@@ -79,7 +79,11 @@ Enable swift, fair, and transparent agricultural trade
 ### 🤝 Contributing
 
 Contributions are welcome!
-
+####To Contribute:
+   Fork the repository
+   Clone your Forked version
+   cd contracts
+   Build and create a PR
 You can help by:
 
     Improving smart contract logic
