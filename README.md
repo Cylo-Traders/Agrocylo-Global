@@ -129,6 +129,8 @@ Enable swift, fair, and transparent trade
     * Writing documentation or tests
     * Please open an issue or submit a pull request.
 
-
+### Contact
+* [Telegram](https://t.me/Tiya_jd)
+* [X](https://x.com/Tiya_JD)
 
 
