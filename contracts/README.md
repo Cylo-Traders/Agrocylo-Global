@@ -9,6 +9,6 @@ This repository is specifically for smart contracts.
 Refer to [main repo](https://github.com/Cylo-Traders/Agrocylo-Global/tree/main) to have general grasp of the project. For this project, please follow Srorban Rust and Stellar CLI rules correctly.
 
 #### Building and Testing
-`cd contracts`
-`cargo build --target wasm32-unknown-unknown --release`
-`cargo test`
+* `cd contracts`
+* `cargo build --target wasm32-unknown-unknown --release`
+* `cargo test`

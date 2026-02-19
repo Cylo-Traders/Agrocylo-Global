@@ -121,7 +121,8 @@ Enable swift, fair, and transparent trade
    * Fork the repository
    * Clone your Forked version
    * cd contracts
-   * Build and create a PR
+   * Please keep a clean working tree (create a branch and be sure its free from conlicts)
+   * Please Do not push uncompiled code
 #### You can assist by:
     * Improving smart contract logic
     * Enhancing UI/UX
