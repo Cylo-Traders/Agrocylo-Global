@@ -27,6 +27,8 @@ pub enum DataKey {
     BuyerOrders(Address),  // Maps Address -> Vec<u64>
     FarmerOrders(Address), // Maps Address -> Vec<u64>
     OrderCount,            // Global counter for order IDs
+    SupportedTokens,       // Maps to Vec<Address>
+    Admin,                 // Maps to Address
 }
 
 const NINTY_SIX_HOURS_IN_SECONDS: u64 = 96 * 60 * 60;
@@ -36,6 +38,22 @@ pub struct EscrowContract;
 
 #[contractimpl]
 impl EscrowContract {
+    /// Initializes the contract with an admin and a list of supported tokens.
+    pub fn initialize(env: Env, admin: Address, supported_tokens: Vec<Address>) {
+        if env.storage().instance().has(&DataKey::Admin) {
+            panic!("already initialized");
+        }
+
+        if supported_tokens.len() < 2 {
+            panic!("must support at least 2 tokens");
+        }
+
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::SupportedTokens, &supported_tokens);
+    }
+
     /// Creates a new order.
     /// Locks the buyer's funds by transferring them to the contract address.
     pub fn create_order(
@@ -49,6 +67,16 @@ impl EscrowContract {
 
         if amount <= 0 {
             panic!("amount must be positive");
+        }
+
+        let supported_tokens: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::SupportedTokens)
+            .expect("contract not initialized");
+
+        if !supported_tokens.contains(&token) {
+            panic!("unsupported token");
         }
 
         // Transfer tokens from buyer to the contract itself
@@ -208,6 +236,14 @@ impl EscrowContract {
             .persistent()
             .get(&DataKey::Order(order_id))
             .expect("order does not exist")
+    }
+
+    /// Returns the currently supported tokens
+    pub fn get_supported_tokens(env: Env) -> Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::SupportedTokens)
+            .unwrap_or_else(|| Vec::new(&env))
     }
 }
 
