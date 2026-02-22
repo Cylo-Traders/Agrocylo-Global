@@ -92,7 +92,6 @@ fn test_create_and_confirm_order() {
 }
 
 #[test]
-#[should_panic(expected = "order is not pending")]
 fn test_confirm_already_completed() {
     let (_env, client, buyer, farmer, token, _) = setup_test();
     let order_id = client
@@ -100,8 +99,12 @@ fn test_confirm_already_completed() {
         .create_order(&buyer, &farmer, &token.address, &500);
 
     client.mock_all_auths().confirm_receipt(&buyer, &order_id);
-    // Panics here
-    client.mock_all_auths().confirm_receipt(&buyer, &order_id);
+
+    // Fails with OrderNotPending
+    let result = client
+        .mock_all_auths()
+        .try_confirm_receipt(&buyer, &order_id);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::OrderNotPending);
 }
 
 #[test]
@@ -130,8 +133,7 @@ fn test_refund_expired_order() {
 }
 
 #[test]
-#[should_panic(expected = "order has not expired yet")]
-fn test_refund_unexpired_order_panics() {
+fn test_refund_unexpired_order_fails() {
     let (env, client, buyer, farmer, token, _) = setup_test();
     let order_id = client
         .mock_all_auths()
@@ -140,20 +142,24 @@ fn test_refund_unexpired_order_panics() {
     // Fast forward only 1 hour
     env.ledger().set_timestamp(env.ledger().timestamp() + 3600);
 
-    // Panics here
-    client.mock_all_auths().refund_expired_order(&order_id);
+    // Fails with OrderNotExpired
+    let result = client.mock_all_auths().try_refund_expired_order(&order_id);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::OrderNotExpired);
 }
 
 #[test]
-#[should_panic(expected = "unsupported token")]
-fn test_create_order_unsupported_token_panics() {
+fn test_create_order_unsupported_token_fails() {
     let (env, client, buyer, farmer, _, _) = setup_test();
     let unsupported_token_admin = Address::generate(&env);
     let unsupported_contract = env.register_stellar_asset_contract_v2(unsupported_token_admin);
     let unsupported_client = token::Client::new(&env, &unsupported_contract.address());
 
     // Fails because the token was not initialized as supported
-    client
-        .mock_all_auths()
-        .create_order(&buyer, &farmer, &unsupported_client.address, &500);
+    let result = client.mock_all_auths().try_create_order(
+        &buyer,
+        &farmer,
+        &unsupported_client.address,
+        &500,
+    );
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::UnsupportedToken);
 }
