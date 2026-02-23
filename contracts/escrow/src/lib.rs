@@ -1,5 +1,20 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env, Vec};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, token, Address, Env, Vec};
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum EscrowError {
+    AlreadyInitialized = 1,
+    MustSupportTwoTokens = 2,
+    AmountMustBePositive = 3,
+    ContractNotInitialized = 4,
+    UnsupportedToken = 5,
+    OrderDoesNotExist = 6,
+    NotBuyer = 7,
+    OrderNotPending = 8,
+    OrderNotExpired = 9,
+}
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -27,6 +42,8 @@ pub enum DataKey {
     BuyerOrders(Address),  // Maps Address -> Vec<u64>
     FarmerOrders(Address), // Maps Address -> Vec<u64>
     OrderCount,            // Global counter for order IDs
+    SupportedTokens,       // Maps to Vec<Address>
+    Admin,                 // Maps to Address
 }
 
 const NINTY_SIX_HOURS_IN_SECONDS: u64 = 96 * 60 * 60;
@@ -36,6 +53,27 @@ pub struct EscrowContract;
 
 #[contractimpl]
 impl EscrowContract {
+    /// Initializes the contract with an admin and a list of supported tokens.
+    pub fn initialize(
+        env: Env,
+        admin: Address,
+        supported_tokens: Vec<Address>,
+    ) -> Result<(), EscrowError> {
+        if env.storage().instance().has(&DataKey::Admin) {
+            return Err(EscrowError::AlreadyInitialized);
+        }
+
+        if supported_tokens.len() < 2 {
+            return Err(EscrowError::MustSupportTwoTokens);
+        }
+
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::SupportedTokens, &supported_tokens);
+        Ok(())
+    }
+
     /// Creates a new order.
     /// Locks the buyer's funds by transferring them to the contract address.
     pub fn create_order(
@@ -44,11 +82,21 @@ impl EscrowContract {
         farmer: Address,
         token: Address,
         amount: i128,
-    ) -> u64 {
+    ) -> Result<u64, EscrowError> {
         buyer.require_auth();
 
         if amount <= 0 {
-            panic!("amount must be positive");
+            return Err(EscrowError::AmountMustBePositive);
+        }
+
+        let supported_tokens: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::SupportedTokens)
+            .ok_or(EscrowError::ContractNotInitialized)?;
+
+        if !supported_tokens.contains(&token) {
+            return Err(EscrowError::UnsupportedToken);
         }
 
         // Transfer tokens from buyer to the contract itself
@@ -109,25 +157,25 @@ impl EscrowContract {
             .persistent()
             .extend_ttl(&DataKey::Order(order_id), 1000, 100000);
 
-        order_id
+        Ok(order_id)
     }
 
     /// Buyer confirms that goods have been received.
     /// Escrow releases payment to the farmer.
-    pub fn confirm_receipt(env: Env, buyer: Address, order_id: u64) {
+    pub fn confirm_receipt(env: Env, buyer: Address, order_id: u64) -> Result<(), EscrowError> {
         buyer.require_auth();
 
         let mut order: Order = env
             .storage()
             .persistent()
             .get(&DataKey::Order(order_id))
-            .expect("order does not exist");
+            .ok_or(EscrowError::OrderDoesNotExist)?;
 
         if order.buyer != buyer {
-            panic!("not the buyer of this order");
+            return Err(EscrowError::NotBuyer);
         }
         if order.status != OrderStatus::Pending {
-            panic!("order is not pending");
+            return Err(EscrowError::OrderNotPending);
         }
 
         // Update status to Completed
@@ -146,23 +194,24 @@ impl EscrowContract {
             &order.farmer,
             &order.amount,
         );
+        Ok(())
     }
 
     /// Anyone can call this to refund an order that is older than 96 hours without confirmation.
-    pub fn refund_expired_order(env: Env, order_id: u64) {
+    pub fn refund_expired_order(env: Env, order_id: u64) -> Result<(), EscrowError> {
         let mut order: Order = env
             .storage()
             .persistent()
             .get(&DataKey::Order(order_id))
-            .expect("order does not exist");
+            .ok_or(EscrowError::OrderDoesNotExist)?;
 
         if order.status != OrderStatus::Pending {
-            panic!("order is not pending");
+            return Err(EscrowError::OrderNotPending);
         }
 
         let current_time = env.ledger().timestamp();
         if current_time <= order.timestamp + NINTY_SIX_HOURS_IN_SECONDS {
-            panic!("order has not expired yet");
+            return Err(EscrowError::OrderNotExpired);
         }
 
         // Mark as refunded
@@ -177,13 +226,15 @@ impl EscrowContract {
         // Transfer funds back to the buyer
         let token_client = token::Client::new(&env, &order.token);
         token_client.transfer(&env.current_contract_address(), &order.buyer, &order.amount);
+        Ok(())
     }
 
     /// Refunds multiple expired orders.
-    pub fn refund_expired_orders(env: Env, order_ids: Vec<u64>) {
+    pub fn refund_expired_orders(env: Env, order_ids: Vec<u64>) -> Result<(), EscrowError> {
         for order_id in order_ids.iter() {
-            Self::refund_expired_order(env.clone(), order_id);
+            Self::refund_expired_order(env.clone(), order_id)?;
         }
+        Ok(())
     }
 
     /// Returns all order IDs associated with a buyer.
@@ -203,11 +254,19 @@ impl EscrowContract {
     }
 
     /// Returns full order details
-    pub fn get_order_details(env: Env, order_id: u64) -> Order {
+    pub fn get_order_details(env: Env, order_id: u64) -> Result<Order, EscrowError> {
         env.storage()
             .persistent()
             .get(&DataKey::Order(order_id))
-            .expect("order does not exist")
+            .ok_or(EscrowError::OrderDoesNotExist)
+    }
+
+    /// Returns the currently supported tokens
+    pub fn get_supported_tokens(env: Env) -> Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::SupportedTokens)
+            .unwrap_or_else(|| Vec::new(&env))
     }
 }
 

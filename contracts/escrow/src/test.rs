@@ -12,37 +12,50 @@ fn setup_test() -> (
     Address,
     Address,
     token::Client<'static>,
+    token::Client<'static>,
 ) {
     let env = Env::default();
     env.mock_all_auths();
 
+    let admin = Address::generate(&env);
     let buyer = Address::generate(&env);
     let farmer = Address::generate(&env);
 
     let token_admin = Address::generate(&env);
-    let token_contract = env.register_stellar_asset_contract_v2(token_admin);
-    let token_client = token::Client::new(&env, &token_contract.address());
 
-    // Mint some testing tokens to the buyer
-    let token_admin_client = token::StellarAssetClient::new(&env, &token_contract.address());
-    token_admin_client.mint(&buyer, &1000);
+    // Create XLM (Token 1)
+    let xlm_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let xlm_client = token::Client::new(&env, &xlm_contract.address());
+    let xlm_admin_client = token::StellarAssetClient::new(&env, &xlm_contract.address());
+    xlm_admin_client.mint(&buyer, &1000);
+
+    // Create USDC (Token 2)
+    let usdc_contract = env.register_stellar_asset_contract_v2(token_admin);
+    let usdc_client = token::Client::new(&env, &usdc_contract.address());
 
     let contract_id = env.register(EscrowContract, ());
     let client = EscrowContractClient::new(&env, &contract_id);
 
-    (env, client, buyer, farmer, token_client)
+    // Initialize the contract with supported tokens
+    let mut supported_tokens = Vec::new(&env);
+    supported_tokens.push_back(xlm_client.address.clone());
+    supported_tokens.push_back(usdc_client.address.clone());
+
+    client.initialize(&admin, &supported_tokens);
+
+    (env, client, buyer, farmer, xlm_client, usdc_client)
 }
 
 #[test]
 fn test_create_and_confirm_order() {
-    let (_env, client, buyer, farmer, token) = setup_test();
+    let (_env, client, buyer, farmer, token, _) = setup_test();
 
     assert_eq!(token.balance(&buyer), 1000);
     assert_eq!(token.balance(&farmer), 0);
 
     let amount = 500;
 
-    // Create order
+    // Create order using xlms
     let order_id = client
         .mock_all_auths()
         .create_order(&buyer, &farmer, &token.address, &amount);
@@ -79,21 +92,24 @@ fn test_create_and_confirm_order() {
 }
 
 #[test]
-#[should_panic(expected = "order is not pending")]
 fn test_confirm_already_completed() {
-    let (_env, client, buyer, farmer, token) = setup_test();
+    let (_env, client, buyer, farmer, token, _) = setup_test();
     let order_id = client
         .mock_all_auths()
         .create_order(&buyer, &farmer, &token.address, &500);
 
     client.mock_all_auths().confirm_receipt(&buyer, &order_id);
-    // Panics here
-    client.mock_all_auths().confirm_receipt(&buyer, &order_id);
+
+    // Fails with OrderNotPending
+    let result = client
+        .mock_all_auths()
+        .try_confirm_receipt(&buyer, &order_id);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::OrderNotPending);
 }
 
 #[test]
 fn test_refund_expired_order() {
-    let (env, client, buyer, farmer, token) = setup_test();
+    let (env, client, buyer, farmer, token, _) = setup_test();
     let order_id = client
         .mock_all_auths()
         .create_order(&buyer, &farmer, &token.address, &500);
@@ -117,9 +133,8 @@ fn test_refund_expired_order() {
 }
 
 #[test]
-#[should_panic(expected = "order has not expired yet")]
-fn test_refund_unexpired_order_panics() {
-    let (env, client, buyer, farmer, token) = setup_test();
+fn test_refund_unexpired_order_fails() {
+    let (env, client, buyer, farmer, token, _) = setup_test();
     let order_id = client
         .mock_all_auths()
         .create_order(&buyer, &farmer, &token.address, &500);
@@ -127,6 +142,24 @@ fn test_refund_unexpired_order_panics() {
     // Fast forward only 1 hour
     env.ledger().set_timestamp(env.ledger().timestamp() + 3600);
 
-    // Panics here
-    client.mock_all_auths().refund_expired_order(&order_id);
+    // Fails with OrderNotExpired
+    let result = client.mock_all_auths().try_refund_expired_order(&order_id);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::OrderNotExpired);
+}
+
+#[test]
+fn test_create_order_unsupported_token_fails() {
+    let (env, client, buyer, farmer, _, _) = setup_test();
+    let unsupported_token_admin = Address::generate(&env);
+    let unsupported_contract = env.register_stellar_asset_contract_v2(unsupported_token_admin);
+    let unsupported_client = token::Client::new(&env, &unsupported_contract.address());
+
+    // Fails because the token was not initialized as supported
+    let result = client.mock_all_auths().try_create_order(
+        &buyer,
+        &farmer,
+        &unsupported_client.address,
+        &500,
+    );
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::UnsupportedToken);
 }
