@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import WalletButton from "./WalletButton";
 import WalletDisplay from "./WalletDisplay";
 
@@ -10,7 +11,12 @@ export default function Navbar() {
       <div className="flex items-center gap-3">
         <div className="text-2xl font-bold">AgroCylo 🌾</div>
       </div>
+
       <div className="flex items-center gap-6">
+        <Link href="/orders" className="hover:text-gray-300">
+          Orders
+        </Link>
+
         <WalletDisplay />
         <WalletButton />
       </div>
