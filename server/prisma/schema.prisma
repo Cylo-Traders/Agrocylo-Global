@@ -1,6 +1,5 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 // Get a free hosted Postgres database in seconds: `npx create-db`
 
 generator client {
@@ -10,14 +9,27 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
 model Notification {
   id            String   @id @default(uuid())
-  walletAddress String   
-  message       String   
-  orderId       String?  
-  type          String   
+  walletAddress String
+  message       String
+  orderId       String?
+  type          String
   isRead        Boolean  @default(false)
   createdAt     DateTime @default(now())
 
-  @@index([walletAddress]) 
+  @@index([walletAddress])
+}
+
+model Product {
+  id             Int      @id @default(autoincrement())
+  product_name   String
+  category       String
+  quantity       Float
+  price          Float
+  location       String
+  image_url      String?
+  farmer_address String
+  created_at     DateTime @default(now())
 }
