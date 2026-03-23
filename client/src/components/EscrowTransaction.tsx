@@ -123,7 +123,7 @@ export default function EscrowTransaction({
     }
   };
 
-  const getStatusColor = () => {
+  const getStatusColor = (): "default" | "primary" | "secondary" | "success" | "warning" | "error" | "outline" => {
     switch (transactionStatus.status) {
       case "pending":
       case "confirming":
@@ -131,7 +131,7 @@ export default function EscrowTransaction({
       case "success":
         return "success";
       case "error":
-        return "destructive";
+        return "error";
       default:
         return "primary";
     }
@@ -263,7 +263,7 @@ export default function EscrowTransaction({
           {transactionStatus.status !== "idle" && (
             <div className="bg-muted/50 p-4 rounded-lg">
               <div className="flex items-center gap-2 mb-2">
-                <Badge variant={getStatusColor() as any}>
+                <Badge variant={getStatusColor()}>
                   {getStatusText()}
                 </Badge>
               </div>
