@@ -1,7 +1,7 @@
 import sharp from 'sharp';
 import { randomUUID } from 'node:crypto';
-import prisma from '../config/database.js';
-import { supabaseAdmin } from '../config/supabase.js';
+import { query } from '../config/database.js';
+import { getSupabaseAdmin } from '../config/supabase.js';
 import { config } from '../config/index.js';
 
 export class HttpError extends Error {
@@ -34,6 +34,7 @@ function mimeTypeToExt(mimeType: string): 'jpg' | 'png' | 'webp' {
 }
 
 function publicUrlForPath(path: string): string {
+  const supabaseAdmin = getSupabaseAdmin();
   const { data } = supabaseAdmin.storage.from(config.productImagesBucket).getPublicUrl(path);
   return data.publicUrl;
 }
@@ -51,14 +52,14 @@ function parseProductPathFromUrl(imageUrl: string | null): string | null {
 }
 
 async function getProduct(productId: string): Promise<ProductRow | null> {
-  const result = await prisma.$queryRaw<ProductRow[]>`
-    select id::text as id, farmer_wallet, image_url
-    from public.products
-    where id = ${productId}::uuid
-    limit 1
-  `;
-
-  return result[0] ?? null;
+  const result = await query<ProductRow>(
+    `select id::text as id, farmer_wallet, image_url
+     from public.products
+     where id = $1::uuid
+     limit 1`,
+    [productId],
+  );
+  return result.rows[0] ?? null;
 }
 
 async function assertProductOwnership(productId: string, walletAddress: string): Promise<ProductRow> {
@@ -81,6 +82,7 @@ async function renderThumbnail(buffer: Buffer, size: 400 | 800): Promise<Buffer>
 }
 
 async function uploadVariant(path: string, body: Buffer, contentType: string): Promise<void> {
+  const supabaseAdmin = getSupabaseAdmin();
   const { error } = await supabaseAdmin.storage.from(config.productImagesBucket).upload(path, body, {
     contentType,
     upsert: true,
@@ -92,6 +94,7 @@ async function uploadVariant(path: string, body: Buffer, contentType: string): P
 }
 
 async function removeIfExists(path: string): Promise<void> {
+  const supabaseAdmin = getSupabaseAdmin();
   const { error } = await supabaseAdmin.storage.from(config.productImagesBucket).remove([path]);
   if (error) {
     throw new HttpError(500, `Storage delete failed: ${error.message}`);
@@ -117,6 +120,7 @@ export async function uploadProductImage(params: {
 
   // Delete existing paths under this product folder so stale variants are not left behind.
   const oldPrefix = basePath;
+  const supabaseAdmin = getSupabaseAdmin();
   const { data: existingFiles, error: listError } = await supabaseAdmin.storage
     .from(config.productImagesBucket)
     .list(oldPrefix, { limit: 100 });
@@ -145,11 +149,12 @@ export async function uploadProductImage(params: {
   const nextImageUrl = publicUrlForPath(uploadedPaths.thumb800Path);
 
   try {
-    await prisma.$executeRaw`
-      update public.products
-      set image_url = ${nextImageUrl}
-      where id = ${product.id}::uuid
-    `;
+    await query(
+      `update public.products
+       set image_url = $1
+       where id = $2::uuid`,
+      [nextImageUrl, product.id],
+    );
   } catch (error) {
     await supabaseAdmin.storage
       .from(config.productImagesBucket)
@@ -168,6 +173,7 @@ export async function deleteProductImage(params: {
   const product = await assertProductOwnership(productId, walletAddress);
   const farmerWallet = walletAddress.toLowerCase();
   const prefix = `${farmerWallet}/${productId}`;
+  const supabaseAdmin = getSupabaseAdmin();
 
   const { data, error } = await supabaseAdmin.storage.from(config.productImagesBucket).list(prefix, {
     limit: 100,
@@ -191,9 +197,10 @@ export async function deleteProductImage(params: {
     }
   }
 
-  await prisma.$executeRaw`
-    update public.products
-    set image_url = ${config.productImagePlaceholderUrl}
-    where id = ${product.id}::uuid
-  `;
+  await query(
+    `update public.products
+     set image_url = $1
+     where id = $2::uuid`,
+    [config.productImagePlaceholderUrl, product.id],
+  );
 }
