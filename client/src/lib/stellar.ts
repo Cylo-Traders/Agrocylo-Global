@@ -1,4 +1,4 @@
-import { Horizon } from "@stellar/stellar-sdk";
+import { Horizon, rpc } from "@stellar/stellar-sdk";
 import FreighterApi from "@stellar/freighter-api";
 
 // Map of Stellar network names to Horizon URLs
@@ -8,10 +8,19 @@ const HORIZON_URLS: Record<string, string> = {
   "Test SDF Network ; September 2015": "https://horizon-testnet.stellar.org",
 };
 
-// Default to testnet
+// Map of Stellar network names to Soroban RPC URLs
+const RPC_URLS: Record<string, string> = {
+  "Public Global Stellar Network ; September 2015":
+    "https://soroban-rpc.mainnet.stellar.org",
+  "Test SDF Network ; September 2015": "https://soroban-testnet.stellar.org",
+};
+
+// Defaults to testnet
 export const DEFAULT_HORIZON_URL = "https://horizon-testnet.stellar.org";
+export const DEFAULT_RPC_URL = "https://soroban-testnet.stellar.org";
 
 let currentServer: Horizon.Server | null = null;
+let currentRpcServer: rpc.Server | null = null;
 let currentNetworkName: string | null = null;
 
 /**
@@ -32,7 +41,7 @@ export async function getServer(): Promise<Horizon.Server> {
       HORIZON_URLS[networkName] ||
       networkDetails.networkUrl ||
       DEFAULT_HORIZON_URL;
-    console.log(`Switching to network: ${networkName} (${horizonUrl})`);
+    console.log(`Switching Horizon to network: ${networkName} (${horizonUrl})`);
 
     currentServer = new Horizon.Server(horizonUrl);
     currentNetworkName = networkName;
@@ -44,6 +53,38 @@ export async function getServer(): Promise<Horizon.Server> {
       currentNetworkName = "Test SDF Network ; September 2015";
     }
     return currentServer;
+  }
+}
+
+/**
+ * Get or create a Soroban RPC Server instance based on the current Freighter network
+ */
+export async function getRpcServer(): Promise<rpc.Server> {
+  try {
+    const networkDetails = await FreighterApi.getNetworkDetails();
+    const networkName = networkDetails.network;
+
+    if (currentNetworkName === networkName && currentRpcServer) {
+      return currentRpcServer;
+    }
+
+    const rpcUrl =
+      RPC_URLS[networkName] ||
+      (networkDetails as any).rpcUrl ||
+      DEFAULT_RPC_URL;
+    console.log(`Switching RPC to network: ${networkName} (${rpcUrl})`);
+
+    currentRpcServer = new rpc.Server(rpcUrl);
+    // Keep network name in sync with Horizon if possible, but at least update if missing
+    currentNetworkName = networkName;
+    return currentRpcServer;
+  } catch (err) {
+    console.warn("Failed to detect Freighter network for RPC, using testnet:", err);
+    if (!currentRpcServer) {
+      currentRpcServer = new rpc.Server(DEFAULT_RPC_URL);
+      currentNetworkName = "Test SDF Network ; September 2015";
+    }
+    return currentRpcServer;
   }
 }
 
