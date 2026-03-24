@@ -10,4 +10,14 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+model Notification {
+  id            String   @id @default(uuid())
+  walletAddress String   
+  message       String   
+  orderId       String?  
+  type          String   
+  isRead        Boolean  @default(false)
+  createdAt     DateTime @default(now())
 
+  @@index([walletAddress]) 
+}
