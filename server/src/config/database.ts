@@ -1,6 +1,8 @@
-import 'dotenv/config';
 import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from 'pg';
+import { PrismaClient } from '@prisma/client';
 import logger from './logger.js';
+
+export const prisma = new PrismaClient();
 
 const pool = new Pool({
   connectionString: process.env['DATABASE_URL'],

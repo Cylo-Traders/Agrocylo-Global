@@ -16,6 +16,12 @@ import {
 import { WalletContext } from "@/context/WalletContext";
 import { createOrder } from "@/services/stellar/contractService";
 import { signAndSubmitTransaction } from "@/lib/signTransaction";
+import {
+  notifyTransactionSubmitted,
+  notifyTransactionConfirmed,
+  notifyTransactionFailed,
+  notifyTransactionConfirming,
+} from "@/services/notification";
 
 interface EscrowTransactionProps {
   farmerAddress: string;
@@ -44,7 +50,7 @@ export default function EscrowTransaction({
   });
 
   const totalPrice = parseFloat(quantity || "0") * pricePerUnit;
-  const totalAmount = BigInt(Math.floor(totalPrice * 10_000_000)); // Convert XLM base units (stroops-style) to i128-friendly integer
+  const totalAmount = BigInt(Math.floor(totalPrice * 10_000_000));
 
   const validateForm = (): boolean => {
     if (!farmerAddress) {
@@ -100,7 +106,6 @@ export default function EscrowTransaction({
     });
 
     try {
-      // Check if wallet is connected
       if (!connected || !address) {
         throw new Error("Please connect your wallet first");
       }
@@ -121,11 +126,17 @@ export default function EscrowTransaction({
         status: "confirming",
         message: "Please confirm the transaction in your wallet...",
       });
+      notifyTransactionConfirming();
 
       const signed = await signAndSubmitTransaction(unsignedXdr.data);
       if (!signed.success || !signed.txHash) {
         throw new Error(signed.error || "Transaction failed");
       }
+
+      notifyTransactionSubmitted(signed.txHash);
+      setTimeout(() => {
+        notifyTransactionConfirmed(signed.txHash);
+      }, 2000);
 
       setTransactionStatus({
         status: "success",
@@ -134,12 +145,13 @@ export default function EscrowTransaction({
       });
     } catch (error) {
       console.error("Transaction error:", error);
+      const errorMessage = error instanceof Error
+        ? error.message
+        : "Transaction failed. Please try again.";
+      notifyTransactionFailed(errorMessage);
       setTransactionStatus({
         status: "error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Transaction failed. Please try again.",
+        message: errorMessage,
       });
     }
   };
