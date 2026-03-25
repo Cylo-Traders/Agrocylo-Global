@@ -3,6 +3,8 @@
 import React from "react";
 import { WalletProvider } from "../context/WalletContext";
 import Navbar from "./Navbar";
+import { CartProvider } from "@/context/CartContext";
+import CartDrawer from "./CartDrawer";
 
 export default function WalletProviderWrapper({
   children,
@@ -11,8 +13,11 @@ export default function WalletProviderWrapper({
 }) {
   return (
     <WalletProvider>
-      <Navbar />
-      {children}
+      <CartProvider>
+        <Navbar />
+        {children}
+        <CartDrawer />
+      </CartProvider>
     </WalletProvider>
   );
 }

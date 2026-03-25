@@ -27,6 +27,10 @@ model User {
   walletAddress String   @unique
   role          String?  // e.g., "BUYER", "SELLER"
   createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  ordersAsBuyer Order[]  @relation("BuyerOrders")
+  ordersAsSeller Order[] @relation("SellerOrders")
 
   ordersAsBuyer Order[]  @relation("BuyerOrders")
   ordersAsSeller Order[] @relation("SellerOrders")
@@ -42,6 +46,7 @@ model Product {
   currency      String   
   isAvailable   Boolean  @default(true)
   createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   orders        Order[]
 

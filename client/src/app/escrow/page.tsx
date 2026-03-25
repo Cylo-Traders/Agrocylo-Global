@@ -8,7 +8,10 @@ export default function EscrowDemo() {
   // Demo data
   const demoProduct = {
     farmerAddress: "GD5DJQJ7P5DLYX6LXZJ2J5LYXZJ2J5LYXZJ2J5LYXZJ2J5LYXZJ2",
-    tokenAddress: "XLM", // Native XLM
+    // Soroban token contract address for the asset escrowed (e.g. XLM/USDC asset contract).
+    // Configure via env so on-chain contract calls don't fail.
+    tokenAddress:
+      process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID ?? "",
     pricePerUnit: 10.5, // 10.5 XLM per unit
     productName: "Organic Tomatoes",
   };

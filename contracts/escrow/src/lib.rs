@@ -176,10 +176,10 @@ impl EscrowContract {
             .extend_ttl(&DataKey::Order(order_id), 1000, 100000);
 
         // --- NEW: Emit Event for Backend Notification ---
-        // Topics: (order, created), Data: (order_id, buyer, farmer, amount)
+        // Topics: (order, created), Data: (order_id, buyer, farmer, amount, token)
         env.events().publish(
             (symbol_short!("order"), symbol_short!("created")),
-            (order_id, buyer, farmer, net_amount),
+            (order_id, buyer, farmer, amount, token),
         );
 
         Ok(order_id)
