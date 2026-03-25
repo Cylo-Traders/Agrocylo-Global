@@ -6,6 +6,7 @@ import { config } from './config/index.js';
 import productImageRoutes, { productImageErrorHandler } from './routes/productImageRoutes.js';
 import productRoutes, { apiErrorHandler } from './routes/productRoutes.js';
 import cartRoutes from './routes/cartRoutes.js';
+import locationRoutes from './routes/locationRoutes.js';
 
 const app = express();
 
@@ -15,6 +16,7 @@ app.use(express.json());
 app.use(productImageRoutes);
 app.use(productRoutes);
 app.use(cartRoutes);
+app.use(locationRoutes);
 
 // Health check
 app.get('/health', (req: Request, res: Response) => {
