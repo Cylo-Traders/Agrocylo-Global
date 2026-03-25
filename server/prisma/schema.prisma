@@ -22,6 +22,11 @@ model Notification {
   @@index([walletAddress])
 }
 
+enum Role {
+  FARMER
+  BUYER
+}
+
 model Product {
   id             Int      @id @default(autoincrement())
   product_name   String
@@ -32,4 +37,37 @@ model Product {
   image_url      String?
   farmer_address String
   created_at     DateTime @default(now())
+}
+
+model Profile {
+  id             Int       @id @default(autoincrement())
+  wallet_address String    @unique
+  name           String?
+  bio            String?
+  avatar_url     String?
+  role           Role      @default(BUYER)
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+  location       Location?
+}
+
+model Location {
+  id             Int      @id @default(autoincrement())
+  wallet_address String   @unique
+  lat            Float
+  lng            Float
+  is_public      Boolean  @default(true)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+  profile        Profile  @relation(fields: [wallet_address], references: [wallet_address])
+}
+
+model OrderMetadata {
+  id                Int      @id @default(autoincrement())
+  on_chain_order_id String   @unique
+  description       String
+  farmer_address    String
+  buyer_address     String
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
 }
