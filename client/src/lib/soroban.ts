@@ -52,6 +52,10 @@ export async function checkTransactionStatus(
 
       if (response.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
         console.log(`Transaction ${txHash} not found yet, retrying...`);
+      } else {
+        // TS may narrow this else-branch to an unreachable path depending on
+        // the RPC status union type, so avoid referencing `response.status`.
+        console.log(`Transaction ${txHash} status not terminal yet, retrying...`);
       }
     } catch (error) {
       console.warn(`Error checking transaction ${txHash}:`, error);

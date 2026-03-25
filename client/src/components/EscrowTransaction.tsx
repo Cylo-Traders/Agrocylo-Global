@@ -14,6 +14,8 @@ import {
   Input,
 } from "@/components/ui";
 import { WalletContext } from "@/context/WalletContext";
+import { createOrder } from "@/services/stellar/contractService";
+import { signAndSubmitTransaction } from "@/lib/signTransaction";
 import {
   notifyTransactionSubmitted,
   notifyTransactionConfirmed,
@@ -48,9 +50,25 @@ export default function EscrowTransaction({
   });
 
   const totalPrice = parseFloat(quantity || "0") * pricePerUnit;
-  const totalAmount = Math.floor(totalPrice * 10000000); // Convert to stroops (7 decimal places)
+  const totalAmount = BigInt(Math.floor(totalPrice * 10_000_000));
 
   const validateForm = (): boolean => {
+    if (!farmerAddress) {
+      setTransactionStatus({
+        status: "error",
+        message: "Farmer address is missing.",
+      });
+      return false;
+    }
+
+    if (!tokenAddress) {
+      setTransactionStatus({
+        status: "error",
+        message: "Token contract address is missing.",
+      });
+      return false;
+    }
+
     if (!quantity || parseFloat(quantity) <= 0) {
       setTransactionStatus({
         status: "error",
@@ -82,11 +100,26 @@ export default function EscrowTransaction({
   const callCreateOrder = async () => {
     if (!validateForm()) return;
 
-    setTransactionStatus({ status: "pending", message: "Preparing transaction..." });
+    setTransactionStatus({
+      status: "pending",
+      message: "Building escrow order transaction...",
+    });
 
     try {
       if (!connected || !address) {
         throw new Error("Please connect your wallet first");
+      }
+
+      const unsignedXdr = await createOrder(
+        address,
+        farmerAddress,
+        tokenAddress,
+        totalAmount,
+        deliveryDeadline,
+      );
+
+      if (!unsignedXdr.success || !unsignedXdr.data) {
+        throw new Error(unsignedXdr.error || "Failed to build escrow transaction");
       }
 
       setTransactionStatus({
@@ -95,30 +128,21 @@ export default function EscrowTransaction({
       });
       notifyTransactionConfirming();
 
-      const { createEscrowService } = await import("../lib/contract");
-      const contractService = createEscrowService("ESCROW_CONTRACT_ID_PLACEHOLDER");
-
-      const result = await contractService.createOrder({
-        buyerAddress: address,
-        farmerAddress: farmerAddress,
-        tokenAddress: tokenAddress,
-        amount: totalAmount,
-        contractId: "ESCROW_CONTRACT_ID_PLACEHOLDER",
-      });
-
-      if (result.success) {
-        notifyTransactionSubmitted(result.txHash);
-        setTimeout(() => {
-          notifyTransactionConfirmed(result.txHash);
-        }, 2000);
-        setTransactionStatus({
-          status: "success",
-          message: "Transaction successful! Order created.",
-          txHash: result.txHash,
-        });
-      } else {
-        throw new Error(result.error || "Transaction failed");
+      const signed = await signAndSubmitTransaction(unsignedXdr.data);
+      if (!signed.success || !signed.txHash) {
+        throw new Error(signed.error || "Transaction failed");
       }
+
+      notifyTransactionSubmitted(signed.txHash);
+      setTimeout(() => {
+        notifyTransactionConfirmed(signed.txHash);
+      }, 2000);
+
+      setTransactionStatus({
+        status: "success",
+        message: "Escrow order created on-chain.",
+        txHash: signed.txHash,
+      });
     } catch (error) {
       console.error("Transaction error:", error);
       const errorMessage = error instanceof Error
