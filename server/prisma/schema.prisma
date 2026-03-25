@@ -1,6 +1,5 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 // Get a free hosted Postgres database in seconds: `npx create-db`
 
 generator client {
@@ -10,14 +9,85 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
 model Notification {
   id            String   @id @default(uuid())
-  walletAddress String   
-  message       String   
-  orderId       String?  
-  type          String   
+  walletAddress String
+  message       String
+  orderId       String?
+  type          String
   isRead        Boolean  @default(false)
   createdAt     DateTime @default(now())
 
   @@index([walletAddress]) 
+}
+model Nonce {
+  id            String   @id @default(uuid())
+  walletAddress String   @unique
+  nonce         String
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([walletAddress])
+}
+
+model RefreshToken {
+  id            String   @id @default(uuid())
+  walletAddress String
+  token         String   @unique
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([walletAddress])
+  @@index([walletAddress])
+}
+
+enum Role {
+  FARMER
+  BUYER
+}
+
+model Product {
+  id             Int      @id @default(autoincrement())
+  product_name   String
+  category       String
+  quantity       Float
+  price          Float
+  location       String
+  image_url      String?
+  farmer_address String
+  created_at     DateTime @default(now())
+}
+
+model Profile {
+  id             Int       @id @default(autoincrement())
+  wallet_address String    @unique
+  name           String?
+  bio            String?
+  avatar_url     String?
+  role           Role      @default(BUYER)
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+  location       Location?
+}
+
+model Location {
+  id             Int      @id @default(autoincrement())
+  wallet_address String   @unique
+  lat            Float
+  lng            Float
+  is_public      Boolean  @default(true)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+  profile        Profile  @relation(fields: [wallet_address], references: [wallet_address])
+}
+
+model OrderMetadata {
+  id                Int      @id @default(autoincrement())
+  on_chain_order_id String   @unique
+  description       String
+  farmer_address    String
+  buyer_address     String
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
 }

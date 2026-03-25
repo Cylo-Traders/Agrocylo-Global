@@ -1,37 +1,44 @@
-import { Router } from 'express';
-import type { Request, Response } from 'express';
-import { getFarmerLocations } from '../services/locationService.js';
-import logger from '../config/logger.js';
+import express from 'express';
+import { requireWallet, type WalletRequest } from '../middleware/walletAuth.js';
+import { ApiError, sendProblem } from '../http/errors.js';
+import { getFarmerLocations, setLocation, updateLocation, deleteLocation } from '../services/locationService.js';
 
-const router = Router();
+const router = express.Router();
 
-/**
- * GET /locations/farmers
- *
- * Query params (all optional):
- *   lat    - user latitude
- *   lng    - user longitude
- *   radius - filter radius in km
- *
- * Returns `{ farmers: FarmerLocationRow[] }`
- */
-router.get('/locations/farmers', async (req: Request, res: Response) => {
+router.get('/locations/farmers', async (req, res, next) => {
   try {
-    const lat = req.query.lat ? Number(req.query.lat) : undefined;
-    const lng = req.query.lng ? Number(req.query.lng) : undefined;
-    const radiusKm = req.query.radius ? Number(req.query.radius) : undefined;
-
-    if ((lat != null && isNaN(lat)) || (lng != null && isNaN(lng))) {
-      res.status(400).json({ message: 'lat and lng must be valid numbers' });
-      return;
-    }
-
-    const farmers = await getFarmerLocations(lat, lng, radiusKm);
-    res.json({ farmers });
-  } catch (error) {
-    logger.error('Failed to fetch farmer locations', error);
-    res.status(500).json({ message: 'Failed to fetch farmer locations' });
-  }
+    const data = await getFarmerLocations(req.query);
+    res.status(200).json(data);
+  } catch (error) { next(error); }
 });
+
+router.post('/locations', requireWallet, async (req: WalletRequest, res, next) => {
+  try {
+    if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet', 'https://cylos.io/errors/unauthorized');
+    const data = await setLocation(req.walletAddress, req.body ?? {});
+    res.status(201).json(data);
+  } catch (error) { next(error); }
+});
+
+router.patch('/locations/:wallet_address', requireWallet, async (req: WalletRequest, res, next) => {
+  try {
+    if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet', 'https://cylos.io/errors/unauthorized');
+    const data = await updateLocation(req.params['wallet_address']!, req.walletAddress, req.body ?? {});
+    res.status(200).json(data);
+  } catch (error) { next(error); }
+});
+
+router.delete('/locations/:wallet_address', requireWallet, async (req: WalletRequest, res, next) => {
+  try {
+    if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet', 'https://cylos.io/errors/unauthorized');
+    await deleteLocation(req.params['wallet_address']!, req.walletAddress);
+    res.status(204).send();
+  } catch (error) { next(error); }
+});
+
+export function locationErrorHandler(error: unknown, req: express.Request, res: express.Response, next: express.NextFunction): void {
+  if (error instanceof ApiError) { sendProblem(res, req, error); return; }
+  next(error);
+}
 
 export default router;
