@@ -5,19 +5,13 @@
     "moduleResolution": "NodeNext",
     "rootDir": "./src",
     "outDir": "./dist",
-    
-    // Essential for Node/Express
-    "esModuleInterop": true,            
+    "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    
-    // Stricter Typechecking (Great for catching bugs early)
     "strict": true,
     "verbatimModuleSyntax": true,
     "noUncheckedIndexedAccess": true,
     "isolatedModules": true,
-    
-    // Source maps help with debugging in VS Code
     "sourceMap": true,
     "declaration": true,
     "declarationMap": true

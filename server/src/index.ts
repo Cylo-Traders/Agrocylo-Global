@@ -7,10 +7,7 @@ import { startContractWatcher } from "./services/contractWatcher.js";
 async function bootstrap() {
   try {
     await connectDb();
-
-    // Start listening to the blockchain
     startContractWatcher();
-
     app.listen(config.port, () => {
       logger.info(
         `[server]: Server is running at http://localhost:${config.port}`,
