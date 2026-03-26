@@ -49,9 +49,11 @@ export async function listProducts(params: ListProductsParams = {}) {
   if (params.includeUnavailable)
     url.searchParams.set("include_unavailable", "true");
 
-  return await requestJson<{ page: number; page_size: number; items: Product[] }>(
-    url,
-  );
+  return await requestJson<{
+    page: number;
+    page_size: number;
+    items: Product[];
+  }>(url);
 }
 
 export async function createProduct(
@@ -156,6 +158,8 @@ export function normalizeProductWriteInput(input: {
   unit: ProductUnit;
   stockQuantity: string | null;
   description: string | null;
+  location: string; // Add this
+  deliveryWindow: string;
   isAvailable: boolean;
 }): ProductWriteInput {
   return {
@@ -166,7 +170,8 @@ export function normalizeProductWriteInput(input: {
     currency: input.currency,
     unit: input.unit,
     stock_quantity: input.stockQuantity,
+    location: input.location,
+    delivery_window: input.deliveryWindow,
     is_available: input.isAvailable,
   };
 }
-
