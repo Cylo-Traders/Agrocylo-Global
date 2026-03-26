@@ -22,12 +22,12 @@ export default function EscrowDemo() {
         <Container size="lg" className="py-8">
           <Card variant="elevated" padding="lg" className="mb-8">
             <CardHeader>
-              <CardTitle>Escrow Transaction Demo</CardTitle>
+              <CardTitle>Dual Escrow Demo</CardTitle>
             </CardHeader>
             <CardContent>
               <p className="text-muted-foreground">
-                This is a demonstration of the escrow transaction functionality. 
-                Connect your wallet and fill in the form to create a secure escrow order.
+                This demo shows both sides of the barter escrow flow.
+                Fund the order, mark goods as delivered, then complete the buyer receipt confirmation to release escrow.
               </p>
             </CardContent>
           </Card>

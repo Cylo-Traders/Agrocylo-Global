@@ -32,6 +32,7 @@ export interface Order {
   orderId: string;
   buyer: string;
   seller: string;
+  token: string;
   amount: bigint;
   status: string;
   createdAt: number;
@@ -146,10 +147,10 @@ function decodeOrderStatus(val: StellarSdk.xdr.ScVal): string {
   if (vec && vec.length > 0) {
     return vec[0].sym().toString();
   }
-  return "Unknown";
+  return StellarSdk.scValToNative(val)?.toString?.() ?? "Unknown";
 }
 
-function decodeOrder(val: StellarSdk.xdr.ScVal): Order {
+function decodeOrder(val: StellarSdk.xdr.ScVal, orderId?: string): Order {
   const fields = val.map();
   if (!fields) throw new Error("Expected map value for order");
 
@@ -162,12 +163,13 @@ function decodeOrder(val: StellarSdk.xdr.ScVal): Order {
   };
 
   return {
-    orderId: StellarSdk.scValToNative(get("order_id")),
+    orderId: orderId ?? "",
     buyer: StellarSdk.Address.fromScVal(get("buyer")).toString(),
-    seller: StellarSdk.Address.fromScVal(get("seller")).toString(),
-    amount: StellarSdk.scValToNative(get("amount")),
+    seller: StellarSdk.Address.fromScVal(get("farmer")).toString(),
+    token: StellarSdk.Address.fromScVal(get("token")).toString(),
+    amount: BigInt(StellarSdk.scValToNative(get("amount"))),
     status: decodeOrderStatus(get("status")),
-    createdAt: Number(StellarSdk.scValToNative(get("created_at"))),
+    createdAt: Number(StellarSdk.scValToNative(get("timestamp"))),
   };
 }
 
@@ -329,10 +331,10 @@ export async function confirmDelivery(
   try {
     const tx = await buildTransaction(
       buyer,
-      "confirm_delivery",
+      "confirm_receipt",
       [
         new StellarSdk.Address(buyer).toScVal(),
-        StellarSdk.nativeToScVal(orderId, { type: "symbol" }),
+        StellarSdk.nativeToScVal(BigInt(orderId), { type: "u64" }),
       ],
     );
     return { success: true, data: tx.toXDR() };
@@ -355,10 +357,9 @@ export async function refundOrder(
   try {
     const tx = await buildTransaction(
       caller,
-      "refund_order",
+      "refund_expired_order",
       [
-        new StellarSdk.Address(caller).toScVal(),
-        StellarSdk.nativeToScVal(orderId, { type: "symbol" }),
+        StellarSdk.nativeToScVal(BigInt(orderId), { type: "u64" }),
       ],
     );
     return { success: true, data: tx.toXDR() };
@@ -394,8 +395,8 @@ export async function getOrder(
     })
       .addOperation(
         contract.call(
-          "get_order",
-          StellarSdk.nativeToScVal(orderId, { type: "symbol" })
+          "get_order_details",
+          StellarSdk.nativeToScVal(BigInt(orderId), { type: "u64" })
         )
       )
       .setTimeout(30)
@@ -417,7 +418,7 @@ export async function getOrder(
       throw new Error("No return value from get_order");
     }
 
-    return { success: true, data: decodeOrder(returnVal) };
+    return { success: true, data: decodeOrder(returnVal, orderId) };
   } catch (err) {
     return { success: false, error: (err as Error).message };
   }
