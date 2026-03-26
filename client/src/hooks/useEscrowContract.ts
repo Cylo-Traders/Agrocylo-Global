@@ -25,9 +25,16 @@ export function useEscrowContract() {
   const createOrder = useCallback(
     async (farmerAddress: string, amount: bigint) => {
       if (!address) throw new Error("Wallet not connected");
+      const tokenAddress =
+        process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID ??
+        process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID_STRK ??
+        process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID_USDC;
+      if (!tokenAddress) {
+        throw new Error("Token contract is not configured");
+      }
       setCreateState({ isLoading: true, error: null });
       try {
-        const result = await buildCreateOrder(address, farmerAddress, amount);
+        const result = await buildCreateOrder(address, farmerAddress, tokenAddress, amount);
         if (!result.success || !result.data) {
           throw new Error(result.error ?? "Failed to build transaction");
         }

@@ -1,49 +1,53 @@
 "use client";
 
-import type { Order } from "@/services/stellar/contractService";
+import type { BuyerOrder } from "@/services/ordersService";
 import { Button } from "@/components/ui/Button";
-import { Badge } from "@/components/ui/Badge";
-import CountdownTimer from "./CountdownTimer";
 
 interface OrderCardProps {
-  order: Order;
-  isBuyer: boolean;
+  order: BuyerOrder;
   onConfirm?: (orderId: string) => void;
   isConfirming?: boolean;
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  Pending: "bg-secondary-100 text-secondary-800",
-  Completed: "bg-primary-100 text-primary-800",
-  Refunded: "bg-red-100 text-red-800",
+  PENDING: "bg-secondary-100 text-secondary-800",
+  COMPLETED: "bg-primary-100 text-primary-800",
+  REFUNDED: "bg-red-100 text-red-800",
 };
 
-function formatAmount(stroops: bigint): string {
-  return (Number(stroops) / 1e7).toFixed(2);
+function formatAmount(value: string): string {
+  const stroops = Number(value);
+  if (!Number.isFinite(stroops)) return value;
+  return (stroops / 1e7).toFixed(2);
 }
 
 function truncateAddress(addr: string): string {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
 
-export default function OrderCard({
-  order,
-  isBuyer,
-  onConfirm,
-  isConfirming,
-}: OrderCardProps) {
+function formatStatus(status: string): string {
+  return status.charAt(0) + status.slice(1).toLowerCase();
+}
+
+function formatDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+export default function OrderCard({ order, onConfirm, isConfirming }: OrderCardProps) {
   const fee = (Number(order.amount) * 3) / 100;
-  const net = Number(order.amount) - fee;
 
   return (
     <div className="rounded-xl border border-neutral-200 bg-white p-5 transition-shadow hover:shadow-md">
       <div className="flex items-start justify-between mb-3">
         <div>
-          <p className="text-sm text-neutral-500">
-            {isBuyer ? "Farmer" : "Buyer"}
-          </p>
+          <p className="text-sm text-neutral-500">Farmer</p>
           <p className="font-mono text-sm font-medium text-foreground">
-            {truncateAddress(isBuyer ? order.seller : order.buyer)}
+            {order.seller_name?.trim() || truncateAddress(order.seller_address)}
           </p>
         </div>
         <span
@@ -51,38 +55,58 @@ export default function OrderCard({
             STATUS_COLORS[order.status] ?? "bg-neutral-100 text-neutral-700"
           }`}
         >
-          {order.status}
+          {formatStatus(order.status)}
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 mb-3 text-sm">
+      <div className="grid grid-cols-2 gap-3 mb-4 text-sm">
         <div>
-          <p className="text-neutral-500">Total</p>
+          <p className="text-neutral-500">Order</p>
+          <p className="font-semibold text-foreground">#{order.order_id}</p>
+        </div>
+        <div>
+          <p className="text-neutral-500">Created</p>
+          <p className="font-semibold text-foreground">{formatDate(order.created_at)}</p>
+        </div>
+        <div>
+          <p className="text-neutral-500">Product</p>
           <p className="font-semibold text-foreground">
-            {formatAmount(order.amount)} XLM
+            {order.product?.name ?? "Indexed order"}
           </p>
         </div>
         <div>
-          <p className="text-neutral-500">{isBuyer ? "Fee (3%)" : "You receive"}</p>
+          <p className="text-neutral-500">Total Locked</p>
           <p className="font-semibold text-foreground">
-            {isBuyer
-              ? `${(fee / 1e7).toFixed(2)} XLM`
-              : `${(net / 1e7).toFixed(2)} XLM`}
+            {formatAmount(order.amount)} {order.token}
+          </p>
+        </div>
+        <div>
+          <p className="text-neutral-500">Platform Fee</p>
+          <p className="font-semibold text-foreground">
+            {(fee / 1e7).toFixed(2)} {order.token}
+          </p>
+        </div>
+        <div>
+          <p className="text-neutral-500">Farmer Wallet</p>
+          <p className="font-mono text-sm font-semibold text-foreground">
+            {truncateAddress(order.seller_address)}
           </p>
         </div>
       </div>
 
-      {order.status === "Pending" && (
+      {order.status === "PENDING" && (
         <div className="flex items-center justify-between">
-          <CountdownTimer createdAt={order.createdAt} />
-          {isBuyer && onConfirm && (
+          <p className="text-sm text-neutral-500">
+            Confirm delivery once the order is received.
+          </p>
+          {onConfirm && (
             <Button
               variant="primary"
               size="sm"
               isLoading={isConfirming}
-              onClick={() => onConfirm(order.orderId)}
+              onClick={() => onConfirm(order.order_id)}
             >
-              Confirm Receipt
+              Confirm Delivery
             </Button>
           )}
         </div>
