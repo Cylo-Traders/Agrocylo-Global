@@ -1,16 +1,22 @@
-import express from 'express';
-import type { Request, Response } from 'express';
-import cors from 'cors';
-import logger from './config/logger.js';
-import { config } from './config/index.js';
-import productImageRoutes, { productImageErrorHandler } from './routes/productImageRoutes.js';
-import productRoutes, { apiErrorHandler } from './routes/productRoutes.js';
-import cartRoutes from './routes/cartRoutes.js';
-import authRoutes from './routes/authRoutes.js';
-import profileRoutes, { profileErrorHandler } from './routes/profileRoutes.js';
-import locationRoutes, { locationErrorHandler } from './routes/locationRoutes.js';
-import orderRoutes, { orderErrorHandler } from './routes/orderMetadataRoutes.js';
-import ordersRoutes, { ordersErrorHandler } from './routes/ordersRoutes.js';
+import express from "express";
+import type { Request, Response } from "express";
+import cors from "cors";
+import logger from "./config/logger.js";
+import { config } from "./config/index.js";
+import productImageRoutes, {
+  productImageErrorHandler,
+} from "./routes/productImageRoutes.js";
+import productRoutes, { apiErrorHandler } from "./routes/productRoutes.js";
+import cartRoutes from "./routes/cartRoutes.js";
+import authRoutes from "./routes/authRoutes.js";
+import profileRoutes, { profileErrorHandler } from "./routes/profileRoutes.js";
+import locationRoutes, {
+  locationErrorHandler,
+} from "./routes/locationRoutes.js";
+import orderRoutes, {
+  orderErrorHandler,
+} from "./routes/orderMetadataRoutes.js";
+import ordersRoutes, { ordersErrorHandler } from "./routes/ordersRoutes.js";
 
 const app = express();
 
