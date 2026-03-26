@@ -22,6 +22,11 @@ export interface ContractResult<T> {
   error?: string;
 }
 
+export interface CreateOrderTx {
+  txXdr: string;
+  orderId: string;
+}
+
 /** On-chain order representation returned by `get_order`. */
 export interface Order {
   orderId: string;
@@ -64,7 +69,8 @@ function contractInstance(): StellarSdk.Contract {
 async function buildTransaction(
   sourcePublicKey: string,
   method: string,
-  ...params: StellarSdk.xdr.ScVal[]
+  params: StellarSdk.xdr.ScVal[],
+  memo?: string
 ): Promise<StellarSdk.Transaction> {
   const server = rpcServer();
   const { networkPassphrase } = config();
@@ -72,13 +78,16 @@ async function buildTransaction(
 
   const sourceAccount = await server.getAccount(sourcePublicKey);
 
-  const tx = new StellarSdk.TransactionBuilder(sourceAccount, {
+  const txBuilder = new StellarSdk.TransactionBuilder(sourceAccount, {
     fee: StellarSdk.BASE_FEE,
     networkPassphrase,
-  })
-    .addOperation(contract.call(method, ...params))
-    .setTimeout(30)
-    .build();
+  }).addOperation(contract.call(method, ...params));
+
+  if (memo && memo.trim().length > 0) {
+    txBuilder.addMemo(StellarSdk.Memo.text(memo));
+  }
+
+  const tx = txBuilder.setTimeout(30).build();
 
   const simulated = await server.simulateTransaction(tx);
 
@@ -167,25 +176,140 @@ function decodeOrder(val: StellarSdk.xdr.ScVal): Order {
 /**
  * Build a `create_order` transaction.
  *
- * @param buyer   - Stellar public key of the buyer
- * @param seller  - Stellar public key of the seller
- * @param amount  - Payment amount in stroops
+ * @param buyer  - Stellar public key of the buyer
+ * @param farmer - Stellar public key of the farmer (seller)
+ * @param token  - Soroban token contract address for the asset being escrowed
+ * @param amount - Token amount in base units (contract expects `i128`)
  * @returns Transaction XDR ready for wallet signing
  */
 export async function createOrder(
   buyer: string,
-  seller: string,
-  amount: bigint
+  farmer: string,
+  token: string,
+  amount: bigint,
+  deliveryDeadline?: string
 ): Promise<ContractResult<string>> {
   try {
-    const tx = await buildTransaction(
+    const built = await createOrderWithOrderId(
       buyer,
-      "create_order",
-      new StellarSdk.Address(buyer).toScVal(),
-      new StellarSdk.Address(seller).toScVal(),
-      StellarSdk.nativeToScVal(amount, { type: "i128" })
+      farmer,
+      token,
+      amount,
+      deliveryDeadline,
     );
-    return { success: true, data: tx.toXDR() };
+    if (!built.success || !built.data) {
+      return { success: false, error: built.error || "Failed to build create_order" };
+    }
+    return { success: true, data: built.data.txXdr };
+  } catch (err) {
+    return { success: false, error: (err as Error).message };
+  }
+}
+
+/**
+ * Build a `create_order` transaction and also extract the returned `order_id`
+ * from Soroban simulation.
+ */
+export async function createOrderWithOrderId(
+  buyer: string,
+  farmer: string,
+  token: string,
+  amount: bigint,
+  deliveryDeadline?: string,
+): Promise<ContractResult<CreateOrderTx>> {
+  try {
+    const server = rpcServer();
+    const { networkPassphrase } = config();
+    const contract = contractInstance();
+
+    const sourceAccount = await server.getAccount(buyer);
+
+    const txBuilder = new StellarSdk.TransactionBuilder(sourceAccount, {
+      fee: StellarSdk.BASE_FEE,
+      networkPassphrase,
+    }).addOperation(
+      contract.call(
+        "create_order",
+        new StellarSdk.Address(buyer).toScVal(),
+        new StellarSdk.Address(farmer).toScVal(),
+        new StellarSdk.Address(token).toScVal(),
+        StellarSdk.nativeToScVal(amount, { type: "i128" }),
+      ),
+    );
+
+    if (deliveryDeadline && deliveryDeadline.trim().length > 0) {
+      txBuilder.addMemo(
+        StellarSdk.Memo.text(`DELIVERY_DEADLINE:${deliveryDeadline}`),
+      );
+    }
+
+    const tx = txBuilder.setTimeout(30).build();
+    const simulated = await server.simulateTransaction(tx);
+
+    if (StellarSdk.rpc.Api.isSimulationError(simulated)) {
+      throw new Error(
+        `Simulation failed: ${(simulated as StellarSdk.rpc.Api.SimulateTransactionErrorResponse).error}`,
+      );
+    }
+
+    const successSim =
+      simulated as StellarSdk.rpc.Api.SimulateTransactionSuccessResponse;
+    const retval = successSim.result?.retval;
+    if (!retval) throw new Error("No return value from create_order");
+
+    const orderIdNative = StellarSdk.scValToNative(retval);
+    const orderId = String(orderIdNative);
+
+    const prepared = StellarSdk.rpc.assembleTransaction(tx, successSim).build();
+    return { success: true, data: { txXdr: prepared.toXDR(), orderId } };
+  } catch (err) {
+    return { success: false, error: (err as Error).message };
+  }
+}
+
+/**
+ * Build a token `approve(spender, amount)` transaction.
+ *
+ * If the token contract doesn't expose `approve` on the active network,
+ * simulation will fail and the caller can decide how to proceed.
+ */
+export async function approveToken(
+  buyer: string,
+  tokenContractId: string,
+  spender: string,
+  amount: bigint,
+): Promise<ContractResult<string>> {
+  try {
+    const server = rpcServer();
+    const { networkPassphrase } = config();
+    const tokenContract = new StellarSdk.Contract(tokenContractId);
+    const sourceAccount = await server.getAccount(buyer);
+
+    const tx = new StellarSdk.TransactionBuilder(sourceAccount, {
+      fee: StellarSdk.BASE_FEE,
+      networkPassphrase,
+    })
+      .addOperation(
+        tokenContract.call(
+          "approve",
+          new StellarSdk.Address(spender).toScVal(),
+          StellarSdk.nativeToScVal(amount, { type: "i128" }),
+        ),
+      )
+      .setTimeout(30)
+      .build();
+
+    const simulated = await server.simulateTransaction(tx);
+    if (StellarSdk.rpc.Api.isSimulationError(simulated)) {
+      throw new Error(
+        `Simulation failed: ${(simulated as StellarSdk.rpc.Api.SimulateTransactionErrorResponse).error}`,
+      );
+    }
+
+    const successSim =
+      simulated as StellarSdk.rpc.Api.SimulateTransactionSuccessResponse;
+    const prepared = StellarSdk.rpc.assembleTransaction(tx, successSim).build();
+    return { success: true, data: prepared.toXDR() };
   } catch (err) {
     return { success: false, error: (err as Error).message };
   }
@@ -206,8 +330,10 @@ export async function confirmDelivery(
     const tx = await buildTransaction(
       buyer,
       "confirm_delivery",
-      new StellarSdk.Address(buyer).toScVal(),
-      StellarSdk.nativeToScVal(orderId, { type: "symbol" })
+      [
+        new StellarSdk.Address(buyer).toScVal(),
+        StellarSdk.nativeToScVal(orderId, { type: "symbol" }),
+      ],
     );
     return { success: true, data: tx.toXDR() };
   } catch (err) {
@@ -230,8 +356,10 @@ export async function refundOrder(
     const tx = await buildTransaction(
       caller,
       "refund_order",
-      new StellarSdk.Address(caller).toScVal(),
-      StellarSdk.nativeToScVal(orderId, { type: "symbol" })
+      [
+        new StellarSdk.Address(caller).toScVal(),
+        StellarSdk.nativeToScVal(orderId, { type: "symbol" }),
+      ],
     );
     return { success: true, data: tx.toXDR() };
   } catch (err) {
