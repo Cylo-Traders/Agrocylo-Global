@@ -4,7 +4,12 @@ export interface WalletRequest extends Request {
   walletAddress?: string;
 }
 
-const WALLET_REGEX = /^0x[a-fA-F0-9]{40}$/;
+const EVM_WALLET_REGEX = /^0x[a-fA-F0-9]{40}$/;
+const STELLAR_WALLET_REGEX = /^G[A-Z2-7]{55}$/;
+
+function isValidWalletAddress(value: string): boolean {
+  return EVM_WALLET_REGEX.test(value) || STELLAR_WALLET_REGEX.test(value);
+}
 
 export function requireWallet(req: WalletRequest, res: Response, next: NextFunction): void {
   const header = req.header('x-wallet-address');
@@ -13,8 +18,8 @@ export function requireWallet(req: WalletRequest, res: Response, next: NextFunct
     return;
   }
 
-  const walletAddress = header.toLowerCase();
-  if (!WALLET_REGEX.test(walletAddress)) {
+  const walletAddress = header.trim();
+  if (!isValidWalletAddress(walletAddress)) {
     res.status(400).json({ message: 'Invalid wallet address format.' });
     return;
   }
