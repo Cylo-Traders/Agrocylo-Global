@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { prisma } from "../config/database.js";
+import { DisputeService } from "../services/disputeService.js";
 import logger from "../config/logger.js";
 
 export class DisputeController {
@@ -9,18 +9,7 @@ export class DisputeController {
    */
   static async getAllDisputes(req: Request, res: Response) {
     try {
-      const disputes = await prisma.dispute.findMany({
-        include: {
-          order: {
-            include: {
-              product: true,
-              buyerUser: true,
-              sellerUser: true,
-            },
-          },
-        },
-        orderBy: { createdAt: "desc" },
-      });
+      const disputes = await DisputeService.getAllDisputes();
       return res.status(200).json(disputes);
     } catch (error) {
       logger.error("Error fetching all disputes:", error);
@@ -33,20 +22,9 @@ export class DisputeController {
    * Retrieve a single dispute by its on-chain order ID
    */
   static async getDisputeByOrderId(req: Request, res: Response) {
-    const { order_id } = req.params;
+    const { order_id } = req.params ;
     try {
-      const dispute = await prisma.dispute.findUnique({
-        where: { orderIdOnChain: order_id },
-        include: {
-          order: {
-            include: {
-              product: true,
-              buyerUser: true,
-              sellerUser: true,
-            },
-          },
-        },
-      });
+      const dispute = await DisputeService.getDisputeByOrderId(order_id as string);
 
       if (!dispute) {
         return res.status(404).json({ error: "Dispute not found" });

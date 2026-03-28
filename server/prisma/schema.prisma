@@ -145,6 +145,7 @@ model Dispute {
   raisedBy        String   // Wallet address of the one who raised it
   status          String   // "OPEN", "RESOLVED"
   outcome         String?  // "REFUNDED", "COMPLETED"
+  evidenceHash    String?  // Hash/CID of the evidence stored off-chain
   createdAt       DateTime @default(now())
   resolvedAt      DateTime?
 
