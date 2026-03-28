@@ -9,6 +9,7 @@ import cartRoutes from './routes/cartRoutes.js';
 import orderRoutes, { orderErrorHandler } from './routes/orderRoutes.js';
 import profileRoutes, { profileErrorHandler } from './routes/profileRoutes.js';
 import locationRoutes, { locationErrorHandler } from './routes/locationRoutes.js';
+import disputeRoutes from './routes/disputeRoutes.js';
 
 const app = express();
 
@@ -19,6 +20,7 @@ app.use(productImageRoutes);
 app.use(productRoutes);
 app.use(cartRoutes);
 app.use("/orders", orderRoutes);
+app.use("/disputes", disputeRoutes);
 app.use(profileRoutes);
 app.use(locationRoutes);
 
