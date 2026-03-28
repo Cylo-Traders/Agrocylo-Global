@@ -9,3 +9,11 @@ export {
 } from "./contractService";
 
 export { getNetworkConfig, type NetworkConfig } from "./networkConfig";
+
+export {
+  submitTransaction as submitTransactionWithRetry,
+  pollTransactionStatus,
+  isRetryableError,
+  type SubmitResult,
+  type SubmitOptions,
+} from "./submitTransaction";

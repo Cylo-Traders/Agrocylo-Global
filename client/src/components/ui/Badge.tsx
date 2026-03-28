@@ -6,6 +6,7 @@ export type BadgeVariant = "default" | "primary" | "secondary" | "success" | "wa
 
 export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   variant?: BadgeVariant;
+  children?: React.ReactNode;
 }
 
 const variantClasses: Record<BadgeVariant, string> = {

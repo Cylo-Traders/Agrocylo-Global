@@ -48,6 +48,13 @@ pub enum DataKey {
     OrderCount,
     SupportedTokens,
     Admin,
+    Order(u64),            // Maps order_id -> Order
+    BuyerOrders(Address),  // Maps Address -> Vec<u64>
+    FarmerOrders(Address), // Maps Address -> Vec<u64>
+    OrderCount,            // Global counter for order IDs
+    SupportedTokens,       // Maps to Vec<Address>
+    Admin,                 // Maps to Address
+    FeeCollector,          // Maps to Address
 }
 
 const NINTY_SIX_HOURS_IN_SECONDS: u64 = 96 * 60 * 60;
@@ -61,6 +68,7 @@ impl EscrowContract {
         env: Env,
         admin: Address,
         supported_tokens: Vec<Address>,
+        fee_collector: Address,
     ) -> Result<(), EscrowError> {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(EscrowError::AlreadyInitialized);
@@ -70,6 +78,12 @@ impl EscrowContract {
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::SupportedTokens, &supported_tokens);
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeCollector, &fee_collector);
+        env.storage()
+            .instance()
+            .set(&DataKey::SupportedTokens, &supported_tokens);
         Ok(())
     }
 
@@ -99,6 +113,21 @@ impl EscrowContract {
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&buyer, &env.current_contract_address(), &amount);
 
+        // --- NEW: Implement Platform Fee (Issue #13) ---
+        let fee_collector: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::FeeCollector)
+            .ok_or(EscrowError::ContractNotInitialized)?;
+        
+        let fee_amount = amount * 3 / 100;
+        let net_amount = amount - fee_amount;
+
+        if fee_amount > 0 {
+            token_client.transfer(&env.current_contract_address(), &fee_collector, &fee_amount);
+        }
+
+        // Get the next order ID
         let mut order_id: u64 = env
             .storage()
             .instance()
@@ -113,7 +142,7 @@ impl EscrowContract {
             buyer: buyer.clone(),
             farmer: farmer.clone(),
             token,
-            amount,
+            amount: net_amount,
             timestamp,
             delivery_timestamp: None,
             status: OrderStatus::Pending,
@@ -139,9 +168,11 @@ impl EscrowContract {
 
         env.storage().persistent().extend_ttl(&DataKey::Order(order_id), 1000, 100000);
 
+        // --- NEW: Emit Event for Backend Notification ---
+        // Topics: (order, created), Data: (order_id, buyer, farmer, amount, token)
         env.events().publish(
             (symbol_short!("order"), symbol_short!("created")),
-            (order_id, buyer, farmer, amount),
+            (order_id, buyer, farmer, amount, token),
         );
 
         Ok(order_id)

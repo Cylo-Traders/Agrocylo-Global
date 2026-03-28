@@ -21,73 +21,53 @@ model Notification {
 
   @@index([walletAddress]) 
 }
-model Nonce {
+
+model User {
   id            String   @id @default(uuid())
   walletAddress String   @unique
-  nonce         String
-  expiresAt     DateTime
+  role          String?  // e.g., "BUYER", "SELLER"
   createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  @@index([walletAddress])
-}
+  ordersAsBuyer Order[]  @relation("BuyerOrders")
+  ordersAsSeller Order[] @relation("SellerOrders")
 
-model RefreshToken {
-  id            String   @id @default(uuid())
-  walletAddress String
-  token         String   @unique
-  expiresAt     DateTime
-  createdAt     DateTime @default(now())
+  ordersAsBuyer Order[]  @relation("BuyerOrders")
+  ordersAsSeller Order[] @relation("SellerOrders")
 
-  @@index([walletAddress])
-  @@index([walletAddress])
-}
-
-enum Role {
-  FARMER
-  BUYER
+  @@map("users")
 }
 
 model Product {
-  id             Int      @id @default(autoincrement())
-  product_name   String
-  category       String
-  quantity       Float
-  price          Float
-  location       String
-  image_url      String?
-  farmer_address String
-  created_at     DateTime @default(now())
+  id            String   @id @default(uuid())
+  farmerWallet  String   
+  name          String
+  pricePerUnit  String   
+  currency      String   
+  isAvailable   Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  orders        Order[]
+
+  @@map("products")
 }
 
-model Profile {
-  id             Int       @id @default(autoincrement())
-  wallet_address String    @unique
-  name           String?
-  bio            String?
-  avatar_url     String?
-  role           Role      @default(BUYER)
-  created_at     DateTime  @default(now())
-  updated_at     DateTime  @updatedAt
-  location       Location?
-}
+model Order {
+  id            String   @id @default(uuid())
+  orderIdOnChain String  @unique 
+  buyerAddress  String
+  sellerAddress String
+  amount        String
+  token         String
+  status        String   
+  productId     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-model Location {
-  id             Int      @id @default(autoincrement())
-  wallet_address String   @unique
-  lat            Float
-  lng            Float
-  is_public      Boolean  @default(true)
-  created_at     DateTime @default(now())
-  updated_at     DateTime @updatedAt
-  profile        Profile  @relation(fields: [wallet_address], references: [wallet_address])
-}
+  buyerUser     User     @relation("BuyerOrders", fields: [buyerAddress], references: [walletAddress], onDelete: Cascade)
+  sellerUser    User     @relation("SellerOrders", fields: [sellerAddress], references: [walletAddress], onDelete: Cascade)
+  product       Product? @relation(fields: [productId], references: [id])
 
-model OrderMetadata {
-  id                Int      @id @default(autoincrement())
-  on_chain_order_id String   @unique
-  description       String
-  farmer_address    String
-  buyer_address     String
-  created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
+  @@map("orders")
 }

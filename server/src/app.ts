@@ -6,10 +6,7 @@ import { config } from './config/index.js';
 import productImageRoutes, { productImageErrorHandler } from './routes/productImageRoutes.js';
 import productRoutes, { apiErrorHandler } from './routes/productRoutes.js';
 import cartRoutes from './routes/cartRoutes.js';
-import authRoutes from './routes/authRoutes.js';
-import profileRoutes, { profileErrorHandler } from './routes/profileRoutes.js';
-import locationRoutes, { locationErrorHandler } from './routes/locationRoutes.js';
-import orderRoutes, { orderErrorHandler } from './routes/orderMetadataRoutes.js';
+import orderRoutes from './routes/orderRoutes.js';
 
 const app = express();
 
@@ -19,10 +16,7 @@ app.use(express.json());
 app.use(productImageRoutes);
 app.use(productRoutes);
 app.use(cartRoutes);
-app.use('/auth', authRoutes);
-app.use(profileRoutes);
-app.use(locationRoutes);
-app.use(orderRoutes);
+app.use("/orders", orderRoutes);
 
 app.get('/health', (req: Request, res: Response) => {
   logger.info('Health check endpoint hit');

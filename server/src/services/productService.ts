@@ -32,11 +32,17 @@ export async function listProducts(params: {
   category?: string;
   page?: string;
   pageSize?: string;
+  includeUnavailable?: boolean;
 }) {
   const page = parsePage(params.page, 1);
   const pageSize = Math.min(parsePage(params.pageSize, 20), 100);
   const where: string[] = ['is_available = true'];
   const values: unknown[] = [];
+
+  if (params.includeUnavailable) {
+    // Farmer dashboard needs access to both listed and unlisted products.
+    where.length = 0;
+  }
 
   if (params.farmer) {
     values.push(params.farmer.toLowerCase());
@@ -48,12 +54,14 @@ export async function listProducts(params: {
   }
 
   values.push(pageSize, (page - 1) * pageSize);
+  const whereClause = where.length > 0 ? `where ${where.join(' and ')}` : '';
+
   const sql = `
     select id::text, farmer_wallet, name, description, category,
            price_per_unit::text, currency, unit, stock_quantity::text,
            image_url, is_available, created_at, updated_at
     from public.products
-    where ${where.join(' and ')}
+    ${whereClause}
     order by created_at desc
     limit $${values.length - 1} offset $${values.length}
   `;

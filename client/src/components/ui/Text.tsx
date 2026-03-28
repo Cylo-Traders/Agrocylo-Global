@@ -16,6 +16,7 @@ export interface TextProps extends HTMLAttributes<HTMLElement> {
   variant?: TextVariant;
   as?: keyof React.JSX.IntrinsicElements;
   muted?: boolean;
+  children?: React.ReactNode;
 }
 
 const variantMap: Record<

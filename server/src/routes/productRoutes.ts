@@ -11,6 +11,11 @@ router.get('/products', async (req, res) => {
     category: typeof req.query['category'] === 'string' ? req.query['category'] : undefined,
     page: typeof req.query['page'] === 'string' ? req.query['page'] : undefined,
     pageSize: typeof req.query['page_size'] === 'string' ? req.query['page_size'] : undefined,
+    includeUnavailable:
+      typeof req.query['include_unavailable'] === 'string'
+        ? req.query['include_unavailable'] === 'true' ||
+          req.query['include_unavailable'] === '1'
+        : undefined,
   });
   res.status(200).json(result);
 });
