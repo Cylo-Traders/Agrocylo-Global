@@ -32,9 +32,6 @@ model User {
   ordersAsBuyer Order[]  @relation("BuyerOrders")
   ordersAsSeller Order[] @relation("SellerOrders")
 
-  ordersAsBuyer Order[]  @relation("BuyerOrders")
-  ordersAsSeller Order[] @relation("SellerOrders")
-
   @@map("users")
 }
 
@@ -49,6 +46,7 @@ model Product {
   updatedAt     DateTime @updatedAt
 
   orders        Order[]
+  priceHistory  PriceHistory[]
 
   @@map("products")
 }
@@ -70,4 +68,72 @@ model Order {
   product       Product? @relation(fields: [productId], references: [id])
 
   @@map("orders")
+}
+
+model EscrowEvent {
+  id          String   @id @default(uuid())
+  orderId     String
+  buyer       String
+  seller      String
+  amount      String
+  token       String
+  action      String
+  ledger      Int
+  eventIndex  Int
+  timestamp   DateTime
+
+  @@unique([ledger, eventIndex])
+  @@map("escrow_events")
+}
+
+model EscrowTransaction {
+  id              String   @id @default(uuid())
+  orderIdOnChain  String
+  action          String
+  ledger          Int
+  timestamp       DateTime
+
+  @@map("escrow_transactions")
+}
+
+model PriceHistory {
+  id        String   @id @default(uuid())
+  productId String
+  price     String
+  currency  String
+  timestamp DateTime
+
+  product   Product  @relation(fields: [productId], references: [id])
+
+  @@map("price_history")
+}
+
+model Profile {
+  wallet_address String    @id
+  name           String?
+  bio            String?
+  avatar_url     String?
+  role           String    @default("BUYER")
+  location       Location?
+
+  @@map("profiles")
+}
+
+model Location {
+  wallet_address String   @id
+  lat            Float
+  lng            Float
+  is_public      Boolean  @default(true)
+  profile        Profile? @relation(fields: [wallet_address], references: [wallet_address])
+
+  @@map("locations")
+}
+
+model OrderMetadata {
+  on_chain_order_id String @id
+  description       String
+  farmer_address    String
+  buyer_address     String
+
+  @@map("order_metadata")
 }

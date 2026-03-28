@@ -1,14 +1,18 @@
+import http from "http";
 import app from "./app.js";
 import logger from "./config/logger.js";
 import { config } from "./config/index.js";
 import { connectDb } from "./config/database.js";
 import { startContractWatcher } from "./services/contractWatcher.js";
+import { SocketService } from "./services/socketService.js";
 
 async function bootstrap() {
   try {
     await connectDb();
     startContractWatcher();
-    app.listen(config.port, () => {
+    const server = http.createServer(app);
+    SocketService.initialize(server);
+    server.listen(config.port, () => {
       logger.info(
         `[server]: Server is running at http://localhost:${config.port}`,
       );
