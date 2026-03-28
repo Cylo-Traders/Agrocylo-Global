@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, token, symbol_short, Address, Env, Vec, Symbol};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, token, symbol_short, Address, Env, Vec};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -14,6 +14,8 @@ pub enum EscrowError {
     NotBuyer = 7,
     OrderNotPending = 8,
     OrderNotExpired = 9,
+    NotAdmin = 10,
+    OrderAlreadyDisputed = 11,
 }
 
 #[contracttype]
@@ -22,6 +24,7 @@ pub enum OrderStatus {
     Pending,
     Completed,
     Refunded,
+    Disputed,
 }
 
 #[contracttype]
@@ -137,7 +140,7 @@ impl EscrowContract {
         let order = Order {
             buyer: buyer.clone(),
             farmer: farmer.clone(),
-            token,
+            token: token.clone(),
             amount: net_amount,
             timestamp,
             status: OrderStatus::Pending,
@@ -179,7 +182,7 @@ impl EscrowContract {
         // Topics: (order, created), Data: (order_id, buyer, farmer, amount, token)
         env.events().publish(
             (symbol_short!("order"), symbol_short!("created")),
-            (order_id, buyer, farmer, amount, token),
+            (order_id, buyer.clone(), farmer.clone(), amount, token.clone()),
         );
 
         Ok(order_id)
@@ -274,6 +277,102 @@ impl EscrowContract {
         for order_id in order_ids.iter() {
             Self::refund_expired_order(env.clone(), order_id)?;
         }
+        Ok(())
+    }
+
+    /// Dispute an order. Can be called by buyer or farmer.
+    pub fn dispute_order(env: Env, caller: Address, order_id: u64) -> Result<(), EscrowError> {
+        caller.require_auth();
+
+        let mut order: Order = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Order(order_id))
+            .ok_or(EscrowError::OrderDoesNotExist)?;
+
+        if order.status != OrderStatus::Pending {
+            return Err(EscrowError::OrderNotPending);
+        }
+
+        if caller != order.buyer && caller != order.farmer {
+            return Err(EscrowError::NotBuyer); // Using NotBuyer as a placeholder for "Not Involved"
+        }
+
+        // Update status to Disputed
+        order.status = OrderStatus::Disputed;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Order(order_id), &order);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Order(order_id), 1000, 100000);
+
+        // --- NEW: Emit Event for Backend Notification ---
+        // Topics: (order, disputed), Data: (order_id, caller)
+        env.events().publish(
+            (symbol_short!("order"), symbol_short!("dispute")),
+            (order_id, caller),
+        );
+
+        Ok(())
+    }
+
+    /// Resolves a dispute. Can only be called by the admin.
+    pub fn resolve_dispute(
+        env: Env,
+        admin: Address,
+        order_id: u64,
+        resolve_to_buyer: bool,
+    ) -> Result<(), EscrowError> {
+        admin.require_auth();
+
+        // Check if caller is admin
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(EscrowError::ContractNotInitialized)?;
+
+        if admin != stored_admin {
+            return Err(EscrowError::NotAdmin);
+        }
+
+        let mut order: Order = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Order(order_id))
+            .ok_or(EscrowError::OrderDoesNotExist)?;
+
+        if order.status != OrderStatus::Disputed {
+            return Err(EscrowError::OrderNotPending); // Should probably use a more specific error
+        }
+
+        let token_client = token::Client::new(&env, &order.token);
+
+        if resolve_to_buyer {
+            // Refund to buyer
+            order.status = OrderStatus::Refunded;
+            token_client.transfer(&env.current_contract_address(), &order.buyer, &order.amount);
+        } else {
+            // Complete for farmer
+            order.status = OrderStatus::Completed;
+            token_client.transfer(&env.current_contract_address(), &order.farmer, &order.amount);
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Order(order_id), &order);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Order(order_id), 1000, 100000);
+
+        // --- NEW: Emit Event for Backend Notification ---
+        // Topics: (order, resolved), Data: (order_id, resolve_to_buyer)
+        env.events().publish(
+            (symbol_short!("order"), symbol_short!("resolved")),
+            (order_id, resolve_to_buyer),
+        );
+
         Ok(())
     }
 

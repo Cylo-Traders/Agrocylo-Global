@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import type { Request, Response } from "express";
 import Database from "better-sqlite3";
 
 const db = new Database("./dev.db");

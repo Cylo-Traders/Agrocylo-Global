@@ -14,6 +14,7 @@ fn setup_test() -> (
     Address, // fee_collector
     token::Client<'static>,
     token::Client<'static>,
+    Address, // admin
 ) {
     let env = Env::default();
     env.mock_all_auths();
@@ -45,12 +46,12 @@ fn setup_test() -> (
 
     client.initialize(&admin, &supported_tokens, &fee_collector);
 
-    (env, client, buyer, farmer, fee_collector, xlm_client, usdc_client)
+    (env, client, buyer, farmer, fee_collector, xlm_client, usdc_client, admin)
 }
 
 #[test]
 fn test_create_and_confirm_order() {
-    let (_env, client, buyer, farmer, collector, token, _) = setup_test();
+    let (_env, client, buyer, farmer, collector, token, _, _) = setup_test();
 
     assert_eq!(token.balance(&buyer), 1000);
     assert_eq!(token.balance(&farmer), 0);
@@ -94,7 +95,7 @@ fn test_create_and_confirm_order() {
 
 #[test]
 fn test_confirm_already_completed() {
-    let (_env, client, buyer, farmer, _, token, _) = setup_test();
+    let (_env, client, buyer, farmer, _, token, _, _) = setup_test();
     let order_id = client
         .mock_all_auths()
         .create_order(&buyer, &farmer, &token.address, &500);
@@ -110,7 +111,7 @@ fn test_confirm_already_completed() {
 
 #[test]
 fn test_refund_expired_order() {
-    let (env, client, buyer, farmer, collector, token, _) = setup_test();
+    let (env, client, buyer, farmer, collector, token, _, _) = setup_test();
     let order_id = client
         .mock_all_auths()
         .create_order(&buyer, &farmer, &token.address, &500);
@@ -136,7 +137,7 @@ fn test_refund_expired_order() {
 
 #[test]
 fn test_refund_unexpired_order_fails() {
-    let (env, client, buyer, farmer, _, token, _) = setup_test();
+    let (env, client, buyer, farmer, _, token, _, _) = setup_test();
     let order_id = client
         .mock_all_auths()
         .create_order(&buyer, &farmer, &token.address, &500);
@@ -151,7 +152,7 @@ fn test_refund_unexpired_order_fails() {
 
 #[test]
 fn test_create_order_unsupported_token_fails() {
-    let (env, client, buyer, farmer, _, _, _) = setup_test();
+    let (env, client, buyer, farmer, _, _, _, _) = setup_test();
     let unsupported_token_admin = Address::generate(&env);
     let unsupported_contract = env.register_stellar_asset_contract_v2(unsupported_token_admin);
     let unsupported_client = token::Client::new(&env, &unsupported_contract.address());
@@ -167,7 +168,7 @@ fn test_create_order_unsupported_token_fails() {
 }
 #[test]
 fn test_platform_fee_acceptance_criteria() {
-    let (_env, client, buyer, farmer, collector, token, _) = setup_test();
+    let (_env, client, buyer, farmer, collector, token, _, _) = setup_test();
 
     let amount = 1000;
     
@@ -183,4 +184,59 @@ fn test_platform_fee_acceptance_criteria() {
     // confirm_receipt releases exactly 970 to the farmer
     client.mock_all_auths().confirm_receipt(&buyer, &1);
     assert_eq!(token.balance(&farmer), 970);
+}
+
+#[test]
+fn test_dispute_and_resolve_to_buyer() {
+    let (env, client, buyer, farmer, _, token, _, admin) = setup_test();
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &1000);
+
+    // Dispute as buyer
+    client.mock_all_auths().dispute_order(&buyer, &order_id);
+
+    let order = client.get_order_details(&order_id);
+    assert_eq!(order.status, OrderStatus::Disputed);
+
+    // Resolve to buyer (Refund)
+    client.mock_all_auths().resolve_dispute(&admin, &order_id, &true);
+
+    let order_after = client.get_order_details(&order_id);
+    assert_eq!(order_after.status, OrderStatus::Refunded);
+    assert_eq!(token.balance(&buyer), 970); // Initial 1000 - 30 (fee) = 970
+}
+
+#[test]
+fn test_dispute_and_resolve_to_farmer() {
+    let (env, client, buyer, farmer, _, token, _, admin) = setup_test();
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &1000);
+
+    // Dispute as farmer
+    client.mock_all_auths().dispute_order(&farmer, &order_id);
+
+    // Resolve to farmer (Complete)
+    client.mock_all_auths().resolve_dispute(&admin, &order_id, &false);
+
+    let order_after = client.get_order_details(&order_id);
+    assert_eq!(order_after.status, OrderStatus::Completed);
+    assert_eq!(token.balance(&farmer), 970);
+}
+
+#[test]
+fn test_resolve_dispute_not_admin_fails() {
+    let (env, client, buyer, farmer, _, token, _, _) = setup_test();
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &1000);
+
+    client.mock_all_auths().dispute_order(&buyer, &order_id);
+
+    let not_admin = Address::generate(&env);
+    let result = client.mock_all_auths().try_resolve_dispute(&not_admin, &order_id, &true);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAdmin);
 }

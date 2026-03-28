@@ -6,7 +6,10 @@ import { config } from './config/index.js';
 import productImageRoutes, { productImageErrorHandler } from './routes/productImageRoutes.js';
 import productRoutes, { apiErrorHandler } from './routes/productRoutes.js';
 import cartRoutes from './routes/cartRoutes.js';
-import orderRoutes from './routes/orderRoutes.js';
+import orderRoutes, { orderErrorHandler } from './routes/orderRoutes.js';
+import profileRoutes, { profileErrorHandler } from './routes/profileRoutes.js';
+import locationRoutes, { locationErrorHandler } from './routes/locationRoutes.js';
+import disputeRoutes from './routes/disputeRoutes.js';
 
 const app = express();
 
@@ -17,6 +20,9 @@ app.use(productImageRoutes);
 app.use(productRoutes);
 app.use(cartRoutes);
 app.use("/orders", orderRoutes);
+app.use("/disputes", disputeRoutes);
+app.use(profileRoutes);
+app.use(locationRoutes);
 
 app.get('/health', (req: Request, res: Response) => {
   logger.info('Health check endpoint hit');
