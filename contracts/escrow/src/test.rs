@@ -25,20 +25,17 @@ fn setup_test() -> (
 
     let token_admin = Address::generate(&env);
 
-    // Create XLM (Token 1)
     let xlm_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
     let xlm_client = token::Client::new(&env, &xlm_contract.address());
     let xlm_admin_client = token::StellarAssetClient::new(&env, &xlm_contract.address());
     xlm_admin_client.mint(&buyer, &1000);
 
-    // Create USDC (Token 2)
     let usdc_contract = env.register_stellar_asset_contract_v2(token_admin);
     let usdc_client = token::Client::new(&env, &usdc_contract.address());
 
     let contract_id = env.register(EscrowContract, ());
     let client = EscrowContractClient::new(&env, &contract_id);
 
-    // Initialize the contract with supported tokens
     let mut supported_tokens = Vec::new(&env);
     supported_tokens.push_back(xlm_client.address.clone());
     supported_tokens.push_back(usdc_client.address.clone());
@@ -63,10 +60,11 @@ fn test_create_and_confirm_order() {
     // Create order
     let order_id = client
         .mock_all_auths()
-        .create_order(&buyer, &farmer, &token.address, &amount);
+        .create_order(&buyer, &farmer, &token.address, &500);
 
     assert_eq!(order_id, 1);
 
+    let order_details = client.get_order_details(&order_id);
     // Tokens moved: 500 from buyer, 15 to collector, 485 to escrow
     assert_eq!(token.balance(&buyer), 500);
     assert_eq!(token.balance(&collector), expected_fee);
@@ -79,7 +77,76 @@ fn test_create_and_confirm_order() {
     assert_eq!(order_details.farmer, farmer);
     assert_eq!(order_details.amount, expected_net); // net amount stored
     assert_eq!(order_details.status, OrderStatus::Pending);
+    assert_eq!(order_details.delivery_timestamp, None);
 
+    client.mock_all_auths().confirm_receipt(&buyer, &order_id);
+
+    let order_after = client.get_order_details(&order_id);
+    assert_eq!(order_after.status, OrderStatus::Completed);
+    assert_eq!(token.balance(&farmer), 500);
+}
+
+#[test]
+fn test_mark_delivered_then_confirm() {
+    let (_env, client, buyer, farmer, token, _) = setup_test();
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    client.mock_all_auths().mark_delivered(&farmer, &order_id);
+
+    let order = client.get_order_details(&order_id);
+    assert_eq!(order.status, OrderStatus::Delivered);
+    assert!(order.delivery_timestamp.is_some());
+
+    client.mock_all_auths().confirm_receipt(&buyer, &order_id);
+
+    let order_after = client.get_order_details(&order_id);
+    assert_eq!(order_after.status, OrderStatus::Completed);
+    assert_eq!(token.balance(&farmer), 500);
+}
+
+#[test]
+fn test_mark_delivered_wrong_farmer_fails() {
+    let (env, client, buyer, farmer, token, _) = setup_test();
+    let fake_farmer = Address::generate(&env);
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    let result = client
+        .mock_all_auths()
+        .try_mark_delivered(&fake_farmer, &order_id);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotFarmer);
+}
+
+#[test]
+fn test_mark_delivered_twice_fails() {
+    let (_env, client, buyer, farmer, token, _) = setup_test();
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    client.mock_all_auths().mark_delivered(&farmer, &order_id);
+
+    let result = client
+        .mock_all_auths()
+        .try_mark_delivered(&farmer, &order_id);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::OrderNotPending);
+}
+
+#[test]
+fn test_confirm_without_mark_delivered() {
+    let (_env, client, buyer, farmer, token, _) = setup_test();
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    client.mock_all_auths().confirm_receipt(&buyer, &order_id);
     // Confirm receipt
     client.mock_all_auths().confirm_receipt(&buyer, &order_id);
 
@@ -87,9 +154,8 @@ fn test_create_and_confirm_order() {
     assert_eq!(token.balance(&escrow_address), 0);
     assert_eq!(token.balance(&farmer), expected_net);
 
-    // Order status now Completed
-    let order_details_after = client.get_order_details(&order_id);
-    assert_eq!(order_details_after.status, OrderStatus::Completed);
+    let order = client.get_order_details(&order_id);
+    assert_eq!(order.status, OrderStatus::Completed);
 }
 
 #[test]
@@ -101,7 +167,6 @@ fn test_confirm_already_completed() {
 
     client.mock_all_auths().confirm_receipt(&buyer, &order_id);
 
-    // Fails with OrderNotPending
     let result = client
         .mock_all_auths()
         .try_confirm_receipt(&buyer, &order_id);
@@ -115,6 +180,13 @@ fn test_refund_expired_order() {
         .mock_all_auths()
         .create_order(&buyer, &farmer, &token.address, &500);
 
+    env.ledger().set_timestamp(env.ledger().timestamp() + 345601);
+
+    client.mock_all_auths().refund_expired_order(&order_id);
+
+    assert_eq!(token.balance(&buyer), 1000);
+    let order = client.get_order_details(&order_id);
+    assert_eq!(order.status, OrderStatus::Refunded);
     let escrow_address = client.address.clone();
     assert_eq!(token.balance(&buyer), 500);
     assert_eq!(token.balance(&collector), 15);
@@ -141,10 +213,8 @@ fn test_refund_unexpired_order_fails() {
         .mock_all_auths()
         .create_order(&buyer, &farmer, &token.address, &500);
 
-    // Fast forward only 1 hour
     env.ledger().set_timestamp(env.ledger().timestamp() + 3600);
 
-    // Fails with OrderNotExpired
     let result = client.mock_all_auths().try_refund_expired_order(&order_id);
     assert_eq!(result.unwrap_err().unwrap(), EscrowError::OrderNotExpired);
 }
@@ -156,7 +226,6 @@ fn test_create_order_unsupported_token_fails() {
     let unsupported_contract = env.register_stellar_asset_contract_v2(unsupported_token_admin);
     let unsupported_client = token::Client::new(&env, &unsupported_contract.address());
 
-    // Fails because the token was not initialized as supported
     let result = client.mock_all_auths().try_create_order(
         &buyer,
         &farmer,

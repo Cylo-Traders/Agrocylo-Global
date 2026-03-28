@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, token, symbol_short, Address, Env, Vec, Symbol};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, token, symbol_short, Address, Env, Vec};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -14,12 +14,15 @@ pub enum EscrowError {
     NotBuyer = 7,
     OrderNotPending = 8,
     OrderNotExpired = 9,
+    NotFarmer = 10,
+    OrderNotDelivered = 11,
 }
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OrderStatus {
     Pending,
+    Delivered,
     Completed,
     Refunded,
 }
@@ -32,12 +35,19 @@ pub struct Order {
     pub token: Address,
     pub amount: i128,
     pub timestamp: u64,
+    pub delivery_timestamp: Option<u64>,
     pub status: OrderStatus,
 }
 
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
+    Order(u64),
+    BuyerOrders(Address),
+    FarmerOrders(Address),
+    OrderCount,
+    SupportedTokens,
+    Admin,
     Order(u64),            // Maps order_id -> Order
     BuyerOrders(Address),  // Maps Address -> Vec<u64>
     FarmerOrders(Address), // Maps Address -> Vec<u64>
@@ -54,7 +64,6 @@ pub struct EscrowContract;
 
 #[contractimpl]
 impl EscrowContract {
-    /// Initializes the contract with an admin and a list of supported tokens.
     pub fn initialize(
         env: Env,
         admin: Address,
@@ -64,12 +73,11 @@ impl EscrowContract {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(EscrowError::AlreadyInitialized);
         }
-
         if supported_tokens.len() < 2 {
             return Err(EscrowError::MustSupportTwoTokens);
         }
-
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::SupportedTokens, &supported_tokens);
         env.storage()
             .instance()
             .set(&DataKey::FeeCollector, &fee_collector);
@@ -79,7 +87,6 @@ impl EscrowContract {
         Ok(())
     }
 
-    /// Creates a new order. Emits a 'created' event.
     pub fn create_order(
         env: Env,
         buyer: Address,
@@ -103,7 +110,6 @@ impl EscrowContract {
             return Err(EscrowError::UnsupportedToken);
         }
 
-        // Transfer tokens from buyer to the contract itself
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&buyer, &env.current_contract_address(), &amount);
 
@@ -128,9 +134,7 @@ impl EscrowContract {
             .get(&DataKey::OrderCount)
             .unwrap_or(0);
         order_id += 1;
-        env.storage()
-            .instance()
-            .set(&DataKey::OrderCount, &order_id);
+        env.storage().instance().set(&DataKey::OrderCount, &order_id);
 
         let timestamp = env.ledger().timestamp();
 
@@ -140,40 +144,29 @@ impl EscrowContract {
             token,
             amount: net_amount,
             timestamp,
+            delivery_timestamp: None,
             status: OrderStatus::Pending,
         };
 
-        // Save order
-        env.storage()
-            .persistent()
-            .set(&DataKey::Order(order_id), &order);
+        env.storage().persistent().set(&DataKey::Order(order_id), &order);
 
-        // Update buyer's order list
         let mut buyer_orders: Vec<u64> = env
             .storage()
             .persistent()
             .get(&DataKey::BuyerOrders(buyer.clone()))
             .unwrap_or_else(|| Vec::new(&env));
         buyer_orders.push_back(order_id);
-        env.storage()
-            .persistent()
-            .set(&DataKey::BuyerOrders(buyer.clone()), &buyer_orders);
+        env.storage().persistent().set(&DataKey::BuyerOrders(buyer.clone()), &buyer_orders);
 
-        // Update farmer's order list
         let mut farmer_orders: Vec<u64> = env
             .storage()
             .persistent()
             .get(&DataKey::FarmerOrders(farmer.clone()))
             .unwrap_or_else(|| Vec::new(&env));
         farmer_orders.push_back(order_id);
-        env.storage()
-            .persistent()
-            .set(&DataKey::FarmerOrders(farmer.clone()), &farmer_orders);
+        env.storage().persistent().set(&DataKey::FarmerOrders(farmer.clone()), &farmer_orders);
 
-        // Extend data lifetime
-        env.storage()
-            .persistent()
-            .extend_ttl(&DataKey::Order(order_id), 1000, 100000);
+        env.storage().persistent().extend_ttl(&DataKey::Order(order_id), 1000, 100000);
 
         // --- NEW: Emit Event for Backend Notification ---
         // Topics: (order, created), Data: (order_id, buyer, farmer, amount, token)
@@ -185,7 +178,37 @@ impl EscrowContract {
         Ok(order_id)
     }
 
-    /// Buyer confirms receipt. Emits a 'confirmed' event.
+    pub fn mark_delivered(env: Env, farmer: Address, order_id: u64) -> Result<(), EscrowError> {
+        farmer.require_auth();
+
+        let mut order: Order = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Order(order_id))
+            .ok_or(EscrowError::OrderDoesNotExist)?;
+
+        if order.farmer != farmer {
+            return Err(EscrowError::NotFarmer);
+        }
+        if order.status != OrderStatus::Pending {
+            return Err(EscrowError::OrderNotPending);
+        }
+
+        let delivery_timestamp = env.ledger().timestamp();
+        order.status = OrderStatus::Delivered;
+        order.delivery_timestamp = Some(delivery_timestamp);
+
+        env.storage().persistent().set(&DataKey::Order(order_id), &order);
+        env.storage().persistent().extend_ttl(&DataKey::Order(order_id), 1000, 100000);
+
+        env.events().publish(
+            (symbol_short!("order"), symbol_short!("delivered")),
+            (order_id, farmer, order.buyer.clone(), delivery_timestamp),
+        );
+
+        Ok(())
+    }
+
     pub fn confirm_receipt(env: Env, buyer: Address, order_id: u64) -> Result<(), EscrowError> {
         buyer.require_auth();
 
@@ -198,20 +221,14 @@ impl EscrowContract {
         if order.buyer != buyer {
             return Err(EscrowError::NotBuyer);
         }
-        if order.status != OrderStatus::Pending {
+        if order.status != OrderStatus::Pending && order.status != OrderStatus::Delivered {
             return Err(EscrowError::OrderNotPending);
         }
 
-        // Update status to Completed
         order.status = OrderStatus::Completed;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Order(order_id), &order);
-        env.storage()
-            .persistent()
-            .extend_ttl(&DataKey::Order(order_id), 1000, 100000);
+        env.storage().persistent().set(&DataKey::Order(order_id), &order);
+        env.storage().persistent().extend_ttl(&DataKey::Order(order_id), 1000, 100000);
 
-        // Release funds to the farmer
         let token_client = token::Client::new(&env, &order.token);
         token_client.transfer(
             &env.current_contract_address(),
@@ -219,8 +236,6 @@ impl EscrowContract {
             &order.amount,
         );
 
-        // --- NEW: Emit Event for Backend Notification ---
-        // Topics: (order, confirmed), Data: (order_id, buyer, farmer)
         env.events().publish(
             (symbol_short!("order"), symbol_short!("confirmed")),
             (order_id, order.buyer, order.farmer),
@@ -229,7 +244,6 @@ impl EscrowContract {
         Ok(())
     }
 
-    /// Refund an expired order. Emits a 'refunded' event.
     pub fn refund_expired_order(env: Env, order_id: u64) -> Result<(), EscrowError> {
         let mut order: Order = env
             .storage()
@@ -237,7 +251,7 @@ impl EscrowContract {
             .get(&DataKey::Order(order_id))
             .ok_or(EscrowError::OrderDoesNotExist)?;
 
-        if order.status != OrderStatus::Pending {
+        if order.status != OrderStatus::Pending && order.status != OrderStatus::Delivered {
             return Err(EscrowError::OrderNotPending);
         }
 
@@ -246,21 +260,13 @@ impl EscrowContract {
             return Err(EscrowError::OrderNotExpired);
         }
 
-        // Mark as refunded
         order.status = OrderStatus::Refunded;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Order(order_id), &order);
-        env.storage()
-            .persistent()
-            .extend_ttl(&DataKey::Order(order_id), 1000, 100000);
+        env.storage().persistent().set(&DataKey::Order(order_id), &order);
+        env.storage().persistent().extend_ttl(&DataKey::Order(order_id), 1000, 100000);
 
-        // Transfer funds back to the buyer
         let token_client = token::Client::new(&env, &order.token);
         token_client.transfer(&env.current_contract_address(), &order.buyer, &order.amount);
 
-        // --- NEW: Emit Event for Backend Notification ---
-        // Topics: (order, refunded), Data: (order_id, buyer)
         env.events().publish(
             (symbol_short!("order"), symbol_short!("refunded")),
             (order_id, order.buyer),
@@ -269,7 +275,6 @@ impl EscrowContract {
         Ok(())
     }
 
-    /// Refunds multiple expired orders.
     pub fn refund_expired_orders(env: Env, order_ids: Vec<u64>) -> Result<(), EscrowError> {
         for order_id in order_ids.iter() {
             Self::refund_expired_order(env.clone(), order_id)?;
@@ -277,7 +282,6 @@ impl EscrowContract {
         Ok(())
     }
 
-    /// Returns all order IDs associated with a buyer.
     pub fn get_orders_by_buyer(env: Env, buyer: Address) -> Vec<u64> {
         env.storage()
             .persistent()
@@ -285,7 +289,6 @@ impl EscrowContract {
             .unwrap_or_else(|| Vec::new(&env))
     }
 
-    /// Returns all order IDs for a specific farmer.
     pub fn get_orders_by_farmer(env: Env, farmer: Address) -> Vec<u64> {
         env.storage()
             .persistent()
@@ -293,7 +296,6 @@ impl EscrowContract {
             .unwrap_or_else(|| Vec::new(&env))
     }
 
-    /// Returns full order details
     pub fn get_order_details(env: Env, order_id: u64) -> Result<Order, EscrowError> {
         env.storage()
             .persistent()
@@ -301,7 +303,6 @@ impl EscrowContract {
             .ok_or(EscrowError::OrderDoesNotExist)
     }
 
-    /// Returns the currently supported tokens
     pub fn get_supported_tokens(env: Env) -> Vec<Address> {
         env.storage()
             .instance()
