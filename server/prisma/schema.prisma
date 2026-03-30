@@ -32,9 +32,6 @@ model User {
   ordersAsBuyer Order[]  @relation("BuyerOrders")
   ordersAsSeller Order[] @relation("SellerOrders")
 
-  ordersAsBuyer Order[]  @relation("BuyerOrders")
-  ordersAsSeller Order[] @relation("SellerOrders")
-
   @@map("users")
 }
 
