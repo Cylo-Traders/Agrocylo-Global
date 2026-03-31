@@ -175,9 +175,7 @@ export default function CartDrawer() {
         // Remove cart items for this farmer group after successful escrow creation.
         // This enables partial checkout without duplicating successful orders.
         const itemsToRemove = group.items.map((it) => it.id);
-        for (const itemId of itemsToRemove) {
-          await removeCartItem(itemId);
-        }
+        await Promise.all(itemsToRemove.map(itemId => removeCartItem(itemId)));
         // Refresh cart to keep badge/count consistent.
         await refreshCart();
       }
@@ -484,4 +482,3 @@ export default function CartDrawer() {
     </div>
   );
 }
-

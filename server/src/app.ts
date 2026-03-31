@@ -20,18 +20,18 @@ app.use(express.json());
 app.use(productImageRoutes);
 app.use(productRoutes);
 app.use(cartRoutes);
-app.use('/auth', authRoutes);
+app.use("/auth", authRoutes);
 app.use(profileRoutes);
 app.use(locationRoutes);
 app.use(orderRoutes);
 app.use(ordersRoutes);
 
-app.get('/health', (req: Request, res: Response) => {
-  logger.info('Health check endpoint hit');
+app.get("/health", (req: Request, res: Response) => {
+  logger.info("Health check endpoint hit");
   res.status(200).json({
-    status: 'UP',
+    status: "UP",
     timestamp: new Date().toISOString(),
-    service: 'Agrocylo-Backend',
+    service: "Agrocylo-Backend",
     env: config.nodeEnv,
   });
 });
@@ -39,8 +39,8 @@ app.get('/health', (req: Request, res: Response) => {
 app.use(productImageErrorHandler);
 app.use(apiErrorHandler);
 app.use((err: unknown, _req: Request, res: Response, _next: () => void) => {
-    logger.error('Unhandled request error', err);
-    res.status(500).json({ message: 'Internal server error' });
+  logger.error("Unhandled request error", err);
+  res.status(500).json({ message: "Internal server error" });
 });
 app.use(profileErrorHandler);
 app.use(locationErrorHandler);

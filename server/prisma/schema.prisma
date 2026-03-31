@@ -22,29 +22,15 @@ model Notification {
   @@index([walletAddress]) 
 }
 
-model EscrowEvent {
-  id          String   @id @default(uuid())
-  orderId     String
-  buyer       String
-  seller      String
-  amount      String
-  token       String
-  action      String
-  ledger      Int      
-  eventIndex  Int      
-  timestamp   DateTime
-  createdAt   DateTime @default(now())
-
-  @@unique([ledger, eventIndex]) 
-}
-
 model User {
   id            String   @id @default(uuid())
   walletAddress String   @unique
-  username      String?
   role          String?  // e.g., "BUYER", "SELLER"
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+
+  ordersAsBuyer Order[]  @relation("BuyerOrders")
+  ordersAsSeller Order[] @relation("SellerOrders")
 
   ordersAsBuyer Order[]  @relation("BuyerOrders")
   ordersAsSeller Order[] @relation("SellerOrders")
@@ -54,21 +40,15 @@ model User {
 
 model Product {
   id            String   @id @default(uuid())
-  farmerWallet  String   // SQL table field compatibility
+  farmerWallet  String   
   name          String
-  description   String?
-  category      String?
   pricePerUnit  String   
   currency      String   
-  unit          String?
-  stockQuantity String?
-  imageUrl      String?
   isAvailable   Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   orders        Order[]
-  priceHistory  PriceHistory[]
 
   @@map("products")
 }
@@ -90,29 +70,4 @@ model Order {
   product       Product? @relation(fields: [productId], references: [id])
 
   @@map("orders")
-}
-
-model PriceHistory {
-  id            String   @id @default(uuid())
-  productId     String
-  price         String
-  currency      String
-  timestamp     DateTime @default(now())
-
-  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-
-  @@map("price_history")
-}
-
-model EscrowTransaction {
-  id              String   @id @default(uuid())
-  orderIdOnChain  String
-  action          String   // e.g., "CREATED", "CONFIRMED", "REFUNDED"
-  txHash          String?
-  ledger          Int
-  timestamp       DateTime
-  createdAt       DateTime @default(now())
-
-  @@map("escrow_transactions")
-  @@index([orderIdOnChain])
 }

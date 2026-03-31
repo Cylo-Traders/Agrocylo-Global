@@ -157,13 +157,10 @@ export default function EscrowTransaction({
       setGoodsDelivered(false);
     } catch (error) {
       console.error("Transaction error:", error);
-      const errorMessage = error instanceof Error
-        ? error.message
-        : "Transaction failed. Please try again.";
-      notifyTransactionFailed(errorMessage);
+      const errorInfo = mapBlockchainError(error);
       setTransactionStatus({
         status: "error",
-        message: errorMessage,
+        message: `${errorInfo.title}: ${errorInfo.message} ${errorInfo.action}`,
       });
     }
   };
