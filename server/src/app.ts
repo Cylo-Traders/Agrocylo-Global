@@ -16,7 +16,7 @@ import locationRoutes, {
 import orderRoutes, {
   orderErrorHandler,
 } from "./routes/orderMetadataRoutes.js";
-import ordersRoutes, { ordersErrorHandler } from './routes/ordersRoutes.js';
+import ordersRoutes, { ordersErrorHandler } from "./routes/ordersRoutes.js";
 
 const app = express();
 
