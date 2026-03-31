@@ -14,6 +14,7 @@ import {
   Input,
 } from "@/components/ui";
 import { WalletContext } from "@/context/WalletContext";
+import { mapBlockchainError } from "@/components/errorHandler";
 import {
   confirmDelivery,
   createOrderWithOrderId,

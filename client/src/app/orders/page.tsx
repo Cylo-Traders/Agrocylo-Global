@@ -28,6 +28,7 @@ export default function OrdersPage() {
 
   useEffect(() => {
     if (!connected || !address) return;
+    const walletAddress = address;
 
     let cancelled = false;
 
@@ -35,7 +36,7 @@ export default function OrdersPage() {
       setLoading(true);
       setError(null);
       try {
-        const response = await listBuyerOrders(address, filter);
+        const response = await listBuyerOrders(walletAddress, filter);
         if (!cancelled) {
           setOrders(response.items);
         }
