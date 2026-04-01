@@ -29,7 +29,7 @@ export default defineConfig({
   webServer: {
     command: "npm run dev",
     url: "http://localhost:3000",
-    cwd: "./client",
+    cwd: ".",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
