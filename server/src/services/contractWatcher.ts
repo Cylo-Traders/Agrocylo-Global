@@ -19,11 +19,17 @@ export async function startContractWatcher() {
           {
             type: "contract",
             contractIds: [CONTRACT_ID],
-            topics: [["AAAADwAAAAVvcmRlcg==", "*"]],
           },
         ],
       });
       for (const event of response.events) {
+        import("./events/blockchainEventIngestionService.js")
+          .then(({ BlockchainEventIngestionService }) => {
+            BlockchainEventIngestionService.ingestEvent(event);
+          })
+          .catch((err) =>
+            logger.error("Dynamic Import Fail (BlockchainEventIngestionService):", err),
+          );
         // --- NEW: Structured Ingestion for the Indexer ---
         import("./events/escrowEventIngestionService.js")
           .then(({ EscrowEventIngestionService }) => {
