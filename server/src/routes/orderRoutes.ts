@@ -3,28 +3,13 @@ import { OrderController } from "../controllers/orderController.js";
 
 const router = Router();
 
-/**
- * @route GET /orders
- * @desc Retrieve all orders
- */
-router.get("/", OrderController.getAllOrders);
+router.get("/orders", OrderController.getAllOrders);
 
-/**
- * @route GET /orders/:id
- * @desc Retrieve a single order by its on-chain ID
- */
-router.get("/:id", OrderController.getOrderById);
+router.get("/orders/:id", OrderController.getOrderById);
 
-/**
- * @route GET /orders/buyer/:address
- * @desc Retrieve orders for a specific buyer
- */
-router.get("/buyer/:address", OrderController.getOrdersByBuyer);
+router.get("/orders/buyer/:address", OrderController.getOrdersByBuyer);
 
-/**
- * @route GET /orders/seller/:address
- * @desc Retrieve orders for a specific seller
- */
-router.get("/seller/:address", OrderController.getOrdersBySeller);
+router.get("/orders/farmer/:address", OrderController.getOrdersByFarmer);
+router.get("/orders/seller/:address", OrderController.getOrdersBySeller);
 
 export default router;

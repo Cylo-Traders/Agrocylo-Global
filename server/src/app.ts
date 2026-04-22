@@ -13,6 +13,7 @@ import profileRoutes, { profileErrorHandler } from "./routes/profileRoutes.js";
 import locationRoutes, {
   locationErrorHandler,
 } from "./routes/locationRoutes.js";
+import ordersRoutes from "./routes/orderRoutes.js";
 import orderRoutes, {
   orderErrorHandler,
 } from "./routes/orderMetadataRoutes.js";
@@ -28,6 +29,7 @@ app.use(cartRoutes);
 app.use("/auth", authRoutes);
 app.use(profileRoutes);
 app.use(locationRoutes);
+app.use(ordersRoutes);
 app.use(orderRoutes);
 
 app.get("/health", (req: Request, res: Response) => {
