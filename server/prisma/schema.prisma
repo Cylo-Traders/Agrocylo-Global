@@ -32,10 +32,43 @@ model User {
   ordersAsBuyer Order[]  @relation("BuyerOrders")
   ordersAsSeller Order[] @relation("SellerOrders")
 
-  ordersAsBuyer Order[]  @relation("BuyerOrders")
-  ordersAsSeller Order[] @relation("SellerOrders")
-
   @@map("users")
+}
+
+model BuyerDemand {
+  id              String    @id @default(uuid())
+  buyerWallet     String    @map("buyer_wallet")
+  cropName        String    @map("crop_name")
+  quantityWanted  String?   @map("quantity_wanted")
+  unit            String?
+  maxPricePerUnit String?   @map("max_price_per_unit")
+  currency        String?
+  region          String?
+  notes           String?
+  neededBy        DateTime? @map("needed_by")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([buyerWallet])
+  @@map("buyer_demands")
+}
+
+model FarmerSupply {
+  id                 String    @id @default(uuid())
+  farmerWallet       String    @map("farmer_wallet")
+  cropName           String    @map("crop_name")
+  quantityAvailable  String    @map("quantity_available")
+  unit               String?
+  pricePerUnit       String?   @map("price_per_unit")
+  currency           String?
+  availableFrom      DateTime? @map("available_from")
+  availableUntil     DateTime? @map("available_until")
+  notes              String?
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@index([farmerWallet])
+  @@map("farmer_supplies")
 }
 
 model Product {

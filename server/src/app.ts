@@ -19,6 +19,7 @@ import orderRoutes, {
   orderErrorHandler,
 } from "./routes/orderMetadataRoutes.js";
 import jobRoutes from "./routes/jobRoutes.js";
+import demandSupplyRoutes from "./routes/demandSupplyRoutes.js";
 
 const app = express();
 
@@ -34,6 +35,7 @@ app.use("/auth", authRoutes);
 app.use(profileRoutes);
 app.use(locationRoutes);
 app.use(orderRoutes);
+app.use(demandSupplyRoutes);
 app.use(jobRoutes);
 
 app.get("/health", (req: Request, res: Response) => {
