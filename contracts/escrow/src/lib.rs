@@ -1,5 +1,8 @@
 #![no_std]
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, token, symbol_short, Address, Env, Vec};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env,
+    String, Vec,
+};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -16,15 +19,29 @@ pub enum EscrowError {
     OrderNotExpired = 9,
     NotFarmer = 10,
     OrderNotDelivered = 11,
+    OrderNotDisputed = 12,
+    DisputeAlreadyExists = 13,
+    NotAdmin = 14,
+    NotOrderParticipant = 15,
+    InvalidSplitRatio = 16,
+    ArithmeticError = 17,
 }
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OrderStatus {
     Pending,
-    Delivered,
+    Disputed,
     Completed,
     Refunded,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DisputeResolution {
+    Refund,
+    Release,
+    Split(u32),
 }
 
 #[contracttype]
@@ -40,9 +57,21 @@ pub struct Order {
 }
 
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Dispute {
+    pub order_id: u64,
+    pub opened_by: Address,
+    pub reason: String,
+    pub evidence_hash: String,
+    pub timestamp: u64,
+    pub resolved: bool,
+}
+
+#[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
     Order(u64),
+    Dispute(u64),
     BuyerOrders(Address),
     FarmerOrders(Address),
     OrderCount,
@@ -51,6 +80,43 @@ pub enum DataKey {
 }
 
 const NINTY_SIX_HOURS_IN_SECONDS: u64 = 96 * 60 * 60;
+
+fn read_order(env: &Env, order_id: u64) -> Result<Order, EscrowError> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::Order(order_id))
+        .ok_or(EscrowError::OrderDoesNotExist)
+}
+
+fn write_order(env: &Env, order_id: u64, order: &Order) {
+    env.storage().persistent().set(&DataKey::Order(order_id), order);
+    env.storage()
+        .persistent()
+        .extend_ttl(&DataKey::Order(order_id), 1000, 100000);
+}
+
+fn read_dispute(env: &Env, order_id: u64) -> Result<Dispute, EscrowError> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::Dispute(order_id))
+        .ok_or(EscrowError::OrderNotDisputed)
+}
+
+fn write_dispute(env: &Env, order_id: u64, dispute: &Dispute) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::Dispute(order_id), dispute);
+    env.storage()
+        .persistent()
+        .extend_ttl(&DataKey::Dispute(order_id), 1000, 100000);
+}
+
+fn read_admin(env: &Env) -> Result<Address, EscrowError> {
+    env.storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .ok_or(EscrowError::ContractNotInitialized)
+}
 
 #[contract]
 pub struct EscrowContract;
@@ -150,11 +216,7 @@ impl EscrowContract {
     pub fn mark_delivered(env: Env, farmer: Address, order_id: u64) -> Result<(), EscrowError> {
         farmer.require_auth();
 
-        let mut order: Order = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Order(order_id))
-            .ok_or(EscrowError::OrderDoesNotExist)?;
+        let mut order = read_order(&env, order_id)?;
 
         if order.farmer != farmer {
             return Err(EscrowError::NotFarmer);
@@ -164,11 +226,9 @@ impl EscrowContract {
         }
 
         let delivery_timestamp = env.ledger().timestamp();
-        order.status = OrderStatus::Delivered;
         order.delivery_timestamp = Some(delivery_timestamp);
 
-        env.storage().persistent().set(&DataKey::Order(order_id), &order);
-        env.storage().persistent().extend_ttl(&DataKey::Order(order_id), 1000, 100000);
+        write_order(&env, order_id, &order);
 
         env.events().publish(
             (symbol_short!("order"), symbol_short!("delivered")),
@@ -181,22 +241,17 @@ impl EscrowContract {
     pub fn confirm_receipt(env: Env, buyer: Address, order_id: u64) -> Result<(), EscrowError> {
         buyer.require_auth();
 
-        let mut order: Order = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Order(order_id))
-            .ok_or(EscrowError::OrderDoesNotExist)?;
+        let mut order = read_order(&env, order_id)?;
 
         if order.buyer != buyer {
             return Err(EscrowError::NotBuyer);
         }
-        if order.status != OrderStatus::Pending && order.status != OrderStatus::Delivered {
+        if order.status != OrderStatus::Pending {
             return Err(EscrowError::OrderNotPending);
         }
 
         order.status = OrderStatus::Completed;
-        env.storage().persistent().set(&DataKey::Order(order_id), &order);
-        env.storage().persistent().extend_ttl(&DataKey::Order(order_id), 1000, 100000);
+        write_order(&env, order_id, &order);
 
         let token_client = token::Client::new(&env, &order.token);
         token_client.transfer(
@@ -214,13 +269,9 @@ impl EscrowContract {
     }
 
     pub fn refund_expired_order(env: Env, order_id: u64) -> Result<(), EscrowError> {
-        let mut order: Order = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Order(order_id))
-            .ok_or(EscrowError::OrderDoesNotExist)?;
+        let mut order = read_order(&env, order_id)?;
 
-        if order.status != OrderStatus::Pending && order.status != OrderStatus::Delivered {
+        if order.status != OrderStatus::Pending {
             return Err(EscrowError::OrderNotPending);
         }
 
@@ -230,8 +281,7 @@ impl EscrowContract {
         }
 
         order.status = OrderStatus::Refunded;
-        env.storage().persistent().set(&DataKey::Order(order_id), &order);
-        env.storage().persistent().extend_ttl(&DataKey::Order(order_id), 1000, 100000);
+        write_order(&env, order_id, &order);
 
         let token_client = token::Client::new(&env, &order.token);
         token_client.transfer(&env.current_contract_address(), &order.buyer, &order.amount);
@@ -251,6 +301,116 @@ impl EscrowContract {
         Ok(())
     }
 
+    pub fn open_dispute(
+        env: Env,
+        opened_by: Address,
+        order_id: u64,
+        reason: String,
+        evidence_hash: String,
+    ) -> Result<(), EscrowError> {
+        opened_by.require_auth();
+
+        let mut order = read_order(&env, order_id)?;
+        if order.status != OrderStatus::Pending {
+            return Err(EscrowError::OrderNotPending);
+        }
+        if opened_by != order.buyer && opened_by != order.farmer {
+            return Err(EscrowError::NotOrderParticipant);
+        }
+        if env.storage().persistent().has(&DataKey::Dispute(order_id)) {
+            return Err(EscrowError::DisputeAlreadyExists);
+        }
+
+        order.status = OrderStatus::Disputed;
+        write_order(&env, order_id, &order);
+
+        let dispute = Dispute {
+            order_id,
+            opened_by: opened_by.clone(),
+            reason,
+            evidence_hash,
+            timestamp: env.ledger().timestamp(),
+            resolved: false,
+        };
+        write_dispute(&env, order_id, &dispute);
+
+        env.events().publish(
+            (symbol_short!("order"), symbol_short!("disputed")),
+            (order_id, opened_by, order.buyer, order.farmer),
+        );
+
+        Ok(())
+    }
+
+    pub fn resolve_dispute(
+        env: Env,
+        admin: Address,
+        order_id: u64,
+        resolution: DisputeResolution,
+    ) -> Result<(), EscrowError> {
+        admin.require_auth();
+
+        let stored_admin = read_admin(&env)?;
+        if admin != stored_admin {
+            return Err(EscrowError::NotAdmin);
+        }
+
+        let mut order = read_order(&env, order_id)?;
+        if order.status != OrderStatus::Disputed {
+            return Err(EscrowError::OrderNotDisputed);
+        }
+
+        let mut dispute = read_dispute(&env, order_id)?;
+        if dispute.resolved {
+            return Err(EscrowError::OrderNotDisputed);
+        }
+
+        let token_client = token::Client::new(&env, &order.token);
+
+        match resolution.clone() {
+            DisputeResolution::Refund => {
+                order.status = OrderStatus::Refunded;
+                token_client.transfer(&env.current_contract_address(), &order.buyer, &order.amount);
+            }
+            DisputeResolution::Release => {
+                order.status = OrderStatus::Completed;
+                token_client.transfer(&env.current_contract_address(), &order.farmer, &order.amount);
+            }
+            DisputeResolution::Split(buyer_share_bps) => {
+                if buyer_share_bps > 10_000 {
+                    return Err(EscrowError::InvalidSplitRatio);
+                }
+
+                let refund_amount = order
+                    .amount
+                    .checked_mul(buyer_share_bps as i128)
+                    .ok_or(EscrowError::ArithmeticError)?
+                    / 10_000;
+                let release_amount = order.amount - refund_amount;
+
+                if refund_amount > 0 {
+                    token_client.transfer(&env.current_contract_address(), &order.buyer, &refund_amount);
+                }
+                if release_amount > 0 {
+                    token_client.transfer(&env.current_contract_address(), &order.farmer, &release_amount);
+                }
+
+                order.status = OrderStatus::Completed;
+            }
+        }
+
+        dispute.resolved = true;
+        write_order(&env, order_id, &order);
+        write_dispute(&env, order_id, &dispute);
+
+        env.events().publish(
+            (symbol_short!("order"), symbol_short!("resolved")),
+            (order_id, resolution, order.buyer, order.farmer),
+        );
+
+        Ok(())
+    }
+
     pub fn get_orders_by_buyer(env: Env, buyer: Address) -> Vec<u64> {
         env.storage()
             .persistent()
@@ -266,10 +426,11 @@ impl EscrowContract {
     }
 
     pub fn get_order_details(env: Env, order_id: u64) -> Result<Order, EscrowError> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Order(order_id))
-            .ok_or(EscrowError::OrderDoesNotExist)
+        read_order(&env, order_id)
+    }
+
+    pub fn get_dispute(env: Env, order_id: u64) -> Result<Dispute, EscrowError> {
+        read_dispute(&env, order_id)
     }
 
     pub fn get_supported_tokens(env: Env) -> Vec<Address> {
