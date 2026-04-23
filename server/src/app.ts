@@ -3,6 +3,8 @@ import type { Request, Response } from "express";
 import cors from "cors";
 import logger from "./config/logger.js";
 import { config } from "./config/index.js";
+import { requestContext } from "./middleware/requestContext.js";
+import { requestLogger } from "./middleware/requestLogger.js";
 import productImageRoutes, {
   productImageErrorHandler,
 } from "./routes/productImageRoutes.js";
@@ -16,11 +18,14 @@ import locationRoutes, {
 import orderRoutes, {
   orderErrorHandler,
 } from "./routes/orderMetadataRoutes.js";
+import jobRoutes from "./routes/jobRoutes.js";
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use(requestContext);
+app.use(requestLogger);
 
 app.use(productImageRoutes);
 app.use(productRoutes);
@@ -29,6 +34,7 @@ app.use("/auth", authRoutes);
 app.use(profileRoutes);
 app.use(locationRoutes);
 app.use(orderRoutes);
+app.use(jobRoutes);
 
 app.get("/health", (req: Request, res: Response) => {
   logger.info("Health check endpoint hit");
