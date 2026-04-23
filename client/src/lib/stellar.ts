@@ -113,6 +113,17 @@ export async function getXlmBalance(address: string): Promise<string> {
  */
 export async function getCurrentNetworkName(): Promise<string> {
   try {
+    // Prefer window.freighter if available (e.g. Playwright test mocks).
+    const w = typeof window !== "undefined" ? (window as any) : null;
+    const freighterDirect =
+      w?.freighter?.getNetwork ? w.freighter :
+      w?.freighterApi?.getNetwork ? w.freighterApi :
+      null;
+
+    if (freighterDirect) {
+      return await freighterDirect.getNetwork();
+    }
+
     const networkDetails = await FreighterApi.getNetworkDetails();
     return networkDetails.network;
   } catch (err) {
