@@ -33,7 +33,7 @@ export default function Navbar() {
           <Link href="/market" className="text-sm hover:opacity-80">
             Market
           </Link>
-          <Link href="/dashboard/products" className="text-sm hover:opacity-80">
+          <Link href="/dashboard" className="text-sm hover:opacity-80">
             Farmer Dashboard
           </Link>
         </div>
