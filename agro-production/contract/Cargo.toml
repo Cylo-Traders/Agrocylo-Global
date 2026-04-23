@@ -1,5 +1,5 @@
 [package]
-name = "registry"
+name = "production_escrow"
 version = "0.1.0"
 edition = "2021"
 

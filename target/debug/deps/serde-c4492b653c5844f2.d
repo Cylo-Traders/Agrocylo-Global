@@ -1,0 +1,14 @@
+C:\Users\ADMIN\Desktop\lekan-drips\Agrocylo-Global\target\debug\deps\serde-c4492b653c5844f2.d: C:\Users\ADMIN\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\ADMIN\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\ADMIN\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\ADMIN\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\ADMIN\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs C:\Users\ADMIN\Desktop\lekan-drips\Agrocylo-Global\target\debug\build\serde-a3d5cc7c79f19dbb\out/private.rs
+
+C:\Users\ADMIN\Desktop\lekan-drips\Agrocylo-Global\target\debug\deps\libserde-c4492b653c5844f2.rlib: C:\Users\ADMIN\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\ADMIN\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\ADMIN\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\ADMIN\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\ADMIN\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs C:\Users\ADMIN\Desktop\lekan-drips\Agrocylo-Global\target\debug\build\serde-a3d5cc7c79f19dbb\out/private.rs
+
+C:\Users\ADMIN\Desktop\lekan-drips\Agrocylo-Global\target\debug\deps\libserde-c4492b653c5844f2.rmeta: C:\Users\ADMIN\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\ADMIN\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\ADMIN\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\ADMIN\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\ADMIN\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs C:\Users\ADMIN\Desktop\lekan-drips\Agrocylo-Global\target\debug\build\serde-a3d5cc7c79f19dbb\out/private.rs
+
+C:\Users\ADMIN\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs:
+C:\Users\ADMIN\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs:
+C:\Users\ADMIN\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs:
+C:\Users\ADMIN\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs:
+C:\Users\ADMIN\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs:
+C:\Users\ADMIN\Desktop\lekan-drips\Agrocylo-Global\target\debug\build\serde-a3d5cc7c79f19dbb\out/private.rs:
+
+# env-dep:OUT_DIR=C:\\Users\\ADMIN\\Desktop\\lekan-drips\\Agrocylo-Global\\target\\debug\\build\\serde-a3d5cc7c79f19dbb\\out
