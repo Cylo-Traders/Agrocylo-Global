@@ -20,6 +20,7 @@ import orderRoutes, {
 } from "./routes/orderMetadataRoutes.js";
 import jobRoutes from "./routes/jobRoutes.js";
 import demandSupplyRoutes from "./routes/demandSupplyRoutes.js";
+import metricsRoutes from "./routes/metricsRoutes.js";
 
 const app = express();
 
@@ -47,6 +48,8 @@ app.get("/health", (req: Request, res: Response) => {
     env: config.nodeEnv,
   });
 });
+
+app.use(metricsRoutes);
 
 app.use(productImageErrorHandler);
 app.use(apiErrorHandler);
