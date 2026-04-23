@@ -17,4 +17,5 @@ export const config = {
   productImagesBucket: process.env['SUPABASE_PRODUCT_IMAGES_BUCKET'] ?? 'product-images',
   productImagePlaceholderUrl:
     process.env['PRODUCT_IMAGE_PLACEHOLDER_URL'] ?? 'https://placehold.co/800x800/png?text=No+Image',
+  wsPath: process.env['WS_PATH'] ?? '/ws',
 };

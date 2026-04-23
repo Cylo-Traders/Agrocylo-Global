@@ -1,6 +1,7 @@
 import { rpc, scValToNative, xdr } from "@stellar/stellar-sdk";
 import logger from "../config/logger.js";
 import { prisma } from "../config/database.js";
+import { wsManager } from "./wsManager.js";
 
 const CONTRACT_ID = process.env.CONTRACT_ID || "C...";
 const RPC_URL = process.env.RPC_URL || "https://soroban-testnet.stellar.org";
@@ -60,6 +61,12 @@ function handleContractEvent(event: any) {
         orderId,
         action,
       );
+      wsManager.broadcast("order:created", {
+        orderId: orderId.toString(),
+        buyer: data[2],
+        seller: data[1],
+        amount: data[3],
+      });
       break;
     case "confirmed":
       notifyUser(
@@ -68,6 +75,10 @@ function handleContractEvent(event: any) {
         orderId,
         action,
       );
+      wsManager.broadcast("order:confirmed", {
+        orderId: orderId.toString(),
+        buyer: data[2],
+      });
       break;
     case "refunded":
       notifyUser(
@@ -76,6 +87,10 @@ function handleContractEvent(event: any) {
         orderId,
         action,
       );
+      wsManager.broadcast("order:refunded", {
+        orderId: orderId.toString(),
+        seller: data[1],
+      });
       break;
   }
 }
