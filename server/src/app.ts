@@ -16,6 +16,7 @@ import locationRoutes, {
 import orderRoutes, {
   orderErrorHandler,
 } from "./routes/orderMetadataRoutes.js";
+import escrowOrderRoutes from "./routes/orderRoutes.js";
 
 const app = express();
 
@@ -29,6 +30,7 @@ app.use("/auth", authRoutes);
 app.use(profileRoutes);
 app.use(locationRoutes);
 app.use(orderRoutes);
+app.use("/orders", escrowOrderRoutes);
 
 app.get("/health", (req: Request, res: Response) => {
   logger.info("Health check endpoint hit");

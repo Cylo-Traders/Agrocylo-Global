@@ -94,4 +94,26 @@ export class OrderController {
       return res.status(500).json({ error: "Internal server error" });
     }
   }
+
+  /**
+   * GET /orders/farmer/:address
+   * Retrieve all orders for a specific farmer address
+   */
+  static async getOrdersByFarmer(req: Request, res: Response) {
+    const { address } = req.params;
+    try {
+      const orders = await prisma.order.findMany({
+        where: { sellerAddress: address },
+        include: {
+          product: true,
+          buyerUser: true,
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      return res.status(200).json(orders);
+    } catch (error) {
+      logger.error(`Error fetching orders for farmer ${address}:`, error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
 }

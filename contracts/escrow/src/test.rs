@@ -3,7 +3,7 @@
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
-    token, Address, Env,
+    token, Address, Env, String,
 };
 
 fn setup_test() -> (
@@ -40,6 +40,42 @@ fn setup_test() -> (
     client.initialize(&admin, &supported_tokens);
 
     (env, client, buyer, farmer, xlm_client, usdc_client)
+}
+
+fn setup_test_with_admin() -> (
+    Env,
+    EscrowContractClient<'static>,
+    Address,
+    Address,
+    Address,
+    token::Client<'static>,
+) {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let farmer = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let xlm_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let xlm_client = token::Client::new(&env, &xlm_contract.address());
+    let xlm_admin_client = token::StellarAssetClient::new(&env, &xlm_contract.address());
+    xlm_admin_client.mint(&buyer, &1000);
+
+    let usdc_contract = env.register_stellar_asset_contract_v2(token_admin);
+    let usdc_client = token::Client::new(&env, &usdc_contract.address());
+
+    let contract_id = env.register(EscrowContract, ());
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let mut supported_tokens = Vec::new(&env);
+    supported_tokens.push_back(xlm_client.address.clone());
+    supported_tokens.push_back(usdc_client.address.clone());
+
+    client.initialize(&admin, &supported_tokens);
+
+    (env, client, admin, buyer, farmer, xlm_client)
 }
 
 #[test]
@@ -187,4 +223,269 @@ fn test_create_order_unsupported_token_fails() {
         &500,
     );
     assert_eq!(result.unwrap_err().unwrap(), EscrowError::UnsupportedToken);
+}
+
+// --- Dispute System Tests (Issues #125, #126, #138) ---
+
+#[test]
+fn test_open_dispute_without_evidence_fails() {
+    let (env, client, _admin, buyer, farmer, token) = setup_test_with_admin();
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    let result = client.mock_all_auths().try_open_dispute(
+        &buyer,
+        &order_id,
+        &String::from_str(&env, "Goods not received"),
+        &String::from_str(&env, ""),
+    );
+
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::MissingEvidence);
+}
+
+#[test]
+fn test_open_dispute_success() {
+    let (env, client, _admin, buyer, farmer, token) = setup_test_with_admin();
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    client.mock_all_auths().open_dispute(
+        &buyer,
+        &order_id,
+        &String::from_str(&env, "Goods not received"),
+        &String::from_str(&env, "ipfs://Qm123abc"),
+    );
+
+    let order = client.get_order_details(&order_id);
+    assert_eq!(order.status, OrderStatus::Disputed);
+
+    let dispute = client.get_dispute(&order_id);
+    assert_eq!(dispute.order_id, order_id);
+    assert!(!dispute.resolved);
+}
+
+#[test]
+fn test_open_dispute_on_delivered_order() {
+    let (env, client, _admin, buyer, farmer, token) = setup_test_with_admin();
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    client.mock_all_auths().mark_delivered(&farmer, &order_id);
+
+    client.mock_all_auths().open_dispute(
+        &buyer,
+        &order_id,
+        &String::from_str(&env, "Wrong goods delivered"),
+        &String::from_str(&env, "ipfs://Qm456def"),
+    );
+
+    let order = client.get_order_details(&order_id);
+    assert_eq!(order.status, OrderStatus::Disputed);
+}
+
+#[test]
+fn test_open_dispute_twice_fails() {
+    let (env, client, _admin, buyer, farmer, token) = setup_test_with_admin();
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    client.mock_all_auths().open_dispute(
+        &buyer,
+        &order_id,
+        &String::from_str(&env, "Issue"),
+        &String::from_str(&env, "ipfs://QmEvidence"),
+    );
+
+    let result = client.mock_all_auths().try_open_dispute(
+        &farmer,
+        &order_id,
+        &String::from_str(&env, "Counter dispute"),
+        &String::from_str(&env, "ipfs://QmCounter"),
+    );
+
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::OrderAlreadyDisputed);
+}
+
+#[test]
+fn test_open_dispute_on_completed_order_fails() {
+    let (env, client, _admin, buyer, farmer, token) = setup_test_with_admin();
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    client.mock_all_auths().confirm_receipt(&buyer, &order_id);
+
+    let result = client.mock_all_auths().try_open_dispute(
+        &buyer,
+        &order_id,
+        &String::from_str(&env, "Changed mind"),
+        &String::from_str(&env, "ipfs://QmEvidence"),
+    );
+
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::OrderNotDisputable);
+}
+
+#[test]
+fn test_resolve_dispute_full_success() {
+    let (env, client, admin, buyer, farmer, token) = setup_test_with_admin();
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    client.mock_all_auths().open_dispute(
+        &buyer,
+        &order_id,
+        &String::from_str(&env, "Goods not received"),
+        &String::from_str(&env, "ipfs://QmEvidence"),
+    );
+
+    client.mock_all_auths().resolve_campaign_dispute(
+        &admin,
+        &order_id,
+        &DisputeResolution::FullSuccess,
+    );
+
+    assert_eq!(token.balance(&farmer), 500);
+    assert_eq!(token.balance(&buyer), 500);
+
+    let dispute = client.get_dispute(&order_id);
+    assert!(dispute.resolved);
+}
+
+#[test]
+fn test_resolve_dispute_full_refund() {
+    let (env, client, admin, buyer, farmer, token) = setup_test_with_admin();
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    client.mock_all_auths().open_dispute(
+        &buyer,
+        &order_id,
+        &String::from_str(&env, "Never delivered"),
+        &String::from_str(&env, "ipfs://QmEvidence"),
+    );
+
+    client.mock_all_auths().resolve_campaign_dispute(
+        &admin,
+        &order_id,
+        &DisputeResolution::FullRefund,
+    );
+
+    assert_eq!(token.balance(&buyer), 1000);
+    assert_eq!(token.balance(&farmer), 0);
+
+    let dispute = client.get_dispute(&order_id);
+    assert!(dispute.resolved);
+}
+
+#[test]
+fn test_resolve_dispute_partial_settlement() {
+    let (env, client, admin, buyer, farmer, token) = setup_test_with_admin();
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    client.mock_all_auths().open_dispute(
+        &buyer,
+        &order_id,
+        &String::from_str(&env, "Partial delivery"),
+        &String::from_str(&env, "ipfs://QmEvidence"),
+    );
+
+    // 6000 bps = 60% to farmer, 40% to buyer
+    client.mock_all_auths().resolve_campaign_dispute(
+        &admin,
+        &order_id,
+        &DisputeResolution::PartialSettlement { farmer_bps: 6000 },
+    );
+
+    assert_eq!(token.balance(&farmer), 300); // 60% of 500
+    assert_eq!(token.balance(&buyer), 700);  // 500 remaining + 200 refunded
+}
+
+#[test]
+fn test_resolve_dispute_already_resolved_fails() {
+    let (env, client, admin, buyer, farmer, token) = setup_test_with_admin();
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    client.mock_all_auths().open_dispute(
+        &buyer,
+        &order_id,
+        &String::from_str(&env, "Issue"),
+        &String::from_str(&env, "ipfs://QmEvidence"),
+    );
+
+    client.mock_all_auths().resolve_campaign_dispute(
+        &admin,
+        &order_id,
+        &DisputeResolution::FullRefund,
+    );
+
+    // Attempt to resolve again
+    let result = client.mock_all_auths().try_resolve_campaign_dispute(
+        &admin,
+        &order_id,
+        &DisputeResolution::FullSuccess,
+    );
+
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::DisputeAlreadyResolved);
+}
+
+#[test]
+fn test_resolve_dispute_not_admin_fails() {
+    let (env, client, _admin, buyer, farmer, token) = setup_test_with_admin();
+    let fake_admin = Address::generate(&env);
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    client.mock_all_auths().open_dispute(
+        &buyer,
+        &order_id,
+        &String::from_str(&env, "Issue"),
+        &String::from_str(&env, "ipfs://QmEvidence"),
+    );
+
+    let result = client.mock_all_auths().try_resolve_campaign_dispute(
+        &fake_admin,
+        &order_id,
+        &DisputeResolution::FullRefund,
+    );
+
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAdmin);
+}
+
+#[test]
+fn test_resolve_nonexistent_dispute_fails() {
+    let (_env, client, admin, buyer, farmer, token) = setup_test_with_admin();
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    // No dispute opened - try to resolve directly
+    let result = client.mock_all_auths().try_resolve_campaign_dispute(
+        &admin,
+        &order_id,
+        &DisputeResolution::FullRefund,
+    );
+
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::DisputeDoesNotExist);
 }

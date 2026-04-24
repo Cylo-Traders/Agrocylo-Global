@@ -48,6 +48,9 @@ export class EscrowEventProjectionService {
         case "created":
           await this.handleOrderCreated(parsed, eventDate);
           break;
+        case "delivered":
+          await this.handleOrderDelivered(orderId);
+          break;
         case "confirmed":
           await this.handleOrderConfirmed(orderId);
           break;
@@ -92,6 +95,13 @@ export class EscrowEventProjectionService {
         },
       });
     }
+  }
+
+  private static async handleOrderDelivered(orderId: string) {
+    await prisma.order.update({
+      where: { orderIdOnChain: orderId },
+      data: { status: "DELIVERED" },
+    });
   }
 
   private static async handleOrderConfirmed(orderId: string) {

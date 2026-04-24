@@ -27,4 +27,10 @@ router.get("/buyer/:address", OrderController.getOrdersByBuyer);
  */
 router.get("/seller/:address", OrderController.getOrdersBySeller);
 
+/**
+ * @route GET /orders/farmer/:address
+ * @desc Retrieve orders for a specific farmer (alias for seller)
+ */
+router.get("/farmer/:address", OrderController.getOrdersByFarmer);
+
 export default router;
