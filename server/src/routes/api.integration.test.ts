@@ -20,8 +20,14 @@ vi.mock('../services/cartService.js', () => ({
   checkout: vi.fn(),
 }));
 
+vi.mock('../services/ordersService.js', () => ({
+  listBuyerOrders: vi.fn(),
+  parseOrderStatusFilter: vi.fn(),
+}));
+
 import * as productService from '../services/productService.js';
 import * as cartService from '../services/cartService.js';
+import * as ordersService from '../services/ordersService.js';
 
 describe('Product and cart API endpoints', () => {
   beforeEach(() => {
@@ -100,5 +106,30 @@ describe('Product and cart API endpoints', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.orders[0].fee_amount).toBe('21');
+  });
+
+  it('GET /orders returns projected buyer orders', async () => {
+    vi.mocked(ordersService.parseOrderStatusFilter).mockReturnValue('active');
+    vi.mocked(ordersService.listBuyerOrders).mockResolvedValue({
+      items: [
+        {
+          order_id: '1',
+          status: 'PENDING',
+          seller_address: '0x2222222222222222222222222222222222222222',
+        },
+      ],
+    });
+
+    const res = await request(app)
+      .get('/orders?status=active')
+      .set('x-wallet-address', '0x1111111111111111111111111111111111111111');
+
+    expect(res.status).toBe(200);
+    expect(res.body.items[0].status).toBe('PENDING');
+    expect(ordersService.parseOrderStatusFilter).toHaveBeenCalledWith('active');
+    expect(ordersService.listBuyerOrders).toHaveBeenCalledWith(
+      '0x1111111111111111111111111111111111111111',
+      'active',
+    );
   });
 });

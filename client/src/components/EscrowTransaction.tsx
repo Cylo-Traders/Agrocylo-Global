@@ -15,14 +15,17 @@ import {
 } from "@/components/ui";
 import { WalletContext } from "@/context/WalletContext";
 import { mapBlockchainError } from "@/components/errorHandler";
-import { createOrder } from "@/services/stellar/contractService";
-import { signAndSubmitTransaction } from "@/lib/signTransaction";
+import {
+  confirmDelivery,
+  createOrderWithOrderId,
+} from "@/services/stellar/contractService";
 import {
   notifyTransactionSubmitted,
   notifyTransactionConfirmed,
   notifyTransactionFailed,
   notifyTransactionConfirming,
 } from "@/services/notification";
+import DualEscrowVisualization from "@/components/DualEscrowVisualization";
 
 interface EscrowTransactionProps {
   farmerAddress: string;
@@ -43,12 +46,17 @@ export default function EscrowTransaction({
   pricePerUnit,
   productName,
 }: EscrowTransactionProps) {
-  const { address, connected, network } = useContext(WalletContext);
+  const { address, connected, network, signAndSubmit } = useContext(WalletContext);
   const [quantity, setQuantity] = useState<string>("1");
   const [deliveryDeadline, setDeliveryDeadline] = useState<string>("");
   const [transactionStatus, setTransactionStatus] = useState<TransactionStatus>({
     status: "idle",
   });
+  const [orderId, setOrderId] = useState<string | null>(null);
+  const [createTxHash, setCreateTxHash] = useState<string | null>(null);
+  const [confirmTxHash, setConfirmTxHash] = useState<string | null>(null);
+  const [goodsDelivered, setGoodsDelivered] = useState(false);
+  const [isConfirmingReceipt, setIsConfirmingReceipt] = useState(false);
 
   const totalPrice = parseFloat(quantity || "0") * pricePerUnit;
   const totalAmount = BigInt(Math.floor(totalPrice * 10_000_000));
@@ -111,7 +119,7 @@ export default function EscrowTransaction({
         throw new Error("Please connect your wallet first");
       }
 
-      const unsignedXdr = await createOrder(
+      const built = await createOrderWithOrderId(
         address,
         farmerAddress,
         tokenAddress,
@@ -119,8 +127,8 @@ export default function EscrowTransaction({
         deliveryDeadline,
       );
 
-      if (!unsignedXdr.success || !unsignedXdr.data) {
-        throw new Error(unsignedXdr.error || "Failed to build escrow transaction");
+      if (!built.success || !built.data) {
+        throw new Error(built.error || "Failed to build escrow transaction");
       }
 
       setTransactionStatus({
@@ -129,7 +137,7 @@ export default function EscrowTransaction({
       });
       notifyTransactionConfirming();
 
-      const signed = await signAndSubmitTransaction(unsignedXdr.data);
+      const signed = await signAndSubmit(built.data.txXdr);
       if (!signed.success || !signed.txHash) {
         throw new Error(signed.error || "Transaction failed");
       }
@@ -144,6 +152,10 @@ export default function EscrowTransaction({
         message: "Escrow order created on-chain.",
         txHash: signed.txHash,
       });
+      setOrderId(built.data.orderId);
+      setCreateTxHash(signed.txHash);
+      setConfirmTxHash(null);
+      setGoodsDelivered(false);
     } catch (error) {
       console.error("Transaction error:", error);
       const errorInfo = mapBlockchainError(error);
@@ -151,6 +163,52 @@ export default function EscrowTransaction({
         status: "error",
         message: `${errorInfo.title}: ${errorInfo.message} ${errorInfo.action}`,
       });
+    }
+  };
+
+  const handleConfirmReceipt = async () => {
+    if (!address || !orderId) return;
+
+    setIsConfirmingReceipt(true);
+    setTransactionStatus({
+      status: "confirming",
+      message: "Requesting buyer receipt confirmation...",
+    });
+
+    try {
+      const built = await confirmDelivery(address, orderId);
+      if (!built.success || !built.data) {
+        throw new Error(built.error || "Failed to build receipt confirmation.");
+      }
+
+      notifyTransactionConfirming();
+      const submitted = await signAndSubmit(built.data);
+      if (!submitted.success || !submitted.txHash) {
+        throw new Error(submitted.error || "Receipt confirmation failed");
+      }
+
+      notifyTransactionSubmitted(submitted.txHash);
+      setTimeout(() => {
+        notifyTransactionConfirmed(submitted.txHash!);
+      }, 2000);
+
+      setConfirmTxHash(submitted.txHash);
+      setTransactionStatus({
+        status: "success",
+        message: "Buyer confirmed receipt. Escrow released to the farmer.",
+        txHash: submitted.txHash,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error
+        ? error.message
+        : "Receipt confirmation failed. Please try again.";
+      notifyTransactionFailed(errorMessage);
+      setTransactionStatus({
+        status: "error",
+        message: errorMessage,
+      });
+    } finally {
+      setIsConfirmingReceipt(false);
     }
   };
 
@@ -202,6 +260,7 @@ export default function EscrowTransaction({
 
   return (
     <Container size="md" className="py-8">
+      <div className="space-y-6">
       <Card variant="elevated" padding="lg">
         <CardHeader>
           <CardTitle>Escrow Transaction</CardTitle>
@@ -340,6 +399,10 @@ export default function EscrowTransaction({
               setQuantity("1");
               setDeliveryDeadline("");
               setTransactionStatus({ status: "idle" });
+              setOrderId(null);
+              setCreateTxHash(null);
+              setConfirmTxHash(null);
+              setGoodsDelivered(false);
             }}
             disabled={
               transactionStatus.status === "pending" ||
@@ -350,6 +413,31 @@ export default function EscrowTransaction({
           </Button>
         </CardFooter>
       </Card>
+
+      <DualEscrowVisualization
+        stage={
+          confirmTxHash
+            ? "confirmed"
+            : goodsDelivered
+              ? "delivered"
+              : orderId
+                ? "funded"
+                : "idle"
+        }
+        productName={productName}
+        quantity={quantity}
+        amountLabel={`${totalPrice.toFixed(2)} XLM`}
+        orderId={orderId}
+        createTxHash={createTxHash}
+        confirmTxHash={confirmTxHash}
+        onMarkDelivered={() => setGoodsDelivered(true)}
+        onConfirmReceipt={() => void handleConfirmReceipt()}
+        isDeliveryMarked={goodsDelivered}
+        isConfirming={isConfirmingReceipt}
+        canMarkDelivered={Boolean(orderId) && !goodsDelivered && !confirmTxHash}
+        canConfirmReceipt={Boolean(orderId) && goodsDelivered && !confirmTxHash && !isConfirmingReceipt}
+      />
+      </div>
     </Container>
   );
 }
