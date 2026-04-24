@@ -188,3 +188,24 @@ fn test_create_order_unsupported_token_fails() {
     );
     assert_eq!(result.unwrap_err().unwrap(), EscrowError::UnsupportedToken);
 }
+
+#[test]
+fn test_disputed_order_cannot_auto_refund() {
+    let (env, client, buyer, farmer, token, _) = setup_test();
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    // Manually set order status to Disputed via storage
+    let mut order: Order = client.get_order_details(&order_id);
+    order.status = OrderStatus::Disputed;
+    env.as_contract(&client.address, || {
+        env.storage().persistent().set(&DataKey::Order(order_id), &order);
+    });
+
+    env.ledger().set_timestamp(env.ledger().timestamp() + 345601);
+
+    let result = client.mock_all_auths().try_refund_expired_order(&order_id);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::OrderDisputed);
+}

@@ -16,6 +16,7 @@ pub enum EscrowError {
     OrderNotExpired = 9,
     NotFarmer = 10,
     OrderNotDelivered = 11,
+    OrderDisputed = 12,
 }
 
 #[contracttype]
@@ -25,6 +26,7 @@ pub enum OrderStatus {
     Delivered,
     Completed,
     Refunded,
+    Disputed,
 }
 
 #[contracttype]
@@ -220,6 +222,9 @@ impl EscrowContract {
             .get(&DataKey::Order(order_id))
             .ok_or(EscrowError::OrderDoesNotExist)?;
 
+        if order.status == OrderStatus::Disputed {
+            return Err(EscrowError::OrderDisputed);
+        }
         if order.status != OrderStatus::Pending && order.status != OrderStatus::Delivered {
             return Err(EscrowError::OrderNotPending);
         }
