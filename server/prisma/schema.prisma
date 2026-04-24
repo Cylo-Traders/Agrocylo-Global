@@ -32,9 +32,6 @@ model User {
   ordersAsBuyer Order[]  @relation("BuyerOrders")
   ordersAsSeller Order[] @relation("SellerOrders")
 
-  ordersAsBuyer Order[]  @relation("BuyerOrders")
-  ordersAsSeller Order[] @relation("SellerOrders")
-
   @@map("users")
 }
 
@@ -69,5 +66,28 @@ model Order {
   sellerUser    User     @relation("SellerOrders", fields: [sellerAddress], references: [walletAddress], onDelete: Cascade)
   product       Product? @relation(fields: [productId], references: [id])
 
+  disputes    Dispute[]
   @@map("orders")
 }
+
+
+model Dispute {
+  id          String    @id @default(uuid())
+  orderId     String    @unique
+  raisedBy    String
+  reason      String
+  status      String    @default("OPEN")
+  resolution  String?
+  resolvedBy  String?
+  resolvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([raisedBy])
+  @@map("disputes")
+}
+
+

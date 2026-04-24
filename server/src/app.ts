@@ -16,6 +16,7 @@ import locationRoutes, {
 import orderRoutes, {
   orderErrorHandler,
 } from "./routes/orderMetadataRoutes.js";
+import adminRoutes, { adminErrorHandler } from "./routes/adminRoutes.js";
 
 const app = express();
 
@@ -29,6 +30,7 @@ app.use("/auth", authRoutes);
 app.use(profileRoutes);
 app.use(locationRoutes);
 app.use(orderRoutes);
+app.use('/admin', adminRoutes);
 
 app.get("/health", (req: Request, res: Response) => {
   logger.info("Health check endpoint hit");
@@ -49,5 +51,6 @@ app.use((err: unknown, _req: Request, res: Response, _next: () => void) => {
 app.use(profileErrorHandler);
 app.use(locationErrorHandler);
 app.use(orderErrorHandler);
+app.use(adminErrorHandler);
 
 export default app;
