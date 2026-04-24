@@ -20,8 +20,14 @@ vi.mock('../services/cartService.js', () => ({
   checkout: vi.fn(),
 }));
 
+vi.mock('../services/notificationService.js', () => ({
+  listNotifications: vi.fn(),
+  markNotificationsRead: vi.fn(),
+}));
+
 import * as productService from '../services/productService.js';
 import * as cartService from '../services/cartService.js';
+import * as notificationService from '../services/notificationService.js';
 
 describe('Product and cart API endpoints', () => {
   beforeEach(() => {
@@ -100,5 +106,47 @@ describe('Product and cart API endpoints', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.orders[0].fee_amount).toBe('21');
+  });
+
+  it('GET /notifications returns unread items for a Stellar wallet', async () => {
+    vi.mocked(notificationService.listNotifications).mockResolvedValue([
+      {
+        id: 'n1',
+        walletAddress: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+        message: 'Order funded',
+        orderId: '42',
+        type: 'created',
+        isRead: false,
+        createdAt: new Date('2026-04-24T12:00:00.000Z'),
+      },
+    ]);
+
+    const res = await request(app)
+      .get('/notifications')
+      .set('x-wallet-address', 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF');
+
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(1);
+    expect(res.body.items[0].orderId).toBe('42');
+    expect(notificationService.listNotifications).toHaveBeenCalledWith(
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      { unreadOnly: true, limit: undefined },
+    );
+  });
+
+  it('POST /notifications/read marks items as read', async () => {
+    vi.mocked(notificationService.markNotificationsRead).mockResolvedValue({ count: 2 });
+
+    const res = await request(app)
+      .post('/notifications/read')
+      .set('x-wallet-address', 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF')
+      .send({ ids: ['n1', 'n2'] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.count).toBe(2);
+    expect(notificationService.markNotificationsRead).toHaveBeenCalledWith(
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      ['n1', 'n2'],
+    );
   });
 });

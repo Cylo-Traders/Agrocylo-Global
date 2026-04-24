@@ -1,21 +1,27 @@
-import { prisma } from '../config/database.js';
-import { ApiError } from '../http/errors.js';
+import { prisma } from "../config/database.js";
+import { ApiError } from "../http/errors.js";
 
-const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 50;
-
-function parseLimit(limit: string | undefined): number {
-  if (!limit) return DEFAULT_LIMIT;
-  const parsed = Number.parseInt(limit, 10);
-  if (Number.isNaN(parsed) || parsed <= 0) {
-    throw new ApiError(400, 'Bad Request', 'limit must be a positive integer');
-  }
-  return Math.min(parsed, MAX_LIMIT);
+export interface NotificationRecord {
+  id: string;
+  walletAddress: string;
+  message: string;
+  orderId: string | null;
+  type: string;
+  isRead: boolean;
+  createdAt: Date;
 }
 
-function parseUnreadOnly(value: string | undefined): boolean {
-  if (!value) return true;
-  return value === 'true' || value === '1';
+export interface ListNotificationsOptions {
+  unreadOnly?: boolean;
+  limit?: number;
+}
+
+function clampLimit(limit?: number): number {
+  if (!Number.isFinite(limit) || !limit) {
+    return 20;
+  }
+
+  return Math.min(Math.max(Math.trunc(limit), 1), 50);
 }
 
 function walletCandidates(walletAddress: string): string[] {
@@ -27,42 +33,69 @@ function walletCandidates(walletAddress: string): string[] {
 
 export async function listNotifications(
   walletAddress: string,
-  params: { unreadOnly?: string; limit?: string } = {},
-) {
-  const unreadOnly = parseUnreadOnly(params.unreadOnly);
-  const limit = parseLimit(params.limit);
+  options: ListNotificationsOptions = {},
+): Promise<NotificationRecord[]> {
+  const unreadOnly = options.unreadOnly ?? true;
+  const limit = clampLimit(options.limit);
   const walletMatches = walletCandidates(walletAddress);
 
-  const items = await prisma.notification.findMany({
+  return prisma.notification.findMany({
     where: {
-      walletAddress: { in: walletMatches },
+      walletAddress: {
+        in: walletMatches,
+      },
       ...(unreadOnly ? { isRead: false } : {}),
     },
     orderBy: {
-      createdAt: 'desc',
+      createdAt: "asc",
     },
     take: limit,
   });
-
-  return { items };
 }
 
-export async function markNotificationRead(walletAddress: string, notificationId: string) {
-  const notification = await prisma.notification.findUnique({
-    where: { id: notificationId },
+export async function markNotificationsRead(
+  walletAddress: string,
+  ids: string[],
+): Promise<{ count: number }> {
+  if (ids.length === 0) {
+    return { count: 0 };
+  }
+
+  const notifications = await prisma.notification.findMany({
+    where: {
+      id: {
+        in: ids,
+      },
+    },
+    select: {
+      id: true,
+      walletAddress: true,
+    },
   });
 
-  if (!notification) {
-    throw new ApiError(404, 'Not Found', 'Notification not found');
+  if (notifications.length !== ids.length) {
+    throw new ApiError(404, "Not Found", "One or more notifications were not found");
   }
 
   const walletMatches = walletCandidates(walletAddress);
-  if (!walletMatches.includes(notification.walletAddress)) {
-    throw new ApiError(403, 'Forbidden', 'You cannot modify this notification');
+  const unauthorized = notifications.some(
+    (notification) => !walletMatches.includes(notification.walletAddress),
+  );
+
+  if (unauthorized) {
+    throw new ApiError(403, "Forbidden", "You cannot modify these notifications");
   }
 
-  await prisma.notification.update({
-    where: { id: notificationId },
-    data: { isRead: true },
+  const result = await prisma.notification.updateMany({
+    where: {
+      id: {
+        in: ids,
+      },
+    },
+    data: {
+      isRead: true,
+    },
   });
+
+  return { count: result.count };
 }

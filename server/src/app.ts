@@ -17,7 +17,9 @@ import orderRoutes from "./routes/orderRoutes.js";
 import orderMetadataRoutes, {
   orderErrorHandler,
 } from "./routes/orderMetadataRoutes.js";
-import notificationRoutes from "./routes/notificationRoutes.js";
+import notificationRoutes, {
+  notificationErrorHandler,
+} from "./routes/notificationRoutes.js";
 
 const app = express();
 
@@ -46,12 +48,13 @@ app.get("/health", (req: Request, res: Response) => {
 
 app.use(productImageErrorHandler);
 app.use(apiErrorHandler);
+app.use(profileErrorHandler);
+app.use(locationErrorHandler);
+app.use(orderErrorHandler);
+app.use(notificationErrorHandler);
 app.use((err: unknown, _req: Request, res: Response, _next: () => void) => {
   logger.error("Unhandled request error", err);
   res.status(500).json({ message: "Internal server error" });
 });
-app.use(profileErrorHandler);
-app.use(locationErrorHandler);
-app.use(orderErrorHandler);
 
 export default app;

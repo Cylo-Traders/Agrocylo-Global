@@ -5,6 +5,7 @@ import { WalletProvider } from "../context/WalletContext";
 import Navbar from "./Navbar";
 import { CartProvider } from "@/context/CartContext";
 import CartDrawer from "./CartDrawer";
+import NotificationPoller from "./NotificationPoller";
 
 export default function WalletProviderWrapper({
   children,
@@ -17,6 +18,7 @@ export default function WalletProviderWrapper({
         <Navbar />
         {children}
         <CartDrawer />
+        <NotificationPoller />
       </CartProvider>
     </WalletProvider>
   );

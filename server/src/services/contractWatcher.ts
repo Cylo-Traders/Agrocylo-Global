@@ -56,7 +56,7 @@ function handleContractEvent(event: any) {
     case "created":
       notifyUser(
         data[2],
-        `New Order Alert! You have a new order #${orderId} for ${data[3]} tokens.`,
+        `Order funded: order #${orderId} has been locked in escrow for ${data[3]} tokens.`,
         orderId,
         action,
       );
@@ -64,7 +64,7 @@ function handleContractEvent(event: any) {
     case "confirmed":
       notifyUser(
         data[2],
-        `Payment Released! Buyer confirmed receipt for order #${orderId}.`,
+        `Delivery confirmed: payment was released for order #${orderId}.`,
         orderId,
         action,
       );
@@ -72,7 +72,7 @@ function handleContractEvent(event: any) {
     case "refunded":
       notifyUser(
         data[1],
-        `Refund Issued. Order #${orderId} was expired and funds returned.`,
+        `Refund issued: order #${orderId} expired and funds were returned.`,
         orderId,
         action,
       );
