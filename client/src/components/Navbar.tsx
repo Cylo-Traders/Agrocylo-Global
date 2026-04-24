@@ -4,6 +4,8 @@ import React from "react";
 import WalletButton from "./WalletButton";
 import WalletDisplay from "./WalletDisplay";
 import { useCart } from "@/context/CartContext";
+import Link from "next/link";
+
 
 export default function Navbar() {
   const { itemCount, setDrawerOpen } = useCart();
