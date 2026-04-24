@@ -7,6 +7,7 @@ import { getOrder, type Order } from "@/services/stellar/contractService";
 import CountdownTimer from "@/components/orders/CountdownTimer";
 import { useWallet } from "@/hooks/useWallet";
 import { useEscrowContract } from "@/hooks/useEscrowContract";
+import DisputeForm from "@/components/orders/DisputeForm";
 
 export default function OrderDetailsPage() {
   const params = useParams<{ orderId: string }>();
@@ -15,12 +16,14 @@ export default function OrderDetailsPage() {
 
   const { address, connected } = useWallet();
   const { requestRefund, refundState } = useEscrowContract();
+  const { openDispute, disputeState } = useEscrowContract();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [order, setOrder] = useState<Order | null>(null);
 
   const [refundTxHash, setRefundTxHash] = useState<string | null>(null);
+  const [showDisputeForm, setShowDisputeForm] = useState(false);
 
   const EXPIRY_HOURS = 96;
 
@@ -72,6 +75,29 @@ export default function OrderDetailsPage() {
       !refundState.isLoading
     );
   }, [orderId, isBuyer, order?.status, isExpired, refundState.isLoading]);
+
+  const canDispute = useMemo(() => {
+    return (
+      !!orderId &&
+      connected &&
+      (order?.status === "Pending" || order?.status === "Delivered") &&
+      !disputeState.isLoading
+    );
+  }, [orderId, connected, order?.status, disputeState.isLoading]);
+
+  const onOpenDispute = useCallback(
+    async (reason: string, evidence: string) => {
+      if (!orderId) return;
+      try {
+        await openDispute(orderId, reason, evidence);
+        setShowDisputeForm(false);
+        await fetchOrder();
+      } catch {
+        // disputeState.error is already set by the hook
+      }
+    },
+    [orderId, openDispute, fetchOrder]
+  );
 
   const onRequestRefund = useCallback(async () => {
     if (!orderId) return;
@@ -142,6 +168,28 @@ export default function OrderDetailsPage() {
                       Refund tx: {refundTxHash}
                     </Text>
                   ) : null}
+                </div>
+              )}
+
+              {canDispute && (
+                <div className="pt-2 space-y-2">
+                  {!showDisputeForm ? (
+                    <Button
+                      variant="outline"
+                      size="lg"
+                      onClick={() => setShowDisputeForm(true)}
+                      className="w-full"
+                    >
+                      Open Dispute
+                    </Button>
+                  ) : (
+                    <DisputeForm
+                      isLoading={disputeState.isLoading}
+                      error={disputeState.error}
+                      onSubmit={onOpenDispute}
+                      onCancel={() => setShowDisputeForm(false)}
+                    />
+                  )}
                 </div>
               )}
             </div>
