@@ -27,4 +27,5 @@ router.get("/buyer/:address", OrderController.getOrdersByBuyer);
  */
 router.get("/seller/:address", OrderController.getOrdersBySeller);
 
+router.get('/stats/:sellerAddress', OrderController.getSellerStats);
 export default router;
