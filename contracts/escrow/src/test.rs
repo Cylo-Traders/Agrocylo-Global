@@ -188,3 +188,64 @@ fn test_create_order_unsupported_token_fails() {
     );
     assert_eq!(result.unwrap_err().unwrap(), EscrowError::UnsupportedToken);
 }
+
+fn setup_test_with_admin() -> (
+    Env,
+    EscrowContractClient<'static>,
+    Address,
+    Address,
+    Address,
+    token::Client<'static>,
+) {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let farmer = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let xlm_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let xlm_client = token::Client::new(&env, &xlm_contract.address());
+    let xlm_admin_client = token::StellarAssetClient::new(&env, &xlm_contract.address());
+    xlm_admin_client.mint(&buyer, &1000);
+    let usdc_contract = env.register_stellar_asset_contract_v2(token_admin);
+    let usdc_client = token::Client::new(&env, &usdc_contract.address());
+    let contract_id = env.register(EscrowContract, ());
+    let client = EscrowContractClient::new(&env, &contract_id);
+    let mut supported_tokens = Vec::new(&env);
+    supported_tokens.push_back(xlm_client.address.clone());
+    supported_tokens.push_back(usdc_client.address.clone());
+    client.initialize(&admin, &supported_tokens);
+    (env, client, admin, buyer, farmer, xlm_client)
+}
+
+#[test]
+fn test_split_funds_correct() {
+    let (_env, client, admin, buyer, farmer, xlm_client) = setup_test_with_admin();
+
+    let order_id = client.mock_all_auths().create_order(&buyer, &farmer, &xlm_client.address, &500);
+    client.mock_all_auths().split_funds(&admin, &order_id, &200, &300);
+
+    assert_eq!(xlm_client.balance(&buyer), 700); // 1000 - 500 + 200
+    assert_eq!(xlm_client.balance(&farmer), 300);
+    let order = client.get_order_details(&order_id);
+    assert_eq!(order.status, OrderStatus::Completed);
+}
+
+#[test]
+fn test_split_funds_invalid_sum_fails() {
+    let (_env, client, admin, buyer, farmer, xlm_client) = setup_test_with_admin();
+
+    let order_id = client.mock_all_auths().create_order(&buyer, &farmer, &xlm_client.address, &500);
+    let result = client.mock_all_auths().try_split_funds(&admin, &order_id, &200, &200);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::InvalidSplit);
+}
+
+#[test]
+fn test_split_funds_non_admin_fails() {
+    let (env, client, _admin, buyer, farmer, xlm_client) = setup_test_with_admin();
+    let fake_admin = Address::generate(&env);
+
+    let order_id = client.mock_all_auths().create_order(&buyer, &farmer, &xlm_client.address, &500);
+    let result = client.mock_all_auths().try_split_funds(&fake_admin, &order_id, &200, &300);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAdmin);
+}
