@@ -71,3 +71,30 @@ model Order {
 
   @@map("orders")
 }
+
+model Campaign {
+  id               String       @id
+  farmerAddress    String
+  token            String
+  targetAmount     String
+  raisedAmount     String
+  harvestDeadline  BigInt
+  status           String
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  investments      Investment[]
+
+  @@map("campaigns")
+}
+
+model Investment {
+  id            String   @id @default(uuid())
+  campaignId    String
+  investor      String
+  amount        String
+  createdAt     DateTime @default(now())
+  
+  campaign      Campaign @relation(fields: [campaignId], references: [id])
+
+  @@map("investments")
+}
