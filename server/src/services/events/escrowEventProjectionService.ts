@@ -55,6 +55,12 @@ export class EscrowEventProjectionService {
         case "refunded":
           await this.handleOrderRefunded(orderId);
           break;
+        case "dispute":
+          await this.handleOrderDisputed(orderId, parsed.buyer, eventDate);
+          break;
+        case "resolved":
+          await this.handleOrderResolved(orderId, parsed.buyer === "REFUNDED", eventDate);
+          break;
       }
     } catch (error) {
       logger.error(`Projection Error for ${action} on order ${orderId}:`, error);
@@ -123,6 +129,43 @@ export class EscrowEventProjectionService {
     wsManager.broadcast("order:status_changed", {
       orderId,
       status: "REFUNDED",
+    });
+  }
+
+  private static async handleOrderDisputed(orderId: string, raisedBy: string, eventDate: Date) {
+    await prisma.order.update({
+      where: { orderIdOnChain: orderId },
+      data: { status: "DISPUTED" },
+    });
+
+    await prisma.dispute.upsert({
+      where: { orderIdOnChain: orderId },
+      create: {
+        orderIdOnChain: orderId,
+        raisedBy,
+        status: "OPEN",
+        createdAt: eventDate,
+      },
+      update: {
+        status: "OPEN",
+        raisedBy,
+      },
+    });
+  }
+
+  private static async handleOrderResolved(orderId: string, isRefund: boolean, eventDate: Date) {
+    await prisma.order.update({
+      where: { orderIdOnChain: orderId },
+      data: { status: isRefund ? "REFUNDED" : "COMPLETED" },
+    });
+
+    await prisma.dispute.update({
+      where: { orderIdOnChain: orderId },
+      data: {
+        status: "RESOLVED",
+        outcome: isRefund ? "REFUNDED" : "COMPLETED",
+        resolvedAt: eventDate,
+      },
     });
   }
 }

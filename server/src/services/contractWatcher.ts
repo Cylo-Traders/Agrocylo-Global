@@ -2,6 +2,7 @@ import { rpc, scValToNative, xdr } from "@stellar/stellar-sdk";
 import logger from "../config/logger.js";
 import { prisma } from "../config/database.js";
 import { wsManager } from "./wsManager.js";
+import { NotificationService } from "./notificationService.js";
 
 const CONTRACT_ID = process.env.CONTRACT_ID || "C...";
 const RPC_URL = process.env.RPC_URL || "https://soroban-testnet.stellar.org";
@@ -20,11 +21,17 @@ export async function startContractWatcher() {
           {
             type: "contract",
             contractIds: [CONTRACT_ID],
-            topics: [["AAAADwAAAAVvcmRlcg==", "*"]],
           },
         ],
       });
       for (const event of response.events) {
+        import("./events/blockchainEventIngestionService.js")
+          .then(({ BlockchainEventIngestionService }) => {
+            BlockchainEventIngestionService.ingestEvent(event);
+          })
+          .catch((err) =>
+            logger.error("Dynamic Import Fail (BlockchainEventIngestionService):", err),
+          );
         // --- NEW: Structured Ingestion for the Indexer ---
         import("./events/escrowEventIngestionService.js")
           .then(({ EscrowEventIngestionService }) => {
@@ -118,4 +125,12 @@ async function notifyUser(
   } catch (error) {
     logger.error("Failed to save notification to DB:", error);
   }
+  NotificationService.notifyFromEscrowEvent({
+    action,
+    orderId,
+    buyerAddress: data[1],
+    farmerAddress: data[2],
+    amount: data[3]?.toString?.(),
+    token: data[4],
+  });
 }
