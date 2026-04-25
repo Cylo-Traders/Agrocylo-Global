@@ -14,8 +14,10 @@ pub enum EscrowError {
     NotBuyer = 7,
     OrderNotPending = 8,
     OrderNotExpired = 9,
-    NotFarmer = 10,
-    OrderNotDelivered = 11,
+    NotAdmin = 10,
+    OrderAlreadyDisputed = 11,
+    NotFarmer = 12,
+    OrderNotDelivered = 13,
 }
 
 #[contracttype]
@@ -25,6 +27,7 @@ pub enum OrderStatus {
     Delivered,
     Completed,
     Refunded,
+    Disputed,
 }
 
 #[contracttype]
@@ -48,6 +51,7 @@ pub enum DataKey {
     OrderCount,
     SupportedTokens,
     Admin,
+    FeeCollector,
 }
 
 const NINTY_SIX_HOURS_IN_SECONDS: u64 = 96 * 60 * 60;
@@ -60,6 +64,7 @@ impl EscrowContract {
     pub fn initialize(
         env: Env,
         admin: Address,
+        fee_collector: Address,
         supported_tokens: Vec<Address>,
     ) -> Result<(), EscrowError> {
         if env.storage().instance().has(&DataKey::Admin) {
@@ -69,6 +74,7 @@ impl EscrowContract {
             return Err(EscrowError::MustSupportTwoTokens);
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::FeeCollector, &fee_collector);
         env.storage().instance().set(&DataKey::SupportedTokens, &supported_tokens);
         Ok(())
     }
@@ -97,7 +103,13 @@ impl EscrowContract {
         }
 
         let token_client = token::Client::new(&env, &token);
-        token_client.transfer(&buyer, &env.current_contract_address(), &amount);
+        
+        let fee_collector: Address = env.storage().instance().get(&DataKey::FeeCollector).ok_or(EscrowError::ContractNotInitialized)?;
+        let fee = amount * 3 / 100;
+        let net_amount = amount - fee;
+
+        token_client.transfer(&buyer, &fee_collector, &fee);
+        token_client.transfer(&buyer, &env.current_contract_address(), &net_amount);
 
         let mut order_id: u64 = env
             .storage()
@@ -112,8 +124,8 @@ impl EscrowContract {
         let order = Order {
             buyer: buyer.clone(),
             farmer: farmer.clone(),
-            token,
-            amount,
+            token: token.clone(),
+            amount: net_amount,
             timestamp,
             delivery_timestamp: None,
             status: OrderStatus::Pending,
@@ -141,7 +153,7 @@ impl EscrowContract {
 
         env.events().publish(
             (symbol_short!("order"), symbol_short!("created")),
-            (order_id, buyer, farmer, amount),
+            (order_id, buyer.clone(), farmer.clone(), amount, token.clone()),
         );
 
         Ok(order_id)
@@ -251,6 +263,103 @@ impl EscrowContract {
         Ok(())
     }
 
+    /// Dispute an order. Can be called by buyer or farmer.
+    pub fn dispute_order(env: Env, caller: Address, order_id: u64) -> Result<(), EscrowError> {
+        caller.require_auth();
+
+        let mut order: Order = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Order(order_id))
+            .ok_or(EscrowError::OrderDoesNotExist)?;
+
+        if order.status != OrderStatus::Pending {
+            return Err(EscrowError::OrderNotPending);
+        }
+
+        if caller != order.buyer && caller != order.farmer {
+            return Err(EscrowError::NotBuyer); // Using NotBuyer as a placeholder for "Not Involved"
+        }
+
+        // Update status to Disputed
+        order.status = OrderStatus::Disputed;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Order(order_id), &order);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Order(order_id), 1000, 100000);
+
+        // --- NEW: Emit Event for Backend Notification ---
+        // Topics: (order, disputed), Data: (order_id, caller)
+        env.events().publish(
+            (symbol_short!("order"), symbol_short!("dispute")),
+            (order_id, caller),
+        );
+
+        Ok(())
+    }
+
+    /// Resolves a dispute. Can only be called by the admin.
+    pub fn resolve_dispute(
+        env: Env,
+        admin: Address,
+        order_id: u64,
+        resolve_to_buyer: bool,
+    ) -> Result<(), EscrowError> {
+        admin.require_auth();
+
+        // Check if caller is admin
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(EscrowError::ContractNotInitialized)?;
+
+        if admin != stored_admin {
+            return Err(EscrowError::NotAdmin);
+        }
+
+        let mut order: Order = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Order(order_id))
+            .ok_or(EscrowError::OrderDoesNotExist)?;
+
+        if order.status != OrderStatus::Disputed {
+            return Err(EscrowError::OrderNotPending); // Should probably use a more specific error
+        }
+
+        let token_client = token::Client::new(&env, &order.token);
+
+        if resolve_to_buyer {
+            // Refund to buyer
+            order.status = OrderStatus::Refunded;
+            token_client.transfer(&env.current_contract_address(), &order.buyer, &order.amount);
+        } else {
+            // Complete for farmer
+            order.status = OrderStatus::Completed;
+            token_client.transfer(&env.current_contract_address(), &order.farmer, &order.amount);
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Order(order_id), &order);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Order(order_id), 1000, 100000);
+
+        // --- NEW: Emit Event for Backend Notification ---
+        // Topics: (order, resolved), Data: (order_id, resolve_to_buyer)
+        env.events().publish(
+            (symbol_short!("order"), symbol_short!("resolved")),
+            (order_id, resolve_to_buyer),
+        );
+
+        Ok(())
+    }
+
+    /// Returns all order IDs associated with a buyer.
     pub fn get_orders_by_buyer(env: Env, buyer: Address) -> Vec<u64> {
         env.storage()
             .persistent()
