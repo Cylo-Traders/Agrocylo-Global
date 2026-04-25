@@ -1,3 +1,4 @@
+import ModalExample from "@/components/examples/ModalExample";
 import {
   Container,
   Button,
@@ -10,6 +11,7 @@ import {
   Text,
   Input,
 } from "@/components/ui";
+import { TransactionFeedbackContext } from "@/context/TransactionFeedbackContext";
 
 export default function Home() {
   return (
@@ -93,6 +95,7 @@ export default function Home() {
             </Card>
           </div>
         </Container>
+        <ModalExample/>
       </section>
     </main>
   );

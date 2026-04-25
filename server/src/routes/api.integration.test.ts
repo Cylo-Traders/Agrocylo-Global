@@ -32,6 +32,8 @@ describe('Product and cart API endpoints', () => {
     vi.mocked(productService.listProducts).mockResolvedValue({
       page: 1,
       page_size: 20,
+      total: 1,
+      totalPages: 1,
       items: [{ id: 'p1', name: 'Tomato' }],
     });
 
@@ -53,6 +55,76 @@ describe('Product and cart API endpoints', () => {
     expect(res.status).toBe(404);
     expect(res.headers['content-type']).toContain('application/problem+json');
     expect(res.body.title).toBe('Not Found');
+  });
+
+  it('GET /products supports search filter', async () => {
+    vi.mocked(productService.listProducts).mockResolvedValue({
+      page: 1,
+      page_size: 20,
+      total: 1,
+      totalPages: 1,
+      items: [{ id: 'p1', name: 'Maize' }],
+    });
+
+    const res = await request(app).get('/products?search=maize');
+    expect(res.status).toBe(200);
+    expect(productService.listProducts).toHaveBeenCalledWith(
+      expect.objectContaining({ search: 'maize' })
+    );
+  });
+
+  it('GET /products supports location filter', async () => {
+    vi.mocked(productService.listProducts).mockResolvedValue({
+      page: 1,
+      page_size: 20,
+      total: 0,
+      totalPages: 0,
+      items: [],
+    });
+
+    const res = await request(app).get('/products?location=Lagos');
+    expect(res.status).toBe(200);
+    expect(productService.listProducts).toHaveBeenCalledWith(
+      expect.objectContaining({ location: 'Lagos' })
+    );
+  });
+
+  it('GET /products supports price range filters', async () => {
+    vi.mocked(productService.listProducts).mockResolvedValue({
+      page: 1,
+      page_size: 20,
+      total: 2,
+      totalPages: 1,
+      items: [{ id: 'p1' }, { id: 'p2' }],
+    });
+
+    const res = await request(app).get('/products?minPrice=1000&maxPrice=5000');
+    expect(res.status).toBe(200);
+    expect(productService.listProducts).toHaveBeenCalledWith(
+      expect.objectContaining({ minPrice: '1000', maxPrice: '5000' })
+    );
+  });
+
+  it('GET /products supports combined filters', async () => {
+    vi.mocked(productService.listProducts).mockResolvedValue({
+      page: 1,
+      page_size: 20,
+      total: 1,
+      totalPages: 1,
+      items: [{ id: 'p1', name: 'Rice', location: 'Abuja', category: 'Grains' }],
+    });
+
+    const res = await request(app).get('/products?search=rice&location=Abuja&minPrice=2000&maxPrice=10000&category=Grains');
+    expect(res.status).toBe(200);
+    expect(productService.listProducts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        search: 'rice',
+        location: 'Abuja',
+        minPrice: '2000',
+        maxPrice: '10000',
+        category: 'Grains'
+      })
+    );
   });
 
   it('GET /cart returns grouped payload for authenticated buyer', async () => {
