@@ -263,6 +263,9 @@ impl EscrowContract {
         let key = DataKey::Order(order_id);
         let mut order: Order = storage.get(&key).ok_or(EscrowError::OrderDoesNotExist)?;
 
+        if order.status == OrderStatus::Disputed {
+            return Err(EscrowError::OrderDisputed);
+        }
         if order.status != OrderStatus::Pending && order.status != OrderStatus::Delivered {
             return Err(EscrowError::OrderNotPending);
         }
