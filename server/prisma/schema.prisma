@@ -68,8 +68,30 @@ model Order {
   product       Product? @relation(fields: [productId], references: [id])
   dispute       Dispute?
 
+  disputes    Dispute[]
   @@map("orders")
 }
+
+
+model Dispute {
+  id          String    @id @default(uuid())
+  orderId     String    @unique
+  raisedBy    String
+  reason      String
+  status      String    @default("OPEN")
+  resolution  String?
+  resolvedBy  String?
+  resolvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([raisedBy])
+  @@map("disputes")
+}
+
 
 model EscrowEvent {
   id          String   @id @default(uuid())

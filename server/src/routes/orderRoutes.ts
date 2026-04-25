@@ -28,6 +28,7 @@ router.get("/buyer/:address", OrderController.getOrdersByBuyer);
  */
 router.get("/seller/:address", OrderController.getOrdersBySeller);
 
+router.get('/stats/:sellerAddress', OrderController.getSellerStats);
 export function orderErrorHandler(error: unknown, req: Request, res: Response, next: NextFunction): void {
   if (error instanceof ApiError) {
     sendProblem(res, req, error);
