@@ -46,6 +46,7 @@ model Product {
   updatedAt     DateTime @updatedAt
 
   orders        Order[]
+  priceHistory  PriceHistory[]
 
   @@map("products")
 }
@@ -65,7 +66,9 @@ model Order {
   buyerUser     User     @relation("BuyerOrders", fields: [buyerAddress], references: [walletAddress], onDelete: Cascade)
   sellerUser    User     @relation("SellerOrders", fields: [sellerAddress], references: [walletAddress], onDelete: Cascade)
   product       Product? @relation(fields: [productId], references: [id])
+  dispute       Dispute?
 
+  disputes    Dispute[]
   @@map("orders")
 }
 
@@ -116,4 +119,106 @@ model BlockchainTransaction {
   @@index([orderIdOnChain])
   @@index([campaignIdOnChain])
   @@map("transactions")
+
+model Dispute {
+  id          String    @id @default(uuid())
+  orderId     String    @unique
+  raisedBy    String
+  reason      String
+  status      String    @default("OPEN")
+  resolution  String?
+  resolvedBy  String?
+  resolvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([raisedBy])
+  @@map("disputes")
+}
+
+
+model EscrowEvent {
+  id          String   @id @default(uuid())
+  orderId     String
+  buyer       String
+  seller      String
+  amount      String
+  token       String
+  action      String
+  ledger      Int
+  eventIndex  Int
+  timestamp   DateTime
+
+  @@unique([ledger, eventIndex])
+  @@map("escrow_events")
+}
+
+model EscrowTransaction {
+  id              String   @id @default(uuid())
+  orderIdOnChain  String
+  action          String
+  ledger          Int
+  timestamp       DateTime
+
+  @@map("escrow_transactions")
+}
+
+model PriceHistory {
+  id        String   @id @default(uuid())
+  productId String
+  price     String
+  currency  String
+  timestamp DateTime
+
+  product   Product  @relation(fields: [productId], references: [id])
+
+  @@map("price_history")
+}
+
+model Profile {
+  wallet_address String    @id
+  name           String?
+  bio            String?
+  avatar_url     String?
+  role           String    @default("BUYER")
+  location       Location?
+
+  @@map("profiles")
+}
+
+model Location {
+  wallet_address String   @id
+  lat            Float
+  lng            Float
+  is_public      Boolean  @default(true)
+  profile        Profile? @relation(fields: [wallet_address], references: [wallet_address])
+
+  @@map("locations")
+}
+
+model OrderMetadata {
+  on_chain_order_id String @id
+  description       String
+  farmer_address    String
+  buyer_address     String
+
+  @@map("order_metadata")
+}
+
+model Dispute {
+  id              String   @id @default(uuid())
+  orderIdOnChain  String   @unique
+  raisedBy        String   // Wallet address of the one who raised it
+  status          String   // "OPEN", "RESOLVED"
+  outcome         String?  // "REFUNDED", "COMPLETED"
+  evidenceHash    String?  // Hash/CID of the evidence stored off-chain
+  createdAt       DateTime @default(now())
+  resolvedAt      DateTime?
+
+  order           Order    @relation(fields: [orderIdOnChain], references: [orderIdOnChain])
+  
+  @@map("disputes")
 }

@@ -1,6 +1,6 @@
 import { rpc, scValToNative, xdr } from "@stellar/stellar-sdk";
 import logger from "../config/logger.js";
-import { prisma } from "../config/database.js";
+import { NotificationService } from "./notificationService.js";
 
 const CONTRACT_ID = process.env.CONTRACT_ID || "C...";
 const RPC_URL = process.env.RPC_URL || "https://soroban-testnet.stellar.org";
@@ -58,55 +58,12 @@ function handleContractEvent(event: any) {
   const data = scValToNative(xdr.ScVal.fromXDR(event.value, "base64"));
   logger.info(`New Event Detected: ${action}`);
   const orderId = data[0].toString();
-  switch (action) {
-    case "created":
-      notifyUser(
-        data[2],
-        `New Order Alert! You have a new order #${orderId} for ${data[3]} tokens.`,
-        orderId,
-        action,
-      );
-      break;
-    case "confirmed":
-      notifyUser(
-        data[2],
-        `Payment Released! Buyer confirmed receipt for order #${orderId}.`,
-        orderId,
-        action,
-      );
-      break;
-    case "refunded":
-      notifyUser(
-        data[1],
-        `Refund Issued. Order #${orderId} was expired and funds returned.`,
-        orderId,
-        action,
-      );
-      break;
-  }
-}
-
-async function notifyUser(
-  address: string,
-  message: string,
-  orderId: string,
-  type: string,
-) {
-  try {
-    // Save to Database
-    const notification = await prisma.notification.create({
-      data: {
-        walletAddress: address,
-        message: message,
-        orderId: orderId.toString(),
-        type: type,
-        isRead: false,
-      },
-    });
-    logger.info(
-      `Notification saved to DB for ${address}: ID ${notification.id}`,
-    );
-  } catch (error) {
-    logger.error("Failed to save notification to DB:", error);
-  }
+  NotificationService.notifyFromEscrowEvent({
+    action,
+    orderId,
+    buyerAddress: data[1],
+    farmerAddress: data[2],
+    amount: data[3]?.toString?.(),
+    token: data[4],
+  });
 }
