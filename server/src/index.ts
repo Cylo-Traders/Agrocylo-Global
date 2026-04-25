@@ -10,7 +10,7 @@ async function bootstrap() {
     startContractWatcher();
     app.listen(config.port, () => {
       logger.info(
-        `[server]: Server is running at http://localhost:${config.port}`,
+        `[server]: Server is running at http://localhost:${config.port}`
       );
     });
   } catch (error) {
