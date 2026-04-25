@@ -1,0 +1,121 @@
+// Production Escrow schema
+// Tables: users, campaigns, investments, orders, transactions
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(uuid())
+  walletAddress String   @unique
+  role          String   @default("INVESTOR") // INVESTOR | FARMER | BUYER
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  campaigns   Campaign[]    @relation("FarmerCampaigns")
+  investments Investment[]
+  orders      Order[]
+
+  @@index([walletAddress])
+  @@map("users")
+}
+
+model Campaign {
+  id             String         @id @default(uuid())
+  onChainId      String         @unique // uint64 from contract as string
+  farmerAddress  String
+  tokenAddress   String
+  targetAmount   String         // i128 stored as string
+  totalRaised    String         @default("0")
+  totalRevenue   String         @default("0")
+  trancheReleased String        @default("0")
+  deadline       DateTime
+  status         CampaignStatus @default(FUNDING)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  farmer       User         @relation("FarmerCampaigns", fields: [farmerAddress], references: [walletAddress], onDelete: Restrict)
+  investments  Investment[]
+  orders       Order[]
+  transactions Transaction[]
+
+  @@index([farmerAddress])
+  @@index([status])
+  @@map("campaigns")
+}
+
+model Investment {
+  id             String   @id @default(uuid())
+  campaignId     String
+  investorAddress String
+  amount         String   // i128 as string
+  ledger         Int
+  txHash         String?
+  createdAt      DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  investor User     @relation(fields: [investorAddress], references: [walletAddress], onDelete: Restrict)
+
+  @@unique([campaignId, investorAddress, ledger])
+  @@index([campaignId])
+  @@index([investorAddress])
+  @@map("investments")
+}
+
+model Order {
+  id            String      @id @default(uuid())
+  onChainId     String      @unique // uint64 as string
+  campaignId    String
+  buyerAddress  String
+  amount        String      // i128 as string
+  status        OrderStatus @default(PENDING)
+  ledger        Int
+  txHash        String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  buyer    User     @relation(fields: [buyerAddress], references: [walletAddress], onDelete: Restrict)
+
+  @@index([campaignId])
+  @@index([buyerAddress])
+  @@map("orders")
+}
+
+model Transaction {
+  id         String   @id @default(uuid())
+  campaignId String?
+  eventType  String   // campaign.created | campaign.invested | campaign.settled | order.created | order.confirmed
+  payload    Json
+  ledger     Int
+  eventIndex Int
+  txHash     String?
+  processedAt DateTime @default(now())
+
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  @@unique([ledger, eventIndex])
+  @@index([campaignId])
+  @@index([eventType])
+  @@map("transactions")
+}
+
+enum CampaignStatus {
+  FUNDING
+  FUNDED
+  IN_PRODUCTION
+  HARVESTED
+  SETTLED
+  FAILED
+  DISPUTED
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+}
