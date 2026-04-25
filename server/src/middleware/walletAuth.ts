@@ -1,10 +1,9 @@
 import type { NextFunction, Request, Response } from 'express';
+import { Keypair } from '@stellar/stellar-sdk';
 
 export interface WalletRequest extends Request {
   walletAddress?: string;
 }
-
-const WALLET_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
 export function requireWallet(req: WalletRequest, res: Response, next: NextFunction): void {
   const header = req.header('x-wallet-address');
@@ -13,12 +12,13 @@ export function requireWallet(req: WalletRequest, res: Response, next: NextFunct
     return;
   }
 
-  const walletAddress = header.toLowerCase();
-  if (!WALLET_REGEX.test(walletAddress)) {
-    res.status(400).json({ message: 'Invalid wallet address format.' });
+  try {
+    Keypair.fromPublicKey(header);
+  } catch {
+    res.status(400).json({ message: 'Invalid Stellar wallet address format.' });
     return;
   }
 
-  req.walletAddress = walletAddress;
+  req.walletAddress = header;
   next();
 }
