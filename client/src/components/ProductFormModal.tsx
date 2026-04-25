@@ -8,11 +8,15 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
-  Container,
   Input,
   Text,
 } from "@/components/ui";
-import type { Product, ProductCategory, ProductCurrency, ProductUnit } from "@/types/product";
+import type {
+  Product,
+  ProductCategory,
+  ProductCurrency,
+  ProductUnit,
+} from "@/types/product";
 import {
   normalizeProductWriteInput,
   createProduct,
@@ -22,7 +26,20 @@ import {
 
 type Mode = "add" | "edit";
 
-type FormErrors = Partial<Record<"name" | "category" | "pricePerUnit" | "currency" | "unit" | "description", string>>;
+// Expanded Error type for new fields
+type FormErrors = Partial<
+  Record<
+    | "name"
+    | "category"
+    | "pricePerUnit"
+    | "currency"
+    | "unit"
+    | "description"
+    | "location"
+    | "deliveryWindow",
+    string
+  >
+>;
 
 const CATEGORIES: ProductCategory[] = [
   "Vegetables",
@@ -32,9 +49,7 @@ const CATEGORIES: ProductCategory[] = [
   "Livestock",
   "Other",
 ];
-
 const CURRENCIES: ProductCurrency[] = ["STRK", "USDC"];
-
 const UNITS: ProductUnit[] = ["kg", "bag", "crate", "piece", "litre", "dozen"];
 
 export default function ProductFormModal({
@@ -52,32 +67,26 @@ export default function ProductFormModal({
   onClose: () => void;
   onSuccess: () => Promise<void> | void;
 }) {
-  const existingImageUrl = initialProduct?.image_url ?? null;
-
   const [name, setName] = useState("");
   const [category, setCategory] = useState<ProductCategory | null>(null);
   const [pricePerUnit, setPricePerUnit] = useState("");
   const [currency, setCurrency] = useState<ProductCurrency>("STRK");
   const [unit, setUnit] = useState<ProductUnit>("kg");
-  const [stockQuantity, setStockQuantity] = useState<string>(""); // blank => unlimited
+  const [stockQuantity, setStockQuantity] = useState<string>("");
   const [description, setDescription] = useState<string>("");
+  const [location, setLocation] = useState(""); // New field
+  const [deliveryWindow, setDeliveryWindow] = useState(""); // New field
   const [isAvailable, setIsAvailable] = useState(true);
 
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [imageFiles, setImageFiles] = useState<File[]>([]); // Multiple images
   const [errors, setErrors] = useState<FormErrors>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  const activePreviewUrl = imagePreviewUrl ?? existingImageUrl;
-
   useEffect(() => {
     if (!open) return;
-
     setErrors({});
     setSaveError(null);
-    setSaving(false);
-
     setName(initialProduct?.name ?? "");
     setCategory(initialProduct?.category ?? null);
     setPricePerUnit(initialProduct?.price_per_unit ?? "");
@@ -85,49 +94,31 @@ export default function ProductFormModal({
     setUnit((initialProduct?.unit as ProductUnit) ?? "kg");
     setStockQuantity(initialProduct?.stock_quantity ?? "");
     setDescription(initialProduct?.description ?? "");
+    setLocation(initialProduct?.location ?? "");
+    setDeliveryWindow(initialProduct?.delivery_window ?? "");
     setIsAvailable(initialProduct?.is_available ?? true);
-
-    setImageFile(null);
-    setImagePreviewUrl(null);
+    setImageFiles([]);
   }, [open, initialProduct]);
 
-  // Object URL cleanup
-  useEffect(() => {
-    return () => {
-      if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
-    };
-  }, [imagePreviewUrl]);
-
-  const accepts = useMemo(
-    () => ["image/png", "image/jpeg", "image/webp"],
-    [],
-  );
-
-  function setFile(file: File | null) {
-    if (!file) {
-      setImageFile(null);
-      setImagePreviewUrl(null);
+  const handleFileChange = (files: FileList | null) => {
+    if (!files) return;
+    const newFiles = Array.from(files);
+    if (imageFiles.length + newFiles.length > 8) {
+      setSaveError("Maximum 8 images allowed.");
       return;
     }
-    if (!accepts.includes(file.type)) {
-      setErrors((prev) => ({
-        ...prev,
-        description: "Unsupported image type. Use JPG/PNG/WebP.",
-      }));
-      return;
-    }
-    setImageFile(file);
-    setImagePreviewUrl(URL.createObjectURL(file));
-  }
+    setImageFiles((prev) => [...prev, ...newFiles]);
+  };
 
   function validate(): boolean {
     const next: FormErrors = {};
     if (!name.trim()) next.name = "Product name is required.";
-    if (!category) next.category = "Please select a category.";
-    if (!pricePerUnit || Number(pricePerUnit) <= 0) next.pricePerUnit = "Price must be a positive number.";
-    if (!currency) next.currency = "Please select a currency.";
-    if (!unit) next.unit = "Please select a unit.";
-    if (description && description.length > 500) next.description = "Description must be 500 characters or less.";
+    if (!category) next.category = "Select a category.";
+    if (!pricePerUnit || Number(pricePerUnit) <= 0)
+      next.pricePerUnit = "Invalid price.";
+    if (!location.trim()) next.location = "Location is required.";
+    if (!deliveryWindow.trim())
+      next.deliveryWindow = "Delivery window is required.";
 
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -135,43 +126,47 @@ export default function ProductFormModal({
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!walletAddress) {
-      setSaveError("Wallet is not connected.");
-      return;
-    }
     if (!validate()) return;
-
     setSaving(true);
-    setSaveError(null);
     try {
-      const normalized = normalizeProductWriteInput({
+      const payload = normalizeProductWriteInput({
         name: name.trim(),
         category,
-        pricePerUnit: pricePerUnit.trim(),
+        pricePerUnit,
         currency,
         unit,
-        stockQuantity: stockQuantity.trim() === "" ? null : stockQuantity.trim(),
-        description: description.trim() === "" ? null : description.trim(),
+        stockQuantity,
+        description,
         isAvailable,
+        location,
+        deliveryWindow,
       });
 
+      let product;
       if (mode === "add") {
-        const created = await createProduct(walletAddress, normalized);
-        if (imageFile) {
-          await uploadProductImage(walletAddress, created.id, imageFile);
-        }
+        product = await createProduct(walletAddress, payload);
       } else {
-        if (!initialProduct?.id) throw new Error("Missing product to update.");
-        await updateProduct(walletAddress, initialProduct.id, normalized);
-        if (imageFile) {
-          await uploadProductImage(walletAddress, initialProduct.id, imageFile);
-        }
+        if (!initialProduct?.id) throw new Error("Missing ID");
+        product = await updateProduct(
+          walletAddress,
+          initialProduct.id,
+          payload,
+        );
+      }
+
+      // Handle multiple image uploads
+      if (imageFiles.length > 0) {
+        await Promise.all(
+          imageFiles.map((file) =>
+            uploadProductImage(walletAddress, product.id, file),
+          ),
+        );
       }
 
       await onSuccess();
       onClose();
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Failed to save product.");
+    } catch (err: any) {
+      setSaveError(err.message);
     } finally {
       setSaving(false);
     }
@@ -180,35 +175,37 @@ export default function ProductFormModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-2xl">
-        <Card variant="elevated" padding="lg">
-          <CardHeader>
-            <CardTitle>{mode === "add" ? "Add Product" : "Edit Product"}</CardTitle>
+    <div className="fixed inset-0 z-50 flex justify-center bg-black/60 backdrop-blur-sm overflow-y-auto p-4 sm:p-6">
+      <div className="w-full max-w-2xl my-auto">
+        {" "}
+        {/* my-auto + overflow-y-auto fixes the scroll */}
+        <Card variant="elevated" className="shadow-2xl">
+          <CardHeader className="sticky top-0 bg-background z-10 border-b border-border/50">
+            <CardTitle>
+              {mode === "add" ? "List New Product" : "Edit Listing"}
+            </CardTitle>
           </CardHeader>
+
           <form onSubmit={onSubmit}>
-            <CardContent className="space-y-5">
-              <div className="space-y-2">
+            <CardContent className="space-y-6 pt-6">
+              {/* Basic Info */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Input
                   label="Product Name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Organic Tomatoes"
                   error={errors.name}
                   required
                 />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <label className="text-sm font-medium">Category</label>
                   <select
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground"
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2"
                     value={category ?? ""}
-                    onChange={(e) => setCategory((e.target.value || null) as ProductCategory | null)}
+                    onChange={(e) => setCategory(e.target.value as any)}
                   >
                     <option value="" disabled>
-                      Select a category
+                      Select category
                     </option>
                     {CATEGORIES.map((c) => (
                       <option key={c} value={c}>
@@ -216,31 +213,25 @@ export default function ProductFormModal({
                       </option>
                     ))}
                   </select>
-                  {errors.category && <Text variant="body" className="text-error">{errors.category}</Text>}
-                </div>
-
-                <div className="space-y-2">
-                  <Input
-                    label="Price per unit"
-                    type="number"
-                    value={pricePerUnit}
-                    min={0}
-                    step={0.01}
-                    onChange={(e) => setPricePerUnit(e.target.value)}
-                    placeholder="e.g. 10.5"
-                    error={errors.pricePerUnit}
-                    required
-                  />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
+              {/* Pricing & Units */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <Input
+                  label="Price"
+                  type="number"
+                  value={pricePerUnit}
+                  onChange={(e) => setPricePerUnit(e.target.value)}
+                  error={errors.pricePerUnit}
+                  required
+                />
+                <div className="space-y-1.5">
                   <label className="text-sm font-medium">Currency</label>
                   <select
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground"
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2"
                     value={currency}
-                    onChange={(e) => setCurrency(e.target.value as ProductCurrency)}
+                    onChange={(e) => setCurrency(e.target.value as any)}
                   >
                     {CURRENCIES.map((c) => (
                       <option key={c} value={c}>
@@ -248,15 +239,13 @@ export default function ProductFormModal({
                       </option>
                     ))}
                   </select>
-                  {errors.currency && <Text variant="body" className="text-error">{errors.currency}</Text>}
                 </div>
-
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <label className="text-sm font-medium">Unit</label>
                   <select
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground"
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2"
                     value={unit}
-                    onChange={(e) => setUnit(e.target.value as ProductUnit)}
+                    onChange={(e) => setUnit(e.target.value as any)}
                   >
                     {UNITS.map((u) => (
                       <option key={u} value={u}>
@@ -264,115 +253,96 @@ export default function ProductFormModal({
                       </option>
                     ))}
                   </select>
-                  {errors.unit && <Text variant="body" className="text-error">{errors.unit}</Text>}
                 </div>
               </div>
 
-              <div className="space-y-2">
+              {/* Logistics (New) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Input
-                  label="Stock quantity (optional)"
-                  type="number"
-                  value={stockQuantity}
-                  min={0}
-                  step={1}
-                  onChange={(e) => setStockQuantity(e.target.value)}
-                  placeholder="Leave blank for unlimited"
-                  hint="Quantity at the farm right now"
+                  label="Farm Location (Region)"
+                  placeholder="e.g. Kumasi, Ghana"
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  error={errors.location}
+                  required
+                />
+                <Input
+                  label="Delivery Window"
+                  placeholder="e.g. 2-3 days"
+                  value={deliveryWindow}
+                  onChange={(e) => setDeliveryWindow(e.target.value)}
+                  error={errors.deliveryWindow}
+                  required
                 />
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Description (max 500 chars)</label>
+              {/* Images */}
+              <div className="space-y-3">
+                <Text variant="body" className="font-medium text-sm">
+                  Product Images (Max 8, 2MB limit per image)
+                </Text>
+                <div
+                  className="border-2 border-dashed border-border rounded-xl p-6 flex flex-col items-center hover:border-primary/50 transition-colors cursor-pointer"
+                  onClick={() =>
+                    document.getElementById("file-upload")?.click()
+                  }
+                >
+                  <Text variant="body" muted>
+                    Click to upload or drag images here
+                  </Text>
+                  <input
+                    id="file-upload"
+                    type="file"
+                    multiple
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => handleFileChange(e.target.files)}
+                  />
+                </div>
+                {imageFiles.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {imageFiles.map((f, i) => (
+                      <div
+                        key={i}
+                        className="px-3 py-1 bg-secondary rounded-full text-xs flex items-center gap-2"
+                      >
+                        {f.name}{" "}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setImageFiles((prev) =>
+                              prev.filter((_, idx) => idx !== i),
+                            )
+                          }
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-foreground">
+                  Description & Health Benefits
+                </label>
                 <textarea
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 min-h-[100px]"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Short description..."
-                  className={[
-                    "w-full rounded-lg border bg-background px-4 py-2.5 text-foreground text-base transition-colors placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed min-h-24 sm:py-3",
-                    errors.description ? "border-error focus:ring-error" : "border-border",
-                  ].join(" ")}
-                  aria-invalid={!!errors.description}
+                  placeholder="Tell buyers about origin, organic status, or health benefits..."
                 />
-                {errors.description && (
-                  <Text variant="body" className="text-error text-sm">
-                    {errors.description}
-                  </Text>
-                )}
-                <Text variant="body" muted className="text-xs">
-                  {description.length}/500
-                </Text>
-              </div>
-
-              <div className="space-y-2">
-                <Text variant="body" muted className="text-sm">
-                  Product Image (optional)
-                </Text>
-
-                <div
-                  className="border-2 border-dashed border-border rounded-xl p-4 flex flex-col items-center justify-center gap-3"
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const file = e.dataTransfer.files?.[0];
-                    if (file) setFile(file);
-                  }}
-                >
-                  {activePreviewUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={activePreviewUrl} alt="Product preview" className="w-32 h-32 object-cover rounded-lg" />
-                  ) : (
-                    <Container size="sm" className="text-center">
-                      <Text variant="body" muted>
-                        Drag & drop an image here
-                      </Text>
-                    </Container>
-                  )}
-
-                  <div className="flex items-center gap-2">
-                    <Button type="button" variant="outline" onClick={() => document.getElementById("product-image-input")?.click()}>
-                      Choose image
-                    </Button>
-                    <input
-                      id="product-image-input"
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp"
-                      className="hidden"
-                      onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                    />
-                    {imageFile && (
-                      <Button type="button" variant="ghost" onClick={() => setFile(null)}>
-                        Remove
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between gap-4">
-                <Text variant="body" className="font-medium">
-                  Availability
-                </Text>
-                <label className="flex items-center gap-3 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={isAvailable}
-                    onChange={(e) => setIsAvailable(e.target.checked)}
-                  />
-                  <Text variant="body" muted>
-                    {isAvailable ? "Listed" : "Unlisted"}
-                  </Text>
-                </label>
               </div>
 
               {saveError && (
-                <div className="bg-error/10 border border-error/30 rounded-lg p-3">
-                  <Text variant="body" className="text-error">
-                    {saveError}
-                  </Text>
+                <div className="p-3 bg-error/10 border border-error/20 rounded-lg text-error text-sm">
+                  {saveError}
                 </div>
               )}
             </CardContent>
-            <CardFooter className="flex gap-3 justify-end">
+
+            <CardFooter className="sticky bottom-0 bg-background border-t border-border/50 py-4 flex gap-3 justify-end">
               <Button
                 variant="outline"
                 type="button"
@@ -382,7 +352,11 @@ export default function ProductFormModal({
                 Cancel
               </Button>
               <Button variant="primary" type="submit" disabled={saving}>
-                {saving ? "Saving..." : mode === "add" ? "Create Product" : "Save Changes"}
+                {saving
+                  ? "Processing..."
+                  : mode === "add"
+                    ? "List Product"
+                    : "Update Listing"}
               </Button>
             </CardFooter>
           </form>
@@ -391,4 +365,3 @@ export default function ProductFormModal({
     </div>
   );
 }
-

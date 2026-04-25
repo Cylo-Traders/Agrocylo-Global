@@ -8,13 +8,7 @@ export type ProductCategory =
 
 export type ProductCurrency = "STRK" | "USDC";
 
-export type ProductUnit =
-  | "kg"
-  | "bag"
-  | "crate"
-  | "piece"
-  | "litre"
-  | "dozen";
+export type ProductUnit = "kg" | "bag" | "crate" | "piece" | "litre" | "dozen";
 
 export interface Product {
   id: string;
@@ -27,6 +21,8 @@ export interface Product {
   unit: ProductUnit;
   stock_quantity: string | null; // numeric as string
   image_url: string | null;
+  location: string;
+  delivery_window: string;
   is_available: boolean;
   created_at?: string;
   updated_at?: string;
@@ -40,6 +36,7 @@ export interface ProductWriteInput {
   currency?: ProductCurrency;
   unit?: ProductUnit;
   stock_quantity?: string | null;
+  location?: string;
+  delivery_window?: string;
   is_available?: boolean;
 }
-

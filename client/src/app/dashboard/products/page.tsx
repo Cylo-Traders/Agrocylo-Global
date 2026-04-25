@@ -9,7 +9,6 @@ import {
   updateProduct,
 } from "@/services/productService";
 import {
-  Badge,
   Button,
   Card,
   CardContent,
@@ -19,12 +18,7 @@ import {
   Text,
 } from "@/components/ui";
 import ProductFormModal from "@/components/ProductFormModal";
-
-function formatMoney(price: string) {
-  const n = Number(price);
-  if (Number.isNaN(n)) return price;
-  return n.toString();
-}
+import { ProductCard, ProductCardSkeleton } from "@/components/ProductCard";
 
 export default function FarmerProductsDashboard() {
   const { address, connected } = useContext(WalletContext);
@@ -60,7 +54,6 @@ export default function FarmerProductsDashboard() {
   useEffect(() => {
     if (!connected || !address) return;
     void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected, address]);
 
   function openAdd() {
@@ -83,19 +76,24 @@ export default function FarmerProductsDashboard() {
       if (!address) throw new Error("Wallet not connected.");
       await updateProduct(address, product.id, { is_available: next });
     } catch (err) {
-      // revert optimistic change
       setProducts((prev) =>
         prev.map((p) =>
-          p.id === product.id ? { ...p, is_available: product.is_available } : p,
+          p.id === product.id
+            ? { ...p, is_available: product.is_available }
+            : p,
         ),
       );
-      alert(err instanceof Error ? err.message : "Failed to update availability.");
+      alert(
+        err instanceof Error ? err.message : "Failed to update availability.",
+      );
     }
   }
 
   async function onDelete(product: Product) {
     if (!address) return;
-    const ok = window.confirm(`Delete "${product.name}"? This will soft-delete the product.`);
+    const ok = window.confirm(
+      `Delete "${product.name}"? This will soft-delete the product.`,
+    );
     if (!ok) return;
     try {
       await softDeleteProduct(address, product.id);
@@ -139,16 +137,9 @@ export default function FarmerProductsDashboard() {
       </div>
 
       {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {Array.from({ length: 6 }).map((_, i) => (
-            <Card key={i} variant="outlined" padding="md">
-              <CardContent className="space-y-3">
-                <div className="h-24 bg-border/30 rounded-lg" />
-                <div className="h-4 bg-border/30 rounded w-3/4" />
-                <div className="h-4 bg-border/30 rounded w-1/2" />
-                <div className="h-9 bg-border/30 rounded" />
-              </CardContent>
-            </Card>
+            <ProductCardSkeleton key={i} />
           ))}
         </div>
       ) : error ? (
@@ -166,7 +157,8 @@ export default function FarmerProductsDashboard() {
               No products yet
             </Text>
             <Text variant="body" muted>
-              Create your first listing and it will appear in the public catalog.
+              Create your first listing and it will appear in the public
+              catalog.
             </Text>
             <Button variant="primary" onClick={openAdd}>
               Add Product
@@ -174,81 +166,41 @@ export default function FarmerProductsDashboard() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {products.map((p) => (
-            <Card key={p.id} variant="elevated" padding="md">
-              <CardHeader className="flex flex-row items-start justify-between gap-4">
-                <div className="flex items-start gap-4">
-                  {p.image_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={p.image_url}
-                      alt={p.name}
-                      className="w-20 h-20 object-cover rounded-lg border border-border/60"
-                    />
-                  ) : (
-                    <div className="w-20 h-20 rounded-lg border border-border/60 bg-border/20" />
-                  )}
-                  <div>
-                    <CardTitle className="text-base">{p.name}</CardTitle>
-                    <div className="mt-1 flex flex-wrap gap-2 items-center">
-                      <Badge variant={p.is_available ? "success" : "outline"}>
-                        {p.is_available ? "Listed" : "Unlisted"}
-                      </Badge>
-                    </div>
-                  </div>
+            <ProductCard key={p.id} product={p}>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <Text variant="body" muted className="text-sm">
+                    Available
+                  </Text>
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 accent-primary cursor-pointer"
+                    checked={p.is_available}
+                    onChange={(e) =>
+                      void onToggleAvailability(p, e.target.checked)
+                    }
+                  />
                 </div>
-
-                <div className="flex items-center gap-3">
-                  <Button variant="outline" onClick={() => openEdit(p)}>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openEdit(p)}
+                  >
                     Edit
                   </Button>
-                  <Button variant="danger" onClick={() => onDelete(p)}>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => onDelete(p)}
+                  >
                     Delete
                   </Button>
                 </div>
-              </CardHeader>
-
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Text variant="body" muted className="text-sm">
-                      Price
-                    </Text>
-                    <Text variant="body" className="font-medium">
-                      {formatMoney(p.price_per_unit)} {p.currency}
-                    </Text>
-                    <Text variant="body" muted className="text-sm">
-                      per {p.unit}
-                    </Text>
-                  </div>
-                  <div>
-                    <Text variant="body" muted className="text-sm">
-                      Stock
-                    </Text>
-                    <Text variant="body" className="font-medium">
-                      {p.stock_quantity ? p.stock_quantity : "Unlimited"}
-                    </Text>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between gap-3">
-                  <Text variant="body" muted>
-                    Availability
-                  </Text>
-                  <label className="flex items-center gap-3 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={p.is_available}
-                      onChange={(e) => void onToggleAvailability(p, e.target.checked)}
-                    />
-                    <Text variant="body" muted>
-                      {p.is_available ? "Listed" : "Unlisted"}
-                    </Text>
-                  </label>
-                </div>
-              </CardContent>
-            </Card>
+              </div>
+            </ProductCard>
           ))}
         </div>
       )}
@@ -266,4 +218,3 @@ export default function FarmerProductsDashboard() {
     </Container>
   );
 }
-

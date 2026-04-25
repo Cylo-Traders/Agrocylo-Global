@@ -15,6 +15,7 @@ import {
   Input,
   Text,
 } from "@/components/ui";
+import { PriceChart } from "@/components/PriceChart";
 
 const CATEGORIES: Array<ProductCategory | "All"> = [
   "All",
@@ -177,6 +178,13 @@ export default function MarketPage() {
                       {p.stock_quantity ? p.stock_quantity : "Unlimited"}
                     </Text>
                   </div>
+
+                  <PriceChart
+                    productId={p.id}
+                    productName={p.name}
+                    currency={p.currency}
+                    unit={p.unit}
+                  />
 
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">

@@ -1,10 +1,8 @@
 "use client";
 
 import React from "react";
-import Link from "next/link";
 import WalletButton from "./WalletButton";
 import WalletDisplay from "./WalletDisplay";
-import Link from "next/link";
 import { useCart } from "@/context/CartContext";
 
 export default function Navbar() {
@@ -16,10 +14,16 @@ export default function Navbar() {
           AgroCylo 🌾
         </Link>
         <div className="hidden sm:flex items-center gap-4 text-sm">
-          <Link href="/map" className="hover:text-primary-400 transition-colors">
+          <Link
+            href="/map"
+            className="hover:text-primary-400 transition-colors"
+          >
             Farmer Map
           </Link>
-          <Link href="/orders" className="hover:text-primary-400 transition-colors">
+          <Link
+            href="/orders"
+            className="hover:text-primary-400 transition-colors"
+          >
             Orders
           </Link>
         </div>

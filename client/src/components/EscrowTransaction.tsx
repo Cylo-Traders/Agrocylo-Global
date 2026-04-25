@@ -14,6 +14,7 @@ import {
   Input,
 } from "@/components/ui";
 import { WalletContext } from "@/context/WalletContext";
+import { mapBlockchainError } from "@/components/errorHandler";
 import { createOrder } from "@/services/stellar/contractService";
 import { signAndSubmitTransaction } from "@/lib/signTransaction";
 import {
@@ -145,13 +146,10 @@ export default function EscrowTransaction({
       });
     } catch (error) {
       console.error("Transaction error:", error);
-      const errorMessage = error instanceof Error
-        ? error.message
-        : "Transaction failed. Please try again.";
-      notifyTransactionFailed(errorMessage);
+      const errorInfo = mapBlockchainError(error);
       setTransactionStatus({
         status: "error",
-        message: errorMessage,
+        message: `${errorInfo.title}: ${errorInfo.message} ${errorInfo.action}`,
       });
     }
   };

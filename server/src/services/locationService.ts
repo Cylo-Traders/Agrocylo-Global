@@ -1,4 +1,4 @@
-import prisma from '../config/database.js';
+import { prisma } from '../config/database.js';
 import { ApiError } from '../http/errors.js';
 import { z } from 'zod';
 
@@ -34,7 +34,7 @@ export async function getFarmerLocations(query: unknown) {
     include: { profile: { select: { name: true, role: true, avatar_url: true } } },
   });
   if (lat !== undefined && lng !== undefined && radius !== undefined) {
-    locations = locations.filter((l) => haversine(lat, lng, l.lat, l.lng) <= radius);
+    locations = locations.filter((l: any) => haversine(lat, lng, l.lat, l.lng) <= radius);
   }
   const total = locations.length;
   return { data: locations.slice(skip, skip + limit), meta: { total, page, limit, pages: Math.ceil(total / limit) } };

@@ -14,6 +14,8 @@ export default function OrderDetailsPage() {
 
   const { address, connected } = useWallet();
   const { confirmReceipt, confirmState } = useEscrowContract();
+  const { requestRefund, refundState } = useEscrowContract();
+  const { openDispute, disputeState } = useEscrowContract();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +46,11 @@ export default function OrderDetailsPage() {
     };
   }, [order?.createdAt]);
 
+  const [refundTxHash, setRefundTxHash] = useState<string | null>(null);
+  const [showDisputeForm, setShowDisputeForm] = useState(false);
+
+  const EXPIRY_HOURS = 96;
+
   const fetchOrder = useCallback(async () => {
     if (!orderId) return;
     setLoading(true);
@@ -65,6 +72,18 @@ export default function OrderDetailsPage() {
     void fetchOrder();
   }, [fetchOrder]);
 
+  const deliveryExpiryTsSeconds = useMemo(() => {
+    if (!order || order.createdAt == null) return null;
+    const createdAtSeconds = Number(order.createdAt);
+    if (!Number.isFinite(createdAtSeconds)) return null;
+    return createdAtSeconds + EXPIRY_HOURS * 3600;
+  }, [order]);
+
+  const isExpired = useMemo(() => {
+    if (deliveryExpiryTsSeconds == null) return false;
+    return Math.floor(Date.now() / 1000) >= deliveryExpiryTsSeconds;
+  }, [deliveryExpiryTsSeconds]);
+
   const isBuyer = useMemo(() => {
     if (!connected || !address) return false;
     if (!order?.buyer) return false;
@@ -72,29 +91,53 @@ export default function OrderDetailsPage() {
   }, [connected, address, order?.buyer]);
 
   const canConfirm = useMemo(() => {
+  const canRefund = useMemo(() => {
     return (
       !!orderId &&
       isBuyer &&
       order?.status === "Pending" &&
-      !isExpired &&
-      !confirmState.isLoading
+      isExpired &&
+      !refundState.isLoading
     );
-  }, [orderId, isBuyer, order?.status, isExpired, confirmState.isLoading]);
+  }, [orderId, isBuyer, order?.status, isExpired, refundState.isLoading]);
 
-  const onConfirmDelivery = useCallback(async () => {
-    if (!orderId) return;
-    setConfirmTxHash(null);
-    try {
-      const result = await confirmReceipt(orderId);
-      if (result.success && result.txHash) {
-        setConfirmTxHash(result.txHash);
+  const canDispute = useMemo(() => {
+    return (
+      !!orderId &&
+      connected &&
+      (order?.status === "Pending" || order?.status === "Delivered") &&
+      !disputeState.isLoading
+    );
+  }, [orderId, connected, order?.status, disputeState.isLoading]);
+
+  const onOpenDispute = useCallback(
+    async (reason: string, evidence: string) => {
+      if (!orderId) return;
+      try {
+        await openDispute(orderId, reason, evidence);
+        setShowDisputeForm(false);
+        await fetchOrder();
+      } catch {
+        // disputeState.error is already set by the hook
       }
-      // Refresh so UI updates order.status to `Completed`.
+    },
+    [orderId, openDispute, fetchOrder]
+  );
+
+  const onRequestRefund = useCallback(async () => {
+    if (!orderId) return;
+    setRefundTxHash(null);
+    try {
+      const result = await requestRefund(orderId);
+      if (result.success && result.txHash) {
+        setRefundTxHash(result.txHash);
+      }
+      // Refresh to update `order.status` to `Refunded`.
       await fetchOrder();
     } catch {
-      // `confirmState.error` is handled via the hook state.
+      // `refundState.error` is already set by the hook.
     }
-  }, [confirmReceipt, fetchOrder, orderId]);
+  }, [fetchOrder, orderId, requestRefund]);
 
   return (
     <Container size="lg" className="py-8">
@@ -115,30 +158,63 @@ export default function OrderDetailsPage() {
               <div><Text variant="body" muted>Status</Text><Text variant="body" className="block">{order.status ?? "-"}</Text></div>
               <div><Text variant="body" muted>Created</Text><Text variant="body" className="block">{order.createdAt ?? "-"}</Text></div>
 
-              {order.status === "Pending" && isBuyer && !isExpired && (
+              <div className="pt-2">
+                <Text variant="body" muted>Delivery deadline</Text>
+                {order.createdAt != null ? (
+                  <div className="mt-1">
+                    <CountdownTimer createdAt={Number(order.createdAt)} />
+                  </div>
+                ) : (
+                  <Text variant="body" className="block">-</Text>
+                )}
+              </div>
+
+              {order.status === "Pending" && isExpired && isBuyer && (
                 <div className="pt-2 space-y-2">
                   <Button
-                    variant="primary"
+                    variant="danger"
                     size="lg"
-                    onClick={() => void onConfirmDelivery()}
-                    disabled={!canConfirm}
-                    isLoading={confirmState.isLoading}
+                    onClick={() => void onRequestRefund()}
+                    disabled={!canRefund}
+                    isLoading={refundState.isLoading}
                     className="w-full"
                   >
-                    Confirm Delivery
+                    Request Refund
                   </Button>
 
-                  {confirmState.error ? (
+                  {refundState.error ? (
                     <Text variant="body" className="text-error">
-                      {confirmState.error}
+                      {refundState.error}
                     </Text>
                   ) : null}
 
-                  {confirmTxHash ? (
+                  {refundTxHash ? (
                     <Text variant="body" muted className="break-all text-xs">
-                      Confirm tx: {confirmTxHash}
+                      Refund tx: {refundTxHash}
                     </Text>
                   ) : null}
+                </div>
+              )}
+
+              {canDispute && (
+                <div className="pt-2 space-y-2">
+                  {!showDisputeForm ? (
+                    <Button
+                      variant="outline"
+                      size="lg"
+                      onClick={() => setShowDisputeForm(true)}
+                      className="w-full"
+                    >
+                      Open Dispute
+                    </Button>
+                  ) : (
+                    <DisputeForm
+                      isLoading={disputeState.isLoading}
+                      error={disputeState.error}
+                      onSubmit={onOpenDispute}
+                      onCancel={() => setShowDisputeForm(false)}
+                    />
+                  )}
                 </div>
               )}
             </div>
