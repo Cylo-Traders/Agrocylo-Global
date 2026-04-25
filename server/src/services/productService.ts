@@ -1,5 +1,6 @@
 import { query } from '../config/database.js';
 import { ApiError } from '../http/errors.js';
+import { wsManager } from './wsManager.js';
 import type { QueryResultRow } from 'pg';
 
 export interface ProductWriteInput {
@@ -69,6 +70,10 @@ export async function listProducts(params: {
   return { page, page_size: pageSize, items: rows.rows };
 }
 
+async function emitProductEvent(event: string, product: unknown) {
+  wsManager.broadcast(event, product);
+}
+
 export async function getProductById(productId: string) {
   const result = await query(
     `select id::text, farmer_wallet, name, description, category,
@@ -104,7 +109,9 @@ export async function createProduct(farmerWallet: string, input: ProductWriteInp
       input.is_available ?? true,
     ],
   );
-  return getProductById(String(inserted.rows[0]?.id));
+  const result = await getProductById(String(inserted.rows[0]?.id));
+  emitProductEvent('product:created', result);
+  return result;
 }
 
 export async function updateProduct(productId: string, farmerWallet: string, input: ProductWriteInput) {
@@ -136,9 +143,13 @@ export async function updateProduct(productId: string, farmerWallet: string, inp
   if (fields.length === 0) throw new ApiError(400, 'Bad Request', 'No fields provided to update');
   values.push(productId);
   await query(`update public.products set ${fields.join(', ')} where id = $${values.length}::uuid`, values);
-  return getProductById(productId);
+  const result = await getProductById(productId);
+  emitProductEvent('product:updated', result);
+  return result;
 }
 
 export async function softDeleteProduct(productId: string, farmerWallet: string) {
-  return updateProduct(productId, farmerWallet, { is_available: false });
+  const result = await updateProduct(productId, farmerWallet, { is_available: false });
+  emitProductEvent('product:deleted', result);
+  return result;
 }

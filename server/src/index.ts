@@ -14,9 +14,10 @@ async function bootstrap() {
     SocketService.initialize(server);
     server.listen(config.port, () => {
       logger.info(
-        `[server]: Server is running at http://localhost:${config.port}`
+        `[server]: Server is running at http://localhost:${config.port}`,
       );
     });
+    wsManager.init(server);
   } catch (error) {
     logger.error("Critical failure during startup:", error);
     process.exit(1);
