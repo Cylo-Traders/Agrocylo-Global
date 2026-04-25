@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useRef, useState } from "react";
+import React, { useState } from "react";
 import { Button, Text } from "@/components/ui";
+import EvidenceUpload, { type EvidenceFile } from "./EvidenceUpload";
 
 interface DisputeFormProps {
   isLoading: boolean;
@@ -12,18 +13,13 @@ interface DisputeFormProps {
 
 export default function DisputeForm({ isLoading, error, onSubmit, onCancel }: DisputeFormProps) {
   const [reason, setReason] = useState("");
-  const [evidenceUrl, setEvidenceUrl] = useState("");
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) setEvidenceUrl(file.name);
-  };
+  const [evidenceFile, setEvidenceFile] = useState<EvidenceFile | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!reason.trim()) return;
-    await onSubmit(reason.trim(), evidenceUrl.trim());
+    // Pass the hash as the evidence identifier; fall back to empty string
+    await onSubmit(reason.trim(), evidenceFile?.hash ?? "");
   };
 
   return (
@@ -43,31 +39,8 @@ export default function DisputeForm({ isLoading, error, onSubmit, onCancel }: Di
 
       <div>
         <Text variant="body" muted>Evidence (optional)</Text>
-        <input
-          ref={fileRef}
-          type="file"
-          className="hidden"
-          onChange={handleFileChange}
-          disabled={isLoading}
-        />
-        <div className="flex gap-2 mt-1">
-          <input
-            type="text"
-            className="flex-1 rounded border border-gray-300 p-2 text-sm focus:outline-none focus:ring-1 focus:ring-red-400"
-            placeholder="URL or file name"
-            value={evidenceUrl}
-            onChange={(e) => setEvidenceUrl(e.target.value)}
-            disabled={isLoading}
-          />
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => fileRef.current?.click()}
-            disabled={isLoading}
-          >
-            Upload
-          </Button>
+        <div className="mt-1">
+          <EvidenceUpload onChange={setEvidenceFile} disabled={isLoading} />
         </div>
       </div>
 
