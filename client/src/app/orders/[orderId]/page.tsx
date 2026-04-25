@@ -4,10 +4,8 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle, Container, Text, Button } from "@/components/ui";
 import { getOrder, type Order } from "@/services/stellar/contractService";
-import CountdownTimer from "@/components/orders/CountdownTimer";
 import { useWallet } from "@/hooks/useWallet";
 import { useEscrowContract } from "@/hooks/useEscrowContract";
-import DisputeForm from "@/components/orders/DisputeForm";
 
 export default function OrderDetailsPage() {
   const params = useParams<{ orderId: string }>();
@@ -15,12 +13,38 @@ export default function OrderDetailsPage() {
   const orderId = params?.orderId;
 
   const { address, connected } = useWallet();
+  const { confirmReceipt, confirmState } = useEscrowContract();
   const { requestRefund, refundState } = useEscrowContract();
   const { openDispute, disputeState } = useEscrowContract();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [order, setOrder] = useState<Order | null>(null);
+  const [confirmTxHash, setConfirmTxHash] = useState<string | null>(null);
+
+  // The on-chain contract treats an order as expired after 96 hours from creation.
+  const EXPIRY_HOURS = 96;
+  const [isExpired, setIsExpired] = useState(false);
+
+  // Keep expiry state updated outside render (avoid impure Date.now() during render).
+  useEffect(() => {
+    if (!order?.createdAt) return;
+
+    const expiryTimeSeconds = order.createdAt + EXPIRY_HOURS * 3600;
+    let cancelled = false;
+
+    const tick = () => {
+      if (cancelled) return;
+      setIsExpired(Math.floor(Date.now() / 1000) >= expiryTimeSeconds);
+    };
+
+    tick();
+    const id = window.setInterval(tick, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [order?.createdAt]);
 
   const [refundTxHash, setRefundTxHash] = useState<string | null>(null);
   const [showDisputeForm, setShowDisputeForm] = useState(false);
@@ -66,6 +90,7 @@ export default function OrderDetailsPage() {
     return address === order.buyer;
   }, [connected, address, order?.buyer]);
 
+  const canConfirm = useMemo(() => {
   const canRefund = useMemo(() => {
     return (
       !!orderId &&
