@@ -1,116 +1,180 @@
 #![no_std]
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, token, symbol_short, Address, Env, Vec, Symbol};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env,
+};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum CampaignError {
+pub enum ContractError {
     AlreadyInitialized = 1,
-    AmountMustBePositive = 2,
-    ContractNotInitialized = 3,
-    UnsupportedToken = 4,
-    CampaignDoesNotExist = 5,
-    CampaignNotFunding = 6,
-    DeadlinePassed = 7,
-    InsufficientFunds = 8,
-    Overflow = 9,
+    NotAuthorized = 2,
+    CampaignNotFound = 3,
+    FarmerNotFound = 4,
+    InvalidState = 5,
+    FundingNotComplete = 6,
+    FundingAlreadyComplete = 7,
+    TrancheAlreadyReleased = 8,
+    InvalidAmount = 9,
+    CampaignNotFunded = 10,
+    CampaignNotInProduction = 11,
+    NotFarmer = 12,
+    AlreadyHarvested = 13,
+    AlreadySettled = 14,
 }
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CampaignStatus {
-    Funding,
-    Successful,
+    Pending,
+    Funded,
+    InProduction,
+    Harvested,
+    Settled,
     Failed,
+    Disputed,
 }
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Campaign {
+    pub id: u64,
     pub farmer: Address,
-    pub token: Address,
     pub target_amount: i128,
     pub raised_amount: i128,
-    pub harvest_deadline: u64,
     pub status: CampaignStatus,
+    pub initial_release_percent: u32,
+    pub mid_release_percent: u32,
+    pub final_release_percent: u32,
+    pub initial_released: bool,
+    pub mid_released: bool,
+    pub final_released: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Farmer {
+    pub address: Address,
+    pub registered: bool,
 }
 
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
     Campaign(u64),
+    Farmer(Address),
+    FarmerById(u64),
     CampaignCount,
-    InvestorPosition(u64, Address),
-    SupportedTokens,
     Admin,
+    RegistryInitialized,
 }
 
+const INITIAL_RELEASE_PERCENT: u32 = 40;
+const MID_RELEASE_PERCENT: u32 = 30;
+const FINAL_RELEASE_PERCENT: u32 = 30;
+
 #[contract]
-pub struct AgroProductionContract;
+pub struct CampaignContract;
 
 #[contractimpl]
-impl AgroProductionContract {
-    pub fn initialize(
-        env: Env,
-        admin: Address,
-        supported_tokens: Vec<Address>,
-    ) -> Result<(), CampaignError> {
-        if env.storage().instance().has(&DataKey::Admin) {
-            return Err(CampaignError::AlreadyInitialized);
+impl CampaignContract {
+    pub fn initialize(env: Env, admin: Address) -> Result<(), ContractError> {
+        if env.storage().instance().has(&DataKey::RegistryInitialized) {
+            return Err(ContractError::AlreadyInitialized);
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::SupportedTokens, &supported_tokens);
-        env.storage().instance().set(&DataKey::CampaignCount, &0u64);
+        env.storage()
+            .instance()
+            .set(&DataKey::RegistryInitialized, &true);
+        env.events()
+            .publish((symbol_short!("reg"), symbol_short!("init")), admin);
+        Ok(())
+    }
+
+    pub fn register_farmer(env: Env, farmer: Address) -> Result<(), ContractError> {
+        farmer.require_auth();
+
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::Farmer(farmer.clone()))
+        {
+            return Err(ContractError::AlreadyInitialized);
+        }
+
+        let farmer_count: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CampaignCount)
+            .unwrap_or(0);
+
+        env.storage().persistent().set(
+            &DataKey::Farmer(farmer.clone()),
+            &Farmer {
+                address: farmer.clone(),
+                registered: true,
+            },
+        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::FarmerById(farmer_count + 1), &farmer);
+
+        env.events().publish(
+            (symbol_short!("farmer"), symbol_short!("regd")),
+            (farmer_count + 1, farmer),
+        );
         Ok(())
     }
 
     pub fn create_campaign(
         env: Env,
         farmer: Address,
-        token: Address,
         target_amount: i128,
-        harvest_deadline: u64,
-    ) -> Result<u64, CampaignError> {
+    ) -> Result<u64, ContractError> {
         farmer.require_auth();
 
         if target_amount <= 0 {
-            return Err(CampaignError::AmountMustBePositive);
+            return Err(ContractError::InvalidAmount);
         }
 
-        let supported_tokens: Vec<Address> = env
+        let _farmer_data: Farmer = env
             .storage()
-            .instance()
-            .get(&DataKey::SupportedTokens)
-            .ok_or(CampaignError::ContractNotInitialized)?;
+            .persistent()
+            .get(&DataKey::Farmer(farmer.clone()))
+            .ok_or(ContractError::FarmerNotFound)?;
 
-        if !supported_tokens.contains(&token) {
-            return Err(CampaignError::UnsupportedToken);
-        }
-
-        let mut campaign_id: u64 = env
+        let campaign_count: u64 = env
             .storage()
             .instance()
             .get(&DataKey::CampaignCount)
             .unwrap_or(0);
-        
-        campaign_id = campaign_id.checked_add(1).ok_or(CampaignError::Overflow)?;
-        env.storage().instance().set(&DataKey::CampaignCount, &campaign_id);
+
+        let campaign_id = campaign_count + 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::CampaignCount, &campaign_id);
 
         let campaign = Campaign {
+            id: campaign_id,
             farmer: farmer.clone(),
-            token: token.clone(),
             target_amount,
             raised_amount: 0,
-            harvest_deadline,
-            status: CampaignStatus::Funding,
+            status: CampaignStatus::Pending,
+            initial_release_percent: INITIAL_RELEASE_PERCENT,
+            mid_release_percent: MID_RELEASE_PERCENT,
+            final_release_percent: FINAL_RELEASE_PERCENT,
+            initial_released: false,
+            mid_released: false,
+            final_released: false,
         };
 
-        env.storage().persistent().set(&DataKey::Campaign(campaign_id), &campaign);
-        env.storage().persistent().extend_ttl(&DataKey::Campaign(campaign_id), 1000, 100000);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(campaign_id), &campaign);
 
         env.events().publish(
-            (symbol_short!("campaign"), symbol_short!("created")),
-            (campaign_id, farmer, token, target_amount),
+            (symbol_short!("camp"), symbol_short!("created")),
+            (campaign_id, farmer, target_amount),
         );
 
         Ok(campaign_id)
@@ -121,89 +185,302 @@ impl AgroProductionContract {
         investor: Address,
         campaign_id: u64,
         amount: i128,
-    ) -> Result<(), CampaignError> {
+    ) -> Result<i128, ContractError> {
         investor.require_auth();
 
         if amount <= 0 {
-            return Err(CampaignError::AmountMustBePositive);
+            return Err(ContractError::InvalidAmount);
         }
 
         let mut campaign: Campaign = env
             .storage()
             .persistent()
             .get(&DataKey::Campaign(campaign_id))
-            .ok_or(CampaignError::CampaignDoesNotExist)?;
+            .ok_or(ContractError::CampaignNotFound)?;
 
-        if campaign.status != CampaignStatus::Funding {
-            return Err(CampaignError::CampaignNotFunding);
+        if campaign.status != CampaignStatus::Pending {
+            return Err(ContractError::InvalidState);
         }
 
-        if env.ledger().timestamp() >= campaign.harvest_deadline {
-            return Err(CampaignError::DeadlinePassed);
+        let new_raised = campaign.raised_amount + amount;
+        campaign.raised_amount = new_raised;
+
+        let was_not_funded = campaign.status == CampaignStatus::Pending;
+        if was_not_funded && new_raised >= campaign.target_amount {
+            campaign.status = CampaignStatus::Funded;
+            env.events().publish(
+                (symbol_short!("camp"), symbol_short!("funded")),
+                (campaign_id, new_raised, campaign.target_amount),
+            );
         }
 
-        let token_client = token::Client::new(&env, &campaign.token);
-        token_client.transfer(&investor, &env.current_contract_address(), &amount);
-
-        campaign.raised_amount = campaign.raised_amount.checked_add(amount).ok_or(CampaignError::Overflow)?;
-        
-        // Update investor position
-        let mut investor_contribution: i128 = env
-            .storage()
+        env.storage()
             .persistent()
-            .get(&DataKey::InvestorPosition(campaign_id, investor.clone()))
-            .unwrap_or(0);
-        
-        investor_contribution = investor_contribution.checked_add(amount).ok_or(CampaignError::Overflow)?;
-        env.storage().persistent().set(&DataKey::InvestorPosition(campaign_id, investor.clone()), &investor_contribution);
-        env.storage().persistent().extend_ttl(&DataKey::InvestorPosition(campaign_id, investor.clone()), 1000, 100000);
-
-        // Update campaign state
-        if campaign.raised_amount >= campaign.target_amount {
-            // Success condition could be handled here or explicitly by admin
-            // For now, we just keep it funding until deadline or manually closed
-        }
-
-        env.storage().persistent().set(&DataKey::Campaign(campaign_id), &campaign);
-        env.storage().persistent().extend_ttl(&DataKey::Campaign(campaign_id), 1000, 100000);
+            .set(&DataKey::Campaign(campaign_id), &campaign);
 
         env.events().publish(
-            (symbol_short!("invest"), symbol_short!("success")),
-            (campaign_id, investor, amount),
+            (symbol_short!("camp"), symbol_short!("invest")),
+            (campaign_id, investor, amount, new_raised),
+        );
+
+        Ok(new_raised)
+    }
+
+    pub fn check_funding_complete(env: Env, campaign_id: u64) -> Result<bool, ContractError> {
+        let campaign: Campaign = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Campaign(campaign_id))
+            .ok_or(ContractError::CampaignNotFound)?;
+
+        Ok(campaign.raised_amount >= campaign.target_amount)
+    }
+
+    pub fn start_production(
+        env: Env,
+        farmer: Address,
+        campaign_id: u64,
+    ) -> Result<(), ContractError> {
+        farmer.require_auth();
+
+        let mut campaign: Campaign = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Campaign(campaign_id))
+            .ok_or(ContractError::CampaignNotFound)?;
+
+        if campaign.farmer != farmer {
+            return Err(ContractError::NotFarmer);
+        }
+
+        if campaign.status != CampaignStatus::Funded {
+            return Err(ContractError::CampaignNotFunded);
+        }
+
+        campaign.status = CampaignStatus::InProduction;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(campaign_id), &campaign);
+
+        env.events().publish(
+            (symbol_short!("camp"), symbol_short!("started")),
+            (campaign_id, farmer),
         );
 
         Ok(())
     }
 
-    pub fn get_campaign(env: Env, campaign_id: u64) -> Result<Campaign, CampaignError> {
+    pub fn mark_harvest(env: Env, farmer: Address, campaign_id: u64) -> Result<(), ContractError> {
+        farmer.require_auth();
+
+        let mut campaign: Campaign = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Campaign(campaign_id))
+            .ok_or(ContractError::CampaignNotFound)?;
+
+        if campaign.farmer != farmer {
+            return Err(ContractError::NotFarmer);
+        }
+
+        if campaign.status != CampaignStatus::InProduction {
+            return Err(ContractError::CampaignNotInProduction);
+        }
+
+        campaign.status = CampaignStatus::Harvested;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(campaign_id), &campaign);
+
+        env.events().publish(
+            (symbol_short!("camp"), symbol_short!("harvest")),
+            (campaign_id, farmer),
+        );
+
+        Ok(())
+    }
+
+    pub fn settle_campaign(env: Env, campaign_id: u64) -> Result<(), ContractError> {
+        let mut campaign: Campaign = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Campaign(campaign_id))
+            .ok_or(ContractError::CampaignNotFound)?;
+
+        if campaign.status == CampaignStatus::Settled {
+            return Err(ContractError::AlreadySettled);
+        }
+
+        if campaign.status != CampaignStatus::Harvested {
+            return Err(ContractError::InvalidState);
+        }
+
+        campaign.status = CampaignStatus::Settled;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(campaign_id), &campaign);
+
+        env.events().publish(
+            (symbol_short!("camp"), symbol_short!("settled")),
+            campaign_id,
+        );
+
+        Ok(())
+    }
+
+    pub fn release_tranche(
+        env: Env,
+        campaign_id: u64,
+        tranche: u32,
+    ) -> Result<i128, ContractError> {
+        let mut campaign: Campaign = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Campaign(campaign_id))
+            .ok_or(ContractError::CampaignNotFound)?;
+
+        if campaign.status != CampaignStatus::Funded
+            && campaign.status != CampaignStatus::InProduction
+            && campaign.status != CampaignStatus::Harvested
+            && campaign.status != CampaignStatus::Settled
+        {
+            return Err(ContractError::CampaignNotFunded);
+        }
+
+        let release_amount = match tranche {
+            0 => {
+                if campaign.initial_released {
+                    return Err(ContractError::TrancheAlreadyReleased);
+                }
+                campaign.initial_released = true;
+                (campaign.raised_amount * campaign.initial_release_percent as i128) / 100
+            }
+            1 => {
+                if campaign.mid_released {
+                    return Err(ContractError::TrancheAlreadyReleased);
+                }
+                campaign.mid_released = true;
+                (campaign.raised_amount * campaign.mid_release_percent as i128) / 100
+            }
+            2 => {
+                if campaign.final_released {
+                    return Err(ContractError::TrancheAlreadyReleased);
+                }
+                campaign.final_released = true;
+                (campaign.raised_amount * campaign.final_release_percent as i128) / 100
+            }
+            _ => return Err(ContractError::InvalidState),
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(campaign_id), &campaign);
+
+        env.events().publish(
+            (symbol_short!("camp"), symbol_short!("tranche")),
+            (campaign_id, tranche, release_amount),
+        );
+
+        Ok(release_amount)
+    }
+
+    pub fn fail_campaign(env: Env, campaign_id: u64) -> Result<(), ContractError> {
+        let mut campaign: Campaign = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Campaign(campaign_id))
+            .ok_or(ContractError::CampaignNotFound)?;
+
+        if campaign.status != CampaignStatus::Pending && campaign.status != CampaignStatus::Funded {
+            return Err(ContractError::InvalidState);
+        }
+
+        campaign.status = CampaignStatus::Failed;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(campaign_id), &campaign);
+
+        env.events().publish(
+            (symbol_short!("camp"), symbol_short!("failed")),
+            campaign_id,
+        );
+
+        Ok(())
+    }
+
+    pub fn dispute_campaign(env: Env, campaign_id: u64) -> Result<(), ContractError> {
+        let mut campaign: Campaign = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Campaign(campaign_id))
+            .ok_or(ContractError::CampaignNotFound)?;
+
+        if campaign.status != CampaignStatus::Funded
+            && campaign.status != CampaignStatus::InProduction
+            && campaign.status != CampaignStatus::Harvested
+        {
+            return Err(ContractError::InvalidState);
+        }
+
+        campaign.status = CampaignStatus::Disputed;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(campaign_id), &campaign);
+
+        env.events().publish(
+            (symbol_short!("camp"), symbol_short!("disputed")),
+            campaign_id,
+        );
+
+        Ok(())
+    }
+
+    pub fn resolve_campaign(
+        env: Env,
+        campaign_id: u64,
+        success: bool,
+    ) -> Result<(), ContractError> {
+        let mut campaign: Campaign = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Campaign(campaign_id))
+            .ok_or(ContractError::CampaignNotFound)?;
+
+        if campaign.status != CampaignStatus::Disputed {
+            return Err(ContractError::InvalidState);
+        }
+
+        campaign.status = if success {
+            CampaignStatus::Settled
+        } else {
+            CampaignStatus::Failed
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Campaign(campaign_id), &campaign);
+
+        env.events().publish(
+            (symbol_short!("camp"), symbol_short!("resolved")),
+            (campaign_id, success),
+        );
+
+        Ok(())
+    }
+
+    pub fn get_campaign(env: Env, campaign_id: u64) -> Result<Campaign, ContractError> {
         env.storage()
             .persistent()
             .get(&DataKey::Campaign(campaign_id))
-            .ok_or(CampaignError::CampaignDoesNotExist)
+            .ok_or(ContractError::CampaignNotFound)
     }
 
-    pub fn get_investor_contribution(env: Env, campaign_id: u64, investor: Address) -> i128 {
+    pub fn get_farmer(env: Env, farmer: Address) -> Result<Farmer, ContractError> {
         env.storage()
             .persistent()
-            .get(&DataKey::InvestorPosition(campaign_id, investor))
-            .unwrap_or(0)
-    }
-
-    pub fn get_investor_share(env: Env, campaign_id: u64, investor: Address) -> Result<i128, CampaignError> {
-        let campaign = Self::get_campaign(env.clone(), campaign_id)?;
-        if campaign.raised_amount == 0 {
-            return Ok(0);
-        }
-        let contribution = Self::get_investor_contribution(env.clone(), campaign_id, investor);
-        
-        // Share represented as parts per million (PPM) for precision
-        // share = (contribution * 1_000_000) / total_raised
-        let share = contribution
-            .checked_mul(1_000_000)
-            .ok_or(CampaignError::Overflow)?
-            .checked_div(campaign.raised_amount)
-            .unwrap_or(0);
-            
-        Ok(share)
+            .get(&DataKey::Farmer(farmer))
+            .ok_or(ContractError::FarmerNotFound)
     }
 }
+
+mod test;
