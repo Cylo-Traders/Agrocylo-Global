@@ -22,6 +22,8 @@ import orderRoutes, {
   orderErrorHandler,
 } from "./routes/orderMetadataRoutes.js";
 import jobRoutes from "./routes/jobRoutes.js";
+import demandSupplyRoutes from "./routes/demandSupplyRoutes.js";
+import metricsRoutes from "./routes/metricsRoutes.js";
 import adminRoutes, { adminErrorHandler } from "./routes/adminRoutes.js";
 import disputeRoutes from "./routes/disputeRoutes.js";
 
@@ -43,6 +45,7 @@ app.use(profileRoutes);
 app.use(locationRoutes);
 app.use(ordersRoutes);
 app.use(orderRoutes);
+app.use(demandSupplyRoutes);
 app.use(jobRoutes);
 app.use('/admin', adminRoutes);
 
@@ -55,6 +58,8 @@ app.get("/health", (req: Request, res: Response) => {
     env: config.nodeEnv,
   });
 });
+
+app.use(metricsRoutes);
 
 app.use(productImageErrorHandler);
 app.use(apiErrorHandler);

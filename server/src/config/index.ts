@@ -13,6 +13,8 @@ export const config = {
   nodeEnv: process.env['NODE_ENV'] ?? 'development',
   redisUrl: process.env["REDIS_URL"] ?? "redis://127.0.0.1:6379",
   runWorkers: (process.env["RUN_WORKERS"] ?? "").toLowerCase() === "true",
+  /** If set, GET /metrics requires x-metrics-api-key or Authorization: Bearer */
+  metricsApiKey: process.env["METRICS_API_KEY"]?.trim() || "",
   supabaseUrl: process.env['SUPABASE_URL'] ?? '',
   supabaseAnonKey: process.env['SUPABASE_ANON_KEY'] ?? '',
   supabaseServiceRoleKey: process.env['SUPABASE_SERVICE_ROLE_KEY'] ?? '',
