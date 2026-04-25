@@ -17,6 +17,7 @@ export const config = {
   supabaseAnonKey: process.env['SUPABASE_ANON_KEY'] ?? '',
   supabaseServiceRoleKey: process.env['SUPABASE_SERVICE_ROLE_KEY'] ?? '',
   productImagesBucket: process.env['SUPABASE_PRODUCT_IMAGES_BUCKET'] ?? 'product-images',
+  jwtSecret: process.env['JWT_SECRET'] ?? 'changeme',
   productImagePlaceholderUrl:
     process.env['PRODUCT_IMAGE_PLACEHOLDER_URL'] ?? 'https://placehold.co/800x800/png?text=No+Image',
 };

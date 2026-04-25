@@ -368,6 +368,37 @@ export async function refundOrder(
 }
 
 /**
+ * Build an `open_dispute` transaction.
+ *
+ * @param caller   - Stellar public key of the party opening the dispute
+ * @param orderId  - On-chain order identifier
+ * @param reason   - Short text reason for the dispute
+ * @param evidence - Optional evidence URL/hash
+ */
+export async function openDispute(
+  caller: string,
+  orderId: string,
+  reason: string,
+  evidence: string
+): Promise<ContractResult<string>> {
+  try {
+    const tx = await buildTransaction(
+      caller,
+      "open_dispute",
+      [
+        new StellarSdk.Address(caller).toScVal(),
+        StellarSdk.nativeToScVal(BigInt(orderId), { type: "u64" }),
+        StellarSdk.nativeToScVal(reason, { type: "string" }),
+        StellarSdk.nativeToScVal(evidence, { type: "string" }),
+      ]
+    );
+    return { success: true, data: tx.toXDR() };
+  } catch (err) {
+    return { success: false, error: (err as Error).message };
+  }
+}
+
+/**
  * Query order details (read-only, no signing required).
  *
  * @param orderId - On-chain order identifier
