@@ -9,6 +9,8 @@ import productImageRoutes, {
 import productRoutes, { apiErrorHandler } from "./routes/productRoutes.js";
 import cartRoutes from "./routes/cartRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
+import orderRoutes, { orderErrorHandler } from "./routes/orderRoutes.js";
+import orderMetadataRoutes from "./routes/orderMetadataRoutes.js";
 import profileRoutes, { profileErrorHandler } from "./routes/profileRoutes.js";
 import locationRoutes, {
   locationErrorHandler,
@@ -17,6 +19,7 @@ import orderRoutes, {
   orderErrorHandler,
 } from "./routes/orderMetadataRoutes.js";
 import adminRoutes, { adminErrorHandler } from "./routes/adminRoutes.js";
+import disputeRoutes from "./routes/disputeRoutes.js";
 
 const app = express();
 
@@ -27,6 +30,9 @@ app.use(productImageRoutes);
 app.use(productRoutes);
 app.use(cartRoutes);
 app.use("/auth", authRoutes);
+app.use("/orders/metadata", orderMetadataRoutes);
+app.use("/orders", orderRoutes);
+app.use("/disputes", disputeRoutes);
 app.use(profileRoutes);
 app.use(locationRoutes);
 app.use(orderRoutes);
