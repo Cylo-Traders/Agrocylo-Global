@@ -1,10 +1,11 @@
 import type { Request, Response } from "express";
-import { prisma } from "../config/database.js";
 import logger from "../config/logger.js";
+import { OrderService } from "../services/orderService.js";
 
 export class OrderController {
   static async getAllOrders(req: Request, res: Response) {
     try {
+      const orders = await OrderService.getAll();
       const orders = await prisma.order.findMany({
         include: { product: true, buyerUser: true, sellerUser: true },
         orderBy: { createdAt: "desc" },
@@ -18,7 +19,14 @@ export class OrderController {
 
   static async getOrderById(req: Request, res: Response) {
     const { id } = req.params;
+    if (!id) return res.status(400).json({ error: "Order id is required" });
     try {
+      const order = await OrderService.getByOrderId(id);
+
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+
       const order = await prisma.order.findUnique({
         where: { orderIdOnChain: id },
         include: { product: true, buyerUser: true, sellerUser: true },
@@ -33,7 +41,9 @@ export class OrderController {
 
   static async getOrdersByBuyer(req: Request, res: Response) {
     const { address } = req.params;
+    if (!address) return res.status(400).json({ error: "Buyer address is required" });
     try {
+      const orders = await OrderService.getByBuyerAddress(address);
       const orders = await prisma.order.findMany({
         where: { buyerAddress: address },
         include: { product: true, sellerUser: true }
@@ -44,8 +54,14 @@ export class OrderController {
     }
   }
 
+  /**
+   * GET /orders/seller/:address
+   * Retrieve all orders for a specific seller address
+   */
+  static async getOrdersByFarmer(req: Request, res: Response) {
   static async getOrdersBySeller(req: Request, res: Response) {
     const { address } = req.params;
+    if (!address) return res.status(400).json({ error: "Farmer address is required" });
     try {
       const orders = await prisma.order.findMany({
         where: { sellerAddress: address },

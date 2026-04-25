@@ -11,6 +11,8 @@ requiredEnvs.forEach((key) => {
 export const config = {
   port: process.env['PORT'] ?? 5000,
   nodeEnv: process.env['NODE_ENV'] ?? 'development',
+  redisUrl: process.env["REDIS_URL"] ?? "redis://127.0.0.1:6379",
+  runWorkers: (process.env["RUN_WORKERS"] ?? "").toLowerCase() === "true",
   supabaseUrl: process.env['SUPABASE_URL'] ?? '',
   supabaseAnonKey: process.env['SUPABASE_ANON_KEY'] ?? '',
   supabaseServiceRoleKey: process.env['SUPABASE_SERVICE_ROLE_KEY'] ?? '',

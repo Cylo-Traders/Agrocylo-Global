@@ -1,3 +1,20 @@
+## Redis (BullMQ)
+
+This folder contains production-oriented assets for the backend queue system.
+
+Start Redis:
+
+```bash
+docker compose -f docker-compose.redis.yml up -d
+```
+
+Then run the backend worker process from the root `server/` package:
+
+```bash
+cd server
+npm run worker:dev
+```
+
 <p align="center">
   <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
 </p>

@@ -1,26 +1,26 @@
-import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import campaignRoutes from './routes/campaignRoutes.js';
+import { config } from "./config/index.js";
+import logger from "./config/logger.js";
+import { connectDB } from "./db/client.js";
+import app from "./app.js";
+import { startProductionWatcher } from "./events/watcher.js";
 
-dotenv.config();
+async function main() {
+  await connectDB();
 
-const app = express();
-const port = process.env.PORT || 3001;
+  if (config.contractId && config.contractId !== "C...") {
+    startProductionWatcher().catch((err) =>
+      logger.error("Production watcher failed to start", err),
+    );
+  } else {
+    logger.warn("PRODUCTION_CONTRACT_ID not set — watcher disabled");
+  }
 
-app.use(cors());
-app.use(express.json());
+  app.listen(config.port, () => {
+    logger.info(`Server listening on port ${config.port}`);
+  });
+}
 
-// API Routes
-app.use('/api', campaignRoutes);
-
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
 });
-
-app.listen(port, () => {
-  console.log(`Agro Production Server running on port ${port}`);
-});
-
-export default app;

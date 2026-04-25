@@ -263,6 +263,9 @@ impl EscrowContract {
         let key = DataKey::Order(order_id);
         let mut order: Order = storage.get(&key).ok_or(EscrowError::OrderDoesNotExist)?;
 
+        if order.status == OrderStatus::Disputed {
+            return Err(EscrowError::OrderDisputed);
+        }
         if order.status != OrderStatus::Pending && order.status != OrderStatus::Delivered {
             return Err(EscrowError::OrderNotPending);
         }
@@ -437,6 +440,58 @@ impl EscrowContract {
             .persistent()
             .get(&DataKey::Order(order_id))
             .ok_or(EscrowError::OrderDoesNotExist)
+    }
+
+    pub fn split_funds(
+        env: Env,
+        admin: Address,
+        order_id: u64,
+        buyer_share: i128,
+        farmer_share: i128,
+    ) -> Result<(), EscrowError> {
+        admin.require_auth();
+
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(EscrowError::ContractNotInitialized)?;
+        if admin != stored_admin {
+            return Err(EscrowError::NotAdmin);
+        }
+
+        let mut order: Order = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Order(order_id))
+            .ok_or(EscrowError::OrderDoesNotExist)?;
+
+        if order.status != OrderStatus::Pending && order.status != OrderStatus::Delivered && order.status != OrderStatus::Disputed {
+            return Err(EscrowError::OrderNotPending);
+        }
+
+        if buyer_share + farmer_share != order.amount {
+            return Err(EscrowError::InvalidSplit);
+        }
+
+        order.status = OrderStatus::Completed;
+        env.storage().persistent().set(&DataKey::Order(order_id), &order);
+        env.storage().persistent().extend_ttl(&DataKey::Order(order_id), 1000, 100000);
+
+        let token_client = token::Client::new(&env, &order.token);
+        if buyer_share > 0 {
+            token_client.transfer(&env.current_contract_address(), &order.buyer, &buyer_share);
+        }
+        if farmer_share > 0 {
+            token_client.transfer(&env.current_contract_address(), &order.farmer, &farmer_share);
+        }
+
+        env.events().publish(
+            (symbol_short!("order"), symbol_short!("split")),
+            (order_id, buyer_share, farmer_share),
+        );
+
+        Ok(())
     }
 
     pub fn get_supported_tokens(env: Env) -> Vec<Address> {

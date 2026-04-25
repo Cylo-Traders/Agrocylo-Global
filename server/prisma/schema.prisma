@@ -72,6 +72,53 @@ model Order {
   @@map("orders")
 }
 
+model Campaign {
+  id               String   @id @default(uuid())
+  campaignIdOnChain String  @unique
+  creatorAddress   String
+  goalAmount       String
+  token            String
+  status           String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([creatorAddress])
+  @@map("campaigns")
+}
+
+model Investment {
+  id               String   @id @default(uuid())
+  sourceEventId    String   @unique
+  campaignIdOnChain String
+  investorAddress  String
+  amount           String
+  token            String
+  txHash           String?
+  createdAt        DateTime @default(now())
+
+  @@index([campaignIdOnChain])
+  @@index([investorAddress])
+  @@map("investments")
+}
+
+model BlockchainTransaction {
+  id               String   @id @default(uuid())
+  sourceEventId    String   @unique
+  eventType        String
+  entity           String
+  action           String
+  ledger           Int
+  eventIndex       Int
+  txHash           String?
+  orderIdOnChain   String?
+  campaignIdOnChain String?
+  payload          Json?
+  createdAt        DateTime @default(now())
+
+  @@unique([ledger, eventIndex])
+  @@index([orderIdOnChain])
+  @@index([campaignIdOnChain])
+  @@map("transactions")
 
 model Dispute {
   id          String    @id @default(uuid())
