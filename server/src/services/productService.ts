@@ -1,5 +1,6 @@
 import { query } from '../config/database.js';
 import { ApiError } from '../http/errors.js';
+import { wsManager } from './wsManager.js';
 import type { QueryResultRow } from 'pg';
 
 export interface ProductWriteInput {
@@ -10,6 +11,7 @@ export interface ProductWriteInput {
   currency?: 'STRK' | 'USDC';
   unit?: string;
   stock_quantity?: string | null;
+  location?: string;
   is_available?: boolean;
 }
 
@@ -30,6 +32,10 @@ function parsePage(value: string | undefined, fallback: number): number {
 export async function listProducts(params: {
   farmer?: string;
   category?: string;
+  search?: string;
+  location?: string;
+  minPrice?: string;
+  maxPrice?: string;
   page?: string;
   pageSize?: string;
   includeUnavailable?: boolean;
@@ -52,28 +58,59 @@ export async function listProducts(params: {
     values.push(params.category);
     where.push(`category = $${values.length}`);
   }
+  if (params.search) {
+    const searchTerm = `%${params.search}%`;
+    values.push(searchTerm, searchTerm, searchTerm);
+    where.push(`(name ILIKE $${values.length - 2} OR COALESCE(description, '') ILIKE $${values.length - 1} OR COALESCE(category, '') ILIKE $${values.length})`);
+  }
+  if (params.location) {
+    values.push(`%${params.location}%`);
+    where.push(`location ILIKE $${values.length}`);
+  }
+  if (params.minPrice) {
+    const minPrice = parseFloat(params.minPrice);
+    if (!isNaN(minPrice)) {
+      values.push(minPrice);
+      where.push(`price_per_unit::numeric >= $${values.length}`);
+    }
+  }
+  if (params.maxPrice) {
+    const maxPrice = parseFloat(params.maxPrice);
+    if (!isNaN(maxPrice)) {
+      values.push(maxPrice);
+      where.push(`price_per_unit::numeric <= $${values.length}`);
+    }
+  }
 
   values.push(pageSize, (page - 1) * pageSize);
   const whereClause = where.length > 0 ? `where ${where.join(' and ')}` : '';
 
+  const countSql = `select count(*) as total from public.products ${whereClause}`;
+  const countResult = await query(countSql, values.slice(0, -2)); // exclude pageSize and offset
+  const total = parseInt(countResult.rows[0].total, 10);
+
   const sql = `
     select id::text, farmer_wallet, name, description, category,
            price_per_unit::text, currency, unit, stock_quantity::text,
-           image_url, is_available, created_at, updated_at
+           location, image_url, is_available, created_at, updated_at
     from public.products
     ${whereClause}
     order by created_at desc
     limit $${values.length - 1} offset $${values.length}
   `;
   const rows = await query(sql, values);
-  return { page, page_size: pageSize, items: rows.rows };
+  return { page, page_size: pageSize, total, totalPages: Math.ceil(total / pageSize), items: rows.rows };
+}
+
+async function emitProductEvent(event: string, product: unknown) {
+  wsManager.broadcast(event, product);
 }
 
 export async function getProductById(productId: string) {
   const result = await query(
     `select id::text, farmer_wallet, name, description, category,
             price_per_unit::text, currency, unit, stock_quantity::text,
-            image_url, is_available, created_at, updated_at
+            location, image_url, is_available, created_at, updated_at
      from public.products
      where id = $1::uuid`,
     [productId],
@@ -89,8 +126,8 @@ export async function createProduct(farmerWallet: string, input: ProductWriteInp
 
   const inserted = await query<ProductIdRow>(
     `insert into public.products (
-      farmer_wallet, name, description, category, price_per_unit, currency, unit, stock_quantity, is_available
-    ) values ($1,$2,$3,$4,$5::numeric,$6,$7,$8::numeric,$9)
+      farmer_wallet, name, description, category, price_per_unit, currency, unit, stock_quantity, location, is_available
+    ) values ($1,$2,$3,$4,$5::numeric,$6,$7,$8::numeric,$9,$10)
     returning id::text`,
     [
       farmerWallet.toLowerCase(),
@@ -101,10 +138,13 @@ export async function createProduct(farmerWallet: string, input: ProductWriteInp
       input.currency,
       input.unit,
       input.stock_quantity ?? null,
+      input.location ?? null,
       input.is_available ?? true,
     ],
   );
-  return getProductById(String(inserted.rows[0]?.id));
+  const result = await getProductById(String(inserted.rows[0]?.id));
+  emitProductEvent('product:created', result);
+  return result;
 }
 
 export async function updateProduct(productId: string, farmerWallet: string, input: ProductWriteInput) {
@@ -136,9 +176,13 @@ export async function updateProduct(productId: string, farmerWallet: string, inp
   if (fields.length === 0) throw new ApiError(400, 'Bad Request', 'No fields provided to update');
   values.push(productId);
   await query(`update public.products set ${fields.join(', ')} where id = $${values.length}::uuid`, values);
-  return getProductById(productId);
+  const result = await getProductById(productId);
+  emitProductEvent('product:updated', result);
+  return result;
 }
 
 export async function softDeleteProduct(productId: string, farmerWallet: string) {
-  return updateProduct(productId, farmerWallet, { is_available: false });
+  const result = await updateProduct(productId, farmerWallet, { is_available: false });
+  emitProductEvent('product:deleted', result);
+  return result;
 }
