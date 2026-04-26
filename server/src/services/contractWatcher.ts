@@ -66,6 +66,7 @@ function handleContractEvent(event: any) {
       notifyUser(
         data[2],
         `Order Received! You have a new order #${orderId} for ${data[3]} tokens.`,
+        `Order funded: order #${orderId} has been locked in escrow for ${data[3]} tokens.`,
         orderId,
         "order_received",
       );
@@ -97,6 +98,7 @@ function handleContractEvent(event: any) {
       notifyUser(
         data[2],
         `Campaign Funded! Buyer confirmed receipt for order #${orderId}. Payment has been released.`,
+        `Delivery confirmed: payment was released for order #${orderId}.`,
         orderId,
         "campaign_funded",
       );
@@ -108,7 +110,7 @@ function handleContractEvent(event: any) {
     case "refunded":
       notifyUser(
         data[1],
-        `Refund Issued. Order #${orderId} was expired and funds returned.`,
+        `Refund issued: order #${orderId} expired and funds were returned.`,
         orderId,
         action,
       );
@@ -143,6 +145,7 @@ async function notifyUser(
   } catch (error) {
     logger.error("Failed to save notification to DB:", error);
   }
+}
   NotificationService.notifyFromEscrowEvent({
     action,
     orderId,
