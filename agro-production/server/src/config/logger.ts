@@ -1,8 +1,8 @@
-import winston from "winston";
-import { config } from "./index.js";
+import winston from 'winston';
+import { config } from './index.js';
 
 const logger = winston.createLogger({
-  level: config.nodeEnv === "production" ? "info" : "debug",
+  level: config.logLevel,
   format: winston.format.combine(
     winston.format.timestamp(),
     winston.format.errors({ stack: true }),

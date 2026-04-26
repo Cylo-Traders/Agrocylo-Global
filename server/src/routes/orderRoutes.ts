@@ -22,4 +22,10 @@ export function orderErrorHandler(error: unknown, req: Request, res: Response, n
   next(error);
 }
 
+/**
+ * @route GET /orders/farmer/:address
+ * @desc Retrieve orders for a specific farmer (alias for seller)
+ */
+router.get("/farmer/:address", OrderController.getOrdersByFarmer);
+
 export default router;

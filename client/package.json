@@ -26,6 +26,8 @@
   "devDependencies": {
     "@playwright/test": "^1.58.2",
     "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.2.0",
     "@types/cors": "^2.8.19",
     "@types/node": "^20",
     "@types/react": "^19",

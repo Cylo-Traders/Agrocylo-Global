@@ -70,11 +70,29 @@ function handleContractEvent(event: any) {
       break;
     case "refunded":
       notifyUser(data[1], `Refund Issued. Order #${orderId} was expired and funds returned.`, orderId, action);
+      // Notify farmer: order received
       notifyUser(
         data[2],
-        `New Order Alert! You have a new order #${orderId} for ${data[3]} tokens.`,
+        `Order Received! You have a new order #${orderId} for ${data[3]} tokens.`,
+        `Order funded: order #${orderId} has been locked in escrow for ${data[3]} tokens.`,
         orderId,
-        action,
+        "order_received",
+      );
+      // Notify buyer: new investment
+      notifyUser(
+        data[1],
+        `New Investment! Your order #${orderId} has been placed and funds are held in escrow.`,
+        orderId,
+        "new_investment",
+      );
+      break;
+    case "delivered":
+      // Notify buyer: harvest completed
+      notifyUser(
+        data[2],
+        `Harvest Completed! Order #${orderId} has been marked as delivered by the farmer.`,
+        orderId,
+        "harvest_completed",
       );
       wsManager.broadcast("order:created", {
         orderId: orderId.toString(),
@@ -84,11 +102,13 @@ function handleContractEvent(event: any) {
       });
       break;
     case "confirmed":
+      // Notify farmer: campaign funded (payment released)
       notifyUser(
         data[2],
-        `Payment Released! Buyer confirmed receipt for order #${orderId}.`,
+        `Campaign Funded! Buyer confirmed receipt for order #${orderId}. Payment has been released.`,
+        `Delivery confirmed: payment was released for order #${orderId}.`,
         orderId,
-        action,
+        "campaign_funded",
       );
       wsManager.broadcast("order:confirmed", {
         orderId: orderId.toString(),
@@ -98,7 +118,7 @@ function handleContractEvent(event: any) {
     case "refunded":
       notifyUser(
         data[1],
-        `Refund Issued. Order #${orderId} was expired and funds returned.`,
+        `Refund issued: order #${orderId} expired and funds were returned.`,
         orderId,
         action,
       );

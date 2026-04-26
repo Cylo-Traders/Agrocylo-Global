@@ -3,9 +3,14 @@
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
-    token, Address, Env,
+    token, Address, Env, String,
 };
 
+// Shared setup helpers
+
+
+/// Base escrow setup — creates two tokens, mints 1 000 XLM to `buyer`,
+/// registers the contract and calls `initialize`.
 fn setup_test() -> (
     Env,
     EscrowContractClient<'static>,
@@ -15,6 +20,48 @@ fn setup_test() -> (
     token::Client<'static>, // xlm_client
     token::Client<'static>, // usdc_client
     Address, // admin
+) {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin       = Address::generate(&env);
+    let farmer      = Address::generate(&env);
+    let investor1   = Address::generate(&env);
+    let investor2   = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let xlm_contract   = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let xlm_client     = token::Client::new(&env, &xlm_contract.address());
+    let xlm_sac_client = token::StellarAssetClient::new(&env, &xlm_contract.address());
+
+    // Give each investor enough tokens to invest.
+    xlm_sac_client.mint(&investor1, &2000);
+    xlm_sac_client.mint(&investor2, &2000);
+
+    let usdc_contract = env.register_stellar_asset_contract_v2(token_admin);
+    let usdc_client   = token::Client::new(&env, &usdc_contract.address());
+
+    let contract_id = env.register(EscrowContract, ());
+    let client      = EscrowContractClient::new(&env, &contract_id);
+
+    let mut supported_tokens = Vec::new(&env);
+    supported_tokens.push_back(xlm_client.address.clone());
+    supported_tokens.push_back(usdc_client.address.clone());
+
+    let fee_collector = Address::generate(&env);
+
+    client.initialize(&admin, &fee_collector, &supported_tokens);
+
+    (env, client, buyer, farmer, fee_collector, xlm_client, usdc_client, admin)
+}
+
+fn setup_test_with_admin() -> (
+    Env,
+    EscrowContractClient<'static>,
+    Address,
+    Address,
+    Address,
+    token::Client<'static>,
 ) {
     let env = Env::default();
     env.mock_all_auths();
@@ -39,11 +86,9 @@ fn setup_test() -> (
     supported_tokens.push_back(xlm_client.address.clone());
     supported_tokens.push_back(usdc_client.address.clone());
 
-    let fee_collector = Address::generate(&env);
+    client.initialize(&admin, &supported_tokens);
 
-    client.initialize(&admin, &fee_collector, &supported_tokens);
-
-    (env, client, buyer, farmer, fee_collector, xlm_client, usdc_client, admin)
+    (env, client, admin, buyer, farmer, xlm_client)
 }
 
 #[test]
@@ -163,7 +208,7 @@ fn test_refund_expired_order() {
         .mock_all_auths()
         .create_order(&buyer, &farmer, &token.address, &500);
 
-    env.ledger().set_timestamp(env.ledger().timestamp() + 345601);
+    env.ledger().set_timestamp(env.ledger().timestamp() + 345_601);
 
     client.mock_all_auths().refund_expired_order(&order_id);
 
@@ -182,7 +227,9 @@ fn test_refund_unexpired_order_fails() {
 
     env.ledger().set_timestamp(env.ledger().timestamp() + 3600);
 
-    let result = client.mock_all_auths().try_refund_expired_order(&order_id);
+    let result = client
+        .mock_all_auths()
+        .try_refund_expired_order(&order_id);
     assert_eq!(result.unwrap_err().unwrap(), EscrowError::OrderNotExpired);
 }
 
