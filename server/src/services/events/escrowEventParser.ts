@@ -11,6 +11,8 @@ export class EscrowEventParser {
    * (order, created) -> (order_id, buyer, farmer, amount, token)
    * (order, confirmed) -> (order_id, buyer, farmer)
    * (order, refunded) -> (order_id, buyer)
+   * (order, dispute) -> (order_id, caller)
+   * (order, resolved) -> (order_id, resolve_to_buyer)
    */
   static parse(event: any): ParsedEscrowEvent {
     const topics = event.topic.map((t: string) =>
@@ -63,6 +65,22 @@ export class EscrowEventParser {
           buyer: data[1],
           seller: "", // Not in event
           amount: "0", // Not in event
+        };
+      case "dispute":
+        return {
+          ...base,
+          orderId: data[0].toString(),
+          buyer: data[1], // Assuming caller is relevant
+          seller: "",
+          amount: "0",
+        };
+      case "resolved":
+        return {
+          ...base,
+          orderId: data[0].toString(),
+          buyer: data[1] ? "REFUNDED" : "COMPLETED", // Using buyer field to indicate outcome
+          seller: "",
+          amount: "0",
         };
       default:
         throw new Error(`Unknown action: ${action}`);

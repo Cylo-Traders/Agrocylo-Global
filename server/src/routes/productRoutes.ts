@@ -9,6 +9,10 @@ router.get('/products', async (req, res) => {
   const result = await listProducts({
     farmer: typeof req.query['farmer'] === 'string' ? req.query['farmer'] : undefined,
     category: typeof req.query['category'] === 'string' ? req.query['category'] : undefined,
+    search: typeof req.query['search'] === 'string' ? req.query['search'] : undefined,
+    location: typeof req.query['location'] === 'string' ? req.query['location'] : undefined,
+    minPrice: typeof req.query['minPrice'] === 'string' ? req.query['minPrice'] : undefined,
+    maxPrice: typeof req.query['maxPrice'] === 'string' ? req.query['maxPrice'] : undefined,
     page: typeof req.query['page'] === 'string' ? req.query['page'] : undefined,
     pageSize: typeof req.query['page_size'] === 'string' ? req.query['page_size'] : undefined,
     includeUnavailable:
