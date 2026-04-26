@@ -17,6 +17,13 @@ import profileRoutes, { profileErrorHandler } from "./routes/profileRoutes.js";
 import locationRoutes, {
   locationErrorHandler,
 } from "./routes/locationRoutes.js";
+import orderRoutes from "./routes/orderRoutes.js";
+import orderMetadataRoutes, {
+  orderErrorHandler,
+} from "./routes/orderMetadataRoutes.js";
+import notificationRoutes, {
+  notificationErrorHandler,
+} from "./routes/notificationRoutes.js";
 import ordersRoutes from "./routes/orderRoutes.js";
 import orderRoutes, {
   orderErrorHandler,
@@ -37,12 +44,15 @@ app.use(requestLogger);
 app.use(productImageRoutes);
 app.use(productRoutes);
 app.use(cartRoutes);
+app.use(notificationRoutes);
+app.use("/orders", orderRoutes);
 app.use("/auth", authRoutes);
 app.use("/orders/metadata", orderMetadataRoutes);
 app.use("/orders", orderRoutes);
 app.use("/disputes", disputeRoutes);
 app.use(profileRoutes);
 app.use(locationRoutes);
+app.use(orderMetadataRoutes);
 app.use(ordersRoutes);
 app.use(orderRoutes);
 app.use(demandSupplyRoutes);
@@ -63,6 +73,10 @@ app.use(metricsRoutes);
 
 app.use(productImageErrorHandler);
 app.use(apiErrorHandler);
+app.use(profileErrorHandler);
+app.use(locationErrorHandler);
+app.use(orderErrorHandler);
+app.use(notificationErrorHandler);
 app.use((err: unknown, _req: Request, res: Response, _next: () => void) => {
   logger.error("Unhandled request error", err);
   res.status(500).json({ message: "Internal server error" });
