@@ -1,7 +1,7 @@
 'use client';
 
 import { ReactNode } from 'react';
-import { BlockchainErrorKind, BlockchainErrorInfo, mapBlockchainError } from './errorHandler';
+import {  mapBlockchainError } from './errorHandler';
 
 export interface ErrorDisplayProps {
   error: unknown;
