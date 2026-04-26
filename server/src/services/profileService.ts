@@ -1,4 +1,4 @@
-import prisma from '../config/database.js';
+import { prisma } from '../config/database.js';
 import { ApiError } from '../http/errors.js';
 import { z } from 'zod';
 
