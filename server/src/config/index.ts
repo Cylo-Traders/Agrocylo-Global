@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import logger from './logger.js';
 
-const requiredEnvs = ['PORT', 'NODE_ENV'];
+const requiredEnvs = ['PORT', 'NODE_ENV', 'DATABASE_URL', 'SUPABASE_URL', 'SUPABASE_ANON_KEY'];
 requiredEnvs.forEach((key) => {
   if (!process.env[key]) {
     logger.warn(`Environment variable ${key} is missing. Using default.`);
@@ -19,6 +19,10 @@ export const config = {
   supabaseAnonKey: process.env['SUPABASE_ANON_KEY'] ?? '',
   supabaseServiceRoleKey: process.env['SUPABASE_SERVICE_ROLE_KEY'] ?? '',
   productImagesBucket: process.env['SUPABASE_PRODUCT_IMAGES_BUCKET'] ?? 'product-images',
+  productImagePlaceholderUrl: process.env['PRODUCT_IMAGE_PLACEHOLDER_URL'] ?? 'https://placehold.co/800x800/png?text=No+Image',
+  jwtSecret: process.env['JWT_SECRET'] ?? 'dev-secret',
+  contractId: process.env['CONTRACT_ID'] ?? '',
+  rpcUrl: process.env['RPC_URL'] ?? 'https://soroban-testnet.stellar.org',
   jwtSecret: process.env['JWT_SECRET'] ?? 'changeme',
   productImagePlaceholderUrl:
     process.env['PRODUCT_IMAGE_PLACEHOLDER_URL'] ?? 'https://placehold.co/800x800/png?text=No+Image',

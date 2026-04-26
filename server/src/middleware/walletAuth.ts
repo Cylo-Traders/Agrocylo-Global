@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
+import { Keypair } from '@stellar/stellar-sdk';
 import { Keypair } from "@stellar/stellar-sdk";
 
 export interface WalletRequest extends Request {
@@ -23,6 +24,14 @@ export function requireWallet(req: WalletRequest, res: Response, next: NextFunct
     return;
   }
 
+  try {
+    Keypair.fromPublicKey(header);
+  } catch {
+    res.status(400).json({ message: 'Invalid Stellar wallet address format.' });
+    return;
+  }
+
+  req.walletAddress = header;
   const walletAddress = header.trim();
   const isEvmWallet = EVM_WALLET_REGEX.test(walletAddress);
   const isStellarWallet = isStellarAddress(walletAddress);
