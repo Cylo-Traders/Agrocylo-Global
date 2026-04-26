@@ -41,6 +41,15 @@ export class EscrowEventParser {
           amount: data[3].toString(),
           token: data[4],
         };
+      case "delivered":
+        // Event: (order_id, farmer, buyer, delivery_timestamp)
+        return {
+          ...base,
+          orderId: data[0].toString(),
+          buyer: data[2],
+          seller: data[1], // farmer is seller
+          amount: "0", // Not in event
+        };
       case "confirmed":
         return {
           ...base,

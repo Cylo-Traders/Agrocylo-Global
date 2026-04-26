@@ -3,7 +3,7 @@
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
-    token, Address, Env,
+    token, Address, Env, String,
 };
 
 // Shared setup helpers
@@ -55,6 +55,41 @@ fn setup_test() -> (
     (env, client, buyer, farmer, fee_collector, xlm_client, usdc_client, admin)
 }
 
+fn setup_test_with_admin() -> (
+    Env,
+    EscrowContractClient<'static>,
+    Address,
+    Address,
+    Address,
+    token::Client<'static>,
+) {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let farmer = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let xlm_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let xlm_client = token::Client::new(&env, &xlm_contract.address());
+    let xlm_admin_client = token::StellarAssetClient::new(&env, &xlm_contract.address());
+    xlm_admin_client.mint(&buyer, &1000);
+
+    let usdc_contract = env.register_stellar_asset_contract_v2(token_admin);
+    let usdc_client = token::Client::new(&env, &usdc_contract.address());
+
+    let contract_id = env.register(EscrowContract, ());
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let mut supported_tokens = Vec::new(&env);
+    supported_tokens.push_back(xlm_client.address.clone());
+    supported_tokens.push_back(usdc_client.address.clone());
+
+    client.initialize(&admin, &supported_tokens);
+
+    (env, client, admin, buyer, farmer, xlm_client)
+}
 
 #[test]
 fn test_create_and_confirm_order() {
