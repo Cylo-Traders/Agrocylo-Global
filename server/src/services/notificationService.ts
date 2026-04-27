@@ -1,5 +1,9 @@
 import { prisma } from "../config/database.js";
 import { ApiError } from "../http/errors.js";
+import logger from "../config/logger.js";
+import { NotificationEventType } from "../enums/notificationEventType.js";
+import { buildNotificationMessage } from "../utils/notificationTemplates.js";
+import { wsManager } from "./wsManager.js";
 
 export interface NotificationRecord {
   id: string;
@@ -15,92 +19,6 @@ export interface ListNotificationsOptions {
   unreadOnly?: boolean;
   limit?: number;
 }
-
-function clampLimit(limit?: number): number {
-  if (!Number.isFinite(limit) || !limit) {
-    return 20;
-  }
-
-  return Math.min(Math.max(Math.trunc(limit), 1), 50);
-}
-
-function walletCandidates(walletAddress: string): string[] {
-  const values = new Set<string>([walletAddress]);
-  values.add(walletAddress.toLowerCase());
-  values.add(walletAddress.toUpperCase());
-  return Array.from(values);
-}
-
-export async function listNotifications(
-  walletAddress: string,
-  options: ListNotificationsOptions = {},
-): Promise<NotificationRecord[]> {
-  const unreadOnly = options.unreadOnly ?? true;
-  const limit = clampLimit(options.limit);
-  const walletMatches = walletCandidates(walletAddress);
-
-  return prisma.notification.findMany({
-    where: {
-      walletAddress: {
-        in: walletMatches,
-      },
-      ...(unreadOnly ? { isRead: false } : {}),
-    },
-    orderBy: {
-      createdAt: "asc",
-    },
-    take: limit,
-  });
-}
-
-export async function markNotificationsRead(
-  walletAddress: string,
-  ids: string[],
-): Promise<{ count: number }> {
-  if (ids.length === 0) {
-    return { count: 0 };
-  }
-
-  const notifications = await prisma.notification.findMany({
-    where: {
-      id: {
-        in: ids,
-      },
-    },
-    select: {
-      id: true,
-      walletAddress: true,
-    },
-  });
-
-  if (notifications.length !== ids.length) {
-    throw new ApiError(404, "Not Found", "One or more notifications were not found");
-  }
-
-  const walletMatches = walletCandidates(walletAddress);
-  const unauthorized = notifications.some(
-    (notification) => !walletMatches.includes(notification.walletAddress),
-  );
-
-  if (unauthorized) {
-    throw new ApiError(403, "Forbidden", "You cannot modify these notifications");
-  }
-
-  const result = await prisma.notification.updateMany({
-    where: {
-      id: {
-        in: ids,
-      },
-    },
-    data: {
-      isRead: true,
-    },
-  });
-
-  return { count: result.count };
-import logger from "../config/logger.js";
-import { NotificationEventType } from "../enums/notificationEventType.js";
-import { buildNotificationMessage } from "../utils/notificationTemplates.js";
 
 type NotificationPayload = {
   walletAddress: string;
@@ -124,57 +42,120 @@ type MappedNotification = {
   type: NotificationEventType;
 };
 
-const actionToNotifications: Record<string, (payload: EscrowEventPayload) => MappedNotification[]> = {
-  created: (payload) => [
-    ...(payload.farmerAddress
-      ? [{ walletAddress: payload.farmerAddress, type: NotificationEventType.ORDER_RECEIVED as const }]
-      : []),
-    ...(payload.farmerAddress
-      ? [{ walletAddress: payload.farmerAddress, type: NotificationEventType.NEW_INVESTMENT as const }]
-      : []),
-  ],
-  confirmed: (payload) =>
-    payload.farmerAddress
-      ? [{ walletAddress: payload.farmerAddress, type: NotificationEventType.CAMPAIGN_FUNDED }]
-      : [],
-  refunded: (payload) =>
-    payload.buyerAddress
-      ? [{ walletAddress: payload.buyerAddress, type: NotificationEventType.HARVEST_COMPLETED }]
-      : [],
+function clampLimit(limit?: number): number {
+  if (!Number.isFinite(limit) || !limit) return 20;
+  return Math.min(Math.max(Math.trunc(limit), 1), 50);
+}
+
+function walletCandidates(walletAddress: string): string[] {
+  return Array.from(new Set([walletAddress, walletAddress.toLowerCase(), walletAddress.toUpperCase()]));
+}
+
+/**
+ * Maps a contract action to the notifications that should be dispatched.
+ *   created   → ORDER_RECEIVED (farmer) + NEW_INVESTMENT (farmer)
+ *   confirmed → CAMPAIGN_FUNDED (farmer)
+ *   refunded  → HARVEST_COMPLETED (buyer)
+ */
+const actionToNotifications: Record<string, (p: EscrowEventPayload) => MappedNotification[]> = {
+  created: ({ farmerAddress }) => farmerAddress ? [
+    { walletAddress: farmerAddress, type: NotificationEventType.ORDER_RECEIVED },
+    { walletAddress: farmerAddress, type: NotificationEventType.NEW_INVESTMENT },
+  ] : [],
+  confirmed: ({ farmerAddress }) =>
+    farmerAddress ? [{ walletAddress: farmerAddress, type: NotificationEventType.CAMPAIGN_FUNDED }] : [],
+  refunded: ({ buyerAddress }) =>
+    buyerAddress ? [{ walletAddress: buyerAddress, type: NotificationEventType.HARVEST_COMPLETED }] : [],
 };
 
+export async function listNotifications(
+  walletAddress: string,
+  options: ListNotificationsOptions = {},
+): Promise<NotificationRecord[]> {
+  return prisma.notification.findMany({
+    where: {
+      walletAddress: { in: walletCandidates(walletAddress) },
+      ...(options.unreadOnly ?? true ? { isRead: false } : {}),
+    },
+    orderBy: { createdAt: "asc" },
+    take: clampLimit(options.limit),
+  });
+}
+
+export async function markNotificationsRead(
+  walletAddress: string,
+  ids: string[],
+): Promise<{ count: number }> {
+  if (ids.length === 0) return { count: 0 };
+
+  const notifications = await prisma.notification.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, walletAddress: true },
+  });
+
+  if (notifications.length !== ids.length) {
+    throw new ApiError(404, "Not Found", "One or more notifications were not found");
+  }
+
+  const walletMatches = walletCandidates(walletAddress);
+  if (notifications.some((n) => !walletMatches.includes(n.walletAddress))) {
+    throw new ApiError(403, "Forbidden", "You cannot modify these notifications");
+  }
+
+  const result = await prisma.notification.updateMany({
+    where: { id: { in: ids } },
+    data: { isRead: true },
+  });
+
+  return { count: result.count };
+}
+
 export class NotificationService {
-  static async notify(payload: NotificationPayload) {
+  /**
+   * Persist a notification to the DB and push it to the wallet owner via WebSocket.
+   */
+  static async notify(payload: NotificationPayload): Promise<void> {
     try {
-      return await prisma.notification.create({
+      const message = buildNotificationMessage(payload.type, {
+        orderId: payload.orderId,
+        amount: payload.amount,
+        token: payload.token,
+      });
+
+      const record = await prisma.notification.create({
         data: {
           walletAddress: payload.walletAddress,
-          message: buildNotificationMessage(payload.type, {
-            orderId: payload.orderId,
-            amount: payload.amount,
-            token: payload.token,
-          }),
+          message,
           orderId: payload.orderId,
           type: payload.type,
           isRead: false,
         },
       });
+
+      // Push real-time notification to the authenticated wallet owner
+      wsManager.broadcastTo(payload.walletAddress, "notification:new", {
+        id: record.id,
+        type: payload.type,
+        message,
+        orderId: payload.orderId,
+      });
     } catch (error) {
       logger.error("Failed to create notification", error);
-      return null;
     }
   }
 
-  static async notifyFromEscrowEvent(payload: EscrowEventPayload) {
+  /**
+   * Derive and dispatch all notifications for a given escrow contract event.
+   */
+  static async notifyFromEscrowEvent(payload: EscrowEventPayload): Promise<void> {
     const mapper = actionToNotifications[payload.action];
     if (!mapper) return;
 
-    const notifications = mapper(payload);
     await Promise.all(
-      notifications.map((notification) =>
+      mapper(payload).map((n) =>
         NotificationService.notify({
-          walletAddress: notification.walletAddress,
-          type: notification.type,
+          walletAddress: n.walletAddress,
+          type: n.type,
           orderId: payload.orderId,
           amount: payload.amount,
           token: payload.token,
@@ -182,23 +163,13 @@ export class NotificationService {
       ),
     );
   }
-}
 
-import { SocketService } from "./socketService.js";
-import logger from "../config/logger.js";
-
-export class NotificationService {
   /**
-   * Notify users about order-related events.
-   * @param event The event type (e.g., 'dispute_opened', 'dispute_resolved')
-   * @param data The payload for the notification
+   * Broadcast a generic order event to all connected WebSocket clients.
+   * Used by the ingestion pipeline for dispute/resolution events.
    */
-  public static async notifyOrderEvent(event: string, data: any) {
-    logger.info(`[NotificationService]: Sending notification for event: ${event}`);
-    
-    // Emit via WebSocket
-    SocketService.emit(event, data);
-
-    // Future extension: Add logic to send emails, push notifications, etc.
+  static notifyOrderEvent(event: string, data: unknown): void {
+    logger.info(`[NotificationService] Broadcasting event: ${event}`);
+    wsManager.broadcast(`order:${event}`, data);
   }
 }
