@@ -6,6 +6,7 @@ import {
   createOrder as buildCreateOrder,
   confirmDelivery as buildConfirmDelivery,
   refundOrder as buildRefundOrder,
+  openDispute as buildOpenDispute,
   getOrder,
   type Order,
 } from "@/services/stellar/contractService";
@@ -20,6 +21,7 @@ export function useEscrowContract() {
   const [createState, setCreateState] = useState<ActionState>({ isLoading: false, error: null });
   const [confirmState, setConfirmState] = useState<ActionState>({ isLoading: false, error: null });
   const [refundState, setRefundState] = useState<ActionState>({ isLoading: false, error: null });
+  const [disputeState, setDisputeState] = useState<ActionState>({ isLoading: false, error: null });
   const [queryState, setQueryState] = useState<ActionState>({ isLoading: false, error: null });
 
   const createOrder = useCallback(
@@ -122,6 +124,30 @@ export function useEscrowContract() {
     [address, signAndSubmit]
   );
 
+  const openDispute = useCallback(
+    async (orderId: string, reason: string, evidence: string) => {
+      if (!address) throw new Error("Wallet not connected");
+      setDisputeState({ isLoading: true, error: null });
+      try {
+        const result = await buildOpenDispute(address, orderId, reason, evidence);
+        if (!result.success || !result.data) {
+          throw new Error(result.error ?? "Failed to build transaction");
+        }
+        const submitResult = await signAndSubmit(result.data);
+        if (!submitResult.success) {
+          throw new Error(submitResult.error ?? "Transaction failed");
+        }
+        setDisputeState({ isLoading: false, error: null });
+        return submitResult;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setDisputeState({ isLoading: false, error: msg });
+        throw err;
+      }
+    },
+    [address, signAndSubmit]
+  );
+
   const getOrderDetails = useCallback(
     async (orderId: string): Promise<Order | null> => {
       setQueryState({ isLoading: true, error: null });
@@ -145,10 +171,12 @@ export function useEscrowContract() {
     createOrder,
     confirmReceipt,
     requestRefund,
+    openDispute,
     getOrderDetails,
     createState,
     confirmState,
     refundState,
+    disputeState,
     queryState,
   };
 }

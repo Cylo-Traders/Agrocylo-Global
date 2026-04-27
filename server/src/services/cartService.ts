@@ -1,6 +1,7 @@
 import type { PoolClient } from 'pg';
 import { query, withTransaction } from '../config/database.js';
 import { ApiError } from '../http/errors.js';
+import { wsManager } from './wsManager.js';
 
 const FEE_BPS = 3n;
 const HUNDRED = 100n;
@@ -118,6 +119,10 @@ export async function getActiveCart(buyerWallet: string) {
   return { cart_id: cartId, groups: groupRows(rows) };
 }
 
+function emitCartEvent(buyerWallet: string, cartData: unknown) {
+  wsManager.broadcastTo(buyerWallet, 'cart:updated', cartData);
+}
+
 export async function addItem(buyerWallet: string, payload: { product_id?: string; quantity?: string }) {
   if (!payload.product_id || !payload.quantity) {
     throw new ApiError(400, 'Bad Request', 'product_id and quantity are required');
@@ -158,7 +163,9 @@ export async function addItem(buyerWallet: string, payload: { product_id?: strin
         ],
       );
     }
-    return getActiveCart(buyerWallet);
+    const result = await getActiveCart(buyerWallet);
+    emitCartEvent(buyerWallet, result);
+    return result;
   });
 }
 
@@ -174,7 +181,9 @@ export async function updateItemQuantity(buyerWallet: string, itemId: string, qu
     if (!owner.rows[0]) throw new ApiError(404, 'Not Found', 'Cart item not found');
     if (owner.rows[0].status !== 'active') throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
     await client.query(`update public.cart_items set quantity = $1::numeric where id = $2::uuid`, [quantity, itemId]);
-    return getActiveCart(buyerWallet);
+    const result = await getActiveCart(buyerWallet);
+    emitCartEvent(buyerWallet, result);
+    return result;
   });
 }
 
@@ -190,7 +199,9 @@ export async function removeItem(buyerWallet: string, itemId: string) {
     if (!owner.rows[0]) throw new ApiError(404, 'Not Found', 'Cart item not found');
     if (owner.rows[0].status !== 'active') throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
     await client.query(`delete from public.cart_items where id = $1::uuid`, [itemId]);
-    return getActiveCart(buyerWallet);
+    const result = await getActiveCart(buyerWallet);
+    emitCartEvent(buyerWallet, result);
+    return result;
   });
 }
 
@@ -203,7 +214,9 @@ export async function clearCart(buyerWallet: string) {
     if (!cart.rows[0]) return { cart_id: null, groups: [] };
     if (cart.rows[0].status !== 'active') throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
     await client.query(`delete from public.cart_items where cart_id = $1::uuid`, [cart.rows[0].id]);
-    return { cart_id: String(cart.rows[0].id), groups: [] };
+    const result = { cart_id: String(cart.rows[0].id), groups: [] };
+    emitCartEvent(buyerWallet, result);
+    return result;
   });
 }
 
