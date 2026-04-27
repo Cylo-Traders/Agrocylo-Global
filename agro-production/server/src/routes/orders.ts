@@ -10,6 +10,46 @@ import {
 
 const router = Router();
 
+// GET /orders?buyerAddress=... or ?farmerAddress=...
+router.get(
+  "/orders",
+  async (req: Request, res: Response) => {
+    const { buyerAddress, farmerAddress } = req.query;
+
+    if (!buyerAddress && !farmerAddress) {
+      res.status(400).json({ error: "buyerAddress or farmerAddress query param required" });
+      return;
+    }
+
+    if (buyerAddress && typeof buyerAddress === "string") {
+      const orders = await prisma.order.findMany({
+        where: { buyerAddress },
+        orderBy: { createdAt: "desc" },
+        include: { campaign: { select: { farmerAddress: true, tokenAddress: true, onChainId: true } } },
+      });
+      res.json(orders);
+      return;
+    }
+
+    if (farmerAddress && typeof farmerAddress === "string") {
+      const campaigns = await prisma.campaign.findMany({
+        where: { farmerAddress },
+        select: { id: true },
+      });
+      const campaignIds = campaigns.map((c) => c.id);
+      const orders = await prisma.order.findMany({
+        where: { campaignId: { in: campaignIds } },
+        orderBy: { createdAt: "desc" },
+        include: { campaign: { select: { farmerAddress: true, tokenAddress: true, onChainId: true } } },
+      });
+      res.json(orders);
+      return;
+    }
+
+    res.status(400).json({ error: "Invalid query params" });
+  },
+);
+
 // POST /orders
 router.post(
   "/orders",

@@ -37,6 +37,7 @@ export const ListCampaignsQuerySchema = z.object({
   status: z
     .enum(["FUNDING", "FUNDED", "IN_PRODUCTION", "HARVESTED", "SETTLED", "FAILED", "DISPUTED"])
     .optional(),
+  farmerAddress: z.string().min(56).max(56).optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
