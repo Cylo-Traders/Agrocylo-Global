@@ -237,7 +237,7 @@ impl ProductionEscrowContract {
 
         env.events().publish(
             (symbol_short!("campaign"), symbol_short!("created")),
-            (campaign_id, farmer, funding_goal, harvest_deadline),
+            (campaign_id, farmer, campaign.token.clone(), funding_goal, harvest_deadline),
         );
 
         Ok(campaign_id)
@@ -270,9 +270,12 @@ impl ProductionEscrowContract {
         token_client.transfer(&investor, &env.current_contract_address(), &amount);
 
         campaign.total_funded += amount;
+        let newly_funded = campaign.total_funded >= campaign.funding_goal
+            && (campaign.total_funded - amount) < campaign.funding_goal;
         if campaign.total_funded >= campaign.funding_goal {
             campaign.status = CampaignStatus::Funded;
         }
+        let total_raised = campaign.total_funded;
         env.storage().persistent().set(&DataKey::Campaign(campaign_id), &campaign);
 
         let mut position: InvestorPosition = env
@@ -287,8 +290,16 @@ impl ProductionEscrowContract {
 
         env.events().publish(
             (symbol_short!("campaign"), symbol_short!("invested")),
-            (campaign_id, investor, amount),
+            (campaign_id, investor, amount, total_raised),
         );
+
+        // Emit funded event the moment the goal is first crossed
+        if newly_funded {
+            env.events().publish(
+                (symbol_short!("campaign"), symbol_short!("funded")),
+                (campaign_id, total_raised),
+            );
+        }
 
         Ok(())
     }
@@ -314,6 +325,12 @@ impl ProductionEscrowContract {
             return Err(ProductionEscrowError::CampaignNotActive);
         }
 
+        // Production start: farmer calling confirm_harvest signals production has begun
+        env.events().publish(
+            (symbol_short!("campaign"), symbol_short!("started")),
+            (campaign_id,),
+        );
+
         let token_client = token::Client::new(&env, &campaign.token);
         token_client.transfer(
             &env.current_contract_address(),
@@ -326,7 +343,13 @@ impl ProductionEscrowContract {
 
         env.events().publish(
             (symbol_short!("campaign"), symbol_short!("harvested")),
-            (campaign_id, farmer),
+            (campaign_id,),
+        );
+
+        // Settlement: funds have been released to the farmer
+        env.events().publish(
+            (symbol_short!("campaign"), symbol_short!("settled")),
+            (campaign_id,),
         );
 
         Ok(())
@@ -705,8 +728,8 @@ impl ProductionEscrowContract {
             .set(&DataKey::LastDisputeTimestamp(raiser.clone()), &now);
 
         env.events().publish(
-            (symbol_short!("dispute"), symbol_short!("opened")),
-            (dispute_id, order_id, raiser, stake_amount),
+            (symbol_short!("campaign"), symbol_short!("disputed")),
+            (order_id, raiser),
         );
 
         Ok(dispute_id)
@@ -783,8 +806,8 @@ impl ProductionEscrowContract {
         env.storage().persistent().set(&DataKey::Order(dispute.order_id), &order);
 
         env.events().publish(
-            (symbol_short!("dispute"), symbol_short!("resolved")),
-            (dispute_id, favour_raiser),
+            (symbol_short!("campaign"), symbol_short!("resolved")),
+            (dispute.order_id, favour_raiser),
         );
 
         Ok(())
