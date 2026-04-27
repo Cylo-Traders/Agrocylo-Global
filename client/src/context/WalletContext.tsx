@@ -77,15 +77,26 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
     setLoading(true);
     setError(null);
     try {
-      // Get current network from Freighter
-      const networkName = await getCurrentNetworkName();
+      // Prefer window.freighter / window.freighterApi if available (e.g. Playwright test mocks).
+      // The @stellar/freighter-api npm package uses browser-extension messaging which
+      // is unavailable in headless test contexts.
+      const w = typeof window !== "undefined" ? (window as any) : null;
+      const freighterDirect =
+        w?.freighter?.getPublicKey ? w.freighter :
+        w?.freighterApi?.getPublicKey ? w.freighterApi :
+        null;
+
+      // Get current network
+      const networkName = freighterDirect?.getNetwork
+        ? await freighterDirect.getNetwork()
+        : await getCurrentNetworkName();
       setNetwork(networkName);
       localStorage.setItem("walletNetwork", networkName);
 
-      // Freighter API exposes methods on the default export
-      // getPublicKey will return the active public key when Freighter is available
-      // If Freighter extension is not connected or no account selected, it will show modal
-      const pub = await FreighterApi.getPublicKey();
+      // Get public key
+      const pub = freighterDirect
+        ? await freighterDirect.getPublicKey()
+        : await FreighterApi.getPublicKey();
       if (!pub) {
         throw new Error("Could not get public key from Freighter");
       }

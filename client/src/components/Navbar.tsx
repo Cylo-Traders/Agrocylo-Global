@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import WalletButton from "./WalletButton";
 import WalletDisplay from "./WalletDisplay";
 import { useCart } from "@/context/CartContext";

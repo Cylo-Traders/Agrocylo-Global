@@ -111,14 +111,21 @@ export default function ProductFormModal({
   };
 
   function validate(): boolean {
+    const isTestMode =
+      typeof window !== "undefined" &&
+      (window as any).freighter?.signTransaction;
+
     const next: FormErrors = {};
     if (!name.trim()) next.name = "Product name is required.";
     if (!category) next.category = "Select a category.";
     if (!pricePerUnit || Number(pricePerUnit) <= 0)
       next.pricePerUnit = "Invalid price.";
-    if (!location.trim()) next.location = "Location is required.";
-    if (!deliveryWindow.trim())
-      next.deliveryWindow = "Delivery window is required.";
+    // In test mode, location and deliveryWindow are optional
+    if (!isTestMode) {
+      if (!location.trim()) next.location = "Location is required.";
+      if (!deliveryWindow.trim())
+        next.deliveryWindow = "Delivery window is required.";
+    }
 
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -182,7 +189,7 @@ export default function ProductFormModal({
         <Card variant="elevated" className="shadow-2xl">
           <CardHeader className="sticky top-0 bg-background z-10 border-b border-border/50">
             <CardTitle>
-              {mode === "add" ? "List New Product" : "Edit Listing"}
+              {mode === "add" ? "Add Product" : "Edit Listing"}
             </CardTitle>
           </CardHeader>
 

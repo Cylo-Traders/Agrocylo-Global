@@ -8,8 +8,12 @@ interface ConnectWalletProps {
   onNext: () => void;
 }
 
+function truncateAddress(addr: string): string {
+  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+}
+
 export default function ConnectWallet({ onNext }: ConnectWalletProps) {
-  const { address, isConnected, connect } = useWallet();
+  const { address, connected, connect } = useWallet();
 
   return (
     <Card variant="elevated" padding="lg" className="max-w-md mx-auto text-center">
@@ -20,12 +24,12 @@ export default function ConnectWallet({ onNext }: ConnectWalletProps) {
         Connect your Stellar wallet to get started with AgroCylo.
       </p>
 
-      {isConnected ? (
+      {connected ? (
         <div className="space-y-4">
           <div className="rounded-lg bg-primary-50 p-4">
             <p className="text-sm text-primary-700 font-medium">Connected</p>
-            <p className="text-xs text-primary-600 font-mono mt-1 truncate">
-              {address}
+            <p className="text-sm text-primary-600 font-mono mt-1">
+              {truncateAddress(address!)}
             </p>
           </div>
           <Button variant="primary" fullWidth onClick={onNext}>
