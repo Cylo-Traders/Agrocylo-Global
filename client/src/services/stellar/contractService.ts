@@ -422,6 +422,65 @@ export async function openDispute(
 }
 
 /**
+ * Build a `resolve_dispute` transaction (Admin only).
+ *
+ * @param admin          - Stellar public key of the admin
+ * @param orderId        - On-chain order identifier
+ * @param resolveToBuyer - True to refund buyer, false to release to farmer
+ */
+export async function resolveDispute(
+  admin: string,
+  orderId: string,
+  resolveToBuyer: boolean
+): Promise<ContractResult<string>> {
+  try {
+    const tx = await buildTransaction(
+      admin,
+      "resolve_dispute",
+      [
+        new StellarSdk.Address(admin).toScVal(),
+        StellarSdk.nativeToScVal(BigInt(orderId), { type: "u64" }),
+        StellarSdk.nativeToScVal(resolveToBuyer, { type: "bool" }),
+      ]
+    );
+    return { success: true, data: tx.toXDR() };
+  } catch (err) {
+    return { success: false, error: (err as Error).message };
+  }
+}
+
+/**
+ * Build a `split_funds` transaction (Admin only).
+ *
+ * @param admin       - Stellar public key of the admin
+ * @param orderId     - On-chain order identifier
+ * @param buyerShare  - Amount to refund to buyer
+ * @param farmerShare - Amount to release to farmer
+ */
+export async function splitFunds(
+  admin: string,
+  orderId: string,
+  buyerShare: bigint,
+  farmerShare: bigint
+): Promise<ContractResult<string>> {
+  try {
+    const tx = await buildTransaction(
+      admin,
+      "split_funds",
+      [
+        new StellarSdk.Address(admin).toScVal(),
+        StellarSdk.nativeToScVal(BigInt(orderId), { type: "u64" }),
+        StellarSdk.nativeToScVal(buyerShare, { type: "i128" }),
+        StellarSdk.nativeToScVal(farmerShare, { type: "i128" }),
+      ]
+    );
+    return { success: true, data: tx.toXDR() };
+  } catch (err) {
+    return { success: false, error: (err as Error).message };
+  }
+}
+
+/**
  * Query order details (read-only, no signing required).
  *
  * @param orderId - On-chain order identifier
@@ -449,7 +508,7 @@ export async function getOrder(
       .addOperation(
         contract.call(
           "get_order",
-          StellarSdk.nativeToScVal(orderId, { type: "symbol" })
+          [StellarSdk.nativeToScVal(BigInt(orderId), { type: "u64" })]
         )
       )
       .setTimeout(30)
