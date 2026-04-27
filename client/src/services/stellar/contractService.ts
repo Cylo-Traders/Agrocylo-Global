@@ -485,7 +485,7 @@ export async function getOrder(
       .addOperation(
         contract.call(
           "get_order",
-          StellarSdk.nativeToScVal(orderId, { type: "symbol" })
+          [StellarSdk.nativeToScVal(BigInt(orderId), { type: "u64" })]
         )
       )
       .setTimeout(30)
