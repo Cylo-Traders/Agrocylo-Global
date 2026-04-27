@@ -17,13 +17,17 @@ router.get(
   "/campaigns",
   validateQuery(ListCampaignsQuerySchema),
   async (req: Request, res: Response) => {
-    const { status, page, limit } = req.query as unknown as {
+    const { status, farmerAddress, page, limit } = req.query as unknown as {
       status?: CampaignStatus;
+      farmerAddress?: string;
       page: number;
       limit: number;
     };
 
-    const where = status ? { status } : {};
+    const where = {
+      ...(status ? { status } : {}),
+      ...(farmerAddress ? { farmerAddress } : {}),
+    };
     const [items, total] = await Promise.all([
       prisma.campaign.findMany({
         where,
