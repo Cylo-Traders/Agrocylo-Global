@@ -36,3 +36,5 @@ Thumbs.db
 # Rust / Soroban
 target/
 Cargo.lock
+issue.md
+pr.md
