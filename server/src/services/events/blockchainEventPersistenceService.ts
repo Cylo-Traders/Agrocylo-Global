@@ -128,17 +128,45 @@ export class BlockchainEventPersistenceService {
           },
         });
         return;
+      case "order.delivered":
+        await tx.order.upsert({
+          where: { orderIdOnChain: event.orderIdOnChain },
+          update: { status: "DELIVERED" },
+          create: {
+            orderIdOnChain: event.orderIdOnChain ?? "",
+            buyerAddress: event.secondaryAddress ?? "", // buyer is secondaryAddress for delivered
+            sellerAddress: event.actorAddress ?? "",    // farmer is actorAddress for delivered
+            amount: "0",
+            token: "",
+            status: "DELIVERED",
+          },
+        });
+        return;
       case "order.confirmed":
         await tx.order.upsert({
           where: { orderIdOnChain: event.orderIdOnChain },
-          update: { status: "CONFIRMED" },
+          update: { status: "COMPLETED" },
           create: {
             orderIdOnChain: event.orderIdOnChain ?? "",
             buyerAddress: event.actorAddress ?? "",
             sellerAddress: event.secondaryAddress ?? "",
-            amount: event.amount ?? "0",
-            token: event.token ?? "",
-            status: "CONFIRMED",
+            amount: "0",
+            token: "",
+            status: "COMPLETED",
+          },
+        });
+        return;
+      case "order.refunded":
+        await tx.order.upsert({
+          where: { orderIdOnChain: event.orderIdOnChain },
+          update: { status: "REFUNDED" },
+          create: {
+            orderIdOnChain: event.orderIdOnChain ?? "",
+            buyerAddress: event.actorAddress ?? "",
+            sellerAddress: "",
+            amount: "0",
+            token: "",
+            status: "REFUNDED",
           },
         });
         return;
