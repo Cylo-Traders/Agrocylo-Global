@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env, Vec};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Vec};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -75,6 +75,12 @@ impl RegistryContract {
             .instance()
             .set(&DataKey::ProductionContract, &production_contract);
 
+        // (registry, updated) → emitted on initialization and any future contract re-linking
+        env.events().publish(
+            (symbol_short!("registry"), symbol_short!("updated")),
+            (escrow_contract, production_contract),
+        );
+
         Ok(())
     }
 
@@ -110,7 +116,13 @@ impl RegistryContract {
         let campaign_ids: Vec<u64> = Vec::new(&env);
         env.storage()
             .persistent()
-            .set(&DataKey::FarmerCampaigns(farmer), &campaign_ids);
+            .set(&DataKey::FarmerCampaigns(farmer.clone()), &campaign_ids);
+
+        // (farmer, registered) → farmer_address
+        env.events().publish(
+            (symbol_short!("farmer"), symbol_short!("registerd")),
+            (farmer,),
+        );
 
         Ok(())
     }
@@ -182,7 +194,13 @@ impl RegistryContract {
         farmer_campaign_ids.push_back(campaign_id);
         env.storage()
             .persistent()
-            .set(&DataKey::FarmerCampaigns(farmer), &farmer_campaign_ids);
+            .set(&DataKey::FarmerCampaigns(farmer.clone()), &farmer_campaign_ids);
+
+        // (campaign, registered) → (campaign_id, farmer_address)
+        env.events().publish(
+            (symbol_short!("campaign"), symbol_short!("registerd")),
+            (campaign_id, farmer),
+        );
 
         Ok(())
     }

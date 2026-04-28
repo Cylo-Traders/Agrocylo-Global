@@ -66,6 +66,21 @@ const actionToNotifications: Record<string, (p: EscrowEventPayload) => MappedNot
     farmerAddress ? [{ walletAddress: farmerAddress, type: NotificationEventType.CAMPAIGN_FUNDED }] : [],
   refunded: ({ buyerAddress }) =>
     buyerAddress ? [{ walletAddress: buyerAddress, type: NotificationEventType.HARVEST_COMPLETED }] : [],
+ * Maps a contract action to the list of notifications that should be sent.
+ * - "created"   → OrderCreated (buyer) + FundsLocked (farmer)
+ * - "delivered" → no notification (internal state change)
+ * - "confirmed" → DeliveryConfirmed (farmer)
+ * - "refunded"  → RefundIssued (buyer)
+ */
+const actionToNotifications: Record<string, (p: EscrowEventPayload) => MappedNotification[]> = {
+  created: ({ buyerAddress, farmerAddress }) => [
+    ...(buyerAddress ? [{ walletAddress: buyerAddress, type: NotificationEventType.ORDER_CREATED }] : []),
+    ...(farmerAddress ? [{ walletAddress: farmerAddress, type: NotificationEventType.FUNDS_LOCKED }] : []),
+  ],
+  confirmed: ({ farmerAddress }) =>
+    farmerAddress ? [{ walletAddress: farmerAddress, type: NotificationEventType.DELIVERY_CONFIRMED }] : [],
+  refunded: ({ buyerAddress }) =>
+    buyerAddress ? [{ walletAddress: buyerAddress, type: NotificationEventType.REFUND_ISSUED }] : [],
 };
 
 export async function listNotifications(
@@ -132,7 +147,7 @@ export class NotificationService {
         },
       });
 
-      // Push real-time notification to the authenticated wallet owner
+      // Push real-time notification to the wallet owner via WebSocket
       wsManager.broadcastTo(payload.walletAddress, "notification:new", {
         id: record.id,
         type: payload.type,
@@ -144,9 +159,6 @@ export class NotificationService {
     }
   }
 
-  /**
-   * Derive and dispatch all notifications for a given escrow contract event.
-   */
   static async notifyFromEscrowEvent(payload: EscrowEventPayload): Promise<void> {
     const mapper = actionToNotifications[payload.action];
     if (!mapper) return;
@@ -170,6 +182,9 @@ export class NotificationService {
    */
   static notifyOrderEvent(event: string, data: unknown): void {
     logger.info(`[NotificationService] Broadcasting event: ${event}`);
+  /** Generic order-event notification (used by ingestion pipeline). */
+  static async notifyOrderEvent(event: string, data: any): Promise<void> {
+    logger.info(`[NotificationService] Emitting event: ${event}`);
     wsManager.broadcast(`order:${event}`, data);
   }
 }

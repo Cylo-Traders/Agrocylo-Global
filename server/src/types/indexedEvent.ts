@@ -3,13 +3,15 @@ export type IndexedEventType =
   | "campaign.invested"
   | "campaign.settled"
   | "order.created"
-  | "order.confirmed";
+  | "order.delivered"
+  | "order.confirmed"
+  | "order.refunded";
 
 export interface IndexedEvent {
   sourceEventId: string;
   eventType: IndexedEventType;
   entity: "campaign" | "order";
-  action: "created" | "invested" | "settled" | "confirmed";
+  action: "created" | "invested" | "settled" | "delivered" | "confirmed" | "refunded";
   ledger: number;
   eventIndex: number;
   timestamp: Date;
