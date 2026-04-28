@@ -69,3 +69,36 @@ export interface CampaignListResponse {
     limit: number;
   };
 }
+
+export type ProductCategory =
+  | "GRAINS"
+  | "VEGETABLES"
+  | "FRUITS"
+  | "LIVESTOCK"
+  | "DAIRY"
+  | "OTHER";
+
+export interface Product {
+  id: string;
+  name: string;
+  description: string;
+  category: ProductCategory;
+  pricePerUnit: string;
+  unit: string;
+  quantity: number;
+  location: string;
+  farmerAddress: string;
+  campaignId?: string;
+  imageUrl?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProductListResponse {
+  data: Product[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+  };
+}
