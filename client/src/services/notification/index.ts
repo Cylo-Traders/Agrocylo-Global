@@ -1,4 +1,5 @@
 import { toast } from "sonner";
+import type { OrderEventNotification } from "./api";
 
 export type NotificationType = "success" | "error" | "info" | "loading";
 
@@ -38,4 +39,51 @@ export function notifyTransactionConfirming(): void {
 
 export function dismissNotification(): void {
   toast.dismiss("tx-submitted");
+}
+
+function getOrderEventTitle(type: string): string {
+  switch (type) {
+    case "created":
+      return "Order Funded";
+    case "confirmed":
+      return "Delivery Confirmed";
+    case "refunded":
+      return "Refund Issued";
+    default:
+      return "Order Update";
+  }
+}
+
+export function showOrderEventToast(
+  notification: OrderEventNotification,
+  onOpenOrder?: (orderId: string) => void,
+): void {
+  const title = getOrderEventTitle(notification.type);
+  const action =
+    notification.orderId && onOpenOrder
+      ? {
+          label: "View order",
+          onClick: () => onOpenOrder(notification.orderId!),
+        }
+      : undefined;
+
+  const toastOptions = {
+    id: `order-event-${notification.id}`,
+    description: notification.message,
+    duration: 10000,
+    action,
+  };
+
+  switch (notification.type) {
+    case "created":
+    case "confirmed":
+      toast.success(title, toastOptions);
+      break;
+    case "refunded":
+      toast.info(title, toastOptions);
+      break;
+    default:
+      toast(title, toastOptions);
+      break;
+  }
 }

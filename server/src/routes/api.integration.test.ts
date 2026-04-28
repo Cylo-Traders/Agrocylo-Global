@@ -20,8 +20,14 @@ vi.mock('../services/cartService.js', () => ({
   checkout: vi.fn(),
 }));
 
+vi.mock('../services/notificationService.js', () => ({
+  listNotifications: vi.fn(),
+  markNotificationsRead: vi.fn(),
+}));
+
 import * as productService from '../services/productService.js';
 import * as cartService from '../services/cartService.js';
+import * as notificationService from '../services/notificationService.js';
 
 describe('Product and cart API endpoints', () => {
   beforeEach(() => {
@@ -32,6 +38,8 @@ describe('Product and cart API endpoints', () => {
     vi.mocked(productService.listProducts).mockResolvedValue({
       page: 1,
       page_size: 20,
+      total: 1,
+      totalPages: 1,
       items: [{ id: 'p1', name: 'Tomato' }],
     });
 
@@ -53,6 +61,76 @@ describe('Product and cart API endpoints', () => {
     expect(res.status).toBe(404);
     expect(res.headers['content-type']).toContain('application/problem+json');
     expect(res.body.title).toBe('Not Found');
+  });
+
+  it('GET /products supports search filter', async () => {
+    vi.mocked(productService.listProducts).mockResolvedValue({
+      page: 1,
+      page_size: 20,
+      total: 1,
+      totalPages: 1,
+      items: [{ id: 'p1', name: 'Maize' }],
+    });
+
+    const res = await request(app).get('/products?search=maize');
+    expect(res.status).toBe(200);
+    expect(productService.listProducts).toHaveBeenCalledWith(
+      expect.objectContaining({ search: 'maize' })
+    );
+  });
+
+  it('GET /products supports location filter', async () => {
+    vi.mocked(productService.listProducts).mockResolvedValue({
+      page: 1,
+      page_size: 20,
+      total: 0,
+      totalPages: 0,
+      items: [],
+    });
+
+    const res = await request(app).get('/products?location=Lagos');
+    expect(res.status).toBe(200);
+    expect(productService.listProducts).toHaveBeenCalledWith(
+      expect.objectContaining({ location: 'Lagos' })
+    );
+  });
+
+  it('GET /products supports price range filters', async () => {
+    vi.mocked(productService.listProducts).mockResolvedValue({
+      page: 1,
+      page_size: 20,
+      total: 2,
+      totalPages: 1,
+      items: [{ id: 'p1' }, { id: 'p2' }],
+    });
+
+    const res = await request(app).get('/products?minPrice=1000&maxPrice=5000');
+    expect(res.status).toBe(200);
+    expect(productService.listProducts).toHaveBeenCalledWith(
+      expect.objectContaining({ minPrice: '1000', maxPrice: '5000' })
+    );
+  });
+
+  it('GET /products supports combined filters', async () => {
+    vi.mocked(productService.listProducts).mockResolvedValue({
+      page: 1,
+      page_size: 20,
+      total: 1,
+      totalPages: 1,
+      items: [{ id: 'p1', name: 'Rice', location: 'Abuja', category: 'Grains' }],
+    });
+
+    const res = await request(app).get('/products?search=rice&location=Abuja&minPrice=2000&maxPrice=10000&category=Grains');
+    expect(res.status).toBe(200);
+    expect(productService.listProducts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        search: 'rice',
+        location: 'Abuja',
+        minPrice: '2000',
+        maxPrice: '10000',
+        category: 'Grains'
+      })
+    );
   });
 
   it('GET /cart returns grouped payload for authenticated buyer', async () => {
@@ -100,5 +178,47 @@ describe('Product and cart API endpoints', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.orders[0].fee_amount).toBe('21');
+  });
+
+  it('GET /notifications returns unread items for a Stellar wallet', async () => {
+    vi.mocked(notificationService.listNotifications).mockResolvedValue([
+      {
+        id: 'n1',
+        walletAddress: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+        message: 'Order funded',
+        orderId: '42',
+        type: 'created',
+        isRead: false,
+        createdAt: new Date('2026-04-24T12:00:00.000Z'),
+      },
+    ]);
+
+    const res = await request(app)
+      .get('/notifications')
+      .set('x-wallet-address', 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF');
+
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(1);
+    expect(res.body.items[0].orderId).toBe('42');
+    expect(notificationService.listNotifications).toHaveBeenCalledWith(
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      { unreadOnly: true, limit: undefined },
+    );
+  });
+
+  it('POST /notifications/read marks items as read', async () => {
+    vi.mocked(notificationService.markNotificationsRead).mockResolvedValue({ count: 2 });
+
+    const res = await request(app)
+      .post('/notifications/read')
+      .set('x-wallet-address', 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF')
+      .send({ ids: ['n1', 'n2'] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.count).toBe(2);
+    expect(notificationService.markNotificationsRead).toHaveBeenCalledWith(
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      ['n1', 'n2'],
+    );
   });
 });

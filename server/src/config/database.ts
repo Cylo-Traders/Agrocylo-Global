@@ -1,16 +1,17 @@
 import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from 'pg';
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import logger from './logger.js';
 
-export const prisma = new PrismaClient();
+const connectionString = process.env['DATABASE_URL']!;
+const pool = new Pool({ connectionString });
+const adapter = new PrismaPg(pool);
 
-const pool = new Pool({
-  connectionString: process.env['DATABASE_URL'],
-});
+export const prisma = new PrismaClient({ adapter });
 
 export async function connectDb() {
   try {
-    await pool.query('select 1');
+    await prisma.$connect();
     logger.info('Database connection successful.');
   } catch (error) {
     logger.error('Database connection failed:', error);
