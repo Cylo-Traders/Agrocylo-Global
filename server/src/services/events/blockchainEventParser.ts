@@ -6,7 +6,9 @@ const SUPPORTED_EVENT_TYPES = new Set<IndexedEventType>([
   "campaign.invested",
   "campaign.settled",
   "order.created",
+  "order.delivered",
   "order.confirmed",
+  "order.refunded",
 ]);
 
 function toStringValue(value: unknown): string | undefined {
@@ -17,8 +19,7 @@ function toStringValue(value: unknown): string | undefined {
 function toDateValue(value: unknown): Date {
   if (value instanceof Date) return value;
   if (typeof value === "number") {
-    const millis = value > 1_000_000_000_000 ? value : value * 1000;
-    return new Date(millis);
+    return new Date(value > 1_000_000_000_000 ? value : value * 1000);
   }
   if (typeof value === "string") {
     const parsed = Number.parseInt(value, 10);
@@ -30,8 +31,7 @@ function toDateValue(value: unknown): Date {
 }
 
 function getEventIndex(eventId: string): number {
-  const parts = eventId.split("-");
-  const parsed = Number.parseInt(parts[1] ?? "", 10);
+  const parsed = Number.parseInt(eventId.split("-")[1] ?? "", 10);
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
@@ -44,9 +44,7 @@ export class BlockchainEventParser {
     topic: string[];
     value: string;
   }): IndexedEvent | null {
-    const topics = rawEvent.topic.map((entry) =>
-      scValToNative(xdr.ScVal.fromXDR(entry, "base64")),
-    );
+    const topics = rawEvent.topic.map((t) => scValToNative(xdr.ScVal.fromXDR(t, "base64")));
     const value = scValToNative(xdr.ScVal.fromXDR(rawEvent.value, "base64"));
     return this.parseDecoded(topics, value, rawEvent);
   }
@@ -68,8 +66,8 @@ export class BlockchainEventParser {
     const common = {
       sourceEventId: meta.id,
       eventType,
-      entity: entity as "campaign" | "order",
-      action: action as "created" | "invested" | "settled" | "confirmed",
+      entity: entity as IndexedEvent["entity"],
+      action: action as IndexedEvent["action"],
       ledger: meta.ledger,
       eventIndex: getEventIndex(meta.id),
       timestamp,
@@ -102,24 +100,51 @@ export class BlockchainEventParser {
           actorAddress: toStringValue(data[1]),
           status: toStringValue(data[2]) ?? "SETTLED",
         };
+
+      // Contract: publish((order, created), (order_id, buyer, farmer, amount, token))
+      // FundsLocked: funds are transferred into escrow at order creation.
       case "order.created":
         return {
           ...common,
           orderIdOnChain: toStringValue(data[0]),
-          actorAddress: toStringValue(data[1]),
-          secondaryAddress: toStringValue(data[2]),
+          actorAddress: toStringValue(data[1]),     // buyer
+          secondaryAddress: toStringValue(data[2]), // farmer
           amount: toStringValue(data[3]),
           token: toStringValue(data[4]),
           status: "PENDING",
         };
+
+      // Contract: publish((order, delivered), (order_id, farmer, buyer, delivery_timestamp))
+      case "order.delivered":
+        return {
+          ...common,
+          orderIdOnChain: toStringValue(data[0]),
+          actorAddress: toStringValue(data[1]),     // farmer
+          secondaryAddress: toStringValue(data[2]), // buyer
+          status: "DELIVERED",
+        };
+
+      // Contract: publish((order, confirmed), (order_id, buyer, farmer))
+      // DeliveryConfirmed: buyer confirms receipt, payment released to farmer.
       case "order.confirmed":
         return {
           ...common,
           orderIdOnChain: toStringValue(data[0]),
-          actorAddress: toStringValue(data[1]),
-          secondaryAddress: toStringValue(data[2]),
-          status: "CONFIRMED",
+          actorAddress: toStringValue(data[1]),     // buyer
+          secondaryAddress: toStringValue(data[2]), // farmer
+          status: "COMPLETED",
         };
+
+      // Contract: publish((order, refunded), (order_id, buyer))
+      // RefundIssued: expired order refunded back to buyer.
+      case "order.refunded":
+        return {
+          ...common,
+          orderIdOnChain: toStringValue(data[0]),
+          actorAddress: toStringValue(data[1]),     // buyer
+          status: "REFUNDED",
+        };
+
       default:
         return null;
     }
