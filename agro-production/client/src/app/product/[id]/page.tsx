@@ -1,6 +1,8 @@
-import React from 'react';
+"use client";
 import type { Metadata } from 'next';
 import { getProduct } from '@/lib/productService';
+import { useState } from 'react';
+import InvestmentModal from '@/components/ui/InvestmentModal';
 
 export const metadata: Metadata = {
   title: 'Product Detail',
@@ -8,6 +10,8 @@ export const metadata: Metadata = {
 
 export default async function ProductDetail({ params }: { params: { id: string } }) {
   const product = await getProduct(params.id);
+  const [modalOpen, setModalOpen] = useState(false);
+
   return (
     <section className="max-w-2xl mx-auto p-4 bg-[var(--color-background)] text-[var(--color-foreground)]">
       <img src={product.image} alt={product.name} className="w-full h-auto rounded" />
@@ -19,10 +23,15 @@ export default async function ProductDetail({ params }: { params: { id: string }
       </div>
       <button
         className="mt-6 px-4 py-2 bg-[var(--color-primary-600)] text-white rounded hover:bg-[var(--color-primary-700)]"
-        onClick={() => alert('Buy clicked')}
+        onClick={() => setModalOpen(true)}
       >
-        Buy
+        Invest
       </button>
+      <InvestmentModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        productId={product.id}
+      />
     </section>
   );
 }
