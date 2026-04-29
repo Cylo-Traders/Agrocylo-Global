@@ -9,6 +9,7 @@ import {
   ListCampaignsQuerySchema,
 } from "../schemas/campaign.js";
 import type { CampaignStatus } from "@prisma/client";
+import { broadcast } from "../services/wsServer.js";
 
 const router = Router();
 
@@ -89,6 +90,8 @@ router.post(
       },
     });
 
+    broadcast("campaign.created", campaign);
+
     res.status(201).json(campaign);
   },
 );
@@ -102,6 +105,40 @@ router.get(
       where: { campaignId: req.params.id },
       orderBy: { createdAt: "desc" },
     });
+    res.json(investments);
+  },
+);
+
+// GET /investments?investorAddress=... — all investments for a user
+router.get(
+  "/investments",
+  async (req: Request, res: Response) => {
+    const { investorAddress } = req.query;
+    if (!investorAddress || typeof investorAddress !== "string") {
+      res.status(400).json({ error: "investorAddress query param required" });
+      return;
+    }
+
+    const investments = await prisma.investment.findMany({
+      where: { investorAddress },
+      orderBy: { createdAt: "desc" },
+      include: {
+        campaign: {
+          select: {
+            id: true,
+            onChainId: true,
+            farmerAddress: true,
+            tokenAddress: true,
+            targetAmount: true,
+            totalRaised: true,
+            totalRevenue: true,
+            status: true,
+            deadline: true,
+          },
+        },
+      },
+    });
+
     res.json(investments);
   },
 );
@@ -138,6 +175,13 @@ router.post(
         amount,
         ledger: 0, // will be updated by indexer
       },
+    });
+
+    broadcast("campaign.invested", {
+      campaignId: campaign.id,
+      investorAddress,
+      amount,
+      totalRaised: campaign.totalRaised,
     });
 
     res.status(201).json(investment);

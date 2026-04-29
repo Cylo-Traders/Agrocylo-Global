@@ -1,9 +1,11 @@
+import http from 'http';
 import app from './app.js';
 import logger from './config/logger.js';
 import { config } from './config/index.js';
 import { connectDB } from './db/client.js';
 import { startSorobanEventListener } from './services/sorobanEventListener.js';
 import { startProductionWatcher } from './events/watcher.js';
+import { attachWebSocketServer } from './services/wsServer.js';
 
 async function bootstrap() {
   try {
@@ -21,7 +23,10 @@ async function bootstrap() {
       logger.warn('PRODUCTION_CONTRACT_ID not set — single-contract watcher disabled');
     }
 
-    app.listen(config.port, () => {
+    const server = http.createServer(app);
+    attachWebSocketServer(server);
+
+    server.listen(config.port, () => {
       logger.info(
         `[server]: Production backend running at http://localhost:${config.port}`,
       );

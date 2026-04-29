@@ -1,6 +1,7 @@
 import type { CampaignStatus, OrderStatus } from "@prisma/client";
 import { prisma } from "../db/client.js";
 import logger from "../config/logger.js";
+import { broadcast } from "../services/wsServer.js";
 import type {
   CampaignCreatedEvent,
   CampaignInvestedEvent,
@@ -145,6 +146,13 @@ async function handleCampaignInvested(event: CampaignInvestedEvent) {
       update: {},
     });
 
+    broadcast("campaign.invested", {
+      campaignId: campaign.id,
+      investorAddress: event.investor,
+      amount: event.amount,
+      totalRaised: event.totalRaised,
+    });
+
     await tx.transaction.create({
       data: {
         campaignId: campaign.id,
@@ -175,6 +183,12 @@ async function handleCampaignSettled(event: CampaignSettledEvent) {
         totalRevenue: event.totalRevenue,
         status: "SETTLED",
       },
+    });
+
+    broadcast("campaign.settled", {
+      campaignId: campaign.id,
+      onChainId: event.campaignId,
+      totalRevenue: event.totalRevenue,
     });
 
     await tx.transaction.create({
