@@ -11,14 +11,23 @@ import { showOrderEventToast } from "@/services/notification";
 
 const POLL_INTERVAL_MS = 15000;
 
+function isNetworkError(error: unknown): boolean {
+  if (error instanceof TypeError) return true;
+  const message =
+    error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  return /failed to fetch|network|fetch failed/i.test(message);
+}
+
 export default function NotificationPoller() {
   const router = useRouter();
   const { address, connected } = useWallet();
   const seenNotificationIdsRef = useRef<Set<string>>(new Set());
   const isPollingRef = useRef(false);
+  const offlineWarnedRef = useRef(false);
 
   useEffect(() => {
     seenNotificationIdsRef.current.clear();
+    offlineWarnedRef.current = false;
   }, [address]);
 
   useEffect(() => {
@@ -63,7 +72,16 @@ export default function NotificationPoller() {
           unseen.map((notification) => notification.id),
         );
       } catch (error) {
-        console.error("Failed to poll notifications:", error);
+        if (isNetworkError(error)) {
+          if (!offlineWarnedRef.current) {
+            offlineWarnedRef.current = true;
+            console.warn(
+              "Notification poller: backend unreachable. Suppressing further errors until next reconnect.",
+            );
+          }
+        } else {
+          console.error("Failed to poll notifications:", error);
+        }
       } finally {
         isPollingRef.current = false;
       }

@@ -91,14 +91,13 @@ export async function getXlmBalance(address: string): Promise<string> {
     const native = account.balances.find(
       (b: { asset_type: string }) => b.asset_type === "native",
     );
-    // Balance is a string already, return it or '0'
     return native?.balance ?? "0";
   } catch (err: unknown) {
-    // If account not found (404), throw a generic message
-    if (err instanceof Error && err.message.includes("404")) {
-      throw new Error(
-        "Account not found on this network. Please ensure the account is funded.",
-      );
+    const message = err instanceof Error ? err.message : String(err);
+    // Unfunded accounts return 404 / "Not Found" from Horizon. That's a valid
+    // empty-wallet state on testnet, not a failure — surface a zero balance.
+    if (/404|not found/i.test(message)) {
+      return "0";
     }
     throw err;
   }

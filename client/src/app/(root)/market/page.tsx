@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 
+import { RefreshCw, WifiOff } from "lucide-react";
+
 import Wrapper from "@/components/shared/wrapper";
 import { useWallet } from "@/hooks/useWallet";
 import { useProducts } from "@/hooks/queries/useProducts";
@@ -15,6 +17,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { siteConfig } from "@/config/site.config";
 import type { ProductCategory } from "@/types/product";
+
+function isNetworkError(error: unknown): boolean {
+  if (error instanceof TypeError) return true;
+  const message = error instanceof Error ? error.message : "";
+  return /failed to fetch|network|fetch failed/i.test(message);
+}
 
 const CATEGORIES: Array<ProductCategory | "All"> = [
   "All",
@@ -32,7 +40,7 @@ export default function MarketPage() {
   const [category, setCategory] = useState<ProductCategory | "All">("All");
   const [search, setSearch] = useState("");
 
-  const { data, isLoading, error } = useProducts({
+  const { data, isLoading, error, refetch, isFetching } = useProducts({
     pageSize: 50,
     category: category === "All" ? undefined : category,
     includeUnavailable: false,
@@ -133,10 +141,34 @@ export default function MarketPage() {
             ))}
           </div>
         ) : error ? (
-          <div className="bg-destructive/10 text-destructive rounded-2xl border border-destructive/30 p-6">
-            {error instanceof Error
-              ? error.message
-              : "Failed to load products."}
+          <div className="bg-card flex flex-col items-center gap-4 rounded-2xl border p-10 text-center">
+            <div className="bg-muted text-muted-foreground flex size-12 items-center justify-center rounded-2xl">
+              <WifiOff className="size-5" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-lg font-semibold">
+                {isNetworkError(error)
+                  ? "Can't reach the marketplace right now"
+                  : "Couldn't load products"}
+              </h3>
+              <p className="text-muted-foreground text-sm">
+                {isNetworkError(error)
+                  ? "The backend service is unreachable. Check your connection and try again."
+                  : error instanceof Error
+                    ? error.message
+                    : "Something went wrong."}
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              onClick={() => void refetch()}
+              disabled={isFetching}
+            >
+              <RefreshCw
+                className={isFetching ? "size-4 animate-spin" : "size-4"}
+              />
+              Try again
+            </Button>
           </div>
         ) : filtered.length === 0 ? (
           <div className="bg-card rounded-2xl border p-10 text-center">

@@ -9,6 +9,9 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: clientRoot,
   },
+  images: {
+    qualities: [75, 100],
+  },
 };
 
 export default nextConfig;
