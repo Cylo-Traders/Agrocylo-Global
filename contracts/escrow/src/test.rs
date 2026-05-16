@@ -116,6 +116,7 @@ fn test_create_and_confirm_order() {
     assert_eq!(order_details.status, OrderStatus::Pending);
     assert_eq!(order_details.delivery_timestamp, 0);
 
+    client.mock_all_auths().mark_delivered(&farmer, &order_id);
     client.mock_all_auths().confirm_receipt(&buyer, &order_id);
 
     let order_after = client.get_order_details(&order_id);
@@ -133,7 +134,7 @@ fn test_mark_delivered_then_confirm() {
     client.mock_all_auths().mark_delivered(&farmer, &order_id);
 
     let order = client.get_order_details(&order_id);
-    assert_eq!(order.status, OrderStatus::Pending);
+    assert_eq!(order.status, OrderStatus::Delivered);
     assert!(order.delivery_timestamp > 0);
 
     client.mock_all_auths().confirm_receipt(&buyer, &order_id);
@@ -170,7 +171,7 @@ fn test_mark_delivered_twice_fails() {
     let result = client
         .mock_all_auths()
         .try_mark_delivered(&farmer, &order_id);
-    assert!(result.is_err());
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::OrderNotPending);
 }
 
 #[test]
@@ -181,10 +182,13 @@ fn test_confirm_without_mark_delivered() {
         .mock_all_auths()
         .create_order(&buyer, &farmer, &token.address, &500);
 
-    client.mock_all_auths().confirm_receipt(&buyer, &order_id);
+    let result = client
+        .mock_all_auths()
+        .try_confirm_receipt(&buyer, &order_id);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::OrderNotDelivered);
 
     let order = client.get_order_details(&order_id);
-    assert_eq!(order.status, OrderStatus::Completed);
+    assert_eq!(order.status, OrderStatus::Pending);
 }
 
 #[test]
@@ -194,6 +198,7 @@ fn test_confirm_already_completed() {
         .mock_all_auths()
         .create_order(&buyer, &farmer, &token.address, &500);
 
+    client.mock_all_auths().mark_delivered(&farmer, &order_id);
     client.mock_all_auths().confirm_receipt(&buyer, &order_id);
 
     let result = client
@@ -261,6 +266,7 @@ fn test_platform_fee_acceptance_criteria() {
     let order_details = client.get_order_details(&1);
     assert_eq!(order_details.amount, 970);
 
+    client.mock_all_auths().mark_delivered(&farmer, &1);
     client.mock_all_auths().confirm_receipt(&buyer, &1);
     assert_eq!(token.balance(&farmer), 970);
 }
@@ -319,6 +325,7 @@ fn test_open_dispute_not_pending_fails() {
         .mock_all_auths()
         .create_order(&buyer, &farmer, &token.address, &500);
 
+    client.mock_all_auths().mark_delivered(&farmer, &order_id);
     client.mock_all_auths().confirm_receipt(&buyer, &order_id);
 
     let reason = String::from_str(&_env, "Issue with order");
