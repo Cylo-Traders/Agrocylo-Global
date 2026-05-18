@@ -275,6 +275,9 @@ impl EscrowContract {
         if order.status != OrderStatus::Pending {
             return Err(EscrowError::OrderNotPending);
         }
+        if order.delivery_timestamp != 0 {
+            return Err(EscrowError::OrderNotPending);
+        }
 
         let delivery_timestamp = env.ledger().timestamp();
         order.delivery_timestamp = delivery_timestamp;
@@ -391,14 +394,14 @@ impl EscrowContract {
         opened_by.require_auth();
 
         let mut order = read_order(&env, order_id)?;
+        if env.storage().persistent().has(&DataKey::Dispute(order_id)) {
+            return Err(EscrowError::DisputeAlreadyExists);
+        }
         if order.status != OrderStatus::Pending {
             return Err(EscrowError::OrderNotPending);
         }
         if opened_by != order.buyer && opened_by != order.farmer {
             return Err(EscrowError::NotOrderParticipant);
-        }
-        if env.storage().persistent().has(&DataKey::Dispute(order_id)) {
-            return Err(EscrowError::DisputeAlreadyExists);
         }
 
         order.status = OrderStatus::Disputed;
