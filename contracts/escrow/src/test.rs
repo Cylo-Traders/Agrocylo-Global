@@ -3,7 +3,9 @@
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
-    token, Address, Env, String,
+    token,
+    xdr::SorobanAuthorizationEntry,
+    Address, Env, String,
 };
 
 fn setup_test() -> (
@@ -12,13 +14,14 @@ fn setup_test() -> (
     Address,
     Address,
     Address,
+    token::Client<'static>,
+    token::Client<'static>,
     Address,
-    token::Client<'static>,
-    token::Client<'static>,
     Address,
 ) {
     let env = Env::default();
     env.mock_all_auths();
+    env.ledger().set_timestamp(1);
 
     let admin = Address::generate(&env);
     let farmer = Address::generate(&env);
@@ -60,43 +63,6 @@ fn setup_test() -> (
         admin,
         investor1,
     )
-}
-
-fn create_test_with_tokens() -> (
-    Env,
-    EscrowContractClient<'static>,
-    Address,
-    Address,
-    Address,
-    token::Client<'static>,
-) {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let admin = Address::generate(&env);
-    let buyer = Address::generate(&env);
-    let farmer = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-
-    let xlm_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
-    let xlm_client = token::Client::new(&env, &xlm_contract.address());
-    let xlm_admin_client = token::StellarAssetClient::new(&env, &xlm_contract.address());
-    xlm_admin_client.mint(&buyer, &1000);
-
-    let usdc_contract = env.register_stellar_asset_contract_v2(token_admin);
-    let usdc_client = token::Client::new(&env, &usdc_contract.address());
-
-    let contract_id = env.register(EscrowContract, ());
-    let client = EscrowContractClient::new(&env, &contract_id);
-
-    let mut supported_tokens = Vec::new(&env);
-    supported_tokens.push_back(xlm_client.address.clone());
-    supported_tokens.push_back(usdc_client.address.clone());
-
-    let fee_collector = Address::generate(&env);
-    client.initialize(&admin, &fee_collector, &supported_tokens);
-
-    (env, client, admin, buyer, farmer, xlm_client)
 }
 
 #[test]
@@ -170,7 +136,7 @@ fn test_mark_delivered_twice_fails() {
     let result = client
         .mock_all_auths()
         .try_mark_delivered(&farmer, &order_id);
-    assert!(result.is_err());
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::OrderNotPending);
 }
 
 #[test]
@@ -245,6 +211,45 @@ fn test_create_order_unsupported_token_fails() {
         &500,
     );
     assert_eq!(result.unwrap_err().unwrap(), EscrowError::UnsupportedToken);
+}
+
+#[test]
+fn test_create_order_zero_amount_fails() {
+    let (_env, client, buyer, farmer, _, token, _, _, _) = setup_test();
+
+    let result = client
+        .mock_all_auths()
+        .try_create_order(&buyer, &farmer, &token.address, &0);
+
+    assert_eq!(
+        result.unwrap_err().unwrap(),
+        EscrowError::AmountMustBePositive
+    );
+}
+
+#[test]
+fn test_create_order_negative_amount_fails() {
+    let (_env, client, buyer, farmer, _, token, _, _, _) = setup_test();
+
+    let result = client
+        .mock_all_auths()
+        .try_create_order(&buyer, &farmer, &token.address, &-1);
+
+    assert_eq!(
+        result.unwrap_err().unwrap(),
+        EscrowError::AmountMustBePositive
+    );
+}
+
+#[test]
+fn test_create_order_without_buyer_auth_fails() {
+    let (env, client, buyer, farmer, _, token, _, _, _) = setup_test();
+    let auths: [SorobanAuthorizationEntry; 0] = [];
+    env.set_auths(&auths);
+
+    let result = client.try_create_order(&buyer, &farmer, &token.address, &500);
+
+    assert!(result.is_err());
 }
 
 #[test]
@@ -388,11 +393,16 @@ fn test_open_dispute_duplicate_fails() {
 
 #[test]
 fn test_resolve_dispute_refund() {
-    let (_env, client, buyer, farmer, _, token, _, _, admin) = setup_test();
+    let (_env, client, buyer, farmer, collector, token, _, admin, _) = setup_test();
 
     let order_id = client
         .mock_all_auths()
         .create_order(&buyer, &farmer, &token.address, &500);
+    let order_after_create = client.get_order_details(&order_id);
+    assert_eq!(order_after_create.amount, 485);
+    assert_eq!(token.balance(&buyer), 500);
+    assert_eq!(token.balance(&collector), 15);
+    assert_eq!(token.balance(&client.address), 485);
 
     let reason = String::from_str(&_env, "Product not received");
     let evidence_hash = String::from_str(&_env, "QmHashRefund");
@@ -407,15 +417,24 @@ fn test_resolve_dispute_refund() {
 
     let order = client.get_order_details(&order_id);
     assert_eq!(order.status, OrderStatus::Refunded);
+    assert_eq!(token.balance(&buyer), 985);
+    assert_eq!(token.balance(&farmer), 0);
+    assert_eq!(token.balance(&collector), 15);
+    assert_eq!(token.balance(&client.address), 0);
 }
 
 #[test]
 fn test_resolve_dispute_release() {
-    let (_env, client, buyer, farmer, _, token, _, _, admin) = setup_test();
+    let (_env, client, buyer, farmer, collector, token, _, admin, _) = setup_test();
 
     let order_id = client
         .mock_all_auths()
         .create_order(&buyer, &farmer, &token.address, &500);
+    let order_after_create = client.get_order_details(&order_id);
+    assert_eq!(order_after_create.amount, 485);
+    assert_eq!(token.balance(&buyer), 500);
+    assert_eq!(token.balance(&collector), 15);
+    assert_eq!(token.balance(&client.address), 485);
 
     let reason = String::from_str(&_env, "Farmer delivered goods");
     let evidence_hash = String::from_str(&_env, "QmHashRelease");
@@ -430,15 +449,24 @@ fn test_resolve_dispute_release() {
 
     let order = client.get_order_details(&order_id);
     assert_eq!(order.status, OrderStatus::Completed);
+    assert_eq!(token.balance(&buyer), 500);
+    assert_eq!(token.balance(&farmer), 485);
+    assert_eq!(token.balance(&collector), 15);
+    assert_eq!(token.balance(&client.address), 0);
 }
 
 #[test]
 fn test_resolve_dispute_split_50_50() {
-    let (_env, client, buyer, farmer, _, token, _, _, admin) = setup_test();
+    let (_env, client, buyer, farmer, collector, token, _, admin, _) = setup_test();
 
     let order_id = client
         .mock_all_auths()
         .create_order(&buyer, &farmer, &token.address, &1000);
+    let order_after_create = client.get_order_details(&order_id);
+    assert_eq!(order_after_create.amount, 970);
+    assert_eq!(token.balance(&buyer), 0);
+    assert_eq!(token.balance(&collector), 30);
+    assert_eq!(token.balance(&client.address), 970);
 
     let reason = String::from_str(&_env, "Partial fulfillment");
     let evidence_hash = String::from_str(&_env, "QmHashSplit50");
@@ -453,12 +481,15 @@ fn test_resolve_dispute_split_50_50() {
 
     let order = client.get_order_details(&order_id);
     assert_eq!(order.status, OrderStatus::Completed);
+    assert_eq!(token.balance(&buyer), 485);
+    assert_eq!(token.balance(&farmer), 485);
+    assert_eq!(token.balance(&collector), 30);
+    assert_eq!(token.balance(&client.address), 0);
 }
 
 #[test]
 fn test_resolve_dispute_not_admin_fails() {
-    let (_env, client, buyer, farmer, _, token, _, _, _) = setup_test();
-    let (env, _, admin, _, _, _) = create_test_with_tokens();
+    let (env, client, buyer, farmer, _, token, _, _, _) = setup_test();
 
     let order_id = client
         .mock_all_auths()
@@ -482,8 +513,46 @@ fn test_resolve_dispute_not_admin_fails() {
 }
 
 #[test]
+fn test_initialize_with_insufficient_supported_tokens_fails() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let fee_collector = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let xlm_contract = env.register_stellar_asset_contract_v2(token_admin);
+    let xlm_client = token::Client::new(&env, &xlm_contract.address());
+    let contract_id = env.register(EscrowContract, ());
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let mut supported_tokens = Vec::new(&env);
+    supported_tokens.push_back(xlm_client.address.clone());
+
+    let result = client.try_initialize(&admin, &fee_collector, &supported_tokens);
+    assert_eq!(
+        result.unwrap_err().unwrap(),
+        EscrowError::MustSupportTwoTokens
+    );
+}
+
+#[test]
+fn test_initialize_twice_fails() {
+    let (_env, client, _, _, fee_collector, token, second_token, admin, _) = setup_test();
+    let mut supported_tokens = Vec::new(&_env);
+    supported_tokens.push_back(token.address.clone());
+    supported_tokens.push_back(second_token.address.clone());
+
+    let result = client
+        .mock_all_auths()
+        .try_initialize(&admin, &fee_collector, &supported_tokens);
+
+    assert_eq!(
+        result.unwrap_err().unwrap(),
+        EscrowError::AlreadyInitialized
+    );
+}
+
+#[test]
 fn test_resolve_dispute_not_disputed_fails() {
-    let (_env, client, buyer, farmer, _, token, _, _, admin) = setup_test();
+    let (_env, client, buyer, farmer, _, token, _, admin, _) = setup_test();
 
     let order_id = client
         .mock_all_auths()
@@ -499,7 +568,7 @@ fn test_resolve_dispute_not_disputed_fails() {
 
 #[test]
 fn test_resolve_dispute_invalid_split_ratio_fails() {
-    let (_env, client, buyer, farmer, _, token, _, _, admin) = setup_test();
+    let (_env, client, buyer, farmer, _, token, _, admin, _) = setup_test();
 
     let order_id = client
         .mock_all_auths()
