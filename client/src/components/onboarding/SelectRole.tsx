@@ -25,7 +25,7 @@ export default function SelectRole({
         This cannot be changed later.
       </p>
 
-      <div className="grid grid-cols-2 gap-4 mb-6">
+      <div className="grid grid-cols-2 gap-4 mb-6" role="radiogroup" aria-label="Select your role">
         <button
           onClick={() => onSelect("farmer")}
           className={`flex flex-col items-center gap-2 rounded-xl border-2 p-6 transition-colors ${
@@ -33,8 +33,11 @@ export default function SelectRole({
               ? "border-primary-500 bg-primary-50"
               : "border-neutral-200 hover:border-neutral-300"
           }`}
+          role="radio"
+          aria-checked={selected === "farmer"}
+          aria-label="I am a Farmer"
         >
-          <span className="text-4xl">🌾</span>
+          <span className="text-4xl" aria-hidden="true">🌾</span>
           <span className="font-semibold text-foreground">I am a Farmer</span>
           <span className="text-xs text-muted">Sell produce via escrow</span>
         </button>
@@ -46,8 +49,11 @@ export default function SelectRole({
               ? "border-accent bg-accent/5"
               : "border-neutral-200 hover:border-neutral-300"
           }`}
+          role="radio"
+          aria-checked={selected === "buyer"}
+          aria-label="I am a Buyer"
         >
-          <span className="text-4xl">🛒</span>
+          <span className="text-4xl" aria-hidden="true">🛒</span>
           <span className="font-semibold text-foreground">I am a Buyer</span>
           <span className="text-xs text-muted">Buy from local farmers</span>
         </button>

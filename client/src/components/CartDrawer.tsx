@@ -17,6 +17,8 @@ import {
 import { createOrderWithOrderId, approveToken } from "@/services/stellar/contractService";
 import { getNetworkConfig } from "@/services/stellar/networkConfig";
 import { useWallet } from "@/hooks/useWallet";
+import { validateDeadline } from "@/lib/validation";
+import { trackEvent } from "@/lib/analytics";
 
 type OrderSuccess = { orderId: string; farmerWallet: string; txHash: string };
 type OrderFailure = { farmerWallet: string; error: string };
@@ -46,6 +48,7 @@ export default function CartDrawer() {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [deliveryDeadline, setDeliveryDeadline] = useState<string>("");
   const [running, setRunning] = useState(false);
+  const [deadlineError, setDeadlineError] = useState<string | null>(null);
 
   const [successOrders, setSuccessOrders] = useState<OrderSuccess[]>([]);
   const [failedOrders, setFailedOrders] = useState<OrderFailure[]>([]);
@@ -70,6 +73,7 @@ export default function CartDrawer() {
     setStep(1);
     setRunning(false);
     setDeliveryDeadline("");
+    setDeadlineError(null);
     setSuccessOrders([]);
     setFailedOrders([]);
     setProgressMessage("");
@@ -82,11 +86,15 @@ export default function CartDrawer() {
       alert("Connect your wallet to checkout.");
       return;
     }
-    const deadline = deliveryDeadline?.trim();
-    if (!deadline) {
-      alert("Please select a delivery deadline.");
+
+    const deadlineError = validateDeadline(deliveryDeadline);
+    if (deadlineError) {
+      setDeadlineError(deadlineError);
       return;
     }
+    setDeadlineError(null);
+
+    const deadline = deliveryDeadline.trim();
 
     setRunning(true);
     setSuccessOrders([]);
@@ -95,7 +103,6 @@ export default function CartDrawer() {
     setGroupProgress(Object.fromEntries(groups.map((g) => [g.farmer_wallet, "pending"])));
 
     try {
-      // Sequential processing to match wallet UX and progress reporting.
       for (let i = 0; i < groups.length; i++) {
         const group = groups[i];
         const farmerWallet = group.farmer_wallet;
@@ -124,7 +131,6 @@ export default function CartDrawer() {
 
         const { contractId } = getNetworkConfig();
 
-        // Step A: (Optional) token approval. If simulation fails, we proceed to create_order.
         if (contractId && contractId.trim().length > 0) {
           const approval = await approveToken(address, tokenContractId, contractId, net);
           if (approval.success && approval.data) {
@@ -139,7 +145,6 @@ export default function CartDrawer() {
           }
         }
 
-        // Step B: create_order
         const built = await createOrderWithOrderId(
           address,
           farmerWallet,
@@ -172,13 +177,14 @@ export default function CartDrawer() {
         ]);
         setGroupProgress((prev) => ({ ...prev, [farmerWallet]: "success" }));
 
-        // Remove cart items for this farmer group after successful escrow creation.
-        // This enables partial checkout without duplicating successful orders.
         const itemsToRemove = group.items.map((it) => it.id);
         await Promise.all(itemsToRemove.map(itemId => removeCartItem(itemId)));
-        // Refresh cart to keep badge/count consistent.
         await refreshCart();
       }
+
+      trackEvent("order_created", {
+        orderCount: successOrders.length + 1,
+      });
     } finally {
       setRunning(false);
       setStep(3);
@@ -198,9 +204,15 @@ export default function CartDrawer() {
         onClick={() => closeAndReset()}
         role="button"
         tabIndex={0}
+        aria-label="Close cart overlay"
       />
 
-      <div className="absolute right-0 top-0 h-full w-full max-w-lg bg-gray-950 text-white shadow-2xl flex flex-col">
+      <div
+        className="absolute right-0 top-0 h-full w-full max-w-lg bg-gray-950 text-white shadow-2xl flex flex-col"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Shopping cart"
+      >
         <div className="p-4 flex items-center justify-between gap-3 border-b border-white/10">
           <Text variant="h3" as="h3">
             Cart ({itemCount})
@@ -214,7 +226,7 @@ export default function CartDrawer() {
           {cartLoading ? (
             <Text variant="body" muted>Loading cart...</Text>
           ) : cartError ? (
-            <Text variant="body" className="text-error">{cartError}</Text>
+            <Text variant="body" className="text-error" role="alert">{cartError}</Text>
           ) : empty ? (
             <Card variant="outlined" padding="md">
               <CardContent className="py-10 text-center space-y-3">
@@ -273,6 +285,7 @@ export default function CartDrawer() {
                                   <Button
                                     variant="outline"
                                     onClick={() => setQuantityForProduct(it.product_id, Number(it.quantity) - 1)}
+                                    aria-label={`Decrease quantity of ${it.name}`}
                                   >
                                     -
                                   </Button>
@@ -282,6 +295,7 @@ export default function CartDrawer() {
                                   <Button
                                     variant="outline"
                                     onClick={() => setQuantityForProduct(it.product_id, Number(it.quantity) + 1)}
+                                    aria-label={`Increase quantity of ${it.name}`}
                                   >
                                     +
                                   </Button>
@@ -349,15 +363,26 @@ export default function CartDrawer() {
                   </Text>
 
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">
+                    <label htmlFor="delivery-deadline" className="text-sm font-medium">
                       Delivery deadline
                     </label>
                     <input
+                      id="delivery-deadline"
                       type="datetime-local"
                       value={deliveryDeadline}
-                      onChange={(e) => setDeliveryDeadline(e.target.value)}
+                      onChange={(e) => {
+                        setDeliveryDeadline(e.target.value);
+                        setDeadlineError(null);
+                      }}
                       className="w-full rounded-lg border border-border bg-background px-4 py-2.5 text-foreground text-base"
+                      aria-invalid={!!deadlineError}
+                      aria-describedby={deadlineError ? "deadline-error" : undefined}
                     />
+                    {deadlineError && (
+                      <p id="deadline-error" className="text-sm text-error" role="alert">
+                        {deadlineError}
+                      </p>
+                    )}
                   </div>
 
                   <Card variant="elevated" padding="md">

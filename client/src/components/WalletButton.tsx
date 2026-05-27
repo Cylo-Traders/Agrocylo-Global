@@ -13,6 +13,8 @@ export default function WalletButton() {
           onClick={connect}
           disabled={loading}
           className="px-3 py-1 bg-green-600 text-sm rounded-md hover:bg-green-500 disabled:opacity-60"
+          aria-label={loading ? "Connecting wallet" : "Connect wallet"}
+          aria-busy={loading}
         >
           {loading ? "Connecting..." : "Connect Wallet"}
         </button>
@@ -20,6 +22,7 @@ export default function WalletButton() {
         <button
           onClick={disconnect}
           className="px-3 py-1 bg-red-600 text-sm rounded-md hover:bg-red-500"
+          aria-label="Disconnect wallet"
         >
           Disconnect
         </button>

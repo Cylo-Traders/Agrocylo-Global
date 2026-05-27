@@ -2,6 +2,7 @@
 
 import { ReactNode } from 'react';
 import { BlockchainErrorKind, BlockchainErrorInfo, mapBlockchainError } from './errorHandler';
+import { reportError } from '@/lib/errorTracking';
 
 export interface ErrorDisplayProps {
   error: unknown;
@@ -14,8 +15,10 @@ export function ErrorDisplay({ error, details, children }: ErrorDisplayProps) {
 
   const mapped = mapBlockchainError(error);
 
+  reportError(error, { context: 'ErrorDisplay' });
+
   return (
-    <div className="border border-red-400 rounded-lg p-4 bg-red-50 text-red-900">
+    <div className="border border-red-400 rounded-lg p-4 bg-red-50 text-red-900" role="alert">
       <h2 className="text-lg font-bold mb-2">{mapped.title}</h2>
 
       <p className="mb-3">{mapped.message}</p>

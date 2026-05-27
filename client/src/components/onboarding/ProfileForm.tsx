@@ -27,6 +27,10 @@ export default function ProfileForm({
       setNameError("Display name is required");
       return;
     }
+    if (displayName.trim().length > 100) {
+      setNameError("Display name must be 100 characters or less");
+      return;
+    }
     setNameError("");
     onNext();
   }
@@ -50,13 +54,15 @@ export default function ProfileForm({
             if (nameError) setNameError("");
           }}
           error={nameError}
+          maxLength={100}
         />
 
         <div>
-          <label className="block text-sm font-medium text-foreground mb-1.5">
+          <label htmlFor="profile-bio" className="block text-sm font-medium text-foreground mb-1.5">
             Bio (optional)
           </label>
           <textarea
+            id="profile-bio"
             className="w-full rounded-lg border border-neutral-300 bg-white px-4 py-2.5 text-sm text-foreground placeholder:text-neutral-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 dark:border-neutral-600 dark:bg-neutral-800"
             placeholder="Organic tomatoes and peppers from Lagos..."
             rows={3}

@@ -17,6 +17,14 @@ import type {
   ProductCurrency,
 } from "@/types/product";
 import type { BarterOfferItem } from "@/types/barter";
+import {
+  sanitizeString,
+  validateStellarAddress,
+  validateRequired,
+  validatePositiveNumber,
+  validateMaxLength,
+} from "@/lib/validation";
+import { trackEvent } from "@/lib/analytics";
 
 const CATEGORIES: ProductCategory[] = [
   "Vegetables",
@@ -83,7 +91,7 @@ function ItemFieldset({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" role="group" aria-label={label}>
       <div className="flex items-center justify-between">
         <Text variant="body" className="font-semibold text-sm">
           {label}
@@ -93,6 +101,7 @@ function ItemFieldset({
           variant="outline"
           onClick={addItem}
           className="text-xs px-3 py-1"
+          aria-label={`Add item to ${label}`}
         >
           + Add item
         </Button>
@@ -110,6 +119,8 @@ function ItemFieldset({
         <div
           key={idx}
           className="border border-border rounded-lg p-3 space-y-3 bg-surface"
+          role="group"
+          aria-label={`${label} item ${idx + 1}`}
         >
           <div className="flex items-center justify-between">
             <Text variant="body" muted className="text-xs font-medium">
@@ -120,6 +131,7 @@ function ItemFieldset({
                 type="button"
                 onClick={() => removeItem(idx)}
                 className="text-error text-xs hover:underline"
+                aria-label={`Remove item ${idx + 1} from ${label}`}
               >
                 Remove
               </button>
@@ -132,11 +144,12 @@ function ItemFieldset({
             onChange={(e) => updateItem(idx, { product_name: e.target.value })}
             placeholder="e.g. Organic Tomatoes"
             required
+            maxLength={200}
           />
 
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-foreground">
+              <label id={`cat-${label}-${idx}`} className="text-xs font-medium text-foreground">
                 Category
               </label>
               <select
@@ -147,6 +160,7 @@ function ItemFieldset({
                     category: e.target.value as ProductCategory,
                   })
                 }
+                aria-labelledby={`cat-${label}-${idx}`}
               >
                 {CATEGORIES.map((c) => (
                   <option key={c} value={c}>
@@ -170,13 +184,14 @@ function ItemFieldset({
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-medium text-foreground">Unit</label>
+              <label id={`unit-${label}-${idx}`} className="text-xs font-medium text-foreground">Unit</label>
               <select
                 className="w-full rounded-lg border border-border bg-background px-2 py-2 text-sm text-foreground"
                 value={item.unit}
                 onChange={(e) =>
                   updateItem(idx, { unit: e.target.value as ProductUnit })
                 }
+                aria-labelledby={`unit-${label}-${idx}`}
               >
                 {UNITS.map((u) => (
                   <option key={u} value={u}>
@@ -190,7 +205,7 @@ function ItemFieldset({
       ))}
 
       {error && (
-        <Text variant="body" className="text-error text-sm">
+        <Text variant="body" className="text-error text-sm" role="alert">
           {error}
         </Text>
       )}
@@ -224,8 +239,9 @@ export default function BarterOfferForm({
   function validate(): boolean {
     const next: FormErrors = {};
 
-    if (!recipientWallet.trim()) {
-      next.recipientWallet = "Recipient wallet address is required.";
+    const addrError = validateStellarAddress(recipientWallet);
+    if (addrError) {
+      next.recipientWallet = addrError;
     } else if (recipientWallet.trim() === walletAddress) {
       next.recipientWallet = "You cannot barter with yourself.";
     }
@@ -243,14 +259,12 @@ export default function BarterOfferForm({
     }
 
     if (includeCollateral) {
-      if (!collateralAmount || Number(collateralAmount) <= 0) {
-        next.collateral = "Collateral amount must be a positive number.";
-      }
+      const collError = validatePositiveNumber(collateralAmount, "Collateral amount");
+      if (collError) next.collateral = collError;
     }
 
-    if (notes.length > 500) {
-      next.notes = "Notes must be 500 characters or less.";
-    }
+    const notesError = validateMaxLength(notes, 500, "Notes");
+    if (notesError) next.notes = notesError;
 
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -268,29 +282,28 @@ export default function BarterOfferForm({
     setSaveError(null);
 
     try {
-      // TODO: integrate with barterService once backend endpoint is available
       const _payload = {
         proposer_wallet: walletAddress,
-        recipient_wallet: recipientWallet.trim(),
+        recipient_wallet: sanitizeString(recipientWallet),
         offer_items: offerItems.map((i) => ({
           ...i,
-          product_name: i.product_name.trim(),
+          product_name: sanitizeString(i.product_name),
           quantity: i.quantity.trim(),
         })),
         request_items: requestItems.map((i) => ({
           ...i,
-          product_name: i.product_name.trim(),
+          product_name: sanitizeString(i.product_name),
           quantity: i.quantity.trim(),
         })),
         expiry_hours: expiryHours,
         collateral_amount: includeCollateral ? collateralAmount.trim() : null,
         collateral_currency: includeCollateral ? collateralCurrency : null,
-        notes: notes.trim() || null,
+        notes: sanitizeString(notes) || null,
       };
 
-      // Placeholder: when backend is ready, replace with:
-      // await createBarterOffer(walletAddress, payload);
       await new Promise((r) => setTimeout(r, 500));
+
+      trackEvent("barter_offer_created");
 
       await onSuccess();
       onClose();
@@ -306,20 +319,24 @@ export default function BarterOfferForm({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 overflow-y-auto">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="barter-form-title"
+    >
       <div className="w-full max-w-2xl my-8">
         <Card variant="elevated" padding="lg">
           <CardHeader>
-            <CardTitle>Propose a Barter Trade</CardTitle>
+            <CardTitle id="barter-form-title">Propose a Barter Trade</CardTitle>
             <Text variant="body" muted className="text-sm mt-1">
               Offer goods in exchange for other goods. Both parties must agree
               before the trade is finalized.
             </Text>
           </CardHeader>
 
-          <form onSubmit={onSubmit}>
+          <form onSubmit={onSubmit} noValidate>
             <CardContent className="space-y-6">
-              {/* Recipient */}
               <Input
                 label="Recipient Wallet Address"
                 value={recipientWallet}
@@ -327,9 +344,9 @@ export default function BarterOfferForm({
                 placeholder="G... or wallet address of the other party"
                 error={errors.recipientWallet}
                 required
+                maxLength={56}
               />
 
-              {/* You Give */}
               <div className="border-l-4 border-primary-500 pl-4">
                 <ItemFieldset
                   label="You Give"
@@ -339,7 +356,6 @@ export default function BarterOfferForm({
                 />
               </div>
 
-              {/* You Receive */}
               <div className="border-l-4 border-accent-500 pl-4">
                 <ItemFieldset
                   label="You Receive"
@@ -349,15 +365,15 @@ export default function BarterOfferForm({
                 />
               </div>
 
-              {/* Expiry Window */}
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">
+                <label id="expiry-label" className="text-sm font-medium text-foreground">
                   Offer Expires In
                 </label>
                 <select
                   className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground"
                   value={expiryHours}
                   onChange={(e) => setExpiryHours(Number(e.target.value))}
+                  aria-labelledby="expiry-label"
                 >
                   {EXPIRY_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -367,13 +383,13 @@ export default function BarterOfferForm({
                 </select>
               </div>
 
-              {/* Collateral (optional) */}
               <div className="space-y-3">
                 <label className="flex items-center gap-3 cursor-pointer select-none">
                   <input
                     type="checkbox"
                     checked={includeCollateral}
                     onChange={(e) => setIncludeCollateral(e.target.checked)}
+                    aria-label="Include collateral"
                   />
                   <Text variant="body" className="font-medium text-sm">
                     Include collateral (if agreed)
@@ -393,7 +409,7 @@ export default function BarterOfferForm({
                       error={errors.collateral}
                     />
                     <div className="space-y-1">
-                      <label className="text-xs font-medium text-foreground">
+                      <label id="coll-currency-label" className="text-xs font-medium text-foreground">
                         Currency
                       </label>
                       <select
@@ -402,6 +418,7 @@ export default function BarterOfferForm({
                         onChange={(e) =>
                           setCollateralCurrency(e.target.value as ProductCurrency)
                         }
+                        aria-labelledby="coll-currency-label"
                       >
                         {CURRENCIES.map((c) => (
                           <option key={c} value={c}>
@@ -414,12 +431,12 @@ export default function BarterOfferForm({
                 )}
               </div>
 
-              {/* Notes */}
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">
+                <label htmlFor="barter-notes" className="text-sm font-medium text-foreground">
                   Notes (optional, max 500 chars)
                 </label>
                 <textarea
+                  id="barter-notes"
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   placeholder="Any additional details about this trade..."
@@ -429,9 +446,11 @@ export default function BarterOfferForm({
                       ? "border-error focus:ring-error"
                       : "border-border",
                   ].join(" ")}
+                  maxLength={500}
+                  aria-invalid={!!errors.notes}
                 />
                 {errors.notes && (
-                  <Text variant="body" className="text-error text-sm">
+                  <Text variant="body" className="text-error text-sm" role="alert">
                     {errors.notes}
                   </Text>
                 )}
@@ -440,9 +459,8 @@ export default function BarterOfferForm({
                 </Text>
               </div>
 
-              {/* Error banner */}
               {saveError && (
-                <div className="bg-error/10 border border-error/30 rounded-lg p-3">
+                <div className="bg-error/10 border border-error/30 rounded-lg p-3" role="alert">
                   <Text variant="body" className="text-error">
                     {saveError}
                   </Text>

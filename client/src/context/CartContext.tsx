@@ -4,6 +4,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { WalletContext } from "./WalletContext";
 import type { CartState } from "@/types/cart";
 import { getActiveCart, addItemToCart, updateCartItemQuantity, removeCartItem, clearCart } from "@/services/cartService";
+import { trackEvent } from "@/lib/analytics";
 
 type CartContextType = {
   cart: CartState;
@@ -78,7 +79,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         const existing = findItemByProductId(productId);
         if (existing) {
           const { itemId } = existing;
-          // Immediate delete (no debounce) to match expected UI behavior.
           void (async () => {
             try {
               if (timersRef.current[itemId]) {
@@ -87,6 +87,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
               }
               const updated = await removeCartItem(address, itemId);
               setCart(updated);
+
+              trackEvent("product_removed_from_cart", { productId });
             } catch (err) {
               setCartError(err instanceof Error ? err.message : "Failed to remove item.");
               void refreshCart();
@@ -102,6 +104,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           try {
             const updated = await addItemToCart(address, productId, nextQty);
             setCart(updated);
+
+            trackEvent("product_added_to_cart", { productId, quantity: nextQty });
           } catch (err) {
             setCartError(err instanceof Error ? err.message : "Failed to add item.");
           }
@@ -111,7 +115,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
       const { itemId } = existing;
 
-      // Optimistic UI update.
       setCart((prev) => ({
         ...prev,
         groups: prev.groups.map((g) => ({
@@ -122,7 +125,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         })),
       }));
 
-      // Debounced backend update.
       if (timersRef.current[itemId]) clearTimeout(timersRef.current[itemId]);
       timersRef.current[itemId] = setTimeout(() => {
         void (async () => {
@@ -181,4 +183,3 @@ export function useCart() {
   if (!ctx) throw new Error("useCart must be used within CartProvider");
   return ctx;
 }
-

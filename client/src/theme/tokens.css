@@ -138,7 +138,7 @@
   --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Dark mode overrides */
+/* Dark mode overrides — respects both system preference and manual .dark class */
 @media (prefers-color-scheme: dark) {
   :root {
     --color-background: var(--color-neutral-950);
@@ -148,4 +148,13 @@
     --color-surface: var(--color-neutral-900);
     --color-surface-elevated: var(--color-neutral-800);
   }
+}
+
+:root.dark {
+  --color-background: var(--color-neutral-950);
+  --color-foreground: var(--color-neutral-50);
+  --color-muted: var(--color-neutral-400);
+  --color-border: var(--color-neutral-700);
+  --color-surface: var(--color-neutral-900);
+  --color-surface-elevated: var(--color-neutral-800);
 }

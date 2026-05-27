@@ -16,6 +16,7 @@ import {
   Text,
 } from "@/components/ui";
 import { PriceChart } from "@/components/PriceChart";
+import { trackEvent } from "@/lib/analytics";
 
 const CATEGORIES: Array<ProductCategory | "All"> = [
   "All",
@@ -80,6 +81,13 @@ export default function MarketPage() {
     return products.filter((p) => p.name.toLowerCase().includes(q));
   }, [products, search]);
 
+  function handleSearch(value: string) {
+    setSearch(value);
+    if (value.trim().length >= 3) {
+      trackEvent("search_performed", { query: value.trim() });
+    }
+  }
+
   return (
     <Container size="lg" className="py-8">
       <div className="flex items-start justify-between gap-4 flex-wrap mb-6">
@@ -95,11 +103,12 @@ export default function MarketPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div>
-          <label className="text-sm font-medium">Category</label>
+          <label id="category-filter-label" className="text-sm font-medium">Category</label>
           <select
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground"
             value={category}
             onChange={(e) => setCategory(e.target.value as ProductCategory | "All")}
+            aria-labelledby="category-filter-label"
           >
             {CATEGORIES.map((c) => (
               <option key={c} value={c}>
@@ -113,16 +122,16 @@ export default function MarketPage() {
           <Input
             label="Search"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => handleSearch(e.target.value)}
             placeholder="Search by product name..."
           />
         </div>
       </div>
 
       {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" aria-label="Loading products">
           {Array.from({ length: 9 }).map((_, i) => (
-            <Card key={i} variant="outlined" padding="md">
+            <Card key={i} variant="outlined" padding="md" aria-hidden="true">
               <CardContent className="space-y-3">
                 <div className="h-32 bg-border/30 rounded-lg" />
                 <div className="h-4 bg-border/30 rounded w-3/4" />
@@ -133,7 +142,7 @@ export default function MarketPage() {
           ))}
         </div>
       ) : error ? (
-        <Card variant="elevated" padding="lg">
+        <Card variant="elevated" padding="lg" role="alert">
           <CardContent>
             <Text variant="body" className="text-error">
               {error}
@@ -141,11 +150,11 @@ export default function MarketPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" role="list" aria-label="Product listings">
           {filtered.map((p) => {
             const currentQty = quantityByProductId.get(p.id) ?? 0;
             return (
-              <Card key={p.id} variant="elevated" padding="md">
+              <Card key={p.id} variant="elevated" padding="md" role="listitem">
                 <CardHeader>
                   <CardTitle className="text-base">{p.name}</CardTitle>
                 </CardHeader>
@@ -158,7 +167,7 @@ export default function MarketPage() {
                       className="w-full h-40 object-cover rounded-lg border border-border/60"
                     />
                   ) : (
-                    <div className="w-full h-40 rounded-lg border border-border/60 bg-border/20" />
+                    <div className="w-full h-40 rounded-lg border border-border/60 bg-border/20" aria-hidden="true" />
                   )}
 
                   <div>
@@ -194,10 +203,11 @@ export default function MarketPage() {
                         onClick={() =>
                           setQuantityForProduct(p.id, currentQty - 1)
                         }
+                        aria-label={`Decrease quantity of ${p.name}`}
                       >
                         -
                       </Button>
-                      <Text variant="body" className="min-w-8 text-center">
+                      <Text variant="body" className="min-w-8 text-center" aria-live="polite" aria-label={`Quantity: ${currentQty}`}>
                         {currentQty}
                       </Text>
                       <Button
@@ -206,6 +216,7 @@ export default function MarketPage() {
                         onClick={() =>
                           setQuantityForProduct(p.id, currentQty + 1)
                         }
+                        aria-label={`Increase quantity of ${p.name}`}
                       >
                         +
                       </Button>
@@ -217,7 +228,10 @@ export default function MarketPage() {
                     ) : currentQty === 0 ? (
                       <Button
                         variant="primary"
-                        onClick={() => setQuantityForProduct(p.id, 1)}
+                        onClick={() => {
+                          setQuantityForProduct(p.id, 1);
+                          trackEvent("product_added_to_cart", { productId: p.id, productName: p.name });
+                        }}
                       >
                         Add
                       </Button>
@@ -232,4 +246,3 @@ export default function MarketPage() {
     </Container>
   );
 }
-

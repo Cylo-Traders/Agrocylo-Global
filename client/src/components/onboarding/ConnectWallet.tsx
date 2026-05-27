@@ -3,6 +3,7 @@
 import { useWallet } from "@/hooks/useWallet";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { trackEvent } from "@/lib/analytics";
 
 interface ConnectWalletProps {
   onNext: () => void;
@@ -10,6 +11,11 @@ interface ConnectWalletProps {
 
 export default function ConnectWallet({ onNext }: ConnectWalletProps) {
   const { address, isConnected, connect } = useWallet();
+
+  function handleConnect() {
+    trackEvent("wallet_connected");
+    connect();
+  }
 
   return (
     <Card variant="elevated" padding="lg" className="max-w-md mx-auto text-center">
@@ -24,7 +30,7 @@ export default function ConnectWallet({ onNext }: ConnectWalletProps) {
         <div className="space-y-4">
           <div className="rounded-lg bg-primary-50 p-4">
             <p className="text-sm text-primary-700 font-medium">Connected</p>
-            <p className="text-xs text-primary-600 font-mono mt-1 truncate">
+            <p className="text-xs text-primary-600 font-mono mt-1 truncate" aria-label={`Connected wallet: ${address}`}>
               {address}
             </p>
           </div>
@@ -33,7 +39,7 @@ export default function ConnectWallet({ onNext }: ConnectWalletProps) {
           </Button>
         </div>
       ) : (
-        <Button variant="primary" fullWidth onClick={connect}>
+        <Button variant="primary" fullWidth onClick={handleConnect}>
           Connect Freighter Wallet
         </Button>
       )}

@@ -11,7 +11,7 @@ import { DemandData } from "@/types/demand";
 const RegionalHeatMap = dynamic(() => import("./RegionalHeatMap"), {
   ssr: false,
   loading: () => (
-    <div className="h-[400px] w-full animate-pulse bg-surface rounded-xl border border-border flex items-center justify-center">
+    <div className="h-[400px] w-full animate-pulse bg-surface rounded-xl border border-border flex items-center justify-center" aria-label="Loading heat map">
       <Text muted>Loading Heat Map...</Text>
     </div>
   ),
@@ -39,7 +39,7 @@ export function DemandSignalPanel() {
     return (
       <Container size="lg" className="py-8">
         <Text variant="h2" className="mb-8">
-          Aggregated Buyer Demand 📊
+          Aggregated Buyer Demand
         </Text>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
            <div className="space-y-8">
@@ -59,14 +59,14 @@ export function DemandSignalPanel() {
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
         <div>
           <Text variant="h1" as="h1" className="mb-2">
-            Demand Signal Panel 🌾
+            Demand Signal Panel
           </Text>
           <Text variant="body" muted>
             Real-time aggregate data on buyer intents and market volume.
           </Text>
         </div>
         <div className="bg-primary-50 px-4 py-2 rounded-lg border border-primary-100 flex items-center gap-2">
-           <div className="w-2 h-2 bg-primary-500 rounded-full animate-pulse" />
+           <div className="w-2 h-2 bg-primary-500 rounded-full animate-pulse" aria-hidden="true" />
            <Text variant="caption" className="text-primary-800 font-medium">
              Live Updates Enabled
            </Text>

@@ -6,6 +6,7 @@ import { getXlmBalance, getCurrentNetworkName } from "../lib/stellar";
 import { signAndSubmitTransaction } from "../lib/signTransaction";
 import type { SignAndSubmitResult } from "../lib/signTransaction";
 import FreighterApi from "@stellar/freighter-api";
+import { trackEvent } from "@/lib/analytics";
 
 const initialState: WalletContextType = {
   address: null,
@@ -33,7 +34,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
   const [network, setNetwork] = useState<string | null>(null);
 
   useEffect(() => {
-    // Try to restore from localStorage
     const addr =
       typeof window !== "undefined"
         ? localStorage.getItem("walletAddress")
@@ -43,11 +43,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
         ? localStorage.getItem("walletNetwork")
         : null;
     if (addr) {
-      // attempt to refresh balance but don't auto-connect Freighter
       setAddress(addr);
       setConnected(true);
       if (net) setNetwork(net);
-      // call getXlmBalance directly to avoid referencing refreshBalance in deps
       (async () => {
         try {
           const b = await getXlmBalance(addr);
@@ -57,7 +55,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       })();
     }
-    // run only on mount
   }, []);
 
   const refreshBalance = async (addr?: string) => {
@@ -77,14 +74,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
     setLoading(true);
     setError(null);
     try {
-      // Get current network from Freighter
       const networkName = await getCurrentNetworkName();
       setNetwork(networkName);
       localStorage.setItem("walletNetwork", networkName);
 
-      // Freighter API exposes methods on the default export
-      // getPublicKey will return the active public key when Freighter is available
-      // If Freighter extension is not connected or no account selected, it will show modal
       const pub = await FreighterApi.getPublicKey();
       if (!pub) {
         throw new Error("Could not get public key from Freighter");
@@ -92,6 +85,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
       setAddress(pub);
       localStorage.setItem("walletAddress", pub);
       setConnected(true);
+
+      trackEvent("wallet_connected", { network: networkName });
+
       await refreshBalance(pub);
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
@@ -112,6 +108,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
     setNetwork(null);
     localStorage.removeItem("walletAddress");
     localStorage.removeItem("walletNetwork");
+
+    trackEvent("wallet_disconnected");
   };
 
   const signAndSubmit = useCallback(
@@ -122,7 +120,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
       setError(null);
       try {
         const result = await signAndSubmitTransaction(transactionXdr);
-        // Refresh balance after a successful on-chain transaction
         if (result.success) {
           await refreshBalance();
         }

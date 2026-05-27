@@ -11,7 +11,7 @@ import {
 
 interface ProductCardProps {
   product: Product;
-  children?: React.ReactNode; // For action buttons like Edit/Delete
+  children?: React.ReactNode;
 }
 
 export function ProductCard({ product, children }: ProductCardProps) {
@@ -21,6 +21,8 @@ export function ProductCard({ product, children }: ProductCardProps) {
     <Card
       variant="elevated"
       className="h-full flex flex-col hover:shadow-md transition-shadow"
+      role="article"
+      aria-label={`${product.name}, ${priceDisplay} per ${product.unit}`}
     >
       <div className="relative aspect-video w-full overflow-hidden rounded-t-lg bg-border/20">
         {product.image_url ? (
@@ -87,7 +89,6 @@ export function ProductCard({ product, children }: ProductCardProps) {
           </Text>
         </div>
 
-        {/* Slot for Dashboard Actions (Edit/Delete) */}
         {children && <div className="pt-2">{children}</div>}
       </CardContent>
     </Card>
@@ -96,7 +97,7 @@ export function ProductCard({ product, children }: ProductCardProps) {
 
 export function ProductCardSkeleton() {
   return (
-    <Card variant="outlined" className="h-full animate-pulse">
+    <Card variant="outlined" className="h-full animate-pulse" aria-hidden="true">
       <div className="aspect-video w-full bg-border/30" />
       <CardContent className="p-4 space-y-4">
         <div className="h-5 bg-border/30 rounded w-3/4" />

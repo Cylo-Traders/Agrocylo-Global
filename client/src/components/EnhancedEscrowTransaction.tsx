@@ -23,6 +23,11 @@ import {
   notifyTransactionFailed,
   notifyTransactionConfirming,
 } from "@/services/notification";
+import {
+  validatePositiveNumber,
+  validateDeadline,
+} from "@/lib/validation";
+import { trackEvent } from "@/lib/analytics";
 
 interface EnhancedEscrowTransactionProps {
   farmerAddress: string;
@@ -72,28 +77,15 @@ export default function EnhancedEscrowTransaction({
       return false;
     }
 
-    if (!quantity || parseFloat(quantity) <= 0) {
-      setTransactionStatus({
-        status: "error",
-        message: "Please enter a valid quantity",
-      });
+    const qtyError = validatePositiveNumber(quantity, "Quantity");
+    if (qtyError) {
+      setTransactionStatus({ status: "error", message: qtyError });
       return false;
     }
 
-    if (!deliveryDeadline) {
-      setTransactionStatus({
-        status: "error",
-        message: "Please select a delivery deadline",
-      });
-      return false;
-    }
-
-    const deadline = new Date(deliveryDeadline);
-    if (deadline <= new Date()) {
-      setTransactionStatus({
-        status: "error",
-        message: "Delivery deadline must be in the future",
-      });
+    const deadlineError = validateDeadline(deliveryDeadline);
+    if (deadlineError) {
+      setTransactionStatus({ status: "error", message: deadlineError });
       return false;
     }
 
@@ -141,9 +133,13 @@ export default function EnhancedEscrowTransaction({
         notifyTransactionConfirmed(signed.txHash);
       }, 2000);
 
-      // Generate a mock order ID for demo purposes
-      // In production, this would come from the contract response
       const mockOrderId = `order-${Date.now()}-${address.slice(0, 8)}`;
+
+      trackEvent("order_created", {
+        productName,
+        farmerAddress,
+        enhanced: true,
+      });
 
       setTransactionStatus({
         status: "success",
@@ -168,12 +164,8 @@ export default function EnhancedEscrowTransaction({
 
   const handleStatusChange = (status: EscrowStatus, order: any) => {
     console.log("Transaction status updated:", status, order);
-    
-    // You can trigger additional actions based on status changes
     if (status === "delivered") {
-      // Send notification, update UI, etc.
     } else if (status === "refunded") {
-      // Handle refund completion
     }
   };
 
@@ -226,7 +218,7 @@ export default function EnhancedEscrowTransaction({
   return (
     <Container size="md" className="py-8">
       <div className="space-y-6">
-        <Card variant="elevated" padding="lg">
+        <Card variant="elevated" padding="lg" role="region" aria-label="Enhanced escrow transaction form">
           <CardHeader>
             <CardTitle>Enhanced Escrow Transaction</CardTitle>
             <Text variant="body" muted>
@@ -235,7 +227,6 @@ export default function EnhancedEscrowTransaction({
           </CardHeader>
 
           <CardContent className="space-y-6">
-            {/* Product Details */}
             <div className="bg-muted/50 p-4 rounded-lg">
               <Text variant="h4" as="h4" className="mb-2">
                 Order Details
@@ -274,7 +265,6 @@ export default function EnhancedEscrowTransaction({
               </div>
             </div>
 
-            {/* Quantity Input */}
             <div>
               <Input
                 label="Quantity"
@@ -288,7 +278,6 @@ export default function EnhancedEscrowTransaction({
               />
             </div>
 
-            {/* Total Price Display */}
             <div className="bg-primary/10 border border-primary/20 p-4 rounded-lg">
               <div className="flex justify-between items-center">
                 <Text variant="h4" as="h4">
@@ -303,7 +292,6 @@ export default function EnhancedEscrowTransaction({
               </Text>
             </div>
 
-            {/* Delivery Deadline */}
             <div>
               <Input
                 label="Delivery Deadline"
@@ -314,9 +302,8 @@ export default function EnhancedEscrowTransaction({
               />
             </div>
 
-            {/* Transaction Status */}
             {transactionStatus.status !== "idle" && (
-              <div className="bg-muted/50 p-4 rounded-lg">
+              <div className="bg-muted/50 p-4 rounded-lg" role="status" aria-live="polite">
                 <div className="flex items-center gap-2 mb-2">
                   <Badge variant={getStatusColor()}>
                     {getStatusText()}
@@ -376,7 +363,6 @@ export default function EnhancedEscrowTransaction({
           </CardFooter>
         </Card>
 
-        {/* Transaction Status Tracker */}
         {showTracker && transactionStatus.orderId && (
           <TransactionStatusTracker
             orderId={transactionStatus.orderId}

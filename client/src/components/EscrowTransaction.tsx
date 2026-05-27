@@ -23,6 +23,13 @@ import {
   notifyTransactionFailed,
   notifyTransactionConfirming,
 } from "@/services/notification";
+import {
+  sanitizeString,
+  validateRequired,
+  validatePositiveNumber,
+  validateDeadline,
+} from "@/lib/validation";
+import { trackEvent } from "@/lib/analytics";
 
 interface EscrowTransactionProps {
   farmerAddress: string;
@@ -70,28 +77,15 @@ export default function EscrowTransaction({
       return false;
     }
 
-    if (!quantity || parseFloat(quantity) <= 0) {
-      setTransactionStatus({
-        status: "error",
-        message: "Please enter a valid quantity",
-      });
+    const qtyError = validatePositiveNumber(quantity, "Quantity");
+    if (qtyError) {
+      setTransactionStatus({ status: "error", message: qtyError });
       return false;
     }
 
-    if (!deliveryDeadline) {
-      setTransactionStatus({
-        status: "error",
-        message: "Please select a delivery deadline",
-      });
-      return false;
-    }
-
-    const deadline = new Date(deliveryDeadline);
-    if (deadline <= new Date()) {
-      setTransactionStatus({
-        status: "error",
-        message: "Delivery deadline must be in the future",
-      });
+    const deadlineError = validateDeadline(deliveryDeadline);
+    if (deadlineError) {
+      setTransactionStatus({ status: "error", message: deadlineError });
       return false;
     }
 
@@ -138,6 +132,11 @@ export default function EscrowTransaction({
       setTimeout(() => {
         notifyTransactionConfirmed(signed.txHash);
       }, 2000);
+
+      trackEvent("order_created", {
+        productName,
+        farmerAddress,
+      });
 
       setTransactionStatus({
         status: "success",
@@ -202,7 +201,7 @@ export default function EscrowTransaction({
 
   return (
     <Container size="md" className="py-8">
-      <Card variant="elevated" padding="lg">
+      <Card variant="elevated" padding="lg" role="region" aria-label="Escrow transaction form">
         <CardHeader>
           <CardTitle>Escrow Transaction</CardTitle>
           <Text variant="body" muted>
@@ -211,7 +210,6 @@ export default function EscrowTransaction({
         </CardHeader>
 
         <CardContent className="space-y-6">
-          {/* Product Details */}
           <div className="bg-muted/50 p-4 rounded-lg">
             <Text variant="h4" as="h4" className="mb-2">
               Order Details
@@ -250,7 +248,6 @@ export default function EscrowTransaction({
             </div>
           </div>
 
-          {/* Quantity Input */}
           <div>
             <Input
               label="Quantity"
@@ -264,7 +261,6 @@ export default function EscrowTransaction({
             />
           </div>
 
-          {/* Total Price Display */}
           <div className="bg-primary/10 border border-primary/20 p-4 rounded-lg">
             <div className="flex justify-between items-center">
               <Text variant="h4" as="h4">
@@ -279,7 +275,6 @@ export default function EscrowTransaction({
             </Text>
           </div>
 
-          {/* Delivery Deadline */}
           <div>
             <Input
               label="Delivery Deadline"
@@ -290,9 +285,8 @@ export default function EscrowTransaction({
             />
           </div>
 
-          {/* Transaction Status */}
           {transactionStatus.status !== "idle" && (
-            <div className="bg-muted/50 p-4 rounded-lg">
+            <div className="bg-muted/50 p-4 rounded-lg" role="status" aria-live="polite">
               <div className="flex items-center gap-2 mb-2">
                 <Badge variant={getStatusColor()}>
                   {getStatusText()}

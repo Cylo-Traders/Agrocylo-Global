@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useState, type InputHTMLAttributes } from "react";
+import { forwardRef, type InputHTMLAttributes } from "react";
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
@@ -16,7 +16,10 @@ const inputError = "border-error focus:ring-error";
 export const Input = forwardRef<HTMLInputElement, InputProps>(
   ({ className = "", label, error, hint, id, ...props }, ref) => {
     const inputId = id ?? `input-${Math.random().toString(36).slice(2, 9)}`;
-    const [search, setSearch] = useState("");
+    const describedBy = [error && `${inputId}-error`, hint && `${inputId}-hint`]
+      .filter(Boolean)
+      .join(" ") || undefined;
+
     return (
       <div className="w-full">
         {label && (
@@ -29,17 +32,10 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         )}
         <input
           ref={ref}
-          id="product-search"
-          label="Search"
-          value={search}
-          placeholder="Search by product name..."
-          onChange={(e) => setSearch(e.target.value)}
+          id={inputId}
           aria-invalid={!!error}
-          aria-describedby={
-            [error && `${inputId}-error`, hint && `${inputId}-hint`]
-              .filter(Boolean)
-              .join(" ") || undefined
-          }
+          aria-describedby={describedBy}
+          aria-label={!label ? props.placeholder || undefined : undefined}
           className={[
             inputBase,
             error ? inputError : "border-border",

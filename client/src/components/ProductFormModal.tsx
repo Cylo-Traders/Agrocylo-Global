@@ -23,10 +23,16 @@ import {
   updateProduct,
   uploadProductImage,
 } from "@/services/productService";
+import {
+  sanitizeString,
+  validateRequired,
+  validatePositiveNumber,
+  validateMaxLength,
+} from "@/lib/validation";
+import { trackEvent } from "@/lib/analytics";
 
 type Mode = "add" | "edit";
 
-// Expanded Error type for new fields
 type FormErrors = Partial<
   Record<
     | "name"
@@ -74,11 +80,11 @@ export default function ProductFormModal({
   const [unit, setUnit] = useState<ProductUnit>("kg");
   const [stockQuantity, setStockQuantity] = useState<string>("");
   const [description, setDescription] = useState<string>("");
-  const [location, setLocation] = useState(""); // New field
-  const [deliveryWindow, setDeliveryWindow] = useState(""); // New field
+  const [location, setLocation] = useState("");
+  const [deliveryWindow, setDeliveryWindow] = useState("");
   const [isAvailable, setIsAvailable] = useState(true);
 
-  const [imageFiles, setImageFiles] = useState<File[]>([]); // Multiple images
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [errors, setErrors] = useState<FormErrors>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -107,18 +113,41 @@ export default function ProductFormModal({
       setSaveError("Maximum 8 images allowed.");
       return;
     }
-    setImageFiles((prev) => [...prev, ...newFiles]);
+    const validFiles = newFiles.filter(
+      (f) => f.size <= 2 * 1024 * 1024 && f.type.startsWith("image/"),
+    );
+    if (validFiles.length < newFiles.length) {
+      setSaveError("Some files were skipped (max 2MB, images only).");
+    }
+    setImageFiles((prev) => [...prev, ...validFiles]);
   };
 
   function validate(): boolean {
     const next: FormErrors = {};
+
     if (!name.trim()) next.name = "Product name is required.";
+    else if (name.trim().length > 100)
+      next.name = "Product name must be 100 characters or less.";
+
     if (!category) next.category = "Select a category.";
-    if (!pricePerUnit || Number(pricePerUnit) <= 0)
-      next.pricePerUnit = "Invalid price.";
+
+    const priceError = validatePositiveNumber(pricePerUnit, "Price");
+    if (priceError) next.pricePerUnit = priceError;
+    else if (Number(pricePerUnit) > 1_000_000_000)
+      next.pricePerUnit = "Price seems unreasonably high.";
+
     if (!location.trim()) next.location = "Location is required.";
+    else if (location.trim().length > 200)
+      next.location = "Location must be 200 characters or less.";
+
     if (!deliveryWindow.trim())
       next.deliveryWindow = "Delivery window is required.";
+    else if (deliveryWindow.trim().length > 100)
+      next.deliveryWindow = "Delivery window must be 100 characters or less.";
+
+    const descLen = description.trim().length;
+    if (descLen > 2000)
+      next.description = "Description must be 2000 characters or less.";
 
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -130,16 +159,16 @@ export default function ProductFormModal({
     setSaving(true);
     try {
       const payload = normalizeProductWriteInput({
-        name: name.trim(),
+        name: sanitizeString(name),
         category,
         pricePerUnit,
         currency,
         unit,
         stockQuantity,
-        description,
+        description: sanitizeString(description),
         isAvailable,
-        location,
-        deliveryWindow,
+        location: sanitizeString(location),
+        deliveryWindow: sanitizeString(deliveryWindow),
       });
 
       let product;
@@ -154,7 +183,6 @@ export default function ProductFormModal({
         );
       }
 
-      // Handle multiple image uploads
       if (imageFiles.length > 0) {
         await Promise.all(
           imageFiles.map((file) =>
@@ -162,6 +190,11 @@ export default function ProductFormModal({
           ),
         );
       }
+
+      trackEvent(mode === "add" ? "product_viewed" : "order_created", {
+        productId: product.id,
+        mode,
+      });
 
       await onSuccess();
       onClose();
@@ -175,20 +208,22 @@ export default function ProductFormModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-center bg-black/60 backdrop-blur-sm overflow-y-auto p-4 sm:p-6">
+    <div
+      className="fixed inset-0 z-50 flex justify-center bg-black/60 backdrop-blur-sm overflow-y-auto p-4 sm:p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="product-form-title"
+    >
       <div className="w-full max-w-2xl my-auto">
-        {" "}
-        {/* my-auto + overflow-y-auto fixes the scroll */}
         <Card variant="elevated" className="shadow-2xl">
           <CardHeader className="sticky top-0 bg-background z-10 border-b border-border/50">
-            <CardTitle>
+            <CardTitle id="product-form-title">
               {mode === "add" ? "List New Product" : "Edit Listing"}
             </CardTitle>
           </CardHeader>
 
-          <form onSubmit={onSubmit}>
+          <form onSubmit={onSubmit} noValidate>
             <CardContent className="space-y-6 pt-6">
-              {/* Basic Info */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Input
                   label="Product Name"
@@ -196,13 +231,16 @@ export default function ProductFormModal({
                   onChange={(e) => setName(e.target.value)}
                   error={errors.name}
                   required
+                  maxLength={100}
                 />
                 <div className="space-y-1.5">
-                  <label className="text-sm font-medium">Category</label>
+                  <label id="category-label" className="text-sm font-medium">Category</label>
                   <select
                     className="w-full rounded-lg border border-border bg-background px-3 py-2"
                     value={category ?? ""}
                     onChange={(e) => setCategory(e.target.value as any)}
+                    aria-labelledby="category-label"
+                    aria-invalid={!!errors.category}
                   >
                     <option value="" disabled>
                       Select category
@@ -213,10 +251,12 @@ export default function ProductFormModal({
                       </option>
                     ))}
                   </select>
+                  {errors.category && (
+                    <p className="mt-1.5 text-sm text-error" role="alert">{errors.category}</p>
+                  )}
                 </div>
               </div>
 
-              {/* Pricing & Units */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <Input
                   label="Price"
@@ -225,13 +265,16 @@ export default function ProductFormModal({
                   onChange={(e) => setPricePerUnit(e.target.value)}
                   error={errors.pricePerUnit}
                   required
+                  min="0"
+                  step="0.01"
                 />
                 <div className="space-y-1.5">
-                  <label className="text-sm font-medium">Currency</label>
+                  <label id="currency-label" className="text-sm font-medium">Currency</label>
                   <select
                     className="w-full rounded-lg border border-border bg-background px-3 py-2"
                     value={currency}
                     onChange={(e) => setCurrency(e.target.value as any)}
+                    aria-labelledby="currency-label"
                   >
                     {CURRENCIES.map((c) => (
                       <option key={c} value={c}>
@@ -241,11 +284,12 @@ export default function ProductFormModal({
                   </select>
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-sm font-medium">Unit</label>
+                  <label id="unit-label" className="text-sm font-medium">Unit</label>
                   <select
                     className="w-full rounded-lg border border-border bg-background px-3 py-2"
                     value={unit}
                     onChange={(e) => setUnit(e.target.value as any)}
+                    aria-labelledby="unit-label"
                   >
                     {UNITS.map((u) => (
                       <option key={u} value={u}>
@@ -256,7 +300,6 @@ export default function ProductFormModal({
                 </div>
               </div>
 
-              {/* Logistics (New) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Input
                   label="Farm Location (Region)"
@@ -265,6 +308,7 @@ export default function ProductFormModal({
                   onChange={(e) => setLocation(e.target.value)}
                   error={errors.location}
                   required
+                  maxLength={200}
                 />
                 <Input
                   label="Delivery Window"
@@ -273,10 +317,10 @@ export default function ProductFormModal({
                   onChange={(e) => setDeliveryWindow(e.target.value)}
                   error={errors.deliveryWindow}
                   required
+                  maxLength={100}
                 />
               </div>
 
-              {/* Images */}
               <div className="space-y-3">
                 <Text variant="body" className="font-medium text-sm">
                   Product Images (Max 8, 2MB limit per image)
@@ -286,6 +330,14 @@ export default function ProductFormModal({
                   onClick={() =>
                     document.getElementById("file-upload")?.click()
                   }
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Upload product images"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      document.getElementById("file-upload")?.click();
+                    }
+                  }}
                 >
                   <Text variant="body" muted>
                     Click to upload or drag images here
@@ -314,6 +366,7 @@ export default function ProductFormModal({
                               prev.filter((_, idx) => idx !== i),
                             )
                           }
+                          aria-label={`Remove ${f.name}`}
                         >
                           ×
                         </button>
@@ -324,19 +377,25 @@ export default function ProductFormModal({
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-foreground">
+                <label htmlFor="product-description" className="text-sm font-medium text-foreground">
                   Description & Health Benefits
                 </label>
                 <textarea
+                  id="product-description"
                   className="w-full rounded-lg border border-border bg-background px-3 py-2 min-h-[100px]"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="Tell buyers about origin, organic status, or health benefits..."
+                  maxLength={2000}
+                  aria-invalid={!!errors.description}
                 />
+                {errors.description && (
+                  <p className="mt-1.5 text-sm text-error" role="alert">{errors.description}</p>
+                )}
               </div>
 
               {saveError && (
-                <div className="p-3 bg-error/10 border border-error/20 rounded-lg text-error text-sm">
+                <div className="p-3 bg-error/10 border border-error/20 rounded-lg text-error text-sm" role="alert">
                   {saveError}
                 </div>
               )}
