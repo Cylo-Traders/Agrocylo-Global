@@ -35,6 +35,7 @@ pub enum EscrowError {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OrderStatus {
     Pending,
+    Delivered,
     Disputed,
     Completed,
     Refunded,
@@ -289,6 +290,7 @@ impl EscrowContract {
 
         let delivery_timestamp = env.ledger().timestamp();
         order.delivery_timestamp = delivery_timestamp;
+        order.status = OrderStatus::Delivered;
 
         write_order(&env, order_id, &order);
 
@@ -308,8 +310,10 @@ impl EscrowContract {
         if order.buyer != buyer {
             return Err(EscrowError::NotBuyer);
         }
-        if order.status != OrderStatus::Pending {
-            return Err(EscrowError::OrderNotPending);
+        match order.status {
+            OrderStatus::Delivered => {}
+            OrderStatus::Pending => return Err(EscrowError::OrderNotDelivered),
+            _ => return Err(EscrowError::OrderNotPending),
         }
 
         order.status = OrderStatus::Completed;
