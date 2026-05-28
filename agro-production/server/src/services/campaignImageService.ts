@@ -68,6 +68,84 @@ async function assertCampaignOwnership(
   return campaign;
 }
 
+export class StorageError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+    public readonly originalError?: unknown,
+  ) {
+    super(message);
+    this.name = 'StorageError';
+  }
+}
+
+const TRANSIENT_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
+
+function isTransientError(error: unknown): boolean {
+  if (error instanceof StorageError && TRANSIENT_STATUS_CODES.has(error.status)) return true;
+  return false;
+}
+
+async function withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (!isTransientError(error) || attempt >= retries) throw error;
+      await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt)));
+    }
+  }
+  throw lastError;
+}
+
+function classifyStorageError(
+  operation: string,
+  error: { statusCode?: number; message?: string } | null,
+): StorageError {
+  if (!error) {
+    return new StorageError(500, `Storage ${operation} failed with unknown error.`);
+  }
+  switch (error.statusCode) {
+    case 401:
+      return new StorageError(500, `Storage ${operation} failed: authentication error.`, error);
+    case 403:
+      return new StorageError(500, `Storage ${operation} failed: permission denied.`, error);
+    case 404:
+      return new StorageError(500, `Storage ${operation} failed: path not found.`, error);
+    case 413:
+      return new StorageError(413, `Storage ${operation} failed: file exceeds storage size limit.`, error);
+    case 408:
+    case 429:
+    case 502:
+    case 503:
+    case 504:
+      return new StorageError(error.statusCode, `Storage ${operation} temporarily unavailable.`, error);
+    default:
+      return new StorageError(500, `Storage ${operation} failed: ${error.message ?? 'Unknown error'}`, error);
+  }
+}
+
+export async function validateImageContent(buffer: Buffer): Promise<{ width: number; height: number }> {
+  try {
+    const metadata = await sharp(buffer).metadata();
+    if (!metadata.width || !metadata.height) {
+      throw new HttpError(422, 'Could not determine image dimensions. The file may be corrupted.');
+    }
+    if (metadata.width < 200 || metadata.height < 200) {
+      throw new HttpError(422, 'Image dimensions too small. Minimum 200x200 pixels required.');
+    }
+    if (metadata.width > 4096 || metadata.height > 4096) {
+      throw new HttpError(422, 'Image dimensions too large. Maximum 4096x4096 pixels allowed.');
+    }
+    return { width: metadata.width, height: metadata.height };
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(422, 'Invalid image file. The uploaded file could not be processed as an image.');
+  }
+}
+
 async function renderThumbnail(buffer: Buffer, size: 400 | 800): Promise<Buffer> {
   return sharp(buffer)
     .rotate()
@@ -82,12 +160,12 @@ async function uploadVariant(
   contentType: string,
 ): Promise<void> {
   const supabaseAdmin = getSupabaseAdmin();
-  const { error } = await supabaseAdmin.storage
-    .from(config.campaignImagesBucket)
-    .upload(storagePath, body, { contentType, upsert: true, cacheControl: '3600' });
-  if (error) {
-    throw new HttpError(500, `Storage upload failed: ${error.message}`);
-  }
+  await withRetry(async () => {
+    const { error } = await supabaseAdmin.storage
+      .from(config.campaignImagesBucket)
+      .upload(storagePath, body, { contentType, upsert: true, cacheControl: '3600' });
+    if (error) throw classifyStorageError('upload', error);
+  });
 }
 
 async function clearExistingFiles(prefix: string): Promise<void> {
@@ -95,17 +173,13 @@ async function clearExistingFiles(prefix: string): Promise<void> {
   const { data, error: listError } = await supabaseAdmin.storage
     .from(config.campaignImagesBucket)
     .list(prefix, { limit: 100 });
-  if (listError) {
-    throw new HttpError(500, `Storage list failed: ${listError.message}`);
-  }
+  if (listError) throw classifyStorageError('list', listError);
   if (data && data.length > 0) {
     const paths = data.map((item) => `${prefix}/${item.name}`);
     const { error: removeError } = await supabaseAdmin.storage
       .from(config.campaignImagesBucket)
       .remove(paths);
-    if (removeError) {
-      throw new HttpError(500, `Storage cleanup failed: ${removeError.message}`);
-    }
+    if (removeError) throw classifyStorageError('cleanup', removeError);
   }
 }
 
@@ -127,6 +201,9 @@ export async function uploadCampaignImage(params: {
   const { campaignId, walletAddress, fileBuffer, mimeType } = params;
 
   const campaign = await assertCampaignOwnership(campaignId, walletAddress);
+
+  await validateImageContent(fileBuffer);
+
   const ext = mimeTypeToExt(mimeType);
   const farmerWallet = walletAddress.toLowerCase();
   const basePath = `${farmerWallet}/${campaignId}`;
@@ -156,12 +233,17 @@ export async function uploadCampaignImage(params: {
       [imageUrl, campaign.id],
     );
   } catch (error) {
-    // Roll back the uploaded files if the DB write fails.
     const supabaseAdmin = getSupabaseAdmin();
-    await supabaseAdmin.storage
+    const rollbackPaths = [originalPath, thumb400Path, thumb800Path];
+    const { error: removeError } = await supabaseAdmin.storage
       .from(config.campaignImagesBucket)
-      .remove([originalPath, thumb400Path, thumb800Path]);
-    throw error;
+      .remove(rollbackPaths);
+    if (removeError) {
+      console.error(
+        `Rollback failed to clean up storage files for campaign ${campaignId}: ${removeError.message}`,
+      );
+    }
+    throw new HttpError(500, 'Failed to save image metadata. Upload rolled back.');
   }
 
   return { imageUrl };
@@ -185,27 +267,21 @@ export async function deleteCampaignImage(params: {
     .from(config.campaignImagesBucket)
     .list(prefix, { limit: 100 });
 
-  if (error) {
-    throw new HttpError(500, `Storage list failed: ${error.message}`);
-  }
+  if (error) throw classifyStorageError('list', error);
 
   if (data && data.length > 0) {
     const paths = data.map((item) => `${prefix}/${item.name}`);
     const { error: removeError } = await supabaseAdmin.storage
       .from(config.campaignImagesBucket)
       .remove(paths);
-    if (removeError) {
-      throw new HttpError(500, `Storage delete failed: ${removeError.message}`);
-    }
+    if (removeError) throw classifyStorageError('delete', removeError);
   } else if (campaign.image_url) {
     const pathFromUrl = parsePathFromUrl(campaign.image_url);
     if (pathFromUrl) {
       const { error: removeError } = await supabaseAdmin.storage
         .from(config.campaignImagesBucket)
         .remove([pathFromUrl]);
-      if (removeError) {
-        throw new HttpError(500, `Storage delete failed: ${removeError.message}`);
-      }
+      if (removeError) throw classifyStorageError('delete', removeError);
     }
   }
 
