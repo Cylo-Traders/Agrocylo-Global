@@ -52,25 +52,11 @@ function walletCandidates(walletAddress: string): string[] {
 }
 
 /**
- * Maps a contract action to the notifications that should be dispatched.
- *   created   → ORDER_RECEIVED (farmer) + NEW_INVESTMENT (farmer)
- *   confirmed → CAMPAIGN_FUNDED (farmer)
- *   refunded  → HARVEST_COMPLETED (buyer)
- */
-const actionToNotifications: Record<string, (p: EscrowEventPayload) => MappedNotification[]> = {
-  created: ({ farmerAddress }) => farmerAddress ? [
-    { walletAddress: farmerAddress, type: NotificationEventType.ORDER_RECEIVED },
-    { walletAddress: farmerAddress, type: NotificationEventType.NEW_INVESTMENT },
-  ] : [],
-  confirmed: ({ farmerAddress }) =>
-    farmerAddress ? [{ walletAddress: farmerAddress, type: NotificationEventType.CAMPAIGN_FUNDED }] : [],
-  refunded: ({ buyerAddress }) =>
-    buyerAddress ? [{ walletAddress: buyerAddress, type: NotificationEventType.HARVEST_COMPLETED }] : [],
  * Maps a contract action to the list of notifications that should be sent.
- * - "created"   → OrderCreated (buyer) + FundsLocked (farmer)
+ * - "created"   → ORDER_CREATED (buyer) + FUNDS_LOCKED (farmer)
  * - "delivered" → no notification (internal state change)
- * - "confirmed" → DeliveryConfirmed (farmer)
- * - "refunded"  → RefundIssued (buyer)
+ * - "confirmed" → DELIVERY_CONFIRMED (farmer)
+ * - "refunded"  → REFUND_ISSUED (buyer)
  */
 const actionToNotifications: Record<string, (p: EscrowEventPayload) => MappedNotification[]> = {
   created: ({ buyerAddress, farmerAddress }) => [
@@ -180,10 +166,8 @@ export class NotificationService {
    * Broadcast a generic order event to all connected WebSocket clients.
    * Used by the ingestion pipeline for dispute/resolution events.
    */
-  static notifyOrderEvent(event: string, data: unknown): void {
-    logger.info(`[NotificationService] Broadcasting event: ${event}`);
   /** Generic order-event notification (used by ingestion pipeline). */
-  static async notifyOrderEvent(event: string, data: any): Promise<void> {
+  static async notifyOrderEvent(event: string, data: unknown): Promise<void> {
     logger.info(`[NotificationService] Emitting event: ${event}`);
     wsManager.broadcast(`order:${event}`, data);
   }

@@ -4,6 +4,8 @@ import { config } from "../config/index.js";
 import { prisma } from "../config/database.js";
 import { NotificationService } from "./notificationService.js";
 import { wsManager } from "./wsManager.js";
+import { BlockchainEventIngestionService } from "./events/blockchainEventIngestionService.js";
+import { EscrowEventIngestionService } from "./events/escrowEventIngestionService.js";
 
 const POLL_INTERVAL_MS = 5_000;
 const CHECKPOINT_SERVICE_NAME = "contract-watcher";
@@ -28,11 +30,22 @@ function decodeEvent(event: any): { action: string; data: unknown[] } | null {
 function handleEvent(event: any): void {
   const decoded = decodeEvent(event);
   if (!decoded) return;
+  dispatchEvent(decoded.action, decoded.data, event.ledger);
+}
 
-  const { action, data } = decoded;
+/**
+ * Dispatches a decoded escrow event to the notification service and WebSocket
+ * broadcast. Split out from {@link handleEvent} (which handles XDR decoding) so
+ * the routing logic can be unit-tested with plain decoded data.
+ */
+export function dispatchEvent(
+  action: string,
+  data: unknown[],
+  ledger?: number,
+): void {
   const orderId = String(data[0] ?? "");
 
-  logger.info(`[ContractWatcher] Event received: ${action} | order: ${orderId} | ledger: ${event.ledger}`);
+  logger.info(`[ContractWatcher] Event received: ${action} | order: ${orderId} | ledger: ${ledger ?? "?"}`);
 
   switch (action) {
     case "created": {

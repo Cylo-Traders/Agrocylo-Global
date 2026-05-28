@@ -62,6 +62,20 @@ class WsManager {
   }
 
   /**
+   * Send a message to a single client, guarding against send failures.
+   * A failed send drops the client so it can't wedge the broadcast loop.
+   */
+  private safeSend(ws: WebSocket, message: string): void {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    try {
+      ws.send(message);
+    } catch (err) {
+      logger.error("WebSocket send failed; dropping client", err);
+      this.clients.delete(ws);
+    }
+  }
+
+  /**
    * Broadcast an event to every connected client.
    */
   broadcast(event: string, payload: unknown): void {
@@ -72,9 +86,7 @@ class WsManager {
     });
 
     for (const { ws } of this.clients.values()) {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(message);
-      }
+      this.safeSend(ws, message);
     }
   }
 
@@ -89,11 +101,8 @@ class WsManager {
     });
 
     for (const client of this.clients.values()) {
-      if (
-        client.wallet?.toLowerCase() === wallet.toLowerCase() &&
-        client.ws.readyState === WebSocket.OPEN
-      ) {
-        client.ws.send(message);
+      if (client.wallet?.toLowerCase() === wallet.toLowerCase()) {
+        this.safeSend(client.ws, message);
       }
     }
   }
