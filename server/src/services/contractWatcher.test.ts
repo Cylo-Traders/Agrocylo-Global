@@ -28,6 +28,11 @@ vi.mock("./notificationService.js", () => ({
 }));
 vi.mock("./wsManager.js", () => ({
   wsManager: { broadcast: vi.fn(), broadcastTo: vi.fn(), clientCount: 0 },
+vi.mock("./notificationService.js", () => ({
+  NotificationService: { notify: vi.fn(), notifyFromEscrowEvent: vi.fn(), notifyOrderEvent: vi.fn() },
+}));
+vi.mock("./wsManager.js", () => ({
+  wsManager: { broadcast: vi.fn(), broadcastTo: vi.fn(), clientCount: 0 },
 }));
 vi.mock("./events/blockchainEventIngestionService.js", () => ({
   BlockchainEventIngestionService: { ingestEvent: vi.fn() },
