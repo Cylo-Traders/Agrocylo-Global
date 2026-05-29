@@ -13,7 +13,7 @@ import {
 } from "@/components/ui";
 import { WalletContext } from "@/context/WalletContext";
 import { useSocket } from "@/hooks/useSocket";
-import DisputeList from "@/components/admin/DisputeList";
+import DisputeManager from "@/components/admin/DisputeManager";
 
 export default function AdminDisputeDashboard() {
   const { address, connected } = useContext(WalletContext);
@@ -82,10 +82,18 @@ export default function AdminDisputeDashboard() {
                   <Text variant="body" className="text-error mb-4">{error}</Text>
                   <Button variant="primary" onClick={() => void fetchDisputes()}>Try Again</Button>
                 </div>
-              ) : disputes.length === 0 ? (
-                <Text variant="body" muted className="text-center py-12">No active disputes found.</Text>
               ) : (
-                <DisputeList disputes={disputes} onRefresh={fetchDisputes} />
+                <DisputeManager
+                  disputes={disputes}
+                  onRefresh={fetchDisputes}
+                  onBulkAction={async (ids, action) => {
+                    await fetch("/api/admin/disputes/bulk", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ ids, action }),
+                    }).catch(() => undefined);
+                  }}
+                />
               )}
             </CardContent>
           </Card>
