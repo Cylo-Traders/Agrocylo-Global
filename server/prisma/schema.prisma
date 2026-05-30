@@ -18,6 +18,14 @@ model Notification {
   @@index([walletAddress])
 }
 
+model NotificationPreference {
+  walletAddress String   @id
+  preferences   Json
+  updatedAt     DateTime @updatedAt
+
+  @@map("notification_preferences")
+}
+
 model User {
   id            String   @id @default(uuid())
   walletAddress String   @unique

@@ -10,8 +10,10 @@ import {
   TrendingUp,
   Settings,
   ArrowLeft,
+  Shield,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useProfile } from "@/context/ProfileContext";
 
 const sidebarLinks = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
@@ -21,8 +23,16 @@ const sidebarLinks = [
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];
 
+const adminLink = {
+  href: "/admin",
+  label: "Admin",
+  icon: Shield,
+};
+
 export function DashboardSidebar() {
   const pathname = usePathname();
+  const { isAdmin } = useProfile();
+  const links = isAdmin ? [...sidebarLinks, adminLink] : sidebarLinks;
 
   return (
     <aside className="bg-sidebar flex h-full w-64 flex-col border-r">
@@ -46,8 +56,11 @@ export function DashboardSidebar() {
       </div>
 
       <nav className="flex-1 space-y-1 p-4">
-        {sidebarLinks.map((link) => {
-          const isActive = pathname === link.href;
+        {links.map((link) => {
+          const isActive =
+            link.href === "/admin"
+              ? pathname.startsWith("/admin")
+              : pathname === link.href;
           return (
             <Link
               key={link.href}
