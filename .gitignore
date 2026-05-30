@@ -12,6 +12,11 @@ build/
 .next/
 out/
 
+# Test output
+coverage/
+playwright-report/
+test-results/
+
 # Environment
 .env
 .env.local
