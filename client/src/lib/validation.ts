@@ -143,3 +143,20 @@ export const profileFormSchema = z.object({
   displayName: displayNameSchema,
   bio: bioSchema,
 });
+
+export const escrowFormSchema = z.object({
+  quantity: z
+    .string()
+    .regex(/^\d+(\.\d+)?$/, "Quantity must be a valid number")
+    .refine((v) => parseFloat(v) > 0, "Quantity must be greater than 0"),
+  deliveryDeadline: z
+    .string()
+    .min(1, "Delivery deadline is required")
+    .refine((v) => {
+      if (!v) return false;
+      const selected = new Date(v);
+      const now = new Date();
+      return selected > now;
+    }, "Delivery deadline must be in the future"),
+});
+
