@@ -3,6 +3,7 @@ import { EscrowEventIngestionService } from "./escrowEventIngestionService.js";
 import { EscrowEventParser } from "./escrowEventParser.js";
 import { EscrowEventRepository } from "./escrowEventRepository.js";
 import { EscrowEventProjectionService } from "./escrowEventProjectionService.js";
+import type { RawRpcEvent } from "../../types/rawRpcEvent.js";
 
 vi.mock("../../config/database.js", () => ({
     prisma: {
@@ -41,7 +42,7 @@ describe("EscrowEventIngestionService", () => {
 
     vi.spyOn(EscrowEventRepository, "createEscrowEvent").mockResolvedValue(mockRecord as any);
 
-    const result = await EscrowEventIngestionService.ingestEvent({ value: "mock-value", id: "0-0", topic: [] });
+    const result = await EscrowEventIngestionService.ingestEvent({ value: "mock-value", id: "0-0", topic: [] } as unknown as RawRpcEvent);
     
     expect(result).toEqual(mockRecord);
     expect(EscrowEventRepository.createEscrowEvent).toHaveBeenCalled();

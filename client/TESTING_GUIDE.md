@@ -1,3 +1,126 @@
+# Testing Guide
+
+## Running Tests
+```bash
+# Run all tests
+npm test
+
+# Run with coverage
+npm test -- --coverage
+
+# Run specific file
+npm test -- TransactionFeedbackContext.test.tsx
+
+# Watch mode
+npm test -- --watch
+```
+
+## Error Handling Tests
+
+### Logger Tests
+```tsx
+import { logger } from "@/lib/logger";
+
+describe("Logger", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("should log entries with correct level", () => {
+    logger.info("Test message");
+    const logs = logger.getStoredLogs();
+    expect(logs.length).toBe(1);
+    expect(logs[0].level).toBe("info");
+    expect(logs[0].message).toBe("Test message");
+  });
+
+  it("should persist logs to localStorage", () => {
+    logger.error("Error message");
+    const stored = JSON.parse(localStorage.getItem("agrocylo_logs") ?? "[]");
+    expect(stored.length).toBe(1);
+    expect(stored[0].level).toBe("error");
+  });
+
+  it("should clear logs", () => {
+    logger.info("Temp");
+    logger.clearLogs();
+    expect(logger.getStoredLogs().length).toBe(0);
+  });
+});
+```
+
+### Error Classification Tests
+```tsx
+import { classifyError, mapBlockchainError } from "@/components/errorHandler";
+
+describe("classifyError", () => {
+  it("classifies network errors", () => {
+    const result = classifyError(new Error("Network Error: ECONNREFUSED"));
+    expect(result.kind).toBe("network");
+  });
+
+  it("classifies validation errors", () => {
+    const result = classifyError("Validation failed: name is required");
+    expect(result.kind).toBe("validation");
+  });
+
+  it("classifies auth errors", () => {
+    const result = classifyError("Unauthorized: invalid token");
+    expect(result.kind).toBe("authentication");
+  });
+
+  it("classifies wallet errors", () => {
+    const result = classifyError("Freighter not connected");
+    expect(result.kind).toBe("wallet");
+  });
+
+  it("classifies blockchain errors", () => {
+    const result = classifyError("Soroban contract error: insufficient funds");
+    expect(result.kind).toBe("blockchain");
+  });
+});
+```
+
+### Validation Schema Tests
+```tsx
+import { productFormSchema, stellarAddressSchema } from "@/lib/validation";
+
+describe("Validation Schemas", () => {
+  it("validates stellar address format", () => {
+    expect(stellarAddressSchema.safeParse("GABCDEF123...").success).toBe(false);
+    expect(stellarAddressSchema.safeParse("GABCDEF1234567890ABCDEF1234567890ABCDEF1234567890").success).toBe(true);
+  });
+
+  it("validates product form", () => {
+    const result = productFormSchema.safeParse({
+      name: "Tomatoes",
+      category: "Vegetables",
+      pricePerUnit: "5.00",
+      currency: "STRK",
+      unit: "kg",
+      location: "Lagos",
+      deliveryWindow: "2-3 days",
+      isAvailable: true,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("fails on empty product name", () => {
+    const result = productFormSchema.safeParse({
+      name: "",
+      category: "Vegetables",
+      pricePerUnit: "5.00",
+      currency: "STRK",
+      unit: "kg",
+      location: "Lagos",
+      deliveryWindow: "2-3 days",
+      isAvailable: true,
+    });
+    expect(result.success).toBe(false);
+  });
+});
+```
+
 # Testing Guide: Transaction Feedback UI
 
 Unit and integration tests for the TransactionFeedback system.

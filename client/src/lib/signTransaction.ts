@@ -11,7 +11,7 @@
 import { TransactionBuilder } from "@stellar/stellar-sdk";
 import { rpc } from "@stellar/stellar-sdk";
 import FreighterApi from "@stellar/freighter-api";
-import { getRpcServer, getCurrentNetworkName } from "./stellar";
+import { getRpcServer } from "./stellar";
 import { isTestMode } from "./testMode";
 
 // ── Types ────────────────────────────────────────────────────────────────

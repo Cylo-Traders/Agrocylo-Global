@@ -147,6 +147,9 @@ const BPS_DENOM: i128 = 10_000;
 const TTL_THRESHOLD: u32 = 1_000;
 const TTL_EXTEND: u32 = 100_000;
 
+/// Orders expire and become refundable after 96 hours of inactivity.
+pub const ORDER_EXPIRY_SECS: u64 = 96 * 3600;
+
 // Event topic helpers.
 fn t_campaign() -> Symbol {
     symbol_short!("campaign")
@@ -673,6 +676,112 @@ impl ProductionEscrowContract {
             }
         }
         Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Batch Operations (Issue #273)
+    // -----------------------------------------------------------------------
+
+    /// Batch refund multiple investors on a failed campaign.
+    /// Silently skips investors that have no contribution or already claimed.
+    /// Emits ONE `campaign:batch_ref` summary event with (campaign_id, count, total).
+    pub fn batch_refund_investors(
+        env: Env,
+        campaign_id: u64,
+        investors: Vec<Address>,
+    ) -> Result<(u32, i128), EscrowError> {
+        let campaign = load_campaign(&env, campaign_id)?;
+        if campaign.status != CampaignStatus::Failed {
+            return Err(EscrowError::CampaignNotFailed);
+        }
+        let contribs = load_contribs(&env, campaign_id);
+        let token_client = token::Client::new(&env, &campaign.token);
+
+        let mut count: u32 = 0;
+        let mut total: i128 = 0;
+
+        for investor in investors.iter() {
+            let contribution = contribs.get(investor.clone()).unwrap_or(0);
+            if contribution <= 0 {
+                continue;
+            }
+            let claim_key = DataKey::Claimed(campaign_id, investor.clone());
+            if env.storage().persistent().has(&claim_key) {
+                continue;
+            }
+            env.storage().persistent().set(&claim_key, &true);
+            token_client.transfer(
+                &env.current_contract_address(),
+                &investor,
+                &contribution,
+            );
+            count += 1;
+            total += contribution;
+        }
+
+        // Emit a single summary event for the whole batch.
+        env.events().publish(
+            (t_campaign(), symbol_short!("batch_ref")),
+            (campaign_id, count, total),
+        );
+        Ok((count, total))
+    }
+
+    /// Batch refund pending orders that are older than ORDER_EXPIRY_SECS (96 h).
+    /// Silently skips orders that are not pending or have not expired yet.
+    /// Emits ONE `order:batch_ref` summary event with (count, total).
+    pub fn batch_refund_orders(
+        env: Env,
+        order_ids: Vec<u64>,
+    ) -> Result<(u32, i128), EscrowError> {
+        let now = env.ledger().timestamp();
+
+        let mut count: u32 = 0;
+        let mut total: i128 = 0;
+
+        for order_id in order_ids.iter() {
+            let mut order: Order = match env
+                .storage()
+                .persistent()
+                .get(&DataKey::Order(order_id))
+            {
+                Some(o) => o,
+                None => continue,
+            };
+            if order.status != OrderStatus::Pending {
+                continue;
+            }
+            // Only refund orders that have passed the expiry window.
+            if now < order.created_at + ORDER_EXPIRY_SECS {
+                continue;
+            }
+            let campaign = match load_campaign(&env, order.campaign_id) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            // Mark as Confirmed to prevent double-refund (re-uses the Confirmed state
+            // as a terminal "processed" marker for expired orders).
+            order.status = OrderStatus::Confirmed;
+            env.storage()
+                .persistent()
+                .set(&DataKey::Order(order_id), &order);
+
+            let token_client = token::Client::new(&env, &campaign.token);
+            token_client.transfer(
+                &env.current_contract_address(),
+                &order.buyer,
+                &order.amount,
+            );
+            count += 1;
+            total += order.amount;
+        }
+
+        // Emit a single summary event for the whole batch.
+        env.events().publish(
+            (t_order(), symbol_short!("batch_ref")),
+            (count, total),
+        );
+        Ok((count, total))
     }
 
     // -----------------------------------------------------------------------

@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { signAndSubmitTransaction } from "@/lib/signTransaction";
+import { classifyError, logErrorWithContext } from "@/lib/errorHandling";
 
 export type TxStatus = "idle" | "building" | "signing" | "submitting" | "success" | "error";
 
@@ -48,12 +49,28 @@ export function useTransaction(): UseTransactionReturn {
       if (result.success) {
         setState({ status: "success", txHash: result.txHash });
       } else {
-        setState({ status: "error", error: result.error ?? "Transaction failed" });
+        const classified = classifyError(result.error, "submitOrderTransaction");
+        logErrorWithContext(result.error ?? "transaction failed", {
+          feature: "useTransaction",
+          action: "execute",
+          step: "submit",
+          txHash: result.txHash,
+          status: result.status,
+          category: classified.category,
+        });
+        setState({ status: "error", error: classified.actionableMessage });
       }
     } catch (err) {
+      const classified = classifyError(err, "submitOrderTransaction");
+      logErrorWithContext(err, {
+        feature: "useTransaction",
+        action: "execute",
+        step: "buildOrSubmit",
+        category: classified.category,
+      });
       setState({
         status: "error",
-        error: err instanceof Error ? err.message : String(err),
+        error: classified.actionableMessage,
       });
     }
   }, []);

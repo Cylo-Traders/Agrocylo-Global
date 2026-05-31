@@ -10,6 +10,7 @@ import { buildCreateOrder } from "@/lib/contractService";
 import { signAndSubmitTransaction } from "@/lib/signTransaction";
 import { validateAmount, validateStellarAddress, sanitizeString } from "@/lib/validation";
 import { trackOrderPlaced } from "@/lib/analytics";
+import { classifyError, logErrorWithContext } from "@/lib/errorHandling";
 import { ButtonSpinner } from "@/components/Skeletons";
 import TransactionProgress from "@/components/TransactionProgress";
 import { idleMachine, advanceMachine } from "@/types/transaction";
@@ -31,7 +32,16 @@ export default function CheckoutPage() {
     if (!campaignId) return;
     fetchCampaign(campaignId)
       .then(setCampaign)
-      .catch((err: unknown) => setCampaignError(err instanceof Error ? err.message : "Campaign not found"))
+      .catch((err: unknown) => {
+        const classified = classifyError(err, "loadCampaign");
+        logErrorWithContext(err, {
+          feature: "checkout",
+          action: "loadCampaign",
+          campaignId,
+          category: classified.category,
+        });
+        setCampaignError(classified.actionableMessage);
+      })
       .finally(() => setCampaignLoading(false));
   }, [campaignId]);
 
@@ -73,7 +83,16 @@ export default function CheckoutPage() {
       });
       setCreatedOrder(order);
     } catch (err) {
-      setTx(advanceMachine(current, "failed", { error: err instanceof Error ? err.message : "Failed to record order" }));
+      const classified = classifyError(err, "recordOrder");
+      logErrorWithContext(err, {
+        feature: "checkout",
+        action: "recordOrder",
+        campaignId: campaign.id,
+        buyerAddress: addrResult.sanitized,
+        amountStroops: String(amountStroops),
+        category: classified.category,
+      });
+      setTx(advanceMachine(current, "failed", { error: classified.actionableMessage }));
       return;
     }
 
@@ -83,7 +102,8 @@ export default function CheckoutPage() {
 
     const builtResult = await buildCreateOrder(addrResult.sanitized, campaign.onChainId, amountStroops);
     if (!builtResult.success || !builtResult.data) {
-      const msg = builtResult.error ?? "Failed to build contract transaction";
+      const classified = classifyError(builtResult.error, "buildOrderTransaction");
+      const msg = builtResult.error ?? classified.actionableMessage;
       // Contract not configured — treat off-chain-only order as success
       if (msg.includes("NEXT_PUBLIC_PRODUCTION_CONTRACT_ID")) {
         current = advanceMachine(current, "submitting");
@@ -92,7 +112,16 @@ export default function CheckoutPage() {
         trackOrderPlaced(campaign.id, String(amountStroops));
         return;
       }
-      setTx(advanceMachine(current, "failed", { error: msg }));
+      logErrorWithContext(builtResult.error ?? "build transaction failed", {
+        feature: "checkout",
+        action: "buildOrderTransaction",
+        campaignId: campaign.id,
+        onChainId: campaign.onChainId,
+        buyerAddress: addrResult.sanitized,
+        amountStroops: String(amountStroops),
+        category: classified.category,
+      });
+      setTx(advanceMachine(current, "failed", { error: classified.actionableMessage }));
       return;
     }
 
@@ -102,7 +131,18 @@ export default function CheckoutPage() {
 
     const result = await signAndSubmitTransaction(builtResult.data);
     if (!result.success) {
-      setTx(advanceMachine(current, "failed", { error: result.error ?? "Transaction failed" }));
+      const classified = classifyError(result.error, "submitOrderTransaction");
+      logErrorWithContext(result.error ?? "transaction failed", {
+        feature: "checkout",
+        action: "submitOrderTransaction",
+        campaignId: campaign.id,
+        buyerAddress: addrResult.sanitized,
+        amountStroops: String(amountStroops),
+        txHash: result.txHash,
+        status: result.status,
+        category: classified.category,
+      });
+      setTx(advanceMachine(current, "failed", { error: classified.actionableMessage }));
       return;
     }
 
@@ -115,7 +155,7 @@ export default function CheckoutPage() {
   }
 
   if (campaignLoading) return <div className="animate-pulse h-64 bg-neutral-200 rounded-xl" aria-label="Loading checkout" />;
-  if (campaignError || !campaign) return (<div className="border border-red-200 bg-red-50 rounded-xl p-6 text-red-700 text-sm" role="alert">{campaignError ?? "Campaign not found."}</div>);
+  if (campaignError || !campaign) return (<div className="border border-red-200 bg-red-50 rounded-xl p-6 text-red-700 text-sm" role="alert">{campaignError ?? "Could not load this campaign. Refresh and try again."}</div>);
 
   const canOrder = campaign.status === "HARVESTED" || campaign.status === "IN_PRODUCTION";
 

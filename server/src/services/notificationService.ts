@@ -99,7 +99,7 @@ export async function markNotificationsRead(
   }
 
   const walletMatches = walletCandidates(walletAddress);
-  if (notifications.some((n) => !walletMatches.includes(n.walletAddress))) {
+  if (notifications.some((n: { id: string; walletAddress: string }) => !walletMatches.includes(n.walletAddress))) {
     throw new ApiError(403, "Forbidden", "You cannot modify these notifications");
   }
 
@@ -133,7 +133,6 @@ export class NotificationService {
         },
       });
 
-      // Push real-time notification to the wallet owner via WebSocket
       wsManager.broadcastTo(payload.walletAddress, "notification:new", {
         id: record.id,
         type: payload.type,
@@ -166,7 +165,6 @@ export class NotificationService {
    * Broadcast a generic order event to all connected WebSocket clients.
    * Used by the ingestion pipeline for dispute/resolution events.
    */
-  /** Generic order-event notification (used by ingestion pipeline). */
   static async notifyOrderEvent(event: string, data: unknown): Promise<void> {
     logger.info(`[NotificationService] Emitting event: ${event}`);
     wsManager.broadcast(`order:${event}`, data);

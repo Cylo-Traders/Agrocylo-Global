@@ -113,7 +113,7 @@ export default function EscrowTransaction({
         throw new Error(signed.error || "Transaction failed");
       }
 
-      notifyTransactionSubmitted(signed.txHash);
+      notifyTransactionSubmitted();
       setTimeout(() => notifyTransactionConfirmed(signed.txHash), 2000);
 
       setTx({

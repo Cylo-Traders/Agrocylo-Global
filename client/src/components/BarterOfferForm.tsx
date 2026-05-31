@@ -24,6 +24,7 @@ import type {
 } from "@/types/product";
 import type { BarterOfferItem } from "@/types/barter";
 import { useAnalytics } from "@/hooks/useAnalytics";
+import { createBarterOffer } from "@/services/barterService";
 
 const CATEGORIES: ProductCategory[] = [
   "Vegetables",
@@ -293,10 +294,7 @@ export default function BarterOfferForm({
     });
 
     try {
-      // TODO: when /barter is exposed on the backend, replace the simulated
-      // delay with a real createBarterOffer(walletAddress, payload) call.
-      const _payload = {
-        proposer_wallet: walletAddress,
+      const payload = {
         recipient_wallet: recipientWallet.trim(),
         offer_items: offerItems.map((i) => ({
           ...i,
@@ -313,7 +311,6 @@ export default function BarterOfferForm({
         collateral_currency: includeCollateral ? collateralCurrency : null,
         notes: notes.trim() || null,
       };
-      void _payload;
 
       await new Promise((r) => setTimeout(r, 500));
       trackTransactionAttempt("barter", "confirmed", {
@@ -322,6 +319,7 @@ export default function BarterOfferForm({
       trackFunnelStep("barter_creation", "submitted", {
         includeCollateral,
       });
+      await createBarterOffer(payload);
       await onSuccess();
       onClose();
     } catch (err) {

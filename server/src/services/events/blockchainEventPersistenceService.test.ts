@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BlockchainEventPersistenceService } from "./blockchainEventPersistenceService.js";
 import type { IndexedEvent } from "../../types/indexedEvent.js";
 
-const findUniqueMock = vi.fn();
-const transactionMock = vi.fn();
+const { findUniqueMock, transactionMock } = vi.hoisted(() => ({
+  findUniqueMock: vi.fn(),
+  transactionMock: vi.fn(),
+}));
 
 vi.mock("../../config/database.js", () => ({
   prisma: {

@@ -6,6 +6,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 
 import { RefreshCw, WifiOff } from "lucide-react";
+import { useMemo, useState } from "react";
+import { RefreshCw, Search, WifiOff } from "lucide-react";
 
 import Wrapper from "@/components/shared/wrapper";
 import { useWallet } from "@/hooks/useWallet";
@@ -35,6 +37,8 @@ const CATEGORIES: Array<ProductCategory | "All"> = [
   "Other",
 ];
 
+type SortKey = "newest" | "price_asc" | "price_desc";
+
 export default function MarketPage() {
   const { connected } = useWallet();
   const { cart, setQuantityForProduct } = useCart();
@@ -42,6 +46,9 @@ export default function MarketPage() {
   const [search, setSearch] = useState("");
   const { trackFilterUsage, trackSearchQuery, trackFeatureAdoption } =
     useAnalytics();
+  const [sortKey, setSortKey] = useState<SortKey>("newest");
+  const [minPrice, setMinPrice] = useState("");
+  const [maxPrice, setMaxPrice] = useState("");
 
   const { data, isLoading, error, refetch, isFetching } = useProducts({
     pageSize: 50,
@@ -62,9 +69,23 @@ export default function MarketPage() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return products;
-    return products.filter((p) => p.name.toLowerCase().includes(q));
-  }, [products, search]);
+    let result = q
+      ? products.filter((p) => p.name.toLowerCase().includes(q))
+      : products;
+
+    // Price range filter
+    const min = parseFloat(minPrice);
+    const max = parseFloat(maxPrice);
+    if (!isNaN(min)) result = result.filter((p) => parseFloat(p.price_per_unit) >= min);
+    if (!isNaN(max)) result = result.filter((p) => parseFloat(p.price_per_unit) <= max);
+
+    // Sort
+    return [...result].sort((a, b) => {
+      if (sortKey === "price_asc") return parseFloat(a.price_per_unit) - parseFloat(b.price_per_unit);
+      if (sortKey === "price_desc") return parseFloat(b.price_per_unit) - parseFloat(a.price_per_unit);
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+  }, [products, search, sortKey, minPrice, maxPrice]);
 
   useEffect(() => {
     trackFilterUsage("market_category", category, {
@@ -119,15 +140,50 @@ export default function MarketPage() {
 
       {/* Search + filter */}
       <Wrapper className="-mt-8 md:-mt-12">
-        <div className="bg-card relative z-10 flex flex-col gap-3 rounded-2xl border p-4 shadow-sm md:flex-row md:items-center md:gap-4 md:p-6">
-          <div className="relative flex-1">
-            <Search className="text-muted-foreground absolute left-3 top-1/2 size-4 -translate-y-1/2" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by product name…"
-              className="pl-10"
-            />
+        <div className="bg-card relative z-10 flex flex-col gap-3 rounded-2xl border p-4 shadow-sm md:p-6">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-4">
+            <div className="relative flex-1">
+              <Search className="text-muted-foreground absolute left-3 top-1/2 size-4 -translate-y-1/2" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by product name…"
+                className="pl-10"
+              />
+            </div>
+            {/* Sort */}
+            <select
+              value={sortKey}
+              onChange={(e) => setSortKey(e.target.value as SortKey)}
+              className="border-input bg-background rounded-md border px-3 py-2 text-sm"
+              aria-label="Sort by"
+            >
+              <option value="newest">Newest first</option>
+              <option value="price_asc">Price: low → high</option>
+              <option value="price_desc">Price: high → low</option>
+            </select>
+            {/* Price range */}
+            <div className="flex items-center gap-1 text-sm">
+              <Input
+                value={minPrice}
+                onChange={(e) => setMinPrice(e.target.value)}
+                placeholder="Min price"
+                className="w-24"
+                type="number"
+                min={0}
+                aria-label="Minimum price"
+              />
+              <span className="text-muted-foreground">–</span>
+              <Input
+                value={maxPrice}
+                onChange={(e) => setMaxPrice(e.target.value)}
+                placeholder="Max price"
+                className="w-24"
+                type="number"
+                min={0}
+                aria-label="Maximum price"
+              />
+            </div>
           </div>
           <div className="flex gap-2 overflow-x-auto md:flex-wrap">
             {CATEGORIES.map((c) => (

@@ -1,5 +1,6 @@
-import { scValToNative, xdr } from "@stellar/stellar-sdk";
+import { scValToNative } from "@stellar/stellar-sdk";
 import type { IndexedEvent, IndexedEventType } from "../../types/indexedEvent.js";
+import type { RawRpcEvent } from "../../types/rawRpcEvent.js";
 
 const SUPPORTED_EVENT_TYPES = new Set<IndexedEventType>([
   "campaign.created",
@@ -22,6 +23,8 @@ function toDateValue(value: unknown): Date {
     return new Date(value > 1_000_000_000_000 ? value : value * 1000);
   }
   if (typeof value === "string") {
+    const d = new Date(value); // handles ISO date strings
+    if (!Number.isNaN(d.getTime())) return d;
     const parsed = Number.parseInt(value, 10);
     if (!Number.isNaN(parsed)) {
       return new Date(parsed > 1_000_000_000_000 ? parsed : parsed * 1000);
@@ -36,23 +39,16 @@ function getEventIndex(eventId: string): number {
 }
 
 export class BlockchainEventParser {
-  static parse(rawEvent: {
-    id: string;
-    ledger: number;
-    txHash?: string;
-    ledgerCloseAt?: string | number;
-    topic: string[];
-    value: string;
-  }): IndexedEvent | null {
-    const topics = rawEvent.topic.map((t) => scValToNative(xdr.ScVal.fromXDR(t, "base64")));
-    const value = scValToNative(xdr.ScVal.fromXDR(rawEvent.value, "base64"));
+  static parse(rawEvent: RawRpcEvent): IndexedEvent | null {
+    const topics = rawEvent.topic.map((t) => scValToNative(t));
+    const value = scValToNative(rawEvent.value);
     return this.parseDecoded(topics, value, rawEvent);
   }
 
   static parseDecoded(
     topics: unknown[],
     value: unknown,
-    meta: { id: string; ledger: number; txHash?: string; ledgerCloseAt?: string | number },
+    meta: { id: string; ledger: number; txHash?: string; ledgerClosedAt?: string | number },
   ): IndexedEvent | null {
     const entity = toStringValue(topics[0])?.toLowerCase();
     const action = toStringValue(topics[1])?.toLowerCase();
@@ -62,7 +58,7 @@ export class BlockchainEventParser {
     if (!SUPPORTED_EVENT_TYPES.has(eventType)) return null;
 
     const data = Array.isArray(value) ? value : [];
-    const timestamp = toDateValue(meta.ledgerCloseAt);
+    const timestamp = toDateValue(meta.ledgerClosedAt);
     const common = {
       sourceEventId: meta.id,
       eventType,
@@ -102,7 +98,6 @@ export class BlockchainEventParser {
         };
 
       // Contract: publish((order, created), (order_id, buyer, farmer, amount, token))
-      // FundsLocked: funds are transferred into escrow at order creation.
       case "order.created":
         return {
           ...common,
@@ -125,7 +120,6 @@ export class BlockchainEventParser {
         };
 
       // Contract: publish((order, confirmed), (order_id, buyer, farmer))
-      // DeliveryConfirmed: buyer confirms receipt, payment released to farmer.
       case "order.confirmed":
         return {
           ...common,
@@ -136,7 +130,6 @@ export class BlockchainEventParser {
         };
 
       // Contract: publish((order, refunded), (order_id, buyer))
-      // RefundIssued: expired order refunded back to buyer.
       case "order.refunded":
         return {
           ...common,

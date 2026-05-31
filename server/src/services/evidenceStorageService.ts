@@ -11,7 +11,7 @@ export class EvidenceStorageService {
    * @param orderIdOnChain The related order ID
    * @returns The path of the stored evidence
    */
-  static async uploadEvidence(file: any, orderIdOnChain: string): Promise<string> {
+  static async uploadEvidence(file: Express.Multer.File, orderIdOnChain: string): Promise<string> {
     const supabase = getSupabaseAdmin();
 
     if (!file) {

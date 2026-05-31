@@ -1,3 +1,75 @@
+# Architecture Overview
+
+## State Management Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      Provider Tree (outer → inner)               │
+│                                                                  │
+│  ThemeProvider           next-themes light/dark mode             │
+│  ReactLenis              smooth scroll (GSAP-driven)            │
+│  QueryProvider           TanStack Query cache                   │
+│  TransactionFeedbackProvider  Transaction state machine         │
+│  WalletProviderWrapper   Wallet + Profile + Cart contexts        │
+│    ├─ WalletProvider     Wallet connection state (split context) │
+│    ├─ ProfileProvider    User profile state                     │
+│    └─ CartProvider       Shopping cart state                    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+All contexts are optimized to reduce re-renders:
+- **Split state/actions** where applicable to prevent unnecessary re-renders
+- **useMemo** on context values to stabilize references
+- **useCallback** on all action methods
+- **mountedRef** pattern for safe async state updates
+
+## Error Handling Architecture
+
+```
+Error Event
+    │
+    ├─→ ErrorBoundary (catches render errors)
+    │     ├─→ classifyError() → ErrorInfo
+    │     └─→ logger.error() → localStorage → backend flush
+    │
+    ├─→ AsyncBoundary (catches async errors)
+    │     └─→ ErrorMessage (retry UI)
+    │
+    └─→ ErrorDisplay (inline error display)
+          └─→ mapBlockchainError() / classifyError()
+```
+
+### Error Classification
+Errors are classified into: `network`, `authentication`, `validation`, `blockchain`, `wallet`, `unknown`
+
+### Logging System
+- Log levels: debug, info, warn, error
+- Persistence: localStorage (up to 500 entries)
+- Auto-flush: error logs sent to backend every 30s
+- Console output in development
+
+## Form Validation Architecture
+
+```
+Form Component
+    │
+    ├─→ useForm hook (state management + validation)
+    │     └─→ validation.ts (zod schemas)
+    │
+    ├─→ FormField (input/select/textarea with error display)
+    ├─→ FormError (form-level error summary)
+    │
+    └─→ Backend API
+```
+
+### Validation Schemas (src/lib/validation.ts)
+- Product form schema
+- Barter offer schema
+- Create order schema
+- Dispute form schema
+- Profile form schema
+- Individual field validators (email, password, stellar address, etc.)
+
 # Transaction Feedback Architecture & Data Flow
 
 ## System Architecture

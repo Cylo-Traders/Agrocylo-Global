@@ -61,7 +61,7 @@ describe("NotificationService.notifyFromEscrowEvent", () => {
     });
 
     expect(create).toHaveBeenCalledTimes(1);
-    expect((create.mock.calls[0][0] as { data: Record<string, unknown> }).data).toMatchObject({
+    expect((create.mock.calls[0]?.[0] as { data: Record<string, unknown> }).data).toMatchObject({
       walletAddress: "FARMER",
       type: NotificationEventType.DELIVERY_CONFIRMED,
       orderId: "order-2",

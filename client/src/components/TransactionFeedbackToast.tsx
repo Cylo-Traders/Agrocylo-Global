@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useContext, useEffect } from "react";
+"use client";
+
+import { useContext, useEffect } from "react";
 import { toast } from "sonner";
 import { TransactionFeedbackContext } from "@/context/TransactionFeedbackContext";
 
@@ -76,26 +78,9 @@ export function TransactionFeedbackToast({
         break;
 
       case "success":
-        const explorerUrl = showExplorerLink && getTxUrl && txHash ? getTxUrl(txHash) : null;
         const description = txHash
           ? `Hash: ${txHash.slice(0, 8)}...${txHash.slice(-4)}`
           : undefined;
-
-        const successToast = (
-          <div className="space-y-2">
-            {description && <div className="text-sm">{description}</div>}
-            {explorerUrl && (
-              <a
-                href={explorerUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm font-medium text-success hover:underline"
-              >
-                View on Explorer ↗
-              </a>
-            )}
-          </div>
-        );
 
         toast.success(message || "Transaction confirmed!", {
           id: toastId,
@@ -116,7 +101,7 @@ export function TransactionFeedbackToast({
         toast.dismiss(toastId);
         break;
     }
-  }, [context?.feedback.state, context?.feedback.txHash, context?.feedback.errorMessage]);
+  }, [context?.feedback.state, context?.feedback.txHash, context?.feedback.errorMessage, context, toastId, successDismissMs, errorDismissMs, getTxUrl, showExplorerLink]);
 
   return null;
 }

@@ -1,3 +1,48 @@
+# Quick Start
+
+## Prerequisites
+- Node.js 20+
+- npm 10+
+- Freighter wallet browser extension
+- Backend server running on port 5000
+
+## Installation
+```bash
+cd client
+npm install
+cp .env.example .env.local
+npm run dev
+```
+
+## Key Libraries
+
+| Library | Purpose |
+|---|---|
+| Next.js 16 | React framework |
+| TanStack Query | Server state & caching |
+| Zustand | Client state (minimal usage) |
+| Zod | Schema validation |
+| react-hook-form | Form state management |
+| Sonner | Toast notifications |
+| Stellar SDK | Blockchain interaction |
+
+## Project Structure
+```
+src/
+  app/          Next.js App Router pages & layouts
+  components/   Reusable React components
+    ui/         Primitive UI components (Radix-based)
+    shared/     Shared app components
+    modals/     Modal components
+    orders/     Order-related components
+    providers/  React context providers
+  context/      React context definitions
+  hooks/        Custom React hooks
+  lib/          Utilities, API config, validation schemas
+  services/     Backend API service functions
+  types/        TypeScript type definitions
+```
+
 # Quick Start: Transaction Feedback UI
 
 Get up and running in 5 minutes.

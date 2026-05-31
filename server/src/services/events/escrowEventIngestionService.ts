@@ -4,6 +4,7 @@ import { EscrowEventRepository } from "./escrowEventRepository.js";
 import { EscrowEventProjectionService } from "./escrowEventProjectionService.js";
 import { NotificationService } from "../notificationService.js";
 import logger from "../../config/logger.js";
+import type { RawRpcEvent } from "../../types/rawRpcEvent.js";
 
 /**
  * EscrowEventIngestionService: The public entrypoint for processing each event.
@@ -12,7 +13,7 @@ export class EscrowEventIngestionService {
   /**
    * Main flow to ingest a single raw event.
    */
-  static async ingestEvent(rawEvent: any) {
+  static async ingestEvent(rawEvent: RawRpcEvent) {
     try {
       // 1. Parse
       const parsed = EscrowEventParser.parse(rawEvent);

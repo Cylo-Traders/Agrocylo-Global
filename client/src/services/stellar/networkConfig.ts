@@ -17,6 +17,27 @@ export interface NetworkConfig {
   contractId: string;
 }
 
+/** Currency → token contract ID map, validated once at module load. */
+export const TOKEN_CONTRACT_IDS: Record<string, string> = {
+  STRK: process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID_STRK ?? "",
+  USDC: process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID_USDC ?? "",
+};
+
+/**
+ * Validates that a token contract ID is configured for the given currency.
+ * Throws a user-readable error naming the missing env var before any signing starts.
+ */
+export function requireTokenContractId(currency: string): string {
+  const id = TOKEN_CONTRACT_IDS[currency.toUpperCase()];
+  if (!id) {
+    throw new Error(
+      `Token contract ID for ${currency} is not configured. ` +
+        `Set NEXT_PUBLIC_TOKEN_CONTRACT_ID_${currency.toUpperCase()} in your environment.`,
+    );
+  }
+  return id;
+}
+
 const TESTNET_RPC_URL = "https://soroban-testnet.stellar.org";
 const TESTNET_PASSPHRASE = "Test SDF Network ; September 2015";
 

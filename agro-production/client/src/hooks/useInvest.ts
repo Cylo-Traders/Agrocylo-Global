@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { invest } from '@/lib/investService';
+import { classifyError, logErrorWithContext } from '@/lib/errorHandling';
 
 export function useInvest() {
   const [loading, setLoading] = useState(false);
@@ -13,8 +14,16 @@ export function useInvest() {
     try {
       await invest(productId, amount);
       setSuccess(true);
-    } catch (e: any) {
-      setError(e?.message ?? 'Investment failed');
+    } catch (error: unknown) {
+      const classified = classifyError(error, "invest");
+      logErrorWithContext(error, {
+        feature: "investment",
+        action: "invest",
+        productId,
+        amount,
+        category: classified.category,
+      });
+      setError(classified.actionableMessage);
     } finally {
       setLoading(false);
     }

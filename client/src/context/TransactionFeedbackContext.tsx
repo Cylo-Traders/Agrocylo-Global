@@ -3,7 +3,6 @@
 import React, { createContext, useState, useCallback, useMemo } from "react";
 import type {
   TransactionFeedback,
-  TransactionState,
   TransactionFeedbackContextType,
   TransactionFeedbackProviderProps,
 } from "@/types/transaction";
@@ -31,7 +30,7 @@ export function TransactionFeedbackProvider({ children }: TransactionFeedbackPro
     setFeedback((prev) => ({
       ...prev,
       state: "pending",
-      message: message,
+      message: message ?? prev.message,
       timestamp: Date.now(),
     }));
   }, []);
@@ -67,11 +66,11 @@ export function TransactionFeedbackProvider({ children }: TransactionFeedbackPro
     setFeedback(DEFAULT_FEEDBACK);
   }, []);
 
-  const isLoading = feedback.state === "pending" || feedback.state === "confirming";
-  const isTerminal = feedback.state === "success" || feedback.state === "failure";
+  const value = useMemo<TransactionFeedbackContextType>(() => {
+    const isLoading = feedback.state === "pending" || feedback.state === "confirming";
+    const isTerminal = feedback.state === "success" || feedback.state === "failure";
 
-  const value: TransactionFeedbackContextType = useMemo(
-    () => ({
+    return {
       feedback,
       initiate,
       pending,
@@ -81,9 +80,8 @@ export function TransactionFeedbackProvider({ children }: TransactionFeedbackPro
       reset,
       isLoading,
       isTerminal,
-    }),
-    [feedback, initiate, pending, confirming, success, failure, reset, isLoading, isTerminal]
-  );
+    };
+  }, [feedback, initiate, pending, confirming, success, failure, reset]);
 
   return (
     <TransactionFeedbackContext.Provider value={value}>

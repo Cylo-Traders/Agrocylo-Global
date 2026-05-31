@@ -4,16 +4,16 @@ import { ApiError, sendProblem } from "../http/errors.js";
 
 const router = Router();
 
-router.get("/orders", OrderController.getAllOrders);
+router.get("/", OrderController.getAllOrders);
 
-router.get("/orders/:id", OrderController.getOrderById);
+router.get("/buyer/:address", OrderController.getOrdersByBuyer);
 
-router.get("/orders/buyer/:address", OrderController.getOrdersByBuyer);
+router.get("/seller/:address", OrderController.getOrdersBySeller);
 
-router.get("/orders/farmer/:address", OrderController.getOrdersByFarmer);
-router.get("/orders/seller/:address", OrderController.getOrdersBySeller);
+router.get("/stats/:sellerAddress", OrderController.getSellerStats);
 
-router.get('/stats/:sellerAddress', OrderController.getSellerStats);
+router.get("/:id", OrderController.getOrderById);
+
 export function orderErrorHandler(error: unknown, req: Request, res: Response, next: NextFunction): void {
   if (error instanceof ApiError) {
     sendProblem(res, req, error);
@@ -21,11 +21,5 @@ export function orderErrorHandler(error: unknown, req: Request, res: Response, n
   }
   next(error);
 }
-
-/**
- * @route GET /orders/farmer/:address
- * @desc Retrieve orders for a specific farmer (alias for seller)
- */
-router.get("/farmer/:address", OrderController.getOrdersByFarmer);
 
 export default router;

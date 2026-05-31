@@ -27,6 +27,7 @@ const ADAPTIVE_INTERVALS: Record<EscrowStatus, number> = {
   funded: 8_000,
   delivered: 15_000,
   refunded: 30_000,
+  disputed: 20_000,
 };
 
 export function mapOrderStatusToEscrowStatus(orderStatus: string): EscrowStatus {
@@ -43,6 +44,9 @@ export function mapOrderStatusToEscrowStatus(orderStatus: string): EscrowStatus 
     case "refunded":
     case "cancelled":
       return "refunded";
+    case "disputed":
+    case "dispute":
+      return "disputed";
     default:
       return "pending";
   }
@@ -66,6 +70,7 @@ export function useTransactionStatusTracker({
   const [isPolling, setIsPolling] = useState(autoStart);
   const wsUnavailable = useRef(false);
   const { isConnected, on } = useSocket();
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchStatus = useCallback(async () => {
     if (!orderId) return;
@@ -105,19 +110,40 @@ export function useTransactionStatusTracker({
 
     const unsub = on(`order:${orderId}`, (payload) => {
       const data = payload as { status?: string; order?: Order };
-      if (data.status) {
-        const newStatus = mapOrderStatusToEscrowStatus(data.status);
-        setState((prev) => ({
-          ...prev,
-          status: newStatus,
-          order: data.order ?? prev.order,
-          lastUpdated: new Date(),
-          confirmationCount: prev.confirmationCount + 1,
-        }));
+      if (!data.status) return;
+
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
       }
+
+      debounceTimerRef.current = setTimeout(() => {
+        const newStatus = mapOrderStatusToEscrowStatus(data.status!);
+        setState((prev) => {
+          if (newStatus !== prev.status) {
+            import("sonner").then(({ toast }) => {
+              toast.success(`Order Status Updated!`, {
+                description: `Order #${orderId} status changed from ${prev.status} to ${newStatus}`,
+                duration: 5000,
+              });
+            });
+          }
+          return {
+            ...prev,
+            status: newStatus,
+            order: data.order ?? prev.order,
+            lastUpdated: new Date(),
+            confirmationCount: prev.confirmationCount + 1,
+          };
+        });
+      }, 150);
     });
 
-    return unsub;
+    return () => {
+      unsub();
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
   }, [isConnected, orderId, on]);
 
   // Adaptive polling — only active when WebSocket is unavailable
@@ -144,3 +170,4 @@ export function useTransactionStatusTracker({
     refresh,
   };
 }
+

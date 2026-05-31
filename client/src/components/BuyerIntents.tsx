@@ -23,6 +23,7 @@ import type { BuyerIntent } from "@/types/demand";
 import { ProductCategory } from "@/types/product";
 import { cn } from "@/lib/utils";
 import { useAnalytics } from "@/hooks/useAnalytics";
+import BuyerIntentResponse from "./BuyerIntentResponse";
 
 type SortKey = "date" | "volume" | "rating";
 
@@ -60,6 +61,7 @@ function StarRating({ rating }: { rating: number }) {
 
 function IntentCard({ intent }: { intent: BuyerIntent }) {
   const [expanded, setExpanded] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
 
   return (
     <div
@@ -154,14 +156,19 @@ function IntentCard({ intent }: { intent: BuyerIntent }) {
             )}
 
             <div className="flex gap-2 pt-1">
-              <Button size="sm" className="flex-1 text-xs">
+              <Button size="sm" className="flex-1 text-xs" onClick={() => setModalOpen(true)}>
                 Express Interest
               </Button>
-              <Button size="sm" variant="outline" className="flex-1 text-xs">
+              <Button size="sm" variant="outline" className="flex-1 text-xs" onClick={() => setModalOpen(true)}>
                 Contact Buyer
               </Button>
             </div>
           </div>
+          <BuyerIntentResponse
+            intent={intent}
+            isOpen={modalOpen}
+            onClose={() => setModalOpen(false)}
+          />
         </>
       )}
     </div>

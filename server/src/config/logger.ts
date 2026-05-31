@@ -1,5 +1,6 @@
 import winston from 'winston';
 import { getLogContext } from "./logContext.js";
+import type { LogContext } from "./logContext.js";
 
 // log levels
 const levels = {
@@ -27,8 +28,8 @@ winston.addColors(colors);
 
 const injectContext = winston.format((info) => {
   const ctx = getLogContext();
-  if (ctx?.requestId) (info as any).requestId = ctx.requestId;
-  if (ctx?.job) (info as any).job = ctx.job;
+  if (ctx?.requestId) info['requestId'] = ctx.requestId;
+  if (ctx?.job) info['job'] = ctx.job;
   return info;
 });
 
@@ -40,12 +41,12 @@ const format = isDev
       winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss:ms" }),
       winston.format.colorize({ all: true }),
       winston.format.printf((info) => {
-        const rid = (info as any).requestId ? ` rid=${(info as any).requestId}` : "";
-        const job = (info as any).job
-          ? ` job=${(info as any).job.queue}:${(info as any).job.jobId}`
-          : "";
-        const meta = `${rid}${job}`;
-        return `${info.timestamp} ${info.level}: ${info.message}${meta}`;
+        const requestId = info['requestId'] as string | undefined;
+        const job = info['job'] as LogContext['job'] | undefined;
+        const rid = requestId ? ` rid=${requestId}` : "";
+        const jobStr = job ? ` job=${job.queue}:${job.jobId}` : "";
+        const meta = `${rid}${jobStr}`;
+        return `${info['timestamp'] as string} ${info.level}: ${info.message}${meta}`;
       }),
     )
   : winston.format.combine(

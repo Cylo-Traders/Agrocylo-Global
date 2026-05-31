@@ -10,6 +10,7 @@ import {
   Undo2,
   Wifi,
   WifiOff,
+  ShieldAlert,
 } from "lucide-react";
 
 import {
@@ -29,7 +30,7 @@ import { useTransactionStatusTracker } from "@/hooks/useTransactionStatusTracker
 import { useSocket } from "@/hooks/useSocket";
 import type { Order } from "@/services/stellar/contractService";
 
-export type EscrowStatus = "pending" | "funded" | "delivered" | "refunded";
+export type EscrowStatus = "pending" | "funded" | "delivered" | "refunded" | "disputed";
 
 export interface TransactionStatusTrackerProps {
   orderId: string;
@@ -79,9 +80,16 @@ const statusConfig: Record<EscrowStatus, StatusConfig> = {
     Icon: Undo2,
     estimatedMinutes: null,
   },
+  disputed: {
+    label: "Disputed",
+    description: "A dispute is active. Funds are held until resolved.",
+    badge: "destructive",
+    Icon: ShieldAlert,
+    estimatedMinutes: null,
+  },
 };
 
-const ORDER = ["pending", "funded", "delivered", "refunded"] as const;
+const ORDER = ["pending", "funded", "delivered", "refunded", "disputed"] as const;
 
 const EXPLORER_BASE: Record<"testnet" | "mainnet", string> = {
   testnet: "https://stellar.expert/explorer/testnet/tx",

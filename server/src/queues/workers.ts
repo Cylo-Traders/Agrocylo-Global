@@ -42,7 +42,7 @@ export function startWorkers(): RunningWorkers {
   for (const w of workers) {
     w.on("active", (job) =>
       withJobContext(w.name, String(job.id), job.name, () =>
-        logger.info("Job active", { attempt: job.attemptsMade } as any),
+        logger.info("Job active", { attempt: job.attemptsMade }),
       ),
     );
     w.on("completed", (job) =>
@@ -50,7 +50,10 @@ export function startWorkers(): RunningWorkers {
     );
     w.on("failed", (job, err) =>
       withJobContext(w.name, String(job?.id ?? "unknown"), job?.name, () =>
-        logger.error("Job failed", err),
+        logger.error("Job failed", {
+          error: err.message,
+          attemptsMade: job?.attemptsMade,
+        }),
       ),
     );
     w.on("error", (err) => logger.error("Worker error", err));
@@ -68,11 +71,9 @@ export function startWorkers(): RunningWorkers {
 
   async function close(): Promise<void> {
     await Promise.allSettled([...events.map((e) => e.close()), ...workers.map((w) => w.close())]);
-    await connection.quit();
   }
 
   logger.info("Workers started");
 
   return { workers, events, close };
 }
-

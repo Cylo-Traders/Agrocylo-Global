@@ -69,7 +69,7 @@ export class AdminDisputeController {
     }
     const updated = await prisma.dispute.update({
       where: { id: disputeId },
-      data: { status: decision, resolution, resolvedBy: req.adminWallet, resolvedAt: new Date() },
+      data: { status: decision, outcome: resolution, resolvedAt: new Date() },
       include: {
         order: { select: { id: true, orderIdOnChain: true, buyerAddress: true, sellerAddress: true } },
       },
@@ -78,7 +78,7 @@ export class AdminDisputeController {
       data: {
         walletAddress: updated.raisedBy,
         message: 'Your dispute for order ' + updated.order.orderIdOnChain + ' has been ' + decision.toLowerCase() + '.',
-        orderId: updated.orderId,
+        orderId: updated.orderIdOnChain,
         type: 'DISPUTE_RESOLVED',
       },
     });

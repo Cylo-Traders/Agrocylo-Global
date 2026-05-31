@@ -87,7 +87,7 @@ export async function listProducts(params: {
 
   const countSql = `select count(*) as total from public.products ${whereClause}`;
   const countResult = await query(countSql, values.slice(0, -2)); // exclude pageSize and offset
-  const total = parseInt(countResult.rows[0].total, 10);
+  const total = parseInt(countResult.rows[0]?.total ?? "0", 10);
 
   const sql = `
     select id::text, farmer_wallet, name, description, category,

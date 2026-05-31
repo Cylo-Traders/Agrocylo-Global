@@ -2,10 +2,13 @@
 
 import React, { Component, ErrorInfo, ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { classifyError } from "@/components/errorHandler";
+import { logger } from "@/lib/logger";
 
 interface Props {
   children?: ReactNode;
   fallback?: ReactNode;
+  onError?: (error: Error, errorInfo: ErrorInfo) => void;
 }
 
 interface State {
@@ -24,7 +27,17 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error("Uncaught error:", error, errorInfo);
+    const info = classifyError(error);
+    try {
+      logger?.error?.(error.message, {
+        componentStack: errorInfo.componentStack,
+        errorKind: info.kind,
+        ...(process.env.NODE_ENV === "development" && { stack: error.stack }),
+      });
+    } catch {
+      console.error("Uncaught error:", error, errorInfo);
+    }
+    this.props.onError?.(error, errorInfo);
   }
 
   private handleReset = () => {
@@ -32,11 +45,21 @@ export class ErrorBoundary extends Component<Props, State> {
     window.location.href = "/";
   };
 
+  private handleRetry = () => {
+    this.setState({ hasError: false, error: null });
+    window.location.reload();
+  };
+
   public render() {
     if (this.state.hasError) {
       if (this.props.fallback) {
         return this.props.fallback;
       }
+
+      const info = this.state.error
+        ? classifyError(this.state.error)
+        : null;
+
       return (
         <div className="flex min-h-screen flex-col items-center justify-center p-4 text-center">
           <div className="max-w-md space-y-4 rounded-xl border bg-card p-6 shadow-sm">
@@ -57,17 +80,25 @@ export class ErrorBoundary extends Component<Props, State> {
                 <line x1="12" y1="16" x2="12.01" y2="16" />
               </svg>
             </div>
-            <h2 className="text-xl font-bold">Something went wrong</h2>
+
+            <h2 className="text-xl font-bold">
+              {info?.title ?? "Something went wrong"}
+            </h2>
+
             <p className="text-sm text-muted-foreground">
-              An unexpected error occurred. Please try again or contact support if the issue persists.
+              {info?.action ??
+                "An unexpected error occurred. Please try again or contact support if the issue persists."}
             </p>
-            {this.state.error && (
+
+            {this.state.error && process.env.NODE_ENV === "development" && (
               <pre className="mt-4 max-h-32 overflow-auto rounded bg-muted p-2 text-left text-xs text-muted-foreground">
                 {this.state.error.message}
+                {this.state.error.stack && `\n\n${this.state.error.stack}`}
               </pre>
             )}
+
             <div className="pt-4 space-x-2">
-              <Button onClick={() => window.location.reload()} variant="outline">
+              <Button onClick={this.handleRetry} variant="outline">
                 Retry Page
               </Button>
               <Button onClick={this.handleReset}>

@@ -1,5 +1,6 @@
 import { TransactionBuilder, rpc } from "@stellar/stellar-sdk";
 import FreighterApi from "@stellar/freighter-api";
+import { getFreighterSignerFromWindow } from "@/types/freighter";
 
 export interface SignAndSubmitResult {
   success: boolean;
@@ -28,16 +29,9 @@ export async function signAndSubmitTransaction(
   try {
     const networkPassphrase = await resolveNetworkPassphrase();
 
-    const w = typeof window !== "undefined" ? (window as any) : null;
-    const freighterDirect =
-      (w?.freighter as { signTransaction?: unknown } | undefined)?.signTransaction
-        ? (w!.freighter as { signTransaction: (xdr: string, opts: { networkPassphrase: string }) => Promise<string> })
-        : (w?.freighterApi as { signTransaction?: unknown } | undefined)?.signTransaction
-        ? (w!.freighterApi as { signTransaction: (xdr: string, opts: { networkPassphrase: string }) => Promise<string> })
-        : null;
-
-    const signedXdr = freighterDirect
-      ? await freighterDirect.signTransaction(transactionXdr, { networkPassphrase })
+    const signer = getFreighterSignerFromWindow();
+    const signedXdr = signer
+      ? await signer.signTransaction(transactionXdr, { networkPassphrase })
       : await FreighterApi.signTransaction(transactionXdr, { networkPassphrase });
 
     if (!signedXdr) throw new Error("Transaction rejected by wallet");

@@ -1,3 +1,111 @@
+# Implementation Guide
+
+## Error Handling Integration
+
+### Using Error Boundary
+Wrap page-level components:
+
+```tsx
+<ErrorBoundary>
+  <MyPage />
+</ErrorBoundary>
+```
+
+### Using AsyncBoundary
+Wrap data-fetching sections:
+
+```tsx
+<AsyncBoundary isLoading={loading} error={error} onRetry={refetch}>
+  <DataView data={data} />
+</AsyncBoundary>
+```
+
+### Using Logger
+```tsx
+import { logger } from "@/lib/logger";
+
+logger.info("User action performed", { action: "click", page: "market" });
+logger.error("API call failed", { endpoint: "/api/products", status: 500 });
+```
+
+### Using Classified Errors
+```tsx
+import { classifyError } from "@/components/errorHandler";
+
+try {
+  await someOperation();
+} catch (err) {
+  const info = classifyError(err);
+  showToast(info.title, info.message);
+}
+```
+
+## Form Validation Integration
+
+### Basic Form with Validation
+```tsx
+import { useForm } from "@/hooks/useForm";
+import { FormField } from "@/components/FormField";
+import { FormError } from "@/components/FormError";
+import { productFormSchema } from "@/lib/validation";
+
+function MyForm() {
+  const { values, errors, isSubmitting, submitError, setValue, handleSubmit } = useForm({
+    initialValues: { name: "", price: "" },
+    validate: (vals) => {
+      const result = productFormSchema.safeParse(vals);
+      if (!result.success) {
+        const fieldErrors: Record<string, string> = {};
+        result.error.issues.forEach((issue) => {
+          fieldErrors[issue.path[0] as string] = issue.message;
+        });
+        return fieldErrors;
+      }
+      return null;
+    },
+    onSubmit: async (vals) => {
+      await api.createProduct(vals);
+    },
+  });
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <FormField
+        label="Product Name"
+        value={values.name}
+        onChange={(e) => setValue("name", e.target.value)}
+        error={errors.name}
+      />
+      {submitError && <FormError message={submitError} />}
+      <button type="submit" disabled={isSubmitting}>
+        Submit
+      </button>
+    </form>
+  );
+}
+```
+
+## State Management Integration
+
+### Context Selector Pattern
+```tsx
+// Instead of consuming the full context, select only what you need
+function BalanceDisplay() {
+  // Only re-renders when balance or connected change
+  const { balance, connected } = useContext(WalletContext);
+  return <div>{connected ? `${balance} XLM` : "Not connected"}</div>;
+}
+```
+
+### Provider Composition
+The `WalletProviderWrapper` composes all wallet-related providers automatically:
+```tsx
+<WalletProviderWrapper>
+  {children}
+</WalletProviderWrapper>
+```
+This wraps WalletContext, ProfileContext, and CartContext.
+
 # Implementation Guide: Adding Transaction Feedback to Existing Components
 
 This guide shows how to integrate the TransactionFeedback system into existing components like `EscrowTransaction`, `BarterOfferForm`, and custom transaction handlers.

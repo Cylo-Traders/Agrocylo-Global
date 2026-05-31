@@ -1,7 +1,8 @@
 "use client";
 
+import { useState, useEffect, useCallback } from "react";
 import { ColumnDef } from "@tanstack/react-table";
-import { MoreHorizontal, UserCheck, UserX } from "lucide-react";
+import { MoreHorizontal, UserCheck, UserX, AlertCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -14,20 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { DataTable } from "@/components/shared/data-table";
 import { PageHeader } from "@/components/shared/page-header";
-
-interface AdminUser {
-  wallet: string;
-  displayName: string;
-  role: "farmer" | "buyer";
-  country: string;
-  joined: string;
-  orders: number;
-  status: "active" | "suspended";
-}
-
-// Backend endpoint /api/admin/users isn't exposed yet — show the empty state
-// for now. The DataTable will pick up live data the moment the hook lands.
-const users: AdminUser[] = [];
+import { fetchAdminUsers, type AdminUser } from "@/services/adminService";
 
 const columns: ColumnDef<AdminUser>[] = [
   {
@@ -121,6 +109,28 @@ const columns: ColumnDef<AdminUser>[] = [
 ];
 
 export default function AdminUsersPage() {
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadData = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const usersData = await fetchAdminUsers();
+      setUsers(usersData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load users");
+      setUsers([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
   return (
     <div className="space-y-8">
       <PageHeader
@@ -128,11 +138,29 @@ export default function AdminUsersPage() {
         description="Every farmer and buyer registered on the platform."
       />
 
-      {users.length === 0 ? (
+      {error && (
+        <div className="bg-destructive/10 border-destructive/30 flex items-center justify-between rounded-lg border p-4">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="size-5 text-destructive" />
+            <p className="text-sm text-destructive">{error}</p>
+          </div>
+          <Button
+            onClick={() => void loadData()}
+            variant="outline"
+            size="sm"
+          >
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="bg-secondary/50 rounded-2xl border h-96 animate-pulse" />
+      ) : users.length === 0 ? (
         <div className="bg-card rounded-2xl border p-10 text-center">
           <h3 className="text-lg font-semibold">No users to show yet</h3>
           <p className="text-muted-foreground mt-1 text-sm">
-            Hook up <code>/api/admin/users</code> to populate this table.
+            No users have registered on the platform.
           </p>
         </div>
       ) : (

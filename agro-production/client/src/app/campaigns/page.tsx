@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { fetchCampaigns, fundingProgress, formatAmount } from "@/services/campaignService";
-import { isNetworkError } from "@/lib/apiClient";
+import { classifyError, logErrorWithContext } from "@/lib/errorHandling";
 import { CampaignCardSkeleton } from "@/components/Skeletons";
 import type { Campaign, CampaignStatus } from "@/types";
 
@@ -78,7 +78,17 @@ export default function CampaignsPage() {
     setLoading(true); setError(null);
     fetchCampaigns({ status: status || undefined, page, limit })
       .then((res) => { if (!cancelled) { setCampaigns(res.data); setTotal(res.meta.total); } })
-      .catch((err: unknown) => { if (!cancelled) setError(isNetworkError(err) ? "Network error — check your connection and try again" : err instanceof Error ? err.message : "Failed to load campaigns"); })
+      .catch((err: unknown) => {
+        const classified = classifyError(err, "loadCampaigns");
+        logErrorWithContext(err, {
+          feature: "campaign-list",
+          action: "loadCampaigns",
+          page,
+          statusFilter: status || "all",
+          category: classified.category,
+        });
+        if (!cancelled) setError(classified.actionableMessage);
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [status, page]);
