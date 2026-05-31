@@ -1,5 +1,6 @@
-import { scValToNative, xdr } from "@stellar/stellar-sdk";
+import { scValToNative } from "@stellar/stellar-sdk";
 import type { ParsedEscrowEvent } from "../../types/escrowEvent.js";
+import type { RawRpcEvent } from "../../types/rawRpcEvent.js";
 
 /**
  * EscrowEventParser: Pure utilities to extract data from raw Soroban events.
@@ -14,20 +15,18 @@ export class EscrowEventParser {
    * (order, dispute) -> (order_id, caller)
    * (order, resolved) -> (order_id, resolve_to_buyer)
    */
-  static parse(event: any): ParsedEscrowEvent {
-    const topics = event.topic.map((t: string) =>
-      scValToNative(xdr.ScVal.fromXDR(t, "base64")),
-    );
+  static parse(event: RawRpcEvent): ParsedEscrowEvent {
+    const topics = event.topic.map((t) => scValToNative(t));
     const action = topics[1]; // "created", "confirmed", "refunded"
-    const data = scValToNative(xdr.ScVal.fromXDR(event.value, "base64"));
+    const data = scValToNative(event.value);
 
-    const timestamp = parseInt(event.ledgerCloseAt) || Date.now();
+    const timestamp = new Date(event.ledgerClosedAt).getTime() || Date.now();
 
     // Mapping based on action type
     const base = {
       action,
       ledger: event.ledger,
-      eventIndex: parseInt(event.id.split('-')[1]) || 0, // Assuming standard 'ledger-index' format
+      eventIndex: parseInt(event.id.split('-')[1] ?? "") || 0,
       timestamp,
     };
 

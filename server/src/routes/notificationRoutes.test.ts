@@ -4,7 +4,7 @@ import app from '../app.js';
 
 vi.mock('../services/notificationService.js', () => ({
   listNotifications: vi.fn(),
-  markNotificationRead: vi.fn(),
+  markNotificationsRead: vi.fn(),
 }));
 
 import * as notificationService from '../services/notificationService.js';
@@ -15,18 +15,17 @@ describe('Notification routes', () => {
   });
 
   it('GET /notifications returns notification items for an authenticated wallet', async () => {
-    vi.mocked(notificationService.listNotifications).mockResolvedValue({
-      items: [
-        {
-          id: 'n1',
-          walletAddress: '0x1111111111111111111111111111111111111111',
-          message: 'Order funded',
-          orderId: '101',
-          type: 'created',
-          isRead: false,
-        },
-      ],
-    });
+    vi.mocked(notificationService.listNotifications).mockResolvedValue([
+      {
+        id: 'n1',
+        walletAddress: '0x1111111111111111111111111111111111111111',
+        message: 'Order funded',
+        orderId: '101',
+        type: 'created',
+        isRead: false,
+        createdAt: new Date(),
+      },
+    ]);
 
     const res = await request(app)
       .get('/notifications?unread_only=true&limit=10')
@@ -36,21 +35,21 @@ describe('Notification routes', () => {
     expect(res.body.items).toHaveLength(1);
     expect(notificationService.listNotifications).toHaveBeenCalledWith(
       '0x1111111111111111111111111111111111111111',
-      { unreadOnly: 'true', limit: '10' },
+      { unreadOnly: true, limit: 10 },
     );
   });
 
   it('PATCH /notifications/:id/read marks a notification as read', async () => {
-    vi.mocked(notificationService.markNotificationRead).mockResolvedValue(undefined);
+    vi.mocked(notificationService.markNotificationsRead).mockResolvedValue({ count: 1 });
 
     const res = await request(app)
       .patch('/notifications/n1/read')
       .set('x-wallet-address', '0x1111111111111111111111111111111111111111');
 
     expect(res.status).toBe(204);
-    expect(notificationService.markNotificationRead).toHaveBeenCalledWith(
+    expect(notificationService.markNotificationsRead).toHaveBeenCalledWith(
       '0x1111111111111111111111111111111111111111',
-      'n1',
+      ['n1'],
     );
   });
 });

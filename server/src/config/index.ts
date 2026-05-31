@@ -1,27 +1,37 @@
 import 'dotenv/config';
-import logger from './logger.js';
+import { cleanEnv, str, port, bool, url } from 'envalid';
 
-const requiredEnvs = ['PORT', 'NODE_ENV', 'DATABASE_URL', 'SUPABASE_URL', 'SUPABASE_ANON_KEY'];
-requiredEnvs.forEach((key) => {
-  if (!process.env[key]) {
-    logger.warn(`Environment variable ${key} is missing. Using default.`);
-  }
+const env = cleanEnv(process.env, {
+  NODE_ENV: str({ choices: ['development', 'test', 'production'], default: 'development' }),
+  PORT: port({ default: 5000 }),
+  DATABASE_URL: str(),
+  SUPABASE_URL: url(),
+  SUPABASE_ANON_KEY: str(),
+  REDIS_URL: str({ default: 'redis://127.0.0.1:6379' }),
+  RUN_WORKERS: bool({ default: false }),
+  METRICS_API_KEY: str({ default: '' }),
+  SUPABASE_SERVICE_ROLE_KEY: str({ default: '' }),
+  SUPABASE_PRODUCT_IMAGES_BUCKET: str({ default: 'product-images' }),
+  PRODUCT_IMAGE_PLACEHOLDER_URL: str({ default: 'https://placehold.co/800x800/png?text=No+Image' }),
+  JWT_SECRET: str({ default: 'changeme' }),
+  CONTRACT_ID: str({ default: '' }),
+  RPC_URL: str({ default: 'https://soroban-testnet.stellar.org' }),
+  WS_PATH: str({ default: '/ws' }),
 });
 
 export const config = {
-  port: process.env['PORT'] ?? 5000,
-  nodeEnv: process.env['NODE_ENV'] ?? 'development',
-  redisUrl: process.env['REDIS_URL'] ?? 'redis://127.0.0.1:6379',
-  runWorkers: (process.env['RUN_WORKERS'] ?? '').toLowerCase() === 'true',
-  metricsApiKey: process.env['METRICS_API_KEY']?.trim() || '',
-  supabaseUrl: process.env['SUPABASE_URL'] ?? '',
-  supabaseAnonKey: process.env['SUPABASE_ANON_KEY'] ?? '',
-  supabaseServiceRoleKey: process.env['SUPABASE_SERVICE_ROLE_KEY'] ?? '',
-  productImagesBucket: process.env['SUPABASE_PRODUCT_IMAGES_BUCKET'] ?? 'product-images',
-  productImagePlaceholderUrl: process.env['PRODUCT_IMAGE_PLACEHOLDER_URL'] ?? 'https://placehold.co/800x800/png?text=No+Image',
-  jwtSecret: process.env['JWT_SECRET'] ?? 'changeme',
-  contractId: process.env['CONTRACT_ID'] ?? '',
-  rpcUrl: process.env['RPC_URL'] ?? 'https://soroban-testnet.stellar.org',
-  /** WebSocket server path */
-  wsPath: process.env['WS_PATH'] ?? '/ws',
+  port: env.PORT,
+  nodeEnv: env.NODE_ENV,
+  redisUrl: env.REDIS_URL,
+  runWorkers: env.RUN_WORKERS,
+  metricsApiKey: env.METRICS_API_KEY,
+  supabaseUrl: env.SUPABASE_URL,
+  supabaseAnonKey: env.SUPABASE_ANON_KEY,
+  supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
+  productImagesBucket: env.SUPABASE_PRODUCT_IMAGES_BUCKET,
+  productImagePlaceholderUrl: env.PRODUCT_IMAGE_PLACEHOLDER_URL,
+  jwtSecret: env.JWT_SECRET,
+  contractId: env.CONTRACT_ID,
+  rpcUrl: env.RPC_URL,
+  wsPath: env.WS_PATH,
 };

@@ -34,6 +34,8 @@ pub enum ProductionEscrowError {
     DisputeNotOpen = 22,
     NotAdmin = 23,
     DisputeStakeMustBePositive = 24,
+    // Fee errors (Issue #270)
+    InvalidFeeRate = 25,
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -95,6 +97,9 @@ pub struct Order {
     pub buyer: Address,
     pub farmer: Address,
     pub token: Address,
+    /// Gross amount paid by the buyer (before fee deduction).
+    pub gross_amount: i128,
+    /// Net amount held in escrow and paid out to the farmer (after fee deduction).
     pub amount: i128,
     pub timestamp: u64,
     pub delivery_timestamp: Option<u64>,
@@ -120,6 +125,8 @@ pub enum DataKey {
     Admin,
     SupportedTokens,
     DisputeStakeAmount,
+    FeeCollector,
+    FeeRateBps,
     // Campaigns
     Campaign(u64),
     CampaignCount,
@@ -160,6 +167,8 @@ impl ProductionEscrowContract {
         admin: Address,
         supported_tokens: Vec<Address>,
         dispute_stake_amount: i128,
+        fee_collector: Address,
+        fee_rate_bps: u32,
     ) -> Result<(), ProductionEscrowError> {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(ProductionEscrowError::AlreadyInitialized);
@@ -170,6 +179,9 @@ impl ProductionEscrowContract {
         if dispute_stake_amount <= 0 {
             return Err(ProductionEscrowError::DisputeStakeMustBePositive);
         }
+        if fee_rate_bps > 10_000 {
+            return Err(ProductionEscrowError::InvalidFeeRate);
+        }
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage()
             .instance()
@@ -177,6 +189,12 @@ impl ProductionEscrowContract {
         env.storage()
             .instance()
             .set(&DataKey::DisputeStakeAmount, &dispute_stake_amount);
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeCollector, &fee_collector);
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeRateBps, &fee_rate_bps);
         Ok(())
     }
 
@@ -487,8 +505,25 @@ impl ProductionEscrowContract {
             return Err(ProductionEscrowError::UnsupportedToken);
         }
 
+        let fee_collector: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::FeeCollector)
+            .ok_or(ProductionEscrowError::ContractNotInitialized)?;
+        let fee_rate_bps: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::FeeRateBps)
+            .ok_or(ProductionEscrowError::ContractNotInitialized)?;
+
+        let fee = amount * fee_rate_bps as i128 / 10_000;
+        let net_amount = amount - fee;
+
         let token_client = token::Client::new(&env, &token);
-        token_client.transfer(&buyer, &env.current_contract_address(), &amount);
+        if fee > 0 {
+            token_client.transfer(&buyer, &fee_collector, &fee);
+        }
+        token_client.transfer(&buyer, &env.current_contract_address(), &net_amount);
 
         let mut order_id: u64 = env
             .storage()
@@ -505,7 +540,8 @@ impl ProductionEscrowContract {
             buyer: buyer.clone(),
             farmer: farmer.clone(),
             token,
-            amount,
+            gross_amount: amount,
+            amount: net_amount,
             timestamp,
             delivery_timestamp: None,
             status: OrderStatus::Pending,
@@ -540,7 +576,7 @@ impl ProductionEscrowContract {
 
         env.events().publish(
             (symbol_short!("order"), symbol_short!("created")),
-            (order_id, buyer, farmer, amount),
+            (order_id, buyer, farmer, amount, net_amount, fee),
         );
 
         Ok(order_id)
@@ -705,6 +741,8 @@ impl ProductionEscrowContract {
         }
 
         // Enforce cooldown (Issue #124 — prevent spam).
+        // Only apply cooldown when the raiser has previously opened a dispute
+        // (last_dispute > 0) to avoid false-firing at ledger timestamp 0.
         let now = env.ledger().timestamp();
         let last_dispute: u64 = env
             .storage()
@@ -712,7 +750,7 @@ impl ProductionEscrowContract {
             .get(&DataKey::LastDisputeTimestamp(raiser.clone()))
             .unwrap_or(0);
 
-        if now < last_dispute + DISPUTE_COOLDOWN_SECONDS {
+        if last_dispute > 0 && now < last_dispute + DISPUTE_COOLDOWN_SECONDS {
             return Err(ProductionEscrowError::DisputeCooldownActive);
         }
 
@@ -898,6 +936,43 @@ impl ProductionEscrowContract {
             .instance()
             .get(&DataKey::SupportedTokens)
             .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    // ── Access Control Getters (Issue #275) ──────────────────────────────────
+
+    pub fn get_admin(env: Env) -> Result<Address, ProductionEscrowError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(ProductionEscrowError::ContractNotInitialized)
+    }
+
+    pub fn get_dispute_stake_amount(env: Env) -> Result<i128, ProductionEscrowError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::DisputeStakeAmount)
+            .ok_or(ProductionEscrowError::ContractNotInitialized)
+    }
+
+    pub fn get_campaign_count(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::CampaignCount)
+            .unwrap_or(0)
+    }
+
+    pub fn get_order_count(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::OrderCount)
+            .unwrap_or(0)
+    }
+
+    pub fn get_dispute_count(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::DisputeCount)
+            .unwrap_or(0)
     }
 }
 

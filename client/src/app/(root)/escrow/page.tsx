@@ -4,7 +4,7 @@ import { ShieldCheck, Lock, BadgeCheck } from "lucide-react";
 
 import Wrapper from "@/components/shared/wrapper";
 import { PageHeader } from "@/components/shared/page-header";
-import EscrowTransaction from "@/components/EscrowTransaction";
+import EnhancedEscrowTransaction from "@/components/EnhancedEscrowTransaction";
 
 // Demo / sandbox flow — a fixed product against which to test the
 // Soroban create_order pipeline. Wire to a real product page later.
@@ -61,7 +61,7 @@ export default function EscrowDemoPage() {
       </div>
 
       <div className="mt-10">
-        <EscrowTransaction
+        <EnhancedEscrowTransaction
           farmerAddress={demoProduct.farmerAddress}
           tokenAddress={demoProduct.tokenAddress}
           pricePerUnit={demoProduct.pricePerUnit}

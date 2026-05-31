@@ -181,6 +181,25 @@ export async function uploadProductImage(
   return (await res.json()) as { image_url: string };
 }
 
+/** Admin: toggle is_available on any product. */
+export async function adminSetProductVisibility(
+  productId: string,
+  isAvailable: boolean,
+): Promise<Product> {
+  return requestJson<Product>(`${API_BASE_URL}/admin/products/${productId}/visibility`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ is_available: isAvailable }),
+  });
+}
+
+/** Admin: permanently delist (hard-delete) a product. */
+export async function adminDelistProduct(productId: string): Promise<void> {
+  await requestJson<void>(`${API_BASE_URL}/admin/products/${productId}`, {
+    method: "DELETE",
+  });
+}
+
 export function normalizeProductWriteInput(input: {
   name: string;
   category: ProductCategory | null;

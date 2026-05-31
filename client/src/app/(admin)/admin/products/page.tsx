@@ -15,8 +15,57 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { DataTable } from "@/components/shared/data-table";
 import { PageHeader } from "@/components/shared/page-header";
-import { useProducts } from "@/hooks/queries/useProducts";
+import { useProducts, useAdminSetVisibility, useAdminDelistProduct } from "@/hooks/queries/useProducts";
+import { toast } from "sonner";
 import type { Product } from "@/types/product";
+
+function ActionCell({ product }: { product: Product }) {
+  const setVisibility = useAdminSetVisibility();
+  const delist = useAdminDelistProduct();
+
+  const handleToggleVisibility = () => {
+    setVisibility.mutate(
+      { id: product.id, isAvailable: !product.is_available },
+      {
+        onSuccess: () => toast(product.is_available ? "Listing hidden" : "Listing restored"),
+        onError: (e) => toast.error((e as Error).message),
+      },
+    );
+  };
+
+  const handleDelist = () => {
+    if (!confirm(`Permanently delist "${product.name}"? This cannot be undone.`)) return;
+    delist.mutate(product.id, {
+      onSuccess: () => toast("Product delisted"),
+      onError: (e) => toast.error((e as Error).message),
+    });
+  };
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="size-8">
+          <MoreHorizontal className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={handleToggleVisibility} disabled={setVisibility.isPending}>
+          <EyeOff className="size-3.5" />
+          {product.is_available ? "Hide listing" : "Restore listing"}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={handleDelist}
+          disabled={delist.isPending}
+          className="text-destructive focus:text-destructive"
+        >
+          <Trash2 className="size-3.5" />
+          Delist (admin override)
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 const columns: ColumnDef<Product>[] = [
   {
@@ -88,29 +137,7 @@ const columns: ColumnDef<Product>[] = [
     header: "",
     enableGlobalFilter: false,
     enableSorting: false,
-    cell: () => (
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="size-8">
-            <MoreHorizontal className="size-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem disabled>
-            <EyeOff className="size-3.5" />
-            Hide listing
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            disabled
-            className="text-destructive focus:text-destructive"
-          >
-            <Trash2 className="size-3.5" />
-            Delist (admin override)
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    ),
+    cell: ({ row }) => <ActionCell product={row.original} />,
   },
 ];
 

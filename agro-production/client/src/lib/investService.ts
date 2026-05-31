@@ -9,6 +9,8 @@ export async function invest(productId: string, amount: number): Promise<void> {
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(errorText || 'Invest request failed');
+    throw new Error(
+      errorText || `Invest request failed with status ${response.status}`,
+    );
   }
 }

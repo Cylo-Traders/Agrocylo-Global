@@ -3,7 +3,13 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useWallet } from "@/hooks/useWallet";
 import type { CartState } from "@/types/cart";
-import { getActiveCart, addItemToCart, updateCartItemQuantity, removeCartItem, clearCart } from "@/services/cartService";
+import {
+  getActiveCart,
+  addItemToCart,
+  updateCartItemQuantity,
+  removeCartItem,
+  clearCart,
+} from "@/services/cartService";
 
 type CartContextType = {
   cart: CartState;
@@ -32,6 +38,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const cartRef = useRef(cart);
+  useEffect(() => { cartRef.current = cart; }, [cart]);
 
   const itemCount = useMemo(() => {
     return cart.groups.reduce((acc, g) => {
@@ -58,26 +66,23 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     void refreshCart();
   }, [connected, address, refreshCart]);
 
-  const findItemByProductId = useCallback(
-    (productId: string) => {
-      for (const g of cart.groups) {
-        const it = g.items.find((x) => x.product_id === productId);
-        if (it) return { itemId: it.id, quantity: Number(it.quantity), group: g };
-      }
-      return null;
-    },
-    [cart.groups],
-  );
-
   const setQuantityForProduct = useCallback(
     (productId: string, quantity: number) => {
       if (!address || !connected) return;
       const nextQty = Math.max(0, Math.floor(quantity));
+
+      const findItem = (pid: string) => {
+        for (const g of cartRef.current.groups) {
+          const it = g.items.find((x) => x.product_id === pid);
+          if (it) return { itemId: it.id, quantity: Number(it.quantity), group: g };
+        }
+        return null;
+      };
+
       if (nextQty === 0) {
-        const existing = findItemByProductId(productId);
+        const existing = findItem(productId);
         if (existing) {
           const { itemId } = existing;
-          // Immediate delete (no debounce) to match expected UI behavior.
           void (async () => {
             try {
               if (timersRef.current[itemId]) {
@@ -95,7 +100,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const existing = findItemByProductId(productId);
+      const existing = findItem(productId);
       if (!existing) {
         void (async () => {
           try {
@@ -110,7 +115,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
       const { itemId } = existing;
 
-      // Optimistic UI update.
       setCart((prev) => ({
         ...prev,
         groups: prev.groups.map((g) => ({
@@ -121,7 +125,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         })),
       }));
 
-      // Debounced backend update.
       if (timersRef.current[itemId]) clearTimeout(timersRef.current[itemId]);
       timersRef.current[itemId] = setTimeout(() => {
         void (async () => {
@@ -137,7 +140,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         })();
       }, 500);
     },
-    [address, connected, findItemByProductId, refreshCart],
+    [address, connected, refreshCart],
   );
 
   const removeCartItemFn = useCallback(
@@ -159,18 +162,36 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     setCart(updated);
   }, [address]);
 
-  const ctx: CartContextType = {
-    cart,
-    cartLoading,
-    cartError,
-    drawerOpen,
-    setDrawerOpen,
-    itemCount,
-    refreshCart,
-    setQuantityForProduct,
-    removeCartItem: removeCartItemFn,
-    clearCart: clearCartFn,
-  };
+  const setDrawerOpenFn = useCallback((open: boolean) => {
+    setDrawerOpen(open);
+  }, []);
+
+  const ctx = useMemo<CartContextType>(
+    () => ({
+      cart,
+      cartLoading,
+      cartError,
+      drawerOpen,
+      setDrawerOpen: setDrawerOpenFn,
+      itemCount,
+      refreshCart,
+      setQuantityForProduct,
+      removeCartItem: removeCartItemFn,
+      clearCart: clearCartFn,
+    }),
+    [
+      cart,
+      cartLoading,
+      cartError,
+      drawerOpen,
+      setDrawerOpenFn,
+      itemCount,
+      refreshCart,
+      setQuantityForProduct,
+      removeCartItemFn,
+      clearCartFn,
+    ],
+  );
 
   return <CartContext.Provider value={ctx}>{children}</CartContext.Provider>;
 }
@@ -180,4 +201,3 @@ export function useCart() {
   if (!ctx) throw new Error("useCart must be used within CartProvider");
   return ctx;
 }
-

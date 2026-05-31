@@ -1,14 +1,15 @@
 import { Queue } from "bullmq";
-import type { Redis as RedisClient } from "ioredis";
 import { createRedisConnection } from "./connection.js";
 
-let connection: RedisClient | undefined;
+type RedisConnectionOptions = ReturnType<typeof createRedisConnection>;
+
+let connection: RedisConnectionOptions | undefined;
 let indexingQueue: Queue | undefined;
 let analyticsQueue: Queue | undefined;
 let notificationsQueue: Queue | undefined;
 
-function getConnection(): RedisClient {
-  if (!connection) connection = createRedisConnection();
+function getConnection(): RedisConnectionOptions {
+  connection ??= createRedisConnection();
   return connection;
 }
 
@@ -34,6 +35,4 @@ export async function closeQueues(): Promise<void> {
     analyticsQueue?.close(),
     notificationsQueue?.close(),
   ]);
-  if (connection) await connection.quit();
 }
-

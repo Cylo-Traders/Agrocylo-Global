@@ -1,0 +1,24 @@
+{
+  "welcome": "Bienvenue sur Agrocylo Global",
+  "navigation": {
+    "home": "Accueil",
+    "market": "Marché",
+    "orders": "Commandes",
+    "profile": "Profil"
+  },
+  "market": {
+    "title": "Place de marché",
+    "search": "Rechercher des produits...",
+    "buy": "Acheter",
+    "sell": "Vendre"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "markAllRead": "Tout marquer comme lu",
+    "empty": "Aucune nouvelle notification"
+  },
+  "pwa": {
+    "install": "Installer l'application",
+    "installDesc": "Installez notre application pour un support hors ligne et des notifications."
+  }
+}

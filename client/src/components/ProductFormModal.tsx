@@ -30,6 +30,9 @@ import {
   uploadProductImage,
 } from "@/services/productService";
 import { isTestMode } from "@/lib/testMode";
+import { productFormSchema } from "@/lib/validation";
+import { FormError } from "@/components/FormError";
+import { logger } from "@/lib/logger";
 
 type Mode = "add" | "edit";
 
@@ -95,7 +98,6 @@ export default function ProductFormModal({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Reset form when reopening / switching products
   useEffect(() => {
     if (!open) return;
     setErrors({});
@@ -125,16 +127,44 @@ export default function ProductFormModal({
 
   function validate(): boolean {
     const next: FormErrors = {};
-    if (!name.trim()) next.name = "Product name is required.";
-    if (!category) next.category = "Select a category.";
-    if (!pricePerUnit || Number(pricePerUnit) <= 0)
-      next.pricePerUnit = "Invalid price.";
-    // In test mode location and deliveryWindow are optional
-    if (!isTestMode()) {
+
+    const result = productFormSchema.safeParse({
+      name: name.trim(),
+      category,
+      pricePerUnit,
+      currency,
+      unit,
+      stockQuantity: stockQuantity || "",
+      description: description || "",
+      isAvailable,
+      location: isTestMode() ? location || "test" : location,
+      deliveryWindow: isTestMode() ? deliveryWindow || "test" : deliveryWindow,
+    });
+
+    if (!result.success) {
+      const fieldMap: Record<string, keyof FormErrors> = {
+        name: "name",
+        category: "category",
+        pricePerUnit: "pricePerUnit",
+        location: "location",
+        deliveryWindow: "deliveryWindow",
+      };
+
+      for (const issue of result.success ? [] : result.error?.issues ?? []) {
+        const field = issue.path?.[0] as string;
+        const formKey = fieldMap[field];
+        if (formKey && !next[formKey]) {
+          next[formKey] = issue.message;
+        }
+      }
+    }
+
+    if (isTestMode()) {
       if (!location.trim()) next.location = "Location is required.";
       if (!deliveryWindow.trim())
         next.deliveryWindow = "Delivery window is required.";
     }
+
     setErrors(next);
     return Object.keys(next).length === 0;
   }
@@ -174,7 +204,9 @@ export default function ProductFormModal({
       await onSuccess();
       onClose();
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Failed to save.");
+      const msg = err instanceof Error ? err.message : "Failed to save.";
+      setSaveError(msg);
+      logger?.error("Product form save failed", { error: msg, mode });
     } finally {
       setSaving(false);
     }
@@ -194,7 +226,6 @@ export default function ProductFormModal({
         </DialogHeader>
 
         <form onSubmit={onSubmit} className="space-y-6">
-          {/* Basic info */}
           <div className="grid gap-4 sm:grid-cols-2">
             <Input
               label="Product Name"
@@ -227,7 +258,6 @@ export default function ProductFormModal({
             </div>
           </div>
 
-          {/* Pricing & units */}
           <div className="grid gap-4 sm:grid-cols-3">
             <Input
               label="Price"
@@ -271,7 +301,6 @@ export default function ProductFormModal({
             </div>
           </div>
 
-          {/* Stock + availability */}
           <div className="grid gap-4 sm:grid-cols-[2fr_1fr] sm:items-end">
             <Input
               label="Stock quantity"
@@ -294,7 +323,6 @@ export default function ProductFormModal({
             </div>
           </div>
 
-          {/* Logistics */}
           <div className="grid gap-4 sm:grid-cols-2">
             <Input
               label="Farm Location (Region)"
@@ -314,7 +342,6 @@ export default function ProductFormModal({
             />
           </div>
 
-          {/* Description */}
           <div className="grid gap-1.5">
             <Label htmlFor="prod-description">
               Description &amp; Health Benefits
@@ -328,7 +355,6 @@ export default function ProductFormModal({
             />
           </div>
 
-          {/* Images */}
           <div className="grid gap-2">
             <Label>Product images</Label>
             <p className="text-muted-foreground text-xs">
@@ -381,11 +407,7 @@ export default function ProductFormModal({
             )}
           </div>
 
-          {saveError && (
-            <div className="bg-destructive/10 text-destructive border-destructive/30 rounded-lg border p-3 text-sm">
-              {saveError}
-            </div>
-          )}
+          {saveError && <FormError message={saveError} />}
 
           <Separator />
 

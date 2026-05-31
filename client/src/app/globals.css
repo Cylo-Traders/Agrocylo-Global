@@ -1,5 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 @custom-variant dark (&:is(.dark *));
 
@@ -125,4 +128,103 @@
 
 html {
   scroll-behavior: smooth;
+}
+
+
+@layer base {
+  :root {
+    /* Light mode CSS variables */
+    --background: 255 255 255;
+    --background-secondary: 248 250 252;
+    --background-tertiary: 241 245 249;
+    
+    --foreground: 15 23 42;
+    --foreground-secondary: 71 85 105;
+    --foreground-muted: 148 163 184;
+    
+    --border: 226 232 240;
+    --border-strong: 203 213 225;
+    
+    --primary: 22 163 74;
+    --primary-foreground: 255 255 255;
+    --primary-hover: 21 128 61;
+    
+    --accent: 34 197 94;
+    --accent-foreground: 255 255 255;
+    
+    --card: 255 255 255;
+    --card-foreground: 15 23 42;
+    
+    --popover: 255 255 255;
+    --popover-foreground: 15 23 42;
+    
+    --muted: 241 245 249;
+    --muted-foreground: 100 116 139;
+    
+    --destructive: 239 68 68;
+    --destructive-foreground: 255 255 255;
+    
+    --ring: 22 163 74;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    /* Dark mode CSS variables */
+    --background: 2 6 23;
+    --background-secondary: 15 23 42;
+    --background-tertiary: 30 41 59;
+    
+    --foreground: 248 250 252;
+    --foreground-secondary: 203 213 225;
+    --foreground-muted: 148 163 184;
+    
+    --border: 51 65 85;
+    --border-strong: 71 85 105;
+    
+    --primary: 34 197 94;
+    --primary-foreground: 2 6 23;
+    --primary-hover: 74 222 128;
+    
+    --accent: 22 163 74;
+    --accent-foreground: 2 6 23;
+    
+    --card: 15 23 42;
+    --card-foreground: 248 250 252;
+    
+    --popover: 15 23 42;
+    --popover-foreground: 248 250 252;
+    
+    --muted: 30 41 59;
+    --muted-foreground: 148 163 184;
+    
+    --destructive: 248 113 113;
+    --destructive-foreground: 2 6 23;
+    
+    --ring: 34 197 94;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Smooth theme transitions */
+  html {
+    transition: color-scheme 0.3s ease;
+  }
+
+  html * {
+    transition-property: background-color, border-color, color, fill, stroke;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 150ms;
+  }
+
+  /* Disable transitions on page load to prevent flash */
+  html.no-transitions * {
+    transition-duration: 0ms !important;
+  }
 }

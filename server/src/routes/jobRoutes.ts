@@ -28,7 +28,7 @@ router.post("/jobs/:queue", async (req, res) => {
       removeOnFail: 1000,
     });
 
-    logger.info("Job enqueued", { queue: queueName, jobId: job.id } as any);
+    logger.info("Job enqueued", { queue: queueName, jobId: job.id });
     res.status(202).json({ queue: queueName, jobId: job.id });
   } catch (err) {
     logger.error("Failed to enqueue job", err);

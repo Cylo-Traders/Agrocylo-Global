@@ -11,7 +11,7 @@ export function requestLogger(req: Request, res: Response, next: NextFunction): 
       path: req.originalUrl,
       status: res.statusCode,
       durationMs: Math.round(durationMs * 100) / 100,
-    } as any);
+    });
   });
 
   next();

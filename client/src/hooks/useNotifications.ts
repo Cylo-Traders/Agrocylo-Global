@@ -74,7 +74,7 @@ export function useNotifications({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetch = useCallback(
+  const loadNotifications = useCallback(
     async (p = 1) => {
       if (!walletAddress) return;
       setIsLoading(true);
@@ -94,8 +94,8 @@ export function useNotifications({
   );
 
   useEffect(() => {
-    void fetch(1);
-  }, [fetch]);
+    void loadNotifications(1);
+  }, [loadNotifications]);
 
   // Client-side filter + search
   const filtered = all.filter((n) => {
@@ -110,7 +110,7 @@ export function useNotifications({
   const unreadCount = all.filter((n) => !n.isRead).length;
   const hasNextPage = all.length < total;
 
-  const loadNextPage = useCallback(() => fetch(page + 1), [fetch, page]);
+  const loadNextPage = useCallback(() => loadNotifications(page + 1), [loadNotifications, page]);
 
   const markRead = useCallback(
     async (ids: string[]) => {
@@ -154,6 +154,6 @@ export function useNotifications({
     markAllRead,
     deleteNotification,
     clearAll,
-    refetch: () => fetch(1),
+    refetch: () => loadNotifications(1),
   };
 }

@@ -36,7 +36,7 @@ export class SocketService {
     return this.instance;
   }
 
-  public static emit(event: string, data: any) {
+  public static emit(event: string, data: unknown) {
     if (this.instance) {
       this.instance.emit(event, data);
       logger.info(`[SocketService]: Emitted event '${event}' with data:`, data);

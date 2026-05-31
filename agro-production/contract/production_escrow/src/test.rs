@@ -9,8 +9,8 @@ use soroban_sdk::{
 };
 
 use crate::{
-    CampaignStatus, DisputeResolution, EscrowError, ProductionEscrowContract,
-    ProductionEscrowContractClient,
+    CampaignStatus, DisputeResolution, EscrowError, OrderStatus, ProductionEscrowContract,
+    ProductionEscrowContractClient, ORDER_EXPIRY_SECS,
 };
 
 // ---------------------------------------------------------------------------
@@ -1127,4 +1127,1440 @@ fn test_partial_resolution_bps_exceeds_10000_rejected() {
         .unwrap_err()
         .unwrap();
     assert_eq!(err, EscrowError::InvalidResolution);
+}
+
+// ===========================================================================
+// Issue #277 — Comprehensive State Machine Tests
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// 13. Order State Machine Tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_order_valid_transition_pending_to_confirmed() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+
+    let order_id = t.client.create_order(&t.buyer, &id, &500);
+    let o_before = t.client.get_order(&order_id);
+    assert_eq!(o_before.status, OrderStatus::Pending);
+
+    t.client.confirm_order(&t.buyer, &order_id);
+    let o_after = t.client.get_order(&order_id);
+    assert_eq!(o_after.status, OrderStatus::Confirmed);
+}
+
+#[test]
+fn test_cannot_confirm_order_twice() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+
+    let order_id = t.client.create_order(&t.buyer, &id, &200);
+    t.client.confirm_order(&t.buyer, &order_id);
+    // Confirmed → Confirmed is invalid (order is no longer Pending)
+    let err = t
+        .client
+        .try_confirm_order(&t.buyer, &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::OrderNotPending);
+}
+
+// ---------------------------------------------------------------------------
+// 14. Campaign State Machine — Valid Transitions
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_campaign_valid_transition_funding_to_funded() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Funding);
+    t.client.invest(&t.investor1, &id, &10_000);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Funded);
+}
+
+#[test]
+fn test_campaign_valid_transition_funded_to_in_production() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Funded);
+    t.client.start_production(&t.farmer, &id);
+    assert_eq!(
+        t.client.get_campaign(&id).status,
+        CampaignStatus::InProduction
+    );
+}
+
+#[test]
+fn test_campaign_valid_transition_in_production_to_harvested() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    assert_eq!(
+        t.client.get_campaign(&id).status,
+        CampaignStatus::InProduction
+    );
+    t.client.mark_harvest(&t.farmer, &id);
+    assert_eq!(
+        t.client.get_campaign(&id).status,
+        CampaignStatus::Harvested
+    );
+}
+
+#[test]
+fn test_campaign_valid_transition_harvested_to_settled() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+    assert_eq!(
+        t.client.get_campaign(&id).status,
+        CampaignStatus::Harvested
+    );
+    t.client.settle(&t.farmer, &id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Settled);
+}
+
+#[test]
+fn test_campaign_valid_transition_funding_to_failed() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &3_000); // partial only
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Funding);
+    advance_ledger(&t.env, 8 * 24 * 3600);
+    t.client.finalize_failed(&id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+}
+
+#[test]
+fn test_campaign_valid_transition_funded_to_disputed() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Funded);
+    t.client.open_dispute(&t.farmer, &id);
+    assert_eq!(
+        t.client.get_campaign(&id).status,
+        CampaignStatus::Disputed
+    );
+}
+
+#[test]
+fn test_campaign_valid_transition_in_production_to_disputed() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.open_dispute(&t.investor1, &id);
+    assert_eq!(
+        t.client.get_campaign(&id).status,
+        CampaignStatus::Disputed
+    );
+}
+
+#[test]
+fn test_campaign_disputed_to_settled_via_full_payout() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.open_dispute(&t.farmer, &id);
+    t.client
+        .resolve_dispute(&t.admin, &id, &DisputeResolution::FullPayoutToInvestors);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Settled);
+}
+
+#[test]
+fn test_campaign_disputed_to_failed_via_refund_investors() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.open_dispute(&t.farmer, &id);
+    t.client
+        .resolve_dispute(&t.admin, &id, &DisputeResolution::RefundInvestors);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+}
+
+// ---------------------------------------------------------------------------
+// 15. Campaign State Machine — Invalid Transitions (State Locks)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_cannot_invest_after_funded() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000); // → Funded
+    let err = t
+        .client
+        .try_invest(&t.investor2, &id, &100)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignNotFunding);
+}
+
+#[test]
+fn test_cannot_start_production_from_funding() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    // Still Funding (not fully funded)
+    let err = t
+        .client
+        .try_start_production(&t.farmer, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignNotFunded);
+}
+
+#[test]
+fn test_cannot_mark_harvest_from_funded() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000); // → Funded
+    let err = t
+        .client
+        .try_mark_harvest(&t.farmer, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignNotInProduction);
+}
+
+#[test]
+fn test_cannot_settle_from_in_production() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id); // → InProduction
+    let err = t
+        .client
+        .try_settle(&t.farmer, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignNotHarvested);
+}
+
+#[test]
+fn test_cannot_refund_settled_campaign() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+    t.client.settle(&t.farmer, &id); // → Settled
+    let err = t
+        .client
+        .try_refund(&t.investor1, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignNotFailed);
+}
+
+#[test]
+fn test_cannot_finalize_failed_funded_campaign() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000); // → Funded
+    advance_ledger(&t.env, 8 * 24 * 3600);
+    let err = t.client.try_finalize_failed(&id).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::CampaignNotFunding);
+}
+
+#[test]
+fn test_cannot_open_dispute_on_failed_campaign() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &5_000);
+    advance_ledger(&t.env, 8 * 24 * 3600);
+    t.client.finalize_failed(&id); // → Failed
+    let err = t
+        .client
+        .try_open_dispute(&t.investor1, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignAlreadyDisputed);
+}
+
+#[test]
+fn test_state_persisted_after_start_production() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    // Re-fetch campaign and verify state was written to storage
+    let c = t.client.get_campaign(&id);
+    assert_eq!(c.status, CampaignStatus::InProduction);
+    assert_eq!(c.tranche_released, 3_000);
+}
+
+#[test]
+fn test_state_persisted_after_mark_harvest() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+    let c = t.client.get_campaign(&id);
+    assert_eq!(c.status, CampaignStatus::Harvested);
+    assert_eq!(c.tranche_released, 7_000);
+}
+
+// ===========================================================================
+// Issue #279 — Time-Based Event Tests
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// 16. Campaign Deadline Boundary Tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_invest_one_second_before_deadline_succeeds() {
+    let t = setup();
+    let now = t.env.ledger().timestamp();
+    let deadline = now + 100; // 100 seconds from now
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+
+    // Advance to 1 second before deadline
+    advance_ledger(&t.env, 99);
+    // At timestamp = now + 99, deadline = now + 100, so timestamp < deadline → allowed
+    t.client.invest(&t.investor1, &id, &5_000);
+    assert_eq!(t.client.get_campaign(&id).total_raised, 5_000);
+}
+
+#[test]
+fn test_invest_at_exact_deadline_succeeds() {
+    // The check is `timestamp > deadline`, so at exactly the deadline it still succeeds.
+    let t = setup();
+    let now = t.env.ledger().timestamp();
+    let deadline = now + 100;
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+
+    advance_ledger(&t.env, 100); // timestamp == deadline
+    t.client.invest(&t.investor1, &id, &5_000);
+    assert_eq!(t.client.get_campaign(&id).total_raised, 5_000);
+}
+
+#[test]
+fn test_invest_one_second_after_deadline_fails() {
+    let t = setup();
+    let now = t.env.ledger().timestamp();
+    let deadline = now + 100;
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+
+    advance_ledger(&t.env, 101); // timestamp > deadline
+    let err = t
+        .client
+        .try_invest(&t.investor1, &id, &5_000)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignDeadlinePassed);
+}
+
+#[test]
+fn test_finalize_failed_at_exact_deadline_rejected() {
+    // The check is `timestamp <= deadline`, so at exactly the deadline, finalize fails.
+    let t = setup();
+    let now = t.env.ledger().timestamp();
+    let deadline = now + 100;
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &3_000);
+
+    advance_ledger(&t.env, 100); // timestamp == deadline → still not passed
+    let err = t.client.try_finalize_failed(&id).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::CampaignDeadlineNotPassed);
+}
+
+#[test]
+fn test_finalize_failed_one_second_after_deadline_succeeds() {
+    let t = setup();
+    let now = t.env.ledger().timestamp();
+    let deadline = now + 100;
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &3_000);
+
+    advance_ledger(&t.env, 101); // timestamp > deadline
+    t.client.finalize_failed(&id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+}
+
+#[test]
+fn test_campaign_deadline_at_exact_future_timestamp() {
+    // Creating a campaign with deadline = now + 1 must succeed.
+    let t = setup();
+    let now = t.env.ledger().timestamp();
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &(now + 1));
+    let c = t.client.get_campaign(&id);
+    assert_eq!(c.deadline, now + 1);
+    assert_eq!(c.status, CampaignStatus::Funding);
+}
+
+// ---------------------------------------------------------------------------
+// 17. Order Expiration Tests (96-hour expiry via batch_refund_orders)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_order_not_refunded_before_96h() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+
+    let order_id = t.client.create_order(&t.buyer, &id, &500);
+    let buyer_before = balance(&t, &t.buyer);
+
+    // 95 hours — not yet expired
+    advance_ledger(&t.env, 95 * 3600);
+    let mut ids = Vec::new(&t.env);
+    ids.push_back(order_id);
+    let (count, total) = t.client.batch_refund_orders(&ids);
+    assert_eq!(count, 0);
+    assert_eq!(total, 0);
+    // Buyer balance unchanged
+    assert_eq!(balance(&t, &t.buyer), buyer_before);
+}
+
+#[test]
+fn test_order_refunded_at_exactly_96h() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+
+    let order_id = t.client.create_order(&t.buyer, &id, &500);
+    let buyer_before = balance(&t, &t.buyer);
+
+    // Exactly 96 hours later
+    advance_ledger(&t.env, ORDER_EXPIRY_SECS);
+    let mut ids = Vec::new(&t.env);
+    ids.push_back(order_id);
+    let (count, total) = t.client.batch_refund_orders(&ids);
+    assert_eq!(count, 1);
+    assert_eq!(total, 500);
+    assert_eq!(balance(&t, &t.buyer), buyer_before + 500);
+}
+
+#[test]
+fn test_order_refunded_after_96h() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+
+    let order_id = t.client.create_order(&t.buyer, &id, &300);
+    let buyer_before = balance(&t, &t.buyer);
+
+    // More than 96 hours later
+    advance_ledger(&t.env, ORDER_EXPIRY_SECS + 1);
+    let mut ids = Vec::new(&t.env);
+    ids.push_back(order_id);
+    let (count, total) = t.client.batch_refund_orders(&ids);
+    assert_eq!(count, 1);
+    assert_eq!(total, 300);
+    assert_eq!(balance(&t, &t.buyer), buyer_before + 300);
+}
+
+#[test]
+fn test_order_expiration_idempotent() {
+    // Calling batch_refund_orders twice on same order: second call is a no-op.
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+
+    let order_id = t.client.create_order(&t.buyer, &id, &400);
+    advance_ledger(&t.env, ORDER_EXPIRY_SECS);
+
+    let mut ids = Vec::new(&t.env);
+    ids.push_back(order_id);
+
+    // First call — succeeds
+    let (count1, total1) = t.client.batch_refund_orders(&ids);
+    assert_eq!(count1, 1);
+    assert_eq!(total1, 400);
+
+    // Second call — no-op (order is no longer Pending)
+    let (count2, total2) = t.client.batch_refund_orders(&ids);
+    assert_eq!(count2, 0);
+    assert_eq!(total2, 0);
+}
+
+#[test]
+fn test_confirmed_order_not_eligible_for_batch_refund() {
+    // An already confirmed order must not be refunded by batch_refund_orders.
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+
+    let order_id = t.client.create_order(&t.buyer, &id, &500);
+    t.client.confirm_order(&t.buyer, &order_id); // already confirmed
+
+    advance_ledger(&t.env, ORDER_EXPIRY_SECS + 1);
+    let buyer_before = balance(&t, &t.buyer);
+
+    let mut ids = Vec::new(&t.env);
+    ids.push_back(order_id);
+    let (count, total) = t.client.batch_refund_orders(&ids);
+    assert_eq!(count, 0);
+    assert_eq!(total, 0);
+    assert_eq!(balance(&t, &t.buyer), buyer_before);
+}
+
+// ===========================================================================
+// Issue #281 — Error Message Consistency Tests
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// 18. Unauthorized Operation Errors
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_error_not_farmer_start_production() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    let err = t
+        .client
+        .try_start_production(&t.buyer, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::NotFarmer);
+}
+
+#[test]
+fn test_error_not_farmer_mark_harvest() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    let err = t
+        .client
+        .try_mark_harvest(&t.investor1, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::NotFarmer);
+}
+
+#[test]
+fn test_error_not_buyer_confirm_order() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+    let order_id = t.client.create_order(&t.buyer, &id, &100);
+    let err = t
+        .client
+        .try_confirm_order(&t.farmer, &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::NotBuyer);
+}
+
+#[test]
+fn test_error_not_investor_cannot_claim() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+    t.client.settle(&t.farmer, &id);
+    // investor2 never invested
+    let err = t
+        .client
+        .try_claim_returns(&t.investor2, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::NotInvestor);
+}
+
+#[test]
+fn test_error_not_investor_cannot_open_dispute() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    // buyer has no stake
+    let err = t
+        .client
+        .try_open_dispute(&t.buyer, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::NotInvestor);
+}
+
+#[test]
+fn test_error_not_admin_settle() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+    let err = t
+        .client
+        .try_settle(&t.investor1, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::NotAdmin);
+}
+
+#[test]
+fn test_error_not_admin_resolve_dispute() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.open_dispute(&t.farmer, &id);
+    let err = t
+        .client
+        .try_resolve_dispute(&t.farmer, &id, &DisputeResolution::RefundInvestors)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::NotAdmin);
+}
+
+// ---------------------------------------------------------------------------
+// 19. Invalid State Errors
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_error_campaign_not_funding_invest_in_funded() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000); // → Funded
+    let err = t
+        .client
+        .try_invest(&t.investor2, &id, &100)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignNotFunding);
+}
+
+#[test]
+fn test_error_campaign_not_funded_start_production() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    // Still Funding
+    let err = t
+        .client
+        .try_start_production(&t.farmer, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignNotFunded);
+}
+
+#[test]
+fn test_error_campaign_not_in_production_mark_harvest() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000); // → Funded, not InProduction
+    let err = t
+        .client
+        .try_mark_harvest(&t.farmer, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignNotInProduction);
+}
+
+#[test]
+fn test_error_campaign_not_harvested_settle() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id); // → InProduction
+    let err = t.client.try_settle(&t.farmer, &id).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::CampaignNotHarvested);
+}
+
+#[test]
+fn test_error_campaign_not_harvested_create_order_on_funding() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    // Campaign in Funding state — orders not allowed
+    let err = t
+        .client
+        .try_create_order(&t.buyer, &id, &100)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignNotHarvested);
+}
+
+#[test]
+fn test_error_campaign_not_failed_refund() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000); // → Funded
+    let err = t.client.try_refund(&t.investor1, &id).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::CampaignNotFailed);
+}
+
+#[test]
+fn test_error_campaign_not_settled_claim_returns() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000); // → Funded, not Settled
+    let err = t
+        .client
+        .try_claim_returns(&t.investor1, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignNotSettled);
+}
+
+#[test]
+fn test_error_campaign_not_disputed_resolve() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000); // Funded, not Disputed
+    let err = t
+        .client
+        .try_resolve_dispute(&t.admin, &id, &DisputeResolution::RefundInvestors)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignNotDisputed);
+}
+
+#[test]
+fn test_error_campaign_already_disputed_open_dispute_again() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.open_dispute(&t.farmer, &id);
+    // Second open_dispute on an already-disputed campaign
+    let err = t
+        .client
+        .try_open_dispute(&t.farmer, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignAlreadyDisputed);
+}
+
+#[test]
+fn test_error_order_not_pending_confirm_twice() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+    let order_id = t.client.create_order(&t.buyer, &id, &200);
+    t.client.confirm_order(&t.buyer, &order_id);
+    let err = t
+        .client
+        .try_confirm_order(&t.buyer, &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::OrderNotPending);
+}
+
+// ---------------------------------------------------------------------------
+// 20. Invalid Input Errors
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_error_invalid_amount_create_campaign_zero() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let err = t
+        .client
+        .try_create_campaign(&t.farmer, &t.token_id, &0, &deadline)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::InvalidAmount);
+}
+
+#[test]
+fn test_error_invalid_amount_create_campaign_negative() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let err = t
+        .client
+        .try_create_campaign(&t.farmer, &t.token_id, &-500, &deadline)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::InvalidAmount);
+}
+
+#[test]
+fn test_error_invalid_amount_invest_zero() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    let err = t
+        .client
+        .try_invest(&t.investor1, &id, &0)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::InvalidAmount);
+}
+
+#[test]
+fn test_error_invalid_amount_invest_negative() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    let err = t
+        .client
+        .try_invest(&t.investor1, &id, &-1)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::InvalidAmount);
+}
+
+#[test]
+fn test_error_invalid_amount_create_order_zero() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+    let err = t
+        .client
+        .try_create_order(&t.buyer, &id, &0)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::InvalidAmount);
+}
+
+#[test]
+fn test_error_invalid_deadline_equals_now() {
+    let t = setup();
+    let now = t.env.ledger().timestamp();
+    let err = t
+        .client
+        .try_create_campaign(&t.farmer, &t.token_id, &1_000, &now)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::InvalidDeadline);
+}
+
+#[test]
+fn test_error_invalid_deadline_in_past() {
+    let t = setup();
+    let now = t.env.ledger().timestamp();
+    let past = now.saturating_sub(1);
+    // Only works if now > 0
+    if past < now {
+        let err = t
+            .client
+            .try_create_campaign(&t.farmer, &t.token_id, &1_000, &past)
+            .unwrap_err()
+            .unwrap();
+        assert_eq!(err, EscrowError::InvalidDeadline);
+    }
+}
+
+#[test]
+fn test_error_unsupported_token() {
+    let t = setup();
+    let bad_token = Address::generate(&t.env);
+    let deadline = future_deadline(&t);
+    let err = t
+        .client
+        .try_create_campaign(&t.farmer, &bad_token, &1_000, &deadline)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::UnsupportedToken);
+}
+
+#[test]
+fn test_error_campaign_overfunded() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &9_000);
+    let err = t
+        .client
+        .try_invest(&t.investor2, &id, &2_000) // 9_000 + 2_000 > 10_000
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignOverfunded);
+}
+
+#[test]
+fn test_error_invalid_resolution_bps_too_high() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.open_dispute(&t.farmer, &id);
+    let err = t
+        .client
+        .try_resolve_dispute(&t.admin, &id, &DisputeResolution::Partial(10_001))
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::InvalidResolution);
+}
+
+// ---------------------------------------------------------------------------
+// 21. Not-Found Errors
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_error_campaign_not_found() {
+    let t = setup();
+    let err = t.client.try_get_campaign(&99999).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::CampaignNotFound);
+}
+
+#[test]
+fn test_error_order_not_found() {
+    let t = setup();
+    let err = t.client.try_get_order(&99999).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::OrderNotFound);
+}
+
+#[test]
+fn test_error_invest_in_non_existent_campaign() {
+    let t = setup();
+    let err = t
+        .client
+        .try_invest(&t.investor1, &99999, &1_000)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignNotFound);
+}
+
+#[test]
+fn test_error_confirm_non_existent_order() {
+    let t = setup();
+    let err = t
+        .client
+        .try_confirm_order(&t.buyer, &99999)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::OrderNotFound);
+}
+
+// ---------------------------------------------------------------------------
+// 22. Already-Processed Errors
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_error_already_initialized() {
+    let t = setup();
+    let mut tokens = Vec::new(&t.env);
+    tokens.push_back(t.token_id.clone());
+    let err = t
+        .client
+        .try_initialize(&t.admin, &tokens)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::AlreadyInitialized);
+}
+
+#[test]
+fn test_error_already_claimed_returns() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+    t.client.settle(&t.farmer, &id);
+    t.client.claim_returns(&t.investor1, &id);
+    let err = t
+        .client
+        .try_claim_returns(&t.investor1, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::AlreadyClaimed);
+}
+
+#[test]
+fn test_error_already_claimed_refund() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &5_000);
+    advance_ledger(&t.env, 8 * 24 * 3600);
+    t.client.finalize_failed(&id);
+    t.client.refund(&t.investor1, &id);
+    let err = t.client.try_refund(&t.investor1, &id).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::AlreadyClaimed);
+}
+
+#[test]
+fn test_error_must_support_one_token() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(ProductionEscrowContract, ());
+    let client = ProductionEscrowContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let empty: Vec<Address> = Vec::new(&env);
+    let err = client.try_initialize(&admin, &empty).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::MustSupportOneToken);
+}
+
+#[test]
+fn test_error_campaign_deadline_passed_invest() {
+    let t = setup();
+    let now = t.env.ledger().timestamp();
+    let deadline = now + 50;
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    advance_ledger(&t.env, 51);
+    let err = t
+        .client
+        .try_invest(&t.investor1, &id, &100)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignDeadlinePassed);
+}
+
+#[test]
+fn test_error_campaign_deadline_not_passed_finalize() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &3_000);
+    // Deadline hasn't passed yet
+    let err = t.client.try_finalize_failed(&id).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::CampaignDeadlineNotPassed);
+}
+
+// ===========================================================================
+// Issue #273 — Batch Operation Event Tests
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// 23. Batch Refund Investors Tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_batch_refund_investors_refunds_all() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    // Target is 20_000 so partial investments keep campaign in Funding state.
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &20_000, &deadline);
+    t.client.invest(&t.investor1, &id, &6_000);
+    t.client.invest(&t.investor2, &id, &4_000);
+    advance_ledger(&t.env, 8 * 24 * 3600);
+    t.client.finalize_failed(&id);
+
+    let before1 = balance(&t, &t.investor1);
+    let before2 = balance(&t, &t.investor2);
+
+    let mut investors = Vec::new(&t.env);
+    investors.push_back(t.investor1.clone());
+    investors.push_back(t.investor2.clone());
+
+    let (count, total) = t.client.batch_refund_investors(&id, &investors);
+    assert_eq!(count, 2);
+    assert_eq!(total, 10_000);
+    assert_eq!(balance(&t, &t.investor1), before1 + 6_000);
+    assert_eq!(balance(&t, &t.investor2), before2 + 4_000);
+}
+
+#[test]
+fn test_batch_refund_investors_emits_single_summary_event() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    // Partial investment keeps campaign in Funding so finalize_failed works.
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &20_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    advance_ledger(&t.env, 8 * 24 * 3600);
+    t.client.finalize_failed(&id);
+
+    let mut investors = Vec::new(&t.env);
+    investors.push_back(t.investor1.clone());
+
+    // Should complete without error (event emission is verified via no-panic).
+    let (count, total) = t.client.batch_refund_investors(&id, &investors);
+    assert_eq!(count, 1);
+    assert_eq!(total, 10_000); // investor1 contributed 10_000 out of 20_000 target
+}
+
+#[test]
+fn test_batch_refund_investors_skips_non_investors() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    // Partial investment keeps campaign in Funding so finalize_failed works.
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &20_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    advance_ledger(&t.env, 8 * 24 * 3600);
+    t.client.finalize_failed(&id);
+
+    // investor2 never invested — should be silently skipped
+    let mut investors = Vec::new(&t.env);
+    investors.push_back(t.investor1.clone());
+    investors.push_back(t.investor2.clone()); // not an investor
+
+    let (count, total) = t.client.batch_refund_investors(&id, &investors);
+    assert_eq!(count, 1); // only investor1 refunded
+    assert_eq!(total, 10_000);
+}
+
+#[test]
+fn test_batch_refund_investors_idempotent() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    // Partial investment keeps campaign in Funding so finalize_failed works.
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &20_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    advance_ledger(&t.env, 8 * 24 * 3600);
+    t.client.finalize_failed(&id);
+
+    let mut investors = Vec::new(&t.env);
+    investors.push_back(t.investor1.clone());
+
+    // First batch call
+    let (c1, t1) = t.client.batch_refund_investors(&id, &investors);
+    assert_eq!(c1, 1);
+    assert_eq!(t1, 10_000);
+
+    // Second batch call — already claimed, should be skipped
+    let (c2, t2) = t.client.batch_refund_investors(&id, &investors);
+    assert_eq!(c2, 0);
+    assert_eq!(t2, 0);
+}
+
+#[test]
+fn test_batch_refund_investors_requires_failed_campaign() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000); // → Funded, not Failed
+
+    let mut investors = Vec::new(&t.env);
+    investors.push_back(t.investor1.clone());
+
+    let err = t
+        .client
+        .try_batch_refund_investors(&id, &investors)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignNotFailed);
+}
+
+#[test]
+fn test_batch_refund_investors_mixes_with_individual_refund() {
+    // Investor1 already refunded individually; batch should skip them and refund investor2.
+    let t = setup();
+    let deadline = future_deadline(&t);
+    // Target is 20_000 so partial investments keep campaign in Funding state.
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &20_000, &deadline);
+    t.client.invest(&t.investor1, &id, &6_000);
+    t.client.invest(&t.investor2, &id, &4_000);
+    advance_ledger(&t.env, 8 * 24 * 3600);
+    t.client.finalize_failed(&id);
+
+    // Individual refund for investor1
+    t.client.refund(&t.investor1, &id);
+
+    let before2 = balance(&t, &t.investor2);
+    let mut investors = Vec::new(&t.env);
+    investors.push_back(t.investor1.clone());
+    investors.push_back(t.investor2.clone());
+
+    let (count, total) = t.client.batch_refund_investors(&id, &investors);
+    assert_eq!(count, 1); // only investor2
+    assert_eq!(total, 4_000);
+    assert_eq!(balance(&t, &t.investor2), before2 + 4_000);
+}
+
+// ---------------------------------------------------------------------------
+// 24. Batch Refund Orders Tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_batch_refund_orders_refunds_expired_orders() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+
+    let sac = soroban_sdk::token::StellarAssetClient::new(&t.env, &t.token_id);
+    let buyer2 = Address::generate(&t.env);
+    sac.mint(&buyer2, &1_000_000);
+
+    let order1 = t.client.create_order(&t.buyer, &id, &300);
+    let order2 = t.client.create_order(&buyer2, &id, &200);
+
+    let before1 = balance(&t, &t.buyer);
+    let before2 = TokenClient::new(&t.env, &t.token_id).balance(&buyer2);
+
+    advance_ledger(&t.env, ORDER_EXPIRY_SECS);
+
+    let mut ids = Vec::new(&t.env);
+    ids.push_back(order1);
+    ids.push_back(order2);
+
+    let (count, total) = t.client.batch_refund_orders(&ids);
+    assert_eq!(count, 2);
+    assert_eq!(total, 500);
+    assert_eq!(balance(&t, &t.buyer), before1 + 300);
+    assert_eq!(
+        TokenClient::new(&t.env, &t.token_id).balance(&buyer2),
+        before2 + 200
+    );
+}
+
+#[test]
+fn test_batch_refund_orders_emits_single_summary_event() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+
+    let order_id = t.client.create_order(&t.buyer, &id, &400);
+    advance_ledger(&t.env, ORDER_EXPIRY_SECS);
+
+    let mut ids = Vec::new(&t.env);
+    ids.push_back(order_id);
+
+    // Verify batch completes and returns expected count/total (event emission verified via no-panic).
+    let (count, total) = t.client.batch_refund_orders(&ids);
+    assert_eq!(count, 1);
+    assert_eq!(total, 400);
+}
+
+#[test]
+fn test_batch_refund_orders_skips_unexpired_orders() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+
+    let order_id = t.client.create_order(&t.buyer, &id, &500);
+    let buyer_before = balance(&t, &t.buyer);
+
+    // Only 10 hours — well before 96h expiry
+    advance_ledger(&t.env, 10 * 3600);
+
+    let mut ids = Vec::new(&t.env);
+    ids.push_back(order_id);
+
+    let (count, total) = t.client.batch_refund_orders(&ids);
+    assert_eq!(count, 0);
+    assert_eq!(total, 0);
+    assert_eq!(balance(&t, &t.buyer), buyer_before);
+}
+
+#[test]
+fn test_batch_refund_orders_skips_invalid_order_ids() {
+    let t = setup();
+    let mut ids = Vec::new(&t.env);
+    ids.push_back(99999_u64); // non-existent
+
+    // Should not panic — just skip
+    let (count, total) = t.client.batch_refund_orders(&ids);
+    assert_eq!(count, 0);
+    assert_eq!(total, 0);
+}
+
+#[test]
+fn test_batch_refund_orders_count_and_total_are_correct() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+
+    let o1 = t.client.create_order(&t.buyer, &id, &100);
+    let o2 = t.client.create_order(&t.buyer, &id, &200);
+    let o3 = t.client.create_order(&t.buyer, &id, &300);
+
+    advance_ledger(&t.env, ORDER_EXPIRY_SECS);
+
+    let mut ids = Vec::new(&t.env);
+    ids.push_back(o1);
+    ids.push_back(o2);
+    ids.push_back(o3);
+
+    let (count, total) = t.client.batch_refund_orders(&ids);
+    assert_eq!(count, 3);
+    assert_eq!(total, 600); // 100 + 200 + 300
 }

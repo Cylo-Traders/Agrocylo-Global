@@ -7,7 +7,7 @@ export interface TransactionToastOptions {
   txHash?: string;
 }
 
-export function notifyTransactionSubmitted(_txHash?: string): void {
+export function notifyTransactionSubmitted(): void {
   toast.loading("Transaction submitted...", {
     id: "tx-submitted",
     duration: Infinity,

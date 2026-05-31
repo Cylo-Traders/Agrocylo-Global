@@ -9,6 +9,8 @@ import {
   createProduct,
   updateProduct,
   softDeleteProduct,
+  adminSetProductVisibility,
+  adminDelistProduct,
   type ListProductsParams,
 } from "@/services/productService";
 import type { ProductWriteInput } from "@/types/product";
@@ -63,6 +65,30 @@ export function useUpdateProduct() {
       updateProduct(address!, id, input),
     onSuccess: (updated) => {
       qc.setQueryData(queryKeys.products.detail(updated.id), updated);
+      qc.invalidateQueries({ queryKey: queryKeys.products.all() });
+    },
+  });
+}
+
+/** Admin: hide or unhide any product. */
+export function useAdminSetVisibility() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, isAvailable }: { id: string; isAvailable: boolean }) =>
+      adminSetProductVisibility(id, isAvailable),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.products.all() });
+    },
+  });
+}
+
+/** Admin: permanently delist a product. */
+export function useAdminDelistProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => adminDelistProduct(id),
+    onSuccess: (_, id) => {
+      qc.removeQueries({ queryKey: queryKeys.products.detail(id) });
       qc.invalidateQueries({ queryKey: queryKeys.products.all() });
     },
   });

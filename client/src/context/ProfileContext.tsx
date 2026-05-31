@@ -5,6 +5,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
 } from "react";
 import { useWallet } from "@/hooks/useWallet";
@@ -12,9 +13,7 @@ import { getProfile, type Profile } from "@/services/profileService";
 
 interface ProfileContextValue {
   profile: Profile | null;
-  /** True once a profile-fetch completes (success or 404). False during connect/refresh. */
   isLoaded: boolean;
-  /** True only when the user has a confirmed backend profile. */
   isOnboarded: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -47,7 +46,6 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     }
   }, [address, connected]);
 
-  // Refetch whenever the wallet changes
   useEffect(() => {
     setIsLoaded(false);
     void refresh();
@@ -58,17 +56,20 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     setIsLoaded(true);
   }, []);
 
+  const value = useMemo<ProfileContextValue>(
+    () => ({
+      profile,
+      isLoaded,
+      isOnboarded: !!profile,
+      error,
+      refresh,
+      setProfile,
+    }),
+    [profile, isLoaded, error, refresh, setProfile],
+  );
+
   return (
-    <ProfileContext.Provider
-      value={{
-        profile,
-        isLoaded,
-        isOnboarded: !!profile,
-        error,
-        refresh,
-        setProfile,
-      }}
-    >
+    <ProfileContext.Provider value={value}>
       {children}
     </ProfileContext.Provider>
   );

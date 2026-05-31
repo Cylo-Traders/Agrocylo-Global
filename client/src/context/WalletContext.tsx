@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useCallback, useEffect, useState } from "react";
+import React, { createContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { WalletContextType } from "../types/wallet";
 import { getXlmBalance } from "../lib/stellar";
 import { signAndSubmitTransaction } from "../lib/signTransaction";
@@ -44,6 +44,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
   const [error, setError] = useState<string | null>(null);
   const [network, setNetwork] = useState<string | null>(null);
   const [activeWalletId, setActiveWalletId] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -65,6 +70,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
           FreighterAdapter;
         const livePub = await adapter.getPublicKey();
 
+        if (!mountedRef.current) return;
+
         if (livePub && livePub !== cachedAddr) {
           setAddress(livePub);
           localStorage.setItem("walletAddress", livePub);
@@ -79,6 +86,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
         const b = await getXlmBalance(cachedAddr);
         setBalance(b);
       } catch {
+        if (!mountedRef.current) return;
         setAddress(null);
         setConnected(false);
         setNetwork(null);
@@ -91,20 +99,20 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
     })();
   }, []);
 
-  const refreshBalance = async (addr?: string) => {
+  const refreshBalance = useCallback(async () => {
     try {
-      const a = addr ?? address;
+      const a = address;
       if (!a) return;
       const b = await getXlmBalance(a);
-      setBalance(b);
+      if (mountedRef.current) setBalance(b);
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       console.error("Failed to fetch balance:", errorMsg);
-      setError(errorMsg);
+      if (mountedRef.current) setError(errorMsg);
     }
-  };
+  }, [address]);
 
-  const connect = async (adapterId?: string) => {
+  const connect = useCallback(async (adapterId?: string) => {
     setLoading(true);
     setError(null);
 
@@ -137,11 +145,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
                   `Connection timed out after ${CONNECT_TIMEOUT_MS / 1000}s. ` +
                     `Make sure ${adapter.name} is unlocked and try again.`,
                 ),
-            ),
+              ),
             CONNECT_TIMEOUT_MS,
           ),
         ),
       ]);
+
+      if (!mountedRef.current) return;
 
       const networkName = await adapter.getNetwork();
 
@@ -159,17 +169,19 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
       localStorage.setItem("activeWalletId", adapter.id);
       savePreferredAdapter(adapter.id);
 
-      await refreshBalance(pub);
+      const b = await getXlmBalance(pub);
+      if (mountedRef.current) setBalance(b);
     } catch (err: unknown) {
+      if (!mountedRef.current) return;
       const errorMsg = err instanceof Error ? err.message : String(err);
       setError(errorMsg);
       setConnected(false);
       setAddress(null);
       setBalance(null);
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
-  };
+  }, []);
 
   const disconnect = () => {
     if (address) {
@@ -178,6 +190,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
         adapter: activeWalletId ?? undefined,
       });
     }
+  const disconnect = useCallback(() => {
     setAddress(null);
     setBalance(null);
     setConnected(false);
@@ -187,7 +200,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
     localStorage.removeItem("walletAddress");
     localStorage.removeItem("walletNetwork");
     localStorage.removeItem("activeWalletId");
-  };
+  }, []);
 
   const signAndSubmit = useCallback(
     async (transactionXdr: string): Promise<SignAndSubmitResult> => {
@@ -198,34 +211,50 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
       try {
         const result = await signAndSubmitTransaction(transactionXdr);
         if (result.success) {
-          await refreshBalance();
+          const b = await getXlmBalance(address);
+          if (mountedRef.current) setBalance(b);
         }
         return result;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        setError(msg);
+        if (mountedRef.current) setError(msg);
         return { success: false, error: msg };
       }
     },
     [connected, address],
   );
 
+  const value = useMemo<WalletContextType>(
+    () => ({
+      address,
+      balance,
+      connected,
+      loading,
+      error,
+      network,
+      activeWalletId,
+      connect,
+      disconnect,
+      refreshBalance,
+      signAndSubmit,
+    }),
+    [
+      address,
+      balance,
+      connected,
+      loading,
+      error,
+      network,
+      activeWalletId,
+      connect,
+      disconnect,
+      refreshBalance,
+      signAndSubmit,
+    ],
+  );
+
   return (
-    <WalletContext.Provider
-      value={{
-        address,
-        balance,
-        connected,
-        loading,
-        error,
-        network,
-        activeWalletId,
-        connect,
-        disconnect,
-        refreshBalance: async () => refreshBalance(),
-        signAndSubmit,
-      }}
-    >
+    <WalletContext.Provider value={value}>
       {children}
     </WalletContext.Provider>
   );

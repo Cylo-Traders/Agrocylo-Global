@@ -1,17 +1,19 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database.js";
 import logger from "../../config/logger.js";
 import type { IndexedEvent } from "../../types/indexedEvent.js";
 
+type PrismaTx = Omit<typeof prisma, "$connect" | "$disconnect" | "$on" | "$use" | "$extends">;
+
 export class BlockchainEventPersistenceService {
   static async persist(event: IndexedEvent): Promise<void> {
     try {
-      const db = prisma as any;
-      const existing = await db.blockchainTransaction.findUnique({
+      const existing = await prisma.blockchainTransaction.findUnique({
         where: { sourceEventId: event.sourceEventId },
       });
       if (existing) return;
 
-      await db.$transaction(async (tx: any) => {
+      await prisma.$transaction(async (tx: PrismaTx) => {
         await this.upsertUsers(tx, event);
         await this.projectEntity(tx, event);
         await tx.blockchainTransaction.create({
@@ -25,7 +27,7 @@ export class BlockchainEventPersistenceService {
             txHash: event.txHash ?? null,
             campaignIdOnChain: event.campaignIdOnChain ?? null,
             orderIdOnChain: event.orderIdOnChain ?? null,
-            payload: event.payload,
+            payload: event.payload as Prisma.InputJsonValue,
             createdAt: event.timestamp,
           },
         });
@@ -36,7 +38,7 @@ export class BlockchainEventPersistenceService {
     }
   }
 
-  private static async upsertUsers(tx: any, event: IndexedEvent): Promise<void> {
+  private static async upsertUsers(tx: PrismaTx, event: IndexedEvent): Promise<void> {
     const addresses = [event.actorAddress, event.secondaryAddress].filter(
       (address): address is string => Boolean(address),
     );
@@ -49,7 +51,7 @@ export class BlockchainEventPersistenceService {
     }
   }
 
-  private static async projectEntity(tx: any, event: IndexedEvent): Promise<void> {
+  private static async projectEntity(tx: PrismaTx, event: IndexedEvent): Promise<void> {
     switch (event.eventType) {
       case "campaign.created":
         await tx.campaign.upsert({
@@ -134,8 +136,8 @@ export class BlockchainEventPersistenceService {
           update: { status: "DELIVERED" },
           create: {
             orderIdOnChain: event.orderIdOnChain ?? "",
-            buyerAddress: event.secondaryAddress ?? "", // buyer is secondaryAddress for delivered
-            sellerAddress: event.actorAddress ?? "",    // farmer is actorAddress for delivered
+            buyerAddress: event.secondaryAddress ?? "",
+            sellerAddress: event.actorAddress ?? "",
             amount: "0",
             token: "",
             status: "DELIVERED",

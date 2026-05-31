@@ -9,6 +9,7 @@ import {
 } from '../schemas/campaignImage.js';
 import {
   HttpError,
+  StorageError,
   uploadCampaignImage,
   deleteCampaignImage,
 } from '../services/campaignImageService.js';
@@ -27,7 +28,9 @@ router.post(
       const image = req.file;
 
       if (!walletAddress) throw new HttpError(401, 'Unauthorized.');
-      if (!image) throw new HttpError(400, 'Missing image field in multipart form-data.');
+      if (!image) {
+        throw new HttpError(400, 'Missing or unsupported image. Must be a jpg, png, or webp file uploaded as field "image".');
+      }
       if (isUnsupportedMimeType(image)) {
         throw new HttpError(415, 'Unsupported Media Type. Allowed: jpg, png, webp.');
       }
@@ -75,6 +78,10 @@ export function campaignImageErrorHandler(
 ): void {
   if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
     res.status(413).json({ message: 'Payload Too Large. Max image size is 5MB.' });
+    return;
+  }
+  if (err instanceof StorageError) {
+    res.status(err.status).json({ message: err.message });
     return;
   }
   if (err instanceof HttpError) {

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import EvidenceUpload, { type EvidenceFile } from "./EvidenceUpload";
+import { disputeFormSchema } from "@/lib/validation";
 
 interface DisputeFormProps {
   isLoading: boolean;
@@ -22,12 +23,18 @@ export default function DisputeForm({
 }: DisputeFormProps) {
   const [reason, setReason] = useState("");
   const [evidenceFile, setEvidenceFile] = useState<EvidenceFile | null>(null);
+  const [reasonError, setReasonError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!reason.trim()) return;
-    // The contract takes an `evidence_hash` String — fall back to empty when
-    // the buyer/seller doesn't attach a file.
+
+    const result = disputeFormSchema.safeParse({ reason: reason.trim() });
+    if (!result.success) {
+      setReasonError(result.error.issues[0]?.message ?? "Reason is required");
+      return;
+    }
+
+    setReasonError(null);
     await onSubmit(reason.trim(), evidenceFile?.hash ?? "");
   }
 
@@ -44,10 +51,18 @@ export default function DisputeForm({
           rows={3}
           placeholder="Describe the issue — what's wrong with the delivery?"
           value={reason}
-          onChange={(e) => setReason(e.target.value)}
+          onChange={(e) => {
+            setReason(e.target.value);
+            if (reasonError) setReasonError(null);
+          }}
           required
           disabled={isLoading}
         />
+        {reasonError && (
+          <p className="text-destructive text-xs" role="alert">
+            {reasonError}
+          </p>
+        )}
       </div>
 
       <div className="grid gap-1.5">

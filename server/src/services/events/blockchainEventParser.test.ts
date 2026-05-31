@@ -6,7 +6,7 @@ describe("BlockchainEventParser", () => {
     const parsed = BlockchainEventParser.parseDecoded(
       ["order", "created"],
       ["ord-1", "buyer-1", "seller-1", "100", "USDC"],
-      { id: "120-3", ledger: 120, ledgerCloseAt: "1710000000" },
+      { id: "120-3", ledger: 120, ledgerClosedAt: "1710000000" },
     );
 
     expect(parsed).toMatchObject({
@@ -22,9 +22,9 @@ describe("BlockchainEventParser", () => {
 
   it("returns null for unsupported event types", () => {
     const parsed = BlockchainEventParser.parseDecoded(
-      ["order", "refunded"],
+      ["order", "unknown"],
       ["ord-1", "buyer-1"],
-      { id: "120-4", ledger: 120, ledgerCloseAt: "1710000000" },
+      { id: "120-4", ledger: 120, ledgerClosedAt: "1710000000" },
     );
 
     expect(parsed).toBeNull();

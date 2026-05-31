@@ -1,5 +1,5 @@
 import { prisma } from "../../config/database.js";
-import type { ParsedEscrowEvent } from "../../types/escrowEvent.js";
+import type { MappedEscrowEvent } from "../../types/escrowEvent.js";
 import logger from "../../config/logger.js";
 import { wsManager } from "../wsManager.js";
 
@@ -9,11 +9,11 @@ import { wsManager } from "../wsManager.js";
  */
 export class EscrowEventProjectionService {
   /**
-   * Projects a parsed event into the domain tables.
+   * Projects a mapped escrow event into the domain tables.
    */
-  static async projectEvent(parsed: any): Promise<void> {
-    const { action, buyer, seller, orderId, amount, token, timestamp } = parsed;
-    const eventDate = timestamp instanceof Date ? timestamp : new Date(timestamp * 1000);
+  static async projectEvent(parsed: MappedEscrowEvent): Promise<void> {
+    const { action, buyer, seller, orderId, timestamp } = parsed;
+    const eventDate = timestamp;
 
     try {
       // 1. Ensure Users exist (Buyers and Sellers)
@@ -70,7 +70,7 @@ export class EscrowEventProjectionService {
     }
   }
 
-  private static async handleOrderCreated(parsed: ParsedEscrowEvent, eventDate: Date) {
+  private static async handleOrderCreated(parsed: MappedEscrowEvent, eventDate: Date) {
     // Check if we can link a product based on the seller's wallet
     const product = await prisma.product.findFirst({
       where: { farmerWallet: parsed.seller },
