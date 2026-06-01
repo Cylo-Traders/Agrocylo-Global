@@ -6,6 +6,27 @@ datasource db {
   provider = "postgresql"
 }
 
+model Nonce {
+  id            String   @id @default(uuid())
+  walletAddress String   @unique
+  nonce         String
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+
+  @@map("Nonce")
+}
+
+model RefreshToken {
+  id            String   @id @default(uuid())
+  walletAddress String
+  token         String   @unique
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([walletAddress])
+  @@map("RefreshToken")
+}
+
 model Notification {
   id            String   @id @default(uuid())
   walletAddress String
@@ -100,6 +121,7 @@ model Order {
   token          String
   status         String
   productId      String?
+  txHash         String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
