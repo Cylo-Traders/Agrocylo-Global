@@ -66,7 +66,7 @@ export function DataTable<TData, TValue>({
   return (
     <div className={cn("space-y-4", className)}>
       {showSearch && (
-        <div className="relative max-w-xs">
+        <div className="relative w-full max-w-none sm:max-w-xs">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder={searchPlaceholder}
@@ -143,7 +143,7 @@ export function DataTable<TData, TValue>({
       </div>
 
       {/* Pagination */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs text-muted-foreground">
           {totalFiltered} result{totalFiltered !== 1 ? "s" : ""}
           {globalFilter && (
@@ -152,24 +152,24 @@ export function DataTable<TData, TValue>({
             </span>
           )}
         </p>
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             size="icon"
-            className="size-8"
+            className="size-11"
             onClick={() => table.setPageIndex(0)}
             disabled={!table.getCanPreviousPage()}
           >
-            <ChevronsLeft className="size-3.5" />
+            <ChevronsLeft className="size-4" />
           </Button>
           <Button
             variant="outline"
             size="icon"
-            className="size-8"
+            className="size-11"
             onClick={() => table.previousPage()}
             disabled={!table.getCanPreviousPage()}
           >
-            <ChevronLeft className="size-3.5" />
+            <ChevronLeft className="size-4" />
           </Button>
           <span className="min-w-[80px] text-center text-xs text-muted-foreground">
             {pageCount === 0 ? "0 of 0" : `${pageIndex + 1} of ${pageCount}`}
@@ -177,20 +177,20 @@ export function DataTable<TData, TValue>({
           <Button
             variant="outline"
             size="icon"
-            className="size-8"
+            className="size-11"
             onClick={() => table.nextPage()}
             disabled={!table.getCanNextPage()}
           >
-            <ChevronRight className="size-3.5" />
+            <ChevronRight className="size-4" />
           </Button>
           <Button
             variant="outline"
             size="icon"
-            className="size-8"
+            className="size-11"
             onClick={() => table.setPageIndex(pageCount - 1)}
             disabled={!table.getCanNextPage()}
           >
-            <ChevronsRight className="size-3.5" />
+            <ChevronsRight className="size-4" />
           </Button>
         </div>
       </div>

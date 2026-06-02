@@ -63,7 +63,7 @@ const UNITS: ProductUnit[] = ["kg", "bag", "crate", "piece", "litre", "dozen"];
 const MAX_IMAGES = 8;
 
 const SELECT_CLASSES =
-  "border-input bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-10 w-full rounded-md border px-3 text-sm focus-visible:ring-[3px] focus-visible:outline-none";
+  "border-input bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-12 w-full rounded-md border px-3 text-sm focus-visible:ring-[3px] focus-visible:outline-none";
 
 interface ProductFormModalProps {
   open: boolean;

@@ -21,8 +21,8 @@ const ConnectWalletInner = dynamic(
           <Wallet className="size-4" />
           Connect Wallet
         </Button>
-        <Button size="icon" className="inline-flex sm:hidden" disabled>
-          <Wallet className="size-4" />
+        <Button size="icon" className="inline-flex size-11 sm:hidden" disabled>
+          <Wallet className="size-5" />
         </Button>
       </>
     ),

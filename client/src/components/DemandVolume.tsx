@@ -93,7 +93,7 @@ export function DemandVolume({ data }: DemandVolumeProps) {
           {entries.length === 0 ? (
             <p className="text-muted-foreground text-sm">No category data.</p>
           ) : (
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {entries.map(([category, volume]) => {
                 const growth = data.category_growth?.[category as keyof typeof data.category_growth];
                 const isTop = category === topCategory;

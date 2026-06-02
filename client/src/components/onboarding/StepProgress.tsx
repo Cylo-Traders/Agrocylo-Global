@@ -21,7 +21,7 @@ export default function StepProgress({ currentStep }: StepProgressProps) {
             <div className="flex flex-col items-center">
               <div
                 className={cn(
-                  "grid size-9 place-content-center rounded-full text-sm font-semibold transition-colors",
+                  "grid size-11 place-content-center rounded-full text-sm font-semibold transition-colors",
                   isComplete && "bg-primary text-primary-foreground",
                   isActive && "bg-primary/10 text-primary ring-2 ring-primary",
                   !isActive && !isComplete && "bg-muted text-muted-foreground",
@@ -36,7 +36,7 @@ export default function StepProgress({ currentStep }: StepProgressProps) {
             {i < STEPS.length - 1 && (
               <div
                 className={cn(
-                  "h-0.5 w-6 sm:w-10",
+                  "h-0.5 w-4 sm:w-10",
                   isComplete ? "bg-primary" : "bg-muted",
                 )}
               />

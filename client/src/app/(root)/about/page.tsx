@@ -195,14 +195,14 @@ export default function AboutPage() {
                 Platform at a Glance
               </h2>
             </div>
-            <div className="grid grid-cols-2 gap-8 md:grid-cols-4">
+            <div className="grid grid-cols-2 gap-4 sm:gap-6 md:grid-cols-4">
               {[
                 { label: "Platform Fee", value: "3%" },
                 { label: "Order Expiry", value: "96h" },
                 { label: "Supported Tokens", value: "2" },
                 { label: "Built on", value: "Stellar" },
               ].map((stat) => (
-                <div key={stat.label} className="text-center">
+                <div key={stat.label} className="rounded-2xl bg-white/5 p-4 text-center sm:p-6">
                   <p className="text-primary text-3xl font-bold sm:text-4xl">
                     {stat.value}
                   </p>

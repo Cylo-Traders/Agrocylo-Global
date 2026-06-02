@@ -23,10 +23,10 @@ export function StatCard({
   className,
 }: StatCardProps) {
   return (
-    <div className={cn("rounded-2xl border bg-card p-6", className)}>
-      <div className="flex items-center justify-between">
+    <div className={cn("rounded-2xl border bg-card p-5 sm:p-6", className)}>
+      <div className="flex items-start justify-between gap-3">
         <span className="text-sm text-muted-foreground">{label}</span>
-        <div className={cn("rounded-lg bg-primary/10 p-2", iconBgClassName)}>
+        <div className={cn("rounded-lg bg-primary/10 p-2.5", iconBgClassName)}>
           <Icon className={cn("size-4 text-primary", iconClassName)} />
         </div>
       </div>

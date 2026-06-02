@@ -60,7 +60,7 @@ export default function OrderCard({
           <StatusBadge status={order.status} />
         </header>
 
-        <div className="grid grid-cols-2 gap-4 text-sm">
+        <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
           <div>
             <p className="text-muted-foreground text-xs">
               Locked in escrow
@@ -79,7 +79,7 @@ export default function OrderCard({
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-3 pt-1">
+        <div className="flex flex-col gap-3 pt-1 sm:flex-row sm:items-center sm:justify-between">
           {isPending ? (
             <CountdownTimer createdAt={order.createdAt} />
           ) : (
@@ -88,7 +88,7 @@ export default function OrderCard({
             </span>
           )}
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {isPending && isBuyer && onConfirm && !isExpired && (
               <Button
                 size="sm"

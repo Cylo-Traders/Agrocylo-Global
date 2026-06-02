@@ -59,7 +59,7 @@ export default function Testimonies() {
             </ul>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="rounded-2xl bg-card p-6">
               <div className="text-2xl font-bold tracking-tight text-primary sm:text-3xl md:text-4xl">
                 3-5s

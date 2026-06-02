@@ -6,6 +6,27 @@ datasource db {
   provider = "postgresql"
 }
 
+model Nonce {
+  id            String   @id @default(uuid())
+  walletAddress String   @unique
+  nonce         String
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+
+  @@map("Nonce")
+}
+
+model RefreshToken {
+  id            String   @id @default(uuid())
+  walletAddress String
+  token         String   @unique
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([walletAddress])
+  @@map("RefreshToken")
+}
+
 model Notification {
   id            String   @id @default(uuid())
   walletAddress String
@@ -16,6 +37,14 @@ model Notification {
   createdAt     DateTime @default(now())
 
   @@index([walletAddress])
+}
+
+model NotificationPreference {
+  walletAddress String   @id
+  preferences   Json
+  updatedAt     DateTime @updatedAt
+
+  @@map("notification_preferences")
 }
 
 model User {
@@ -50,18 +79,18 @@ model BuyerDemand {
 }
 
 model FarmerSupply {
-  id                 String    @id @default(uuid())
-  farmerWallet       String    @map("farmer_wallet")
-  cropName           String    @map("crop_name")
-  quantityAvailable  String    @map("quantity_available")
-  unit               String?
-  pricePerUnit       String?   @map("price_per_unit")
-  currency           String?
-  availableFrom      DateTime? @map("available_from")
-  availableUntil     DateTime? @map("available_until")
-  notes              String?
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
+  id                String    @id @default(uuid())
+  farmerWallet      String    @map("farmer_wallet")
+  cropName          String    @map("crop_name")
+  quantityAvailable String    @map("quantity_available")
+  unit              String?
+  pricePerUnit      String?   @map("price_per_unit")
+  currency          String?
+  availableFrom     DateTime? @map("available_from")
+  availableUntil    DateTime? @map("available_until")
+  notes             String?
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
   @@index([farmerWallet])
   @@map("farmer_supplies")
@@ -71,9 +100,9 @@ model Product {
   id           String   @id @default(uuid())
   farmerWallet String
   name         String
-  pricePerUnit String
+  pricePerUnit String   @map("price_per_unit")
   currency     String
-  isAvailable  Boolean  @default(true)
+  isAvailable  Boolean  @default(true) @map("is_available")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -92,6 +121,7 @@ model Order {
   token          String
   status         String
   productId      String?
+  txHash         String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -203,8 +233,8 @@ model Profile {
 
 model Location {
   wallet_address String   @id
-  lat            Float
-  lng            Float
+  lat            Float    @map("latitude")
+  lng            Float    @map("longitude")
   is_public      Boolean  @default(true)
   profile        Profile? @relation(fields: [wallet_address], references: [wallet_address])
 
@@ -222,7 +252,7 @@ model OrderMetadata {
 
 model ContractWatcherCheckpoint {
   service    String   @id
-  lastLedger Int
+  lastLedger Int      @map("last_ledger")
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 

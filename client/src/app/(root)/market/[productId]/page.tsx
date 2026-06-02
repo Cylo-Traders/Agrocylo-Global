@@ -92,14 +92,14 @@ export default function ProductDetailPage() {
       <nav className="text-muted-foreground mb-8 flex items-center gap-2 text-sm">
         <button
           onClick={() => router.push("/market")}
-          className="cursor-pointer hover:text-foreground"
+          className="inline-flex min-h-11 items-center rounded-full px-3 py-2 hover:text-foreground"
         >
           Market
         </button>
         <span>/</span>
         <button
           onClick={() => router.push(`/market?category=${product.category}`)}
-          className="cursor-pointer hover:text-foreground"
+          className="inline-flex min-h-11 items-center rounded-full px-3 py-2 hover:text-foreground"
         >
           {product.category}
         </button>
@@ -139,7 +139,7 @@ export default function ProductDetailPage() {
 
           <Separator />
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <p className="text-muted-foreground text-xs">Price</p>
               <p className="text-2xl font-bold">
@@ -190,6 +190,7 @@ export default function ProductDetailPage() {
                     size="icon"
                     variant="ghost"
                     className="size-9 rounded-full"
+                    className="size-11 rounded-full"
                     onClick={() => {
                       trackFunnelStep("purchase", "quantity_decremented", {
                         productId: product.id,
@@ -206,6 +207,7 @@ export default function ProductDetailPage() {
                     size="icon"
                     variant="ghost"
                     className="size-9 rounded-full"
+                    className="size-11 rounded-full"
                     onClick={() => {
                       trackFunnelStep("purchase", "quantity_incremented", {
                         productId: product.id,

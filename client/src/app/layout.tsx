@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { Viewport } from "next";
 import { montserratAlternates } from "@/fonts";
 import { siteConfig } from "@/config/site.config";
 import { GlobalProvider } from "@/components/providers/global-provider";
@@ -40,6 +41,11 @@ export const metadata: Metadata = {
   },
 };
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
 interface RootLayoutProps {
   children: React.ReactNode;
 }
@@ -68,7 +74,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning data-scroll-behavior="smooth">
       <body
-        className={`${montserratAlternates.variable} flex min-h-screen flex-col font-sans antialiased`}
+        className={`${montserratAlternates.variable} flex min-h-dvh flex-col bg-background font-sans antialiased`}
       >
         <ErrorBoundary>
           <GlobalProvider>{children}</GlobalProvider>

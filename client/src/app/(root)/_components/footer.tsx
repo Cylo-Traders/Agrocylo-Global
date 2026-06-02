@@ -49,10 +49,10 @@ const footerLinks = {
 export default function Footer() {
   return (
     <footer className="bg-canvas-dark flex w-full flex-col text-white">
-      <Wrapper className="flex flex-col pt-20 pb-10 sm:pb-16">
-        <div className="grid grid-cols-1 gap-x-8 gap-y-16 lg:grid-cols-2">
+      <Wrapper className="flex flex-col pt-16 pb-28 sm:pb-16 md:pt-20">
+        <div className="grid grid-cols-1 gap-x-8 gap-y-12 lg:grid-cols-2">
           <nav>
-            <ul role="list" className="grid grid-cols-2 gap-8 sm:grid-cols-3">
+            <ul role="list" className="grid grid-cols-1 gap-8 sm:grid-cols-2 sm:gap-8 md:grid-cols-3">
               {footerLinks.routes.map((link) => (
                 <li key={link.title}>
                   <div className="font-display text-lg font-semibold tracking-wider">
@@ -93,23 +93,28 @@ export default function Footer() {
                 Stellar blockchain.
               </p>
 
-              <div className="mt-6 flex items-center gap-5">
-                {footerLinks.socials.map((social, index) => (
-                  <button
-                    key={index}
-                    disabled={!social.path}
-                    className="size-fit disabled:pointer-events-none disabled:opacity-50"
-                  >
+              <div className="mt-6 flex flex-wrap items-center gap-3">
+              {footerLinks.socials.map((social, index) => (
+                  social.path ? (
                     <Link
+                      key={index}
                       title={social.label}
-                      href={social.path ?? "/"}
-                      target={social.path ? "_blank" : "_self"}
+                      className="inline-flex size-11 items-center justify-center rounded-full border border-white/10 bg-white/5 transition hover:bg-white/10"
+                      href={social.path}
+                      target="_blank"
                     >
-                      <social.icon className="size-6 cursor-pointer transition" />
+                      <social.icon className="size-5" />
                     </Link>
-                  </button>
+                  ) : (
+                    <span
+                      key={index}
+                      title={social.label}
+                      className="inline-flex size-11 items-center justify-center rounded-full border border-white/10 bg-white/5 opacity-50"
+                    >
+                      <social.icon className="size-5" />
+                    </span>
+                  )
                 ))}
-                <span className="bg-border/30 h-px w-full flex-1" />
               </div>
             </div>
           </div>

@@ -6,12 +6,59 @@ import {
   listNotifications,
   markNotificationsRead,
 } from "../services/notificationService.js";
+import {
+  getNotificationPreferences,
+  notificationPrefsSchema,
+  upsertNotificationPreferences,
+} from "../services/notificationPreferenceService.js";
 
 const router = express.Router();
 
 const markReadSchema = z.object({
   ids: z.array(z.string().min(1)).min(1),
 });
+
+router.get(
+  "/notifications/preferences",
+  requireWallet,
+  async (req: WalletRequest, res, next) => {
+    try {
+      if (!req.walletAddress) {
+        throw new ApiError(401, "Unauthorized", "Missing wallet");
+      }
+
+      const preferences = await getNotificationPreferences(req.walletAddress);
+      res.status(200).json({ preferences });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.put(
+  "/notifications/preferences",
+  requireWallet,
+  async (req: WalletRequest, res, next) => {
+    try {
+      if (!req.walletAddress) {
+        throw new ApiError(401, "Unauthorized", "Missing wallet");
+      }
+
+      const parsed = notificationPrefsSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        throw new ApiError(400, "Bad Request", parsed.error.message);
+      }
+
+      const preferences = await upsertNotificationPreferences(
+        req.walletAddress,
+        parsed.data,
+      );
+      res.status(200).json({ preferences });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
 router.get(
   "/notifications",

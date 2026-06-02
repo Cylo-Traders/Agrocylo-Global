@@ -10,8 +10,10 @@ import {
   TrendingUp,
   Settings,
   ArrowLeft,
+  Shield,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useProfile } from "@/context/ProfileContext";
 
 const sidebarLinks = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
@@ -21,11 +23,19 @@ const sidebarLinks = [
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];
 
+const adminLink = {
+  href: "/admin",
+  label: "Admin",
+  icon: Shield,
+};
+
 export function DashboardSidebar() {
   const pathname = usePathname();
+  const { isAdmin } = useProfile();
+  const links = isAdmin ? [...sidebarLinks, adminLink] : sidebarLinks;
 
   return (
-    <aside className="bg-sidebar flex h-full w-64 flex-col border-r">
+    <aside className="bg-sidebar flex min-h-dvh w-64 flex-col border-r">
       <div className="flex h-16 items-center gap-2 border-b px-6">
         <Link href="/" className="flex items-center gap-2">
           <Image
@@ -46,8 +56,11 @@ export function DashboardSidebar() {
       </div>
 
       <nav className="flex-1 space-y-1 p-4">
-        {sidebarLinks.map((link) => {
-          const isActive = pathname === link.href;
+        {links.map((link) => {
+          const isActive =
+            link.href === "/admin"
+              ? pathname.startsWith("/admin")
+              : pathname === link.href;
           return (
             <Link
               key={link.href}
@@ -69,7 +82,7 @@ export function DashboardSidebar() {
       <div className="border-t p-4">
         <Link
           href="/"
-          className="text-sidebar-foreground/70 hover:text-sidebar-foreground flex items-center gap-2 text-sm transition-colors"
+          className="text-sidebar-foreground/70 hover:text-sidebar-foreground flex min-h-11 items-center gap-2 rounded-xl px-3 text-sm transition-colors"
         >
           <ArrowLeft className="size-4" />
           Back to Marketplace

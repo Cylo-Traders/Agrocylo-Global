@@ -6,7 +6,7 @@ import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/shared/page-header";
 import { useSocket } from "@/hooks/useSocket";
-import DisputeList from "@/components/admin/DisputeList";
+import DisputeManager from "@/components/admin/DisputeManager";
 
 interface Dispute {
   id?: string;
@@ -72,12 +72,8 @@ export default function AdminDisputeDashboard() {
             <p className="text-destructive text-sm">{error}</p>
             <Button onClick={() => void fetchDisputes()}>Try Again</Button>
           </div>
-        ) : disputes.length === 0 ? (
-          <p className="text-muted-foreground py-12 text-center text-sm">
-            No active disputes — everything&apos;s settling cleanly.
-          </p>
         ) : (
-          <DisputeList disputes={disputes} onRefresh={fetchDisputes} />
+          <DisputeManager disputes={disputes} onRefresh={fetchDisputes} />
         )}
       </div>
     </div>

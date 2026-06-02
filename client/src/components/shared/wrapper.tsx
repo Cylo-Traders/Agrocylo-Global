@@ -10,7 +10,7 @@ const Wrapper = forwardRef<HTMLElement, WrapperProps>(
     return (
       <section
         ref={ref}
-        className={cn("mx-auto w-full max-w-[1240px] px-6", className, {
+        className={cn("mx-auto w-full max-w-[1240px] px-4 sm:px-6 lg:px-8", className, {
           "max-w-[1360px]": max2,
         })}
         {...props}

@@ -137,6 +137,29 @@ const columns: ColumnDef<Product>[] = [
     header: "",
     enableGlobalFilter: false,
     enableSorting: false,
+    cell: () => (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="size-11">
+            <MoreHorizontal className="size-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem disabled>
+            <EyeOff className="size-3.5" />
+            Hide listing
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            disabled
+            className="text-destructive focus:text-destructive"
+          >
+            <Trash2 className="size-3.5" />
+            Delist (admin override)
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    ),
     cell: ({ row }) => <ActionCell product={row.original} />,
   },
 ];

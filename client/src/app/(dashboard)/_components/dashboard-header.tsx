@@ -9,14 +9,14 @@ import { DashboardSidebar } from "./dashboard-sidebar";
 
 export function DashboardHeader() {
   return (
-    <header className="bg-background flex h-16 items-center gap-4 border-b px-6">
+    <header className="bg-background flex h-16 items-center gap-3 border-b px-4 sm:px-6">
       <Sheet>
         <SheetTrigger asChild>
-          <Button variant="ghost" size="icon" className="lg:hidden">
+          <Button variant="ghost" size="icon" className="size-11 lg:hidden">
             <Menu className="size-5" />
           </Button>
         </SheetTrigger>
-        <SheetContent side="left" className="w-64 p-0">
+        <SheetContent side="left" className="w-[min(18rem,100vw)] p-0">
           <DashboardSidebar />
         </SheetContent>
       </Sheet>

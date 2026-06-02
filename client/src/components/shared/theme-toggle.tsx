@@ -16,7 +16,7 @@ export function ThemeToggle() {
 
   if (!mounted) {
     return (
-      <Button variant="ghost" size="icon" className="size-9">
+      <Button variant="ghost" size="icon" className="size-11">
         <span className="size-4" />
       </Button>
     );
@@ -27,6 +27,7 @@ export function ThemeToggle() {
       variant="ghost"
       size="icon"
       className="size-9"
+      className="size-11"
       onClick={() => {
         const nextTheme = theme === "dark" ? "light" : "dark";
         setTheme(nextTheme);

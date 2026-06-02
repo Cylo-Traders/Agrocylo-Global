@@ -81,7 +81,10 @@ export default function AccountModal() {
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <div role="button" className="flex cursor-pointer items-center gap-2">
+        <Button
+          variant="ghost"
+          className="flex h-11 items-center gap-2 rounded-full border px-3 py-2 hover:bg-accent"
+        >
           <div className="grid size-10 place-content-center rounded-full border">
             <div className="bg-secondary size-8 overflow-hidden rounded-full">
               <Identicon
@@ -103,7 +106,7 @@ export default function AccountModal() {
               "-rotate-180": open,
             })}
           />
-        </div>
+        </Button>
       </DropdownMenuTrigger>
 
       <DropdownMenuContent

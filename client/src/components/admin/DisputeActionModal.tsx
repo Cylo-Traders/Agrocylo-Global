@@ -178,7 +178,7 @@ export default function DisputeActionModal({
               </div>
             </div>
 
-            <div className="bg-secondary/40 grid grid-cols-2 gap-3 rounded-2xl border p-3 text-sm">
+            <div className="bg-secondary/40 grid grid-cols-1 gap-3 rounded-2xl border p-3 text-sm sm:grid-cols-2">
               <div>
                 <p className="text-muted-foreground text-xs">Buyer receives</p>
                 <p className="mt-0.5 font-semibold">

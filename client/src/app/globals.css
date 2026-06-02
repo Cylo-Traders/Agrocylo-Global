@@ -122,7 +122,7 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground min-h-dvh overflow-x-clip;
   }
 }
 
@@ -130,6 +130,9 @@ html {
   scroll-behavior: smooth;
 }
 
+body {
+  padding-bottom: env(safe-area-inset-bottom);
+}
 
 @layer base {
   :root {
