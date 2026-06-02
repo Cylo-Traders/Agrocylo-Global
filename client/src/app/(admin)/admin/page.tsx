@@ -444,6 +444,46 @@ export default function AdminOverviewPage() {
             <StatusBadge status="Refunded" />
             <StatusBadge status="Disputed" />
           </div>
+          <Separator className="my-4" />
+          {isLoading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  className="bg-secondary/50 rounded h-12 animate-pulse"
+                />
+              ))}
+            </div>
+          ) : stats && stats.totalUsers > 0 ? (
+            <div className="text-sm">
+              <p className="text-muted-foreground">
+                {stats.totalUsers} registered users on the platform
+              </p>
+            </div>
+          ) : (
+            <div className="text-muted-foreground flex flex-col items-center gap-3 py-12 text-sm">
+              <Users className="size-8" />
+              <p>No users yet.</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Sample-only block kept to demonstrate the StatusBadge rendering */}
+      <div className="rounded-2xl border bg-card">
+        <div className="flex items-center justify-between p-6">
+          <h2 className="font-semibold">Status Reference</h2>
+          <span className="text-muted-foreground text-xs">
+            Visual key
+          </span>
+        </div>
+        <Separator />
+      <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-5 sm:p-6">
+          <StatusBadge status="Pending" />
+          <StatusBadge status="Delivered" />
+          <StatusBadge status="Completed" />
+          <StatusBadge status="Refunded" />
+          <StatusBadge status="Disputed" />
         </div>
       </div>
     </div>

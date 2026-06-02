@@ -12,5 +12,22 @@ export default function AdminLayout({
 }: {
   children: React.ReactNode;
 }) {
+  return (
+    <div className="flex min-h-dvh">
+      <div className="hidden lg:block">
+        <AdminSidebar />
+      </div>
+      <div className="flex flex-1 flex-col overflow-hidden">
+        <AdminHeader />
+        <main
+          className="flex-1 overflow-y-auto p-4 pb-24 sm:p-6"
+          data-lenis-prevent
+        >
+          <AuthGuard>{children}</AuthGuard>
+        </main>
+        <DashboardFooter />
+      </div>
+    </div>
+  );
   return <AdminShell>{children}</AdminShell>;
 }

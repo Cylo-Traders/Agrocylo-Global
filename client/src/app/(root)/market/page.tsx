@@ -16,6 +16,8 @@ import { useCart } from "@/context/CartContext";
 import { useSearch } from "@/hooks/useSearch";
 import { Button } from "@/components/ui/button";
 import { siteConfig } from "@/config/site.config";
+import type { ProductCategory } from "@/types/product";
+import { useAnalytics } from "@/hooks/useAnalytics";
 import { SearchFilters } from "@/components/SearchFilters";
 import { ProductGrid } from "@/components/ProductGrid";
 
@@ -251,6 +253,111 @@ export default function MarketPage() {
             </Button>
           </div>
         ) : (
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {filtered.map((p) => {
+              const currentQty = quantityByProductId.get(p.id) ?? 0;
+              return (
+                <article
+                  key={p.id}
+                  className="bg-card group flex flex-col overflow-hidden rounded-2xl border transition hover:shadow-md"
+                >
+                  <Link
+                    href={`/market/${p.id}`}
+                    className="relative aspect-[4/3] overflow-hidden bg-secondary"
+                  >
+                    {p.image_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={p.image_url}
+                        alt={p.name}
+                        className="size-full object-cover transition group-hover:scale-105"
+                      />
+                    ) : (
+                      <div className="grid size-full place-content-center text-5xl">
+                        🌱
+                      </div>
+                    )}
+                    <Badge className="absolute left-3 top-3" variant="secondary">
+                      {p.category}
+                    </Badge>
+                  </Link>
+
+                  <div className="flex flex-1 flex-col gap-3 p-5">
+                    <div>
+                      <Link
+                        href={`/market/${p.id}`}
+                        className="font-semibold hover:text-primary"
+                      >
+                        {p.name}
+                      </Link>
+                      <p className="text-muted-foreground mt-0.5 text-xs">
+                        {p.location}
+                      </p>
+                    </div>
+
+                    <div className="flex items-baseline justify-between">
+                      <p className="text-lg font-bold">
+                        {p.price_per_unit}{" "}
+                        <span className="text-muted-foreground text-sm font-medium">
+                          {p.currency} / {p.unit}
+                        </span>
+                      </p>
+                      <p className="text-muted-foreground text-xs">
+                        {p.stock_quantity ?? "Unlimited"} in stock
+                      </p>
+                    </div>
+
+                    <div className="mt-auto flex items-center justify-between gap-2 pt-1">
+                      {currentQty > 0 ? (
+                        <div className="bg-secondary flex items-center gap-1 rounded-full p-1">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                          className="size-11 rounded-full"
+                            disabled={!connected}
+                            onClick={() =>
+                              setQuantityForProduct(p.id, currentQty - 1)
+                            }
+                          >
+                            −
+                          </Button>
+                          <span className="min-w-6 text-center text-sm font-medium">
+                            {currentQty}
+                          </span>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                          className="size-11 rounded-full"
+                            disabled={!connected}
+                            onClick={() =>
+                              setQuantityForProduct(p.id, currentQty + 1)
+                            }
+                          >
+                            +
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          size="sm"
+                          disabled={!connected}
+                          onClick={() => setQuantityForProduct(p.id, 1)}
+                          className="flex-1"
+                        >
+                          {connected ? "Add to cart" : "Connect to buy"}
+                        </Button>
+                      )}
+                      <Link
+                        href={`/market/${p.id}`}
+                        className="text-muted-foreground hover:text-foreground text-xs font-medium"
+                      >
+                        View →
+                      </Link>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
           <ProductGrid
             products={products}
             isLoading={isLoading}
