@@ -189,6 +189,7 @@ export default function ProductDetailPage() {
                   <Button
                     size="icon"
                     variant="ghost"
+                    className="size-9 rounded-full"
                     className="size-11 rounded-full"
                     onClick={() => {
                       trackFunnelStep("purchase", "quantity_decremented", {
@@ -205,6 +206,7 @@ export default function ProductDetailPage() {
                   <Button
                     size="icon"
                     variant="ghost"
+                    className="size-9 rounded-full"
                     className="size-11 rounded-full"
                     onClick={() => {
                       trackFunnelStep("purchase", "quantity_incremented", {

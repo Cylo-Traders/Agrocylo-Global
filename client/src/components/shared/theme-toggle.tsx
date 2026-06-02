@@ -26,6 +26,7 @@ export function ThemeToggle() {
     <Button
       variant="ghost"
       size="icon"
+      className="size-9"
       className="size-11"
       onClick={() => {
         const nextTheme = theme === "dark" ? "light" : "dark";

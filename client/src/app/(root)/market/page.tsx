@@ -16,6 +16,8 @@ import { useCart } from "@/context/CartContext";
 import { useSearch } from "@/hooks/useSearch";
 import { Button } from "@/components/ui/button";
 import { siteConfig } from "@/config/site.config";
+import type { ProductCategory } from "@/types/product";
+import { useAnalytics } from "@/hooks/useAnalytics";
 import { SearchFilters } from "@/components/SearchFilters";
 import { ProductGrid } from "@/components/ProductGrid";
 
