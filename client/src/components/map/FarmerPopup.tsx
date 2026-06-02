@@ -81,7 +81,7 @@ export default function FarmerPopup({
 
       <div className="flex gap-2 pt-1">
         <a
-          href={`/profiles/${farmer.wallet_address}`}
+          href={`/profile/${farmer.wallet_address}`}
           className={buttonVariants({
             variant: "outline",
             size: "sm",

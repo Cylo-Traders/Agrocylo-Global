@@ -10,11 +10,13 @@ import React, {
 } from "react";
 import { useWallet } from "@/hooks/useWallet";
 import { getProfile, type Profile } from "@/services/profileService";
+import { isAdminRole } from "@/types/wallet";
 
 interface ProfileContextValue {
   profile: Profile | null;
   isLoaded: boolean;
   isOnboarded: boolean;
+  isAdmin: boolean;
   error: string | null;
   refresh: () => Promise<void>;
   setProfile: (profile: Profile | null) => void;
@@ -61,6 +63,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
       profile,
       isLoaded,
       isOnboarded: !!profile,
+      isAdmin: isAdminRole(profile?.role),
       error,
       refresh,
       setProfile,

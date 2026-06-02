@@ -7,7 +7,16 @@ vi.mock('../services/notificationService.js', () => ({
   markNotificationsRead: vi.fn(),
 }));
 
+vi.mock('../services/notificationPreferenceService.js', () => ({
+  getNotificationPreferences: vi.fn(),
+  upsertNotificationPreferences: vi.fn(),
+  notificationPrefsSchema: {
+    safeParse: (body: unknown) => ({ success: true, data: body }),
+  },
+}));
+
 import * as notificationService from '../services/notificationService.js';
+import * as notificationPreferenceService from '../services/notificationPreferenceService.js';
 
 describe('Notification routes', () => {
   beforeEach(() => {
@@ -37,6 +46,60 @@ describe('Notification routes', () => {
       '0x1111111111111111111111111111111111111111',
       { unreadOnly: true, limit: 10 },
     );
+  });
+
+  it('GET /notifications/preferences returns stored preferences', async () => {
+    vi.mocked(notificationPreferenceService.getNotificationPreferences).mockResolvedValue({
+      types: {
+        orders: true,
+        disputes: true,
+        priceAlerts: false,
+        system: true,
+        demandSignals: false,
+      },
+      delivery: { toast: true, email: false, push: false },
+      sound: true,
+      quietHoursEnabled: false,
+      quietStart: '22:00',
+      quietEnd: '08:00',
+    });
+
+    const res = await request(app)
+      .get('/notifications/preferences')
+      .set('x-wallet-address', '0x1111111111111111111111111111111111111111');
+
+    expect(res.status).toBe(200);
+    expect(res.body.preferences.types.priceAlerts).toBe(false);
+  });
+
+  it('PUT /notifications/preferences updates preferences', async () => {
+    const payload = {
+      types: {
+        orders: false,
+        disputes: true,
+        priceAlerts: true,
+        system: true,
+        demandSignals: false,
+      },
+      delivery: { toast: true, email: true, push: false },
+      sound: false,
+      quietHoursEnabled: true,
+      quietStart: '21:00',
+      quietEnd: '07:00',
+    };
+
+    vi.mocked(notificationPreferenceService.upsertNotificationPreferences).mockResolvedValue(
+      payload,
+    );
+
+    const res = await request(app)
+      .put('/notifications/preferences')
+      .set('x-wallet-address', '0x1111111111111111111111111111111111111111')
+      .send(payload);
+
+    expect(res.status).toBe(200);
+    expect(res.body.preferences.delivery.email).toBe(true);
+    expect(notificationPreferenceService.upsertNotificationPreferences).toHaveBeenCalled();
   });
 
   it('PATCH /notifications/:id/read marks a notification as read', async () => {

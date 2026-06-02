@@ -17,7 +17,10 @@ async function bootstrap() {
     wsManager.init(server);
 
     // Start Soroban event listener (blockchain → indexer → WebSocket → frontend)
-    await startContractWatcher();
+    // Can be disabled by setting RUN_CONTRACT_WATCHER=false for REST-only development
+    if (config.runContractWatcher) {
+      await startContractWatcher();
+    }
 
     const runningWorkers = config.runWorkers ? startWorkers() : null;
 

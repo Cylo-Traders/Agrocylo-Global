@@ -13,13 +13,15 @@ import Wrapper from "@/components/shared/wrapper";
 import { useWallet } from "@/hooks/useWallet";
 import { useProducts } from "@/hooks/queries/useProducts";
 import { useCart } from "@/context/CartContext";
+import { useSearch } from "@/hooks/useSearch";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
 import { siteConfig } from "@/config/site.config";
 import type { ProductCategory } from "@/types/product";
 import { useAnalytics } from "@/hooks/useAnalytics";
+import { SearchFilters } from "@/components/SearchFilters";
+import { ProductGrid } from "@/components/ProductGrid";
+
+const VIEW_MODE_KEY = "market:view-mode";
 
 function isNetworkError(error: unknown): boolean {
   if (error instanceof TypeError) return true;
@@ -51,10 +53,24 @@ export default function MarketPage() {
   const [maxPrice, setMaxPrice] = useState("");
 
   const { data, isLoading, error, refetch, isFetching } = useProducts({
-    pageSize: 50,
-    category: category === "All" ? undefined : category,
+    page: debouncedFilters.page,
+    pageSize: debouncedFilters.pageSize,
+    search: debouncedFilters.search || undefined,
+    categories:
+      debouncedFilters.categories.length > 0
+        ? debouncedFilters.categories
+        : undefined,
+    priceMin: debouncedFilters.priceMin,
+    priceMax: debouncedFilters.priceMax,
+    ratingMin: debouncedFilters.ratingMin,
+    location: debouncedFilters.location || undefined,
+    inStockOnly: debouncedFilters.inStockOnly || undefined,
+    maxAgeDays: debouncedFilters.maxAgeDays,
+    stockMin: debouncedFilters.stockMin,
+    sort: debouncedFilters.sort,
     includeUnavailable: false,
   });
+
   const products = data?.items ?? [];
 
   const quantityByProductId = useMemo(() => {
@@ -138,7 +154,7 @@ export default function MarketPage() {
         </div>
       </div>
 
-      {/* Search + filter */}
+      {/* Search + advanced filters */}
       <Wrapper className="-mt-8 md:-mt-12">
         <div className="bg-card relative z-10 flex flex-col gap-3 rounded-2xl border p-4 shadow-sm md:p-6">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-4">
@@ -204,23 +220,9 @@ export default function MarketPage() {
         </div>
       </Wrapper>
 
-      {/* Product grid */}
+      {/* Results */}
       <Wrapper className="my-12 md:my-16">
-        {isLoading ? (
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div
-                key={i}
-                className="bg-card flex flex-col gap-3 rounded-2xl border p-4"
-              >
-                <Skeleton className="h-48 w-full rounded-xl" />
-                <Skeleton className="h-4 w-3/4" />
-                <Skeleton className="h-4 w-1/2" />
-                <Skeleton className="h-10 w-full" />
-              </div>
-            ))}
-          </div>
-        ) : error ? (
+        {error ? (
           <div className="bg-card flex flex-col items-center gap-4 rounded-2xl border p-10 text-center">
             <div className="bg-muted text-muted-foreground flex size-12 items-center justify-center rounded-2xl">
               <WifiOff className="size-5" />
@@ -249,13 +251,6 @@ export default function MarketPage() {
               />
               Try again
             </Button>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="bg-card rounded-2xl border p-10 text-center">
-            <h3 className="text-lg font-semibold">No products yet</h3>
-            <p className="text-muted-foreground mt-1 text-sm">
-              Try adjusting your search or category filter.
-            </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -363,6 +358,19 @@ export default function MarketPage() {
               );
             })}
           </div>
+          <ProductGrid
+            products={products}
+            isLoading={isLoading}
+            view={view}
+            onViewChange={setView}
+            page={filters.page}
+            pageSize={filters.pageSize}
+            totalKnown={data?.total}
+            onPageChange={(p) => setFilters({ page: p })}
+            onPageSizeChange={(size) => setFilters({ pageSize: size, page: 1 })}
+            renderActions={renderActions}
+            emptyMessage="Try adjusting your filters or clearing them to see more products."
+          />
         )}
       </Wrapper>
     </div>
