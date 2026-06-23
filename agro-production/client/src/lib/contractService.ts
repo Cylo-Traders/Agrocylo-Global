@@ -83,3 +83,53 @@ export async function buildCreateOrder(
     return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
+
+/**
+ * Build an `invest` transaction for a specific campaign contract.
+ *
+ * @param investor          - Stellar public key of the investor
+ * @param campaignOnChainId - On-chain ID of the campaign contract
+ * @param amount            - Token amount in base units (i128)
+ */
+export async function buildInvestTransaction(
+  investor: string,
+  campaignOnChainId: string,
+  amount: bigint,
+): Promise<ContractResult<string>> {
+  try {
+    const rpcServer = server();
+    const campaignContract = new StellarSdk.Contract(campaignOnChainId);
+
+    const sourceAccount = await rpcServer.getAccount(investor);
+
+    const tx = new StellarSdk.TransactionBuilder(sourceAccount, {
+      fee: StellarSdk.BASE_FEE,
+      networkPassphrase: NETWORK_PASSPHRASE,
+    })
+      .addOperation(
+        campaignContract.call(
+          "invest",
+          new StellarSdk.Address(investor).toScVal(),
+          StellarSdk.nativeToScVal(amount, { type: "i128" }),
+        ),
+      )
+      .setTimeout(30)
+      .build();
+
+    const simulated = await rpcServer.simulateTransaction(tx);
+
+    if (StellarSdk.rpc.Api.isSimulationError(simulated)) {
+      throw new Error(
+        `Simulation failed: ${(simulated as StellarSdk.rpc.Api.SimulateTransactionErrorResponse).error}`,
+      );
+    }
+
+    const prepared = StellarSdk.rpc
+      .assembleTransaction(tx, simulated as StellarSdk.rpc.Api.SimulateTransactionSuccessResponse)
+      .build();
+
+    return { success: true, data: prepared.toXDR() };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}

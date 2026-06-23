@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { fetchCampaign, fundingProgress, formatAmount } from "@/services/campaignService";
 import { trackCampaignViewed } from "@/lib/analytics";
 import { classifyError, logErrorWithContext } from "@/lib/errorHandling";
 import { CampaignDetailSkeleton } from "@/components/Skeletons";
+import InvestmentModal from "@/components/ui/InvestmentModal";
 import type { CampaignDetail } from "@/types";
 
 function StatCard({ label, value }: { label: string; value: string }) {
@@ -23,9 +24,11 @@ export default function CampaignDetailPage() {
   const [campaign, setCampaign] = useState<CampaignDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [investModalOpen, setInvestModalOpen] = useState(false);
 
-  useEffect(() => {
+  const loadData = useCallback(() => {
     if (!id) return;
+    setLoading(true);
     fetchCampaign(id)
       .then((c) => {
         setCampaign(c);
@@ -44,9 +47,13 @@ export default function CampaignDetailPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  if (loading) return <CampaignDetailSkeleton />;
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
-  if (error) return (<div className="border border-red-200 bg-red-50 rounded-xl p-6 text-red-700 text-sm" role="alert">{error}</div>);
+  if (loading && !campaign) return <CampaignDetailSkeleton />;
+
+  if (error && !campaign) return (<div className="border border-red-200 bg-red-50 rounded-xl p-6 text-red-700 text-sm" role="alert">{error}</div>);
   if (!campaign) return null;
 
   const pct = fundingProgress(campaign);
@@ -55,6 +62,7 @@ export default function CampaignDetailPage() {
   const isExpired = deadline < new Date();
   const daysLeft = Math.max(0, Math.ceil((deadline.getTime() - Date.now()) / 86_400_000));
   const canOrder = campaign.status === "HARVESTED" || campaign.status === "IN_PRODUCTION";
+  const canInvest = campaign.status === "FUNDING";
 
   return (
     <div className="space-y-6">
@@ -125,6 +133,21 @@ export default function CampaignDetailPage() {
           <Link href={`/checkout/${campaign.id}`} className="whitespace-nowrap bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-700" aria-label={`Place order for campaign ${campaign.id.slice(0, 8)}…`}>Place Order</Link>
         </div>
       )}
+      {canInvest && (
+        <div className="border border-primary-200 bg-primary-50 rounded-xl p-5 flex items-center justify-between gap-4">
+          <div><p className="font-semibold text-primary-800">Ready to Invest</p><p className="text-sm text-primary-700 mt-0.5">Support this farmer by investing in their campaign.</p></div>
+          <button onClick={() => setInvestModalOpen(true)} className="whitespace-nowrap bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-700" aria-label={`Invest in campaign ${campaign.id.slice(0, 8)}…`}>Invest Now</button>
+        </div>
+      )}
+      
+      <InvestmentModal
+        open={investModalOpen}
+        onClose={() => {
+          setInvestModalOpen(false);
+          loadData();
+        }}
+        campaign={campaign}
+      />
     </div>
   );
 }

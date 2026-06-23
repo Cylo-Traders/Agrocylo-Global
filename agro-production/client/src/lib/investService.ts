@@ -1,16 +1,8 @@
-export async function invest(productId: string, amount: number): Promise<void> {
-  const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/invest`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ productId, amount }),
-  });
+import api from "./apiClient";
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      errorText || `Invest request failed with status ${response.status}`,
-    );
-  }
+export async function recordInvestment(campaignId: string, investorAddress: string, amount: bigint): Promise<void> {
+  await api.post(`/campaigns/${campaignId}/invest`, {
+    investorAddress,
+    amount: amount.toString(),
+  });
 }
