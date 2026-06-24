@@ -37,6 +37,9 @@ model Notification {
   createdAt     DateTime @default(now())
 
   @@index([walletAddress])
+  @@index([walletAddress, createdAt(sort: Desc)])
+  @@index([walletAddress, isRead])
+  @@index([orderId])
 }
 
 model NotificationPreference {
@@ -130,6 +133,11 @@ model Order {
   product    Product? @relation(fields: [productId], references: [id])
   dispute    Dispute?
 
+  @@index([sellerAddress])
+  @@index([buyerAddress])
+  @@index([status])
+  @@index([createdAt(sort: Desc)])
+  @@index([sellerAddress, status])
   @@map("orders")
 }
 

@@ -48,7 +48,13 @@ function clampLimit(limit?: number): number {
 }
 
 function walletCandidates(walletAddress: string): string[] {
-  return Array.from(new Set([walletAddress, walletAddress.toLowerCase(), walletAddress.toUpperCase()]));
+  return Array.from(
+    new Set([
+      walletAddress,
+      walletAddress.toLowerCase(),
+      walletAddress.toUpperCase(),
+    ]),
+  );
 }
 
 /**
@@ -58,15 +64,46 @@ function walletCandidates(walletAddress: string): string[] {
  * - "confirmed" → DELIVERY_CONFIRMED (farmer)
  * - "refunded"  → REFUND_ISSUED (buyer)
  */
-const actionToNotifications: Record<string, (p: EscrowEventPayload) => MappedNotification[]> = {
+const actionToNotifications: Record<
+  string,
+  (p: EscrowEventPayload) => MappedNotification[]
+> = {
   created: ({ buyerAddress, farmerAddress }) => [
-    ...(buyerAddress ? [{ walletAddress: buyerAddress, type: NotificationEventType.ORDER_CREATED }] : []),
-    ...(farmerAddress ? [{ walletAddress: farmerAddress, type: NotificationEventType.FUNDS_LOCKED }] : []),
+    ...(buyerAddress
+      ? [
+          {
+            walletAddress: buyerAddress,
+            type: NotificationEventType.ORDER_CREATED,
+          },
+        ]
+      : []),
+    ...(farmerAddress
+      ? [
+          {
+            walletAddress: farmerAddress,
+            type: NotificationEventType.FUNDS_LOCKED,
+          },
+        ]
+      : []),
   ],
   confirmed: ({ farmerAddress }) =>
-    farmerAddress ? [{ walletAddress: farmerAddress, type: NotificationEventType.DELIVERY_CONFIRMED }] : [],
+    farmerAddress
+      ? [
+          {
+            walletAddress: farmerAddress,
+            type: NotificationEventType.DELIVERY_CONFIRMED,
+          },
+        ]
+      : [],
   refunded: ({ buyerAddress }) =>
-    buyerAddress ? [{ walletAddress: buyerAddress, type: NotificationEventType.REFUND_ISSUED }] : [],
+    buyerAddress
+      ? [
+          {
+            walletAddress: buyerAddress,
+            type: NotificationEventType.REFUND_ISSUED,
+          },
+        ]
+      : [],
 };
 
 export async function listNotifications(
@@ -76,9 +113,9 @@ export async function listNotifications(
   return prisma.notification.findMany({
     where: {
       walletAddress: { in: walletCandidates(walletAddress) },
-      ...(options.unreadOnly ?? true ? { isRead: false } : {}),
+      ...((options.unreadOnly ?? true) ? { isRead: false } : {}),
     },
-    orderBy: { createdAt: "asc" },
+    orderBy: { createdAt: "desc" },
     take: clampLimit(options.limit),
   });
 }
@@ -95,12 +132,25 @@ export async function markNotificationsRead(
   });
 
   if (notifications.length !== ids.length) {
-    throw new ApiError(404, "Not Found", "One or more notifications were not found");
+    throw new ApiError(
+      404,
+      "Not Found",
+      "One or more notifications were not found",
+    );
   }
 
   const walletMatches = walletCandidates(walletAddress);
-  if (notifications.some((n: { id: string; walletAddress: string }) => !walletMatches.includes(n.walletAddress))) {
-    throw new ApiError(403, "Forbidden", "You cannot modify these notifications");
+  if (
+    notifications.some(
+      (n: { id: string; walletAddress: string }) =>
+        !walletMatches.includes(n.walletAddress),
+    )
+  ) {
+    throw new ApiError(
+      403,
+      "Forbidden",
+      "You cannot modify these notifications",
+    );
   }
 
   const result = await prisma.notification.updateMany({
@@ -144,7 +194,9 @@ export class NotificationService {
     }
   }
 
-  static async notifyFromEscrowEvent(payload: EscrowEventPayload): Promise<void> {
+  static async notifyFromEscrowEvent(
+    payload: EscrowEventPayload,
+  ): Promise<void> {
     const mapper = actionToNotifications[payload.action];
     if (!mapper) return;
 
