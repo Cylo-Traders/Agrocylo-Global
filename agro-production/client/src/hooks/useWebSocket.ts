@@ -2,6 +2,22 @@
 
 import { useEffect, useRef, useCallback } from "react";
 
+/**
+ * WebSocket hook for real-time client-server communication.
+ *
+ * ## Local Setup
+ * During development, the WebSocket server runs on localhost:5001.
+ * To test locally:
+ *   1. Ensure the backend is running on ws://localhost:5001/ws
+ *   2. The hook auto-derives this URL if NEXT_PUBLIC_WS_URL is not set
+ *
+ * ## Production Setup
+ * In production, set the environment variable:
+ *   NEXT_PUBLIC_WS_URL=wss://your-domain/ws
+ *
+ * The hook automatically detects https connections and uses wss:// (secure WebSocket).
+ */
+
 function getWebSocketUrl(): string {
   if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
   if (typeof window === "undefined") return "ws://localhost:5001/ws";
@@ -19,15 +35,23 @@ export type WsMessage = {
   timestamp: string;
 };
 
+export type WsStatus = "connecting" | "open" | "closed" | "error";
+
 type Handler = (msg: WsMessage) => void;
 
-export function useWebSocket(onMessage: Handler) {
+export interface UseWebSocketReturn {
+  send: (data: string) => void;
+  status: WsStatus;
+}
+
+export function useWebSocket(onMessage: Handler): UseWebSocketReturn {
   const socketRef = useRef<WebSocket | null>(null);
   const handlerRef = useRef<Handler>(onMessage);
   const attemptRef = useRef(0);
   const messageQueueRef = useRef<string[]>([]);
   const unmountedRef = useRef(false);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const statusRef = useRef<WsStatus>("connecting");
 
   handlerRef.current = onMessage;
 
@@ -48,6 +72,7 @@ export function useWebSocket(onMessage: Handler) {
 
     ws.onopen = () => {
       attemptRef.current = 0;
+      statusRef.current = "open";
       flushQueue(ws);
     };
 
@@ -61,6 +86,7 @@ export function useWebSocket(onMessage: Handler) {
     };
 
     ws.onclose = () => {
+      statusRef.current = "closed";
       if (unmountedRef.current) return;
       const attempt = attemptRef.current;
       const delay = Math.min(BACKOFF_BASE_MS * 2 ** attempt, BACKOFF_MAX_MS);
@@ -69,6 +95,7 @@ export function useWebSocket(onMessage: Handler) {
     };
 
     ws.onerror = () => {
+      statusRef.current = "error";
       ws.close();
     };
   }, [flushQueue]);
@@ -87,6 +114,7 @@ export function useWebSocket(onMessage: Handler) {
 
   useEffect(() => {
     unmountedRef.current = false;
+    statusRef.current = "connecting";
     connect();
     return () => {
       unmountedRef.current = true;
@@ -95,5 +123,5 @@ export function useWebSocket(onMessage: Handler) {
     };
   }, [connect]);
 
-  return { send };
+  return { send, status: statusRef.current };
 }
