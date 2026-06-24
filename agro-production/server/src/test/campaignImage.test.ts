@@ -132,7 +132,7 @@ describe('Campaign Image Upload', () => {
 
     it('should return 422 if image dimensions are too small', async () => {
       const sharpModule = await import('sharp');
-      const mockSharp = sharpModule.default as ReturnType<typeof vi.fn>;
+      const mockSharp = sharpModule.default as unknown as ReturnType<typeof vi.fn>;
       const mockInstance = mockSharp();
       mockInstance.metadata.mockResolvedValue({ width: 50, height: 50 });
 

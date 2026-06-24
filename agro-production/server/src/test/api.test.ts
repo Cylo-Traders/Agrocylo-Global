@@ -84,7 +84,7 @@ const mockOrder = {
   updatedAt: new Date(NOW),
 };
 
-const db = prisma as {
+const db = prisma as unknown as {
   campaign: Record<string, ReturnType<typeof vi.fn>>;
   investment: Record<string, ReturnType<typeof vi.fn>>;
   order: Record<string, ReturnType<typeof vi.fn>>;

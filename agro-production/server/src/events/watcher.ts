@@ -9,9 +9,10 @@ import type { RawSorobanEvent } from "./types.js";
 
 const POLL_INTERVAL_MS = 5_000;
 const MAX_LEDGER_GAP = 1_000;
-// base64 encoding of "campaign" and "order" short symbols
+// base64 encoding of event topic symbols
 const CAMPAIGN_TOPIC = "AAAADwAAAAhjYW1wYWlnbg==";
 const ORDER_TOPIC = "AAAADwAAAAVvcmRlcg==";
+const DISPUTE_TOPIC = "AAAADwAAAAdkaXNwdXRl";
 
 /**
  * Loads the last persisted ledger checkpoint from the database.
@@ -56,9 +57,33 @@ async function reconcileGap(server: rpc.Server, lastLedger: number): Promise<num
   return lastLedger;
 }
 
-export async function startProductionWatcher(): Promise<ReturnType<typeof setInterval>> {
+/**
+ * Consolidated Soroban event ingestion pipeline.
+ * Watches all configured contract IDs and ingests events from configured topics.
+ * This is the canonical ingestion path replacing the deprecated sorobanEventListener.
+ *
+ * Handles:
+ * - Escrow contract order events
+ * - Production contract campaign, order, and dispute events
+ * - Checkpoint persistence to resume from last known state
+ * - Gap reconciliation for long outages
+ */
+export async function startProductionWatcher(): Promise<ReturnType<typeof setInterval> | null> {
   const server = new rpc.Server(config.rpcUrl);
-  logger.info("Production contract watcher started", { contractId: config.contractId });
+
+  const contracts = buildContractFilters();
+  if (contracts.length === 0) {
+    logger.warn(
+      "No contract IDs configured. Soroban event watcher will not start. " +
+      "Set PRODUCTION_CONTRACT_ID and/or ESCROW_CONTRACT_ID / PRODUCTION_ESCROW_CONTRACT_ID.",
+    );
+    return null;
+  }
+
+  logger.info("Soroban event watcher started", {
+    contractCount: contracts.length,
+    contracts: contracts.map((c) => c.contractId),
+  });
 
   let lastLedger = await loadCheckpoint(server);
   lastLedger = await reconcileGap(server, lastLedger);
@@ -67,44 +92,88 @@ export async function startProductionWatcher(): Promise<ReturnType<typeof setInt
     try {
       const response = await server.getEvents({
         startLedger: lastLedger,
-        filters: [
-          {
-            type: "contract",
-            contractIds: [config.contractId],
-            topics: [[CAMPAIGN_TOPIC, "*"]],
-          },
-          {
-            type: "contract",
-            contractIds: [config.contractId],
-            topics: [[ORDER_TOPIC, "*"]],
-          },
-        ],
+        filters: contracts,
       });
 
       let highWaterMark = lastLedger;
+      let eventCount = 0;
 
       for (const rawEvent of response.events) {
         const event = ProductionEventParser.tryParse(rawEvent as unknown as RawSorobanEvent);
         if (event) {
           await EventPersister.persist(event).catch((err) => {
             recordPersistError();
-            logger.error("EventPersister error", { error: err });
+            logger.error("EventPersister error", { error: err, ledger: rawEvent.ledger });
           });
+          eventCount++;
         }
         if (rawEvent.ledger > highWaterMark) {
           highWaterMark = rawEvent.ledger;
         }
       }
 
-      // Advance checkpoint only after all events in the batch are processed.
       if (highWaterMark > lastLedger) {
         lastLedger = highWaterMark + 1;
-        logger.debug("Production watcher: checkpoint advanced", { ledger: lastLedger });
+        logger.debug("Soroban watcher: checkpoint advanced", {
+          ledger: lastLedger,
+          eventsProcessed: eventCount,
+        });
       }
     } catch (err) {
-      logger.error("Production watcher poll error", { error: err });
+      logger.error("Soroban watcher poll error", { error: err });
     }
   }, POLL_INTERVAL_MS);
 
   return interval;
+}
+
+function buildContractFilters() {
+  const filters: any[] = [];
+
+  if (config.escrowContractId) {
+    filters.push(
+      {
+        type: "contract" as const,
+        contractIds: [config.escrowContractId],
+        topics: [[ORDER_TOPIC, "*"]],
+      }
+    );
+  }
+
+  if (config.productionEscrowContractId) {
+    filters.push(
+      {
+        type: "contract" as const,
+        contractIds: [config.productionEscrowContractId],
+        topics: [[CAMPAIGN_TOPIC, "*"]],
+      },
+      {
+        type: "contract" as const,
+        contractIds: [config.productionEscrowContractId],
+        topics: [[ORDER_TOPIC, "*"]],
+      },
+      {
+        type: "contract" as const,
+        contractIds: [config.productionEscrowContractId],
+        topics: [[DISPUTE_TOPIC, "*"]],
+      }
+    );
+  }
+
+  if (config.contractId && config.contractId !== "C...") {
+    filters.push(
+      {
+        type: "contract" as const,
+        contractIds: [config.contractId],
+        topics: [[CAMPAIGN_TOPIC, "*"]],
+      },
+      {
+        type: "contract" as const,
+        contractIds: [config.contractId],
+        topics: [[ORDER_TOPIC, "*"]],
+      }
+    );
+  }
+
+  return filters;
 }

@@ -1,7 +1,7 @@
 import type { CampaignStatus, OrderStatus, Prisma } from "@prisma/client";
 import { prisma } from "../db/client.js";
 import logger from "../config/logger.js";
-import { broadcast } from "../services/wsServer.js";
+import { broadcast, type WsEventType } from "../services/wsServer.js";
 import { recordEventProcessed, recordEventDuplicate } from "./metrics.js";
 import type {
   CampaignCreatedEvent,

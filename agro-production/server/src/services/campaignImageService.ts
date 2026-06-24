@@ -102,28 +102,29 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
 
 function classifyStorageError(
   operation: string,
-  error: { statusCode?: number; message?: string } | null,
+  error: { statusCode?: number | string; message?: string } | null,
 ): StorageError {
   if (!error) {
     return new StorageError(500, `Storage ${operation} failed with unknown error.`);
   }
-  switch (error.statusCode) {
+  const statusCode = typeof error.statusCode === 'string' ? parseInt(error.statusCode, 10) : error.statusCode;
+  switch (statusCode) {
     case 401:
-      return new StorageError(500, `Storage ${operation} failed: authentication error.`, error);
+      return new StorageError(500, `Storage ${operation} failed: authentication error.`, error as Record<string, unknown>);
     case 403:
-      return new StorageError(500, `Storage ${operation} failed: permission denied.`, error);
+      return new StorageError(500, `Storage ${operation} failed: permission denied.`, error as Record<string, unknown>);
     case 404:
-      return new StorageError(500, `Storage ${operation} failed: path not found.`, error);
+      return new StorageError(500, `Storage ${operation} failed: path not found.`, error as Record<string, unknown>);
     case 413:
-      return new StorageError(413, `Storage ${operation} failed: file exceeds storage size limit.`, error);
+      return new StorageError(413, `Storage ${operation} failed: file exceeds storage size limit.`, error as Record<string, unknown>);
     case 408:
     case 429:
     case 502:
     case 503:
     case 504:
-      return new StorageError(error.statusCode, `Storage ${operation} temporarily unavailable.`, error);
+      return new StorageError(statusCode, `Storage ${operation} temporarily unavailable.`, error as Record<string, unknown>);
     default:
-      return new StorageError(500, `Storage ${operation} failed: ${error.message ?? 'Unknown error'}`, error);
+      return new StorageError(500, `Storage ${operation} failed: ${error.message ?? 'Unknown error'}`, error as Record<string, unknown>);
   }
 }
 

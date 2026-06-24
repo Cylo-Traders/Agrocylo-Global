@@ -28,6 +28,7 @@ import {
 } from "../schemas/responses.js";
 import { broadcast } from "../services/wsServer.js";
 import { problemDetail } from "../middleware/errors.js";
+import { requireIdempotencyKey, getCachedResponse, setCachedResponse } from "../middleware/idempotency.js";
 
 const router = Router();
 
@@ -84,14 +85,22 @@ router.get(
   },
 );
 
-// POST /campaigns — register a newly-created campaign (for off-chain metadata)
+// POST /campaigns — register a campaign intent (requires idempotency key and transaction hash)
 router.post(
   "/campaigns",
   writeLimiter,
+  requireIdempotencyKey,
   validateBody(CreateCampaignSchema),
   validateResponse(CampaignSchema),
   async (req: Request, res: Response) => {
-    const { farmerAddress, tokenAddress, targetAmount, deadline } =
+    const key = (req as any).idempotencyKey as string;
+    const cached = getCachedResponse(key);
+    if (cached) {
+      jsonValidated(res, CampaignSchema, cached.status, cached.body);
+      return;
+    }
+
+    const { farmerAddress, tokenAddress, targetAmount, deadline, transactionHash } =
       req.body as CreateCampaignInput;
 
     await prisma.user.upsert({
@@ -110,9 +119,20 @@ router.post(
       },
     });
 
-    broadcast("campaign.created", campaign);
+    await prisma.transaction.create({
+      data: {
+        campaignId: campaign.id,
+        eventType: "campaign.created_intent",
+        payload: { transactionHash, intent: true },
+        ledger: 0,
+        eventIndex: 0,
+        txHash: transactionHash,
+      },
+    });
 
-    jsonValidated(res, CampaignSchema, 201, campaign);
+    const response = campaign;
+    setCachedResponse(key, 201, response);
+    jsonValidated(res, CampaignSchema, 201, response);
   },
 );
 
@@ -162,15 +182,23 @@ router.get(
   },
 );
 
-// POST /campaigns/:id/invest — record an investment (indexer shortcut)
+// POST /campaigns/:id/invest — record an investment intent (requires idempotency key and transaction hash)
 router.post(
   "/campaigns/:id/invest",
   writeLimiter,
+  requireIdempotencyKey,
   validateParams(CampaignIdParamSchema),
   validateBody(InvestSchema),
   validateResponse(InvestmentSchema),
   async (req: Request, res: Response) => {
-    const { investorAddress, amount } = req.body as InvestInput;
+    const key = (req as any).idempotencyKey as string;
+    const cached = getCachedResponse(key);
+    if (cached) {
+      jsonValidated(res, InvestmentSchema, cached.status, cached.body);
+      return;
+    }
+
+    const { investorAddress, amount, transactionHash } = req.body as InvestInput;
 
     const campaign = await prisma.campaign.findUnique({ where: { id: req.params.id } });
     if (!campaign) {
@@ -199,18 +227,25 @@ router.post(
         campaignId: campaign.id,
         investorAddress,
         amount,
-        ledger: 0, // will be updated by indexer
+        ledger: 0,
+        txHash: transactionHash,
       },
     });
 
-    broadcast("campaign.invested", {
-      campaignId: campaign.id,
-      investorAddress,
-      amount,
-      totalRaised: campaign.totalRaised,
+    await prisma.transaction.create({
+      data: {
+        campaignId: campaign.id,
+        eventType: "campaign.invested_intent",
+        payload: { transactionHash, intent: true },
+        ledger: 0,
+        eventIndex: 0,
+        txHash: transactionHash,
+      },
     });
 
-    jsonValidated(res, InvestmentSchema, 201, investment);
+    const response = investment;
+    setCachedResponse(key, 201, response);
+    jsonValidated(res, InvestmentSchema, 201, response);
   },
 );
 

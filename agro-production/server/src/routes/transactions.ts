@@ -13,8 +13,6 @@ import {
   TransactionRequestIdParamSchema,
   TransactionStatusResponseSchema,
 } from '../schemas/transaction.js';
-import { broadcast } from '../services/wsServer.js';
-
 const router = Router();
 
 router.post(
@@ -61,13 +59,6 @@ router.post(
         eventIndex: 0,
         txHash,
       },
-    });
-
-    broadcast('transaction.updated', {
-      requestId: tx.id,
-      txHash: tx.txHash,
-      status: 'awaiting_signature',
-      walletAddress,
     });
 
     jsonValidated(res, TransactionStatusResponseSchema, 201, {

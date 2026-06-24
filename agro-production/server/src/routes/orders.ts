@@ -18,6 +18,7 @@ import {
   type ListOrdersQuery,
 } from "../schemas/order.js";
 import { OrderSchema } from "../schemas/responses.js";
+import { requireIdempotencyKey, getCachedResponse, setCachedResponse } from "../middleware/idempotency.js";
 
 const router = Router();
 
@@ -57,14 +58,22 @@ router.get(
   },
 );
 
-// POST /orders
+// POST /orders — create order intent (requires idempotency key and transaction hash)
 router.post(
   "/orders",
   writeLimiter,
+  requireIdempotencyKey,
   validateBody(CreateOrderSchema),
   validateResponse(OrderSchema),
   async (req: Request, res: Response) => {
-    const { buyerAddress, campaignId, amount } = req.body;
+    const key = (req as any).idempotencyKey as string;
+    const cached = getCachedResponse(key);
+    if (cached) {
+      jsonValidated(res, OrderSchema, cached.status, cached.body);
+      return;
+    }
+
+    const { buyerAddress, campaignId, amount, transactionHash } = req.body;
 
     const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
     if (!campaign) {
@@ -95,10 +104,24 @@ router.post(
         buyerAddress,
         amount,
         ledger: 0,
+        txHash: transactionHash,
       },
     });
 
-    jsonValidated(res, OrderSchema, 201, order);
+    await prisma.transaction.create({
+      data: {
+        campaignId: campaign.id,
+        eventType: "order.created_intent",
+        payload: { transactionHash, intent: true },
+        ledger: 0,
+        eventIndex: 0,
+        txHash: transactionHash,
+      },
+    });
+
+    const response = order;
+    setCachedResponse(key, 201, response);
+    jsonValidated(res, OrderSchema, 201, response);
   },
 );
 
@@ -114,37 +137,6 @@ router.get(
       return;
     }
     jsonValidated(res, OrderSchema, 200, order);
-  },
-);
-
-// PATCH /orders/:id/confirm
-router.patch(
-  "/orders/:id/confirm",
-  writeLimiter,
-  validateParams(OrderIdParamSchema),
-  validateBody(ConfirmOrderSchema),
-  validateResponse(OrderSchema),
-  async (req: Request, res: Response) => {
-    const order = await prisma.order.findUnique({ where: { id: req.params.id } });
-    if (!order) {
-      problemDetail(res, req, 404, "Order Not Found", `No order with id ${req.params.id}`);
-      return;
-    }
-    if (order.buyerAddress !== req.body.buyerAddress) {
-      problemDetail(res, req, 403, "Forbidden", "Not the buyer for this order");
-      return;
-    }
-    if (order.status !== "PENDING") {
-      problemDetail(res, req, 409, "Order Already Confirmed", "Order is not pending");
-      return;
-    }
-
-    const updated = await prisma.order.update({
-      where: { id: order.id },
-      data: { status: "CONFIRMED" },
-    });
-
-    jsonValidated(res, OrderSchema, 200, updated);
   },
 );
 
