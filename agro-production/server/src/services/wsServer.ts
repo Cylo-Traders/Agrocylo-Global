@@ -13,6 +13,10 @@ export type WsEventName =
   | "campaign.settled"
   | "order.created"
   | "order.confirmed"
+  | "dispute.opened"
+  | "dispute.evidence_submitted"
+  | "dispute.resolved"
+  | "dispute.dismissed"
   | "error";
 
 export interface WsEnvelope<T = unknown> {
@@ -103,9 +107,6 @@ export class WsServer {
     });
   }
 }
-import { WebSocketServer, WebSocket } from "ws";
-import type { Server } from "http";
-import logger from "../config/logger.js";
 
 let activeServer: WsServer | null = null;
 
@@ -114,23 +115,6 @@ export function attachWebSocketServer(server: Server): void {
     throw new Error("WebSocket server is already attached");
   }
   activeServer = new WsServer(server, "/ws");
-export function attachWebSocketServer(server: Server): WebSocketServer {
-  wss = new WebSocketServer({ server, path: "/ws" });
-
-  wss.on("connection", (socket) => {
-    logger.info("WebSocket client connected");
-
-    socket.on("close", () => {
-      logger.info("WebSocket client disconnected");
-    });
-
-    socket.on("error", (err) => {
-      logger.warn("WebSocket socket error", err);
-    });
-  });
-
-  logger.info("WebSocket server attached at /ws");
-  return wss;
 }
 
 /** Broadcast an indexer event to currently connected clients. */
@@ -140,18 +124,14 @@ export function broadcast(event: WsEventName, payload: unknown): void {
 
 export function closeWebSocketServer(): Promise<void> {
   return new Promise((resolve) => {
-    if (!wss) {
+    if (!activeServer) {
       resolve();
       return;
     }
-    wss.close(() => {
-      wss = null;
-      logger.info("WebSocket server closed");
-      resolve();
-    });
+    activeServer.close().then(resolve).catch(resolve);
   });
 }
 
-export function getWebSocketServer(): WebSocketServer | null {
-  return wss;
+export function getWebSocketServer(): WsServer | null {
+  return activeServer;
 }
