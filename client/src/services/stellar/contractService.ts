@@ -11,7 +11,7 @@
  */
 
 import * as StellarSdk from "@stellar/stellar-sdk";
-import { getNetworkConfig, type NetworkConfig } from "./networkConfig";
+import { getNetworkConfig, requireContractId, type NetworkConfig } from "./networkConfig";
 import { isTestMode } from "@/lib/testMode";
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -46,13 +46,7 @@ function rpcServer(): StellarSdk.rpc.Server {
 }
 
 function contractInstance(): StellarSdk.Contract {
-  const { contractId } = config();
-  if (!contractId) {
-    throw new Error(
-      "Contract ID is not configured. Set NEXT_PUBLIC_CONTRACT_ID in your environment."
-    );
-  }
-  return new StellarSdk.Contract(contractId);
+  return new StellarSdk.Contract(requireContractId());
 }
 
 /**

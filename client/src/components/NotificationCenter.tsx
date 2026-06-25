@@ -10,6 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { useDebounce } from "@/hooks/useDebounce";
 import { useNotifications, type NotificationFilter } from "@/hooks/useNotifications";
 import type { OrderEventNotification } from "@/services/notification/api";
 
@@ -178,6 +179,7 @@ function NotificationList({
 export function NotificationCenter({ walletAddress, className }: NotificationCenterProps) {
   const [filter, setFilter] = useState<NotificationFilter>("all");
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 300);
 
   const {
     notifications,
@@ -190,7 +192,7 @@ export function NotificationCenter({ walletAddress, className }: NotificationCen
     markAllRead,
     deleteNotification,
     clearAll,
-  } = useNotifications({ walletAddress, filter, search });
+  } = useNotifications({ walletAddress, filter, search: debouncedSearch });
 
   return (
     <Card className={cn("flex flex-col", className)}>

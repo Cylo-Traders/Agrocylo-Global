@@ -55,12 +55,32 @@ export function getNetworkConfig(): NetworkConfig {
     process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? TESTNET_PASSPHRASE;
 
   const contractId = process.env.NEXT_PUBLIC_CONTRACT_ID ?? "";
-  if (!contractId) {
-    console.warn(
-      "[networkConfig] NEXT_PUBLIC_CONTRACT_ID is not set. " +
-        "Contract calls will fail until a deployed contract address is provided."
-    );
-  }
 
   return { rpcUrl, networkPassphrase, contractId };
+}
+
+/**
+ * Validates that a deployed contract ID is available at runtime.
+ * Throws a descriptive error when it is missing so consumers don't
+ * silently attempt contract operations that will fail.
+ */
+export function requireContractId(): string {
+  const id = process.env.NEXT_PUBLIC_CONTRACT_ID;
+  if (!id) {
+    throw new Error(
+      "Contract ID is not configured. " +
+        "Set NEXT_PUBLIC_CONTRACT_ID in your environment to point to the deployed escrow contract address. " +
+        "Contract-dependent features will be unavailable until this is set.",
+    );
+  }
+  return id;
+}
+
+/**
+ * Checks whether the contract ID environment variable is configured,
+ * without throwing. Useful for UI guards that want to show a fallback
+ * message instead of crashing.
+ */
+export function isContractConfigured(): boolean {
+  return !!process.env.NEXT_PUBLIC_CONTRACT_ID;
 }

@@ -148,12 +148,104 @@ export const RabetAdapter: WalletAdapter = {
   },
 };
 
+// ─── Albedo adapter (mobile-friendly, browser-based) ────────────────────────
+
+type AlbedoWindow = Window & {
+  albedo?: {
+    connect(opts?: { username?: string }): Promise<{ publicKey: string }>;
+    publicKey(): Promise<{ publicKey: string }>;
+    network(): Promise<{ network: string }>;
+  };
+};
+
+export const AlbedoAdapter: WalletAdapter = {
+  id: "albedo",
+  name: "Albedo",
+  icon: "/wallets/albedo.svg",
+
+  isAvailable() {
+    if (typeof window === "undefined") return false;
+    return !!(window as AlbedoWindow).albedo;
+  },
+
+  supportsMobile() {
+    return true;
+  },
+
+  mobileDeepLink() {
+    return "https://albedo.io";
+  },
+
+  async getPublicKey() {
+    const albedo = (window as AlbedoWindow).albedo;
+    if (!albedo) throw new Error("Albedo is not installed");
+    const result = await albedo.connect();
+    if (!result.publicKey) throw new Error("Albedo did not return a public key");
+    return result.publicKey;
+  },
+
+  async getNetwork() {
+    const albedo = (window as AlbedoWindow).albedo;
+    if (!albedo) throw new Error("Albedo is not installed");
+    const result = await albedo.network();
+    return result.network;
+  },
+};
+
+// ─── LOBSTR adapter (mobile wallet with deep-link support) ──────────────────
+
+type LOBSTRWindow = Window & {
+  lobstr?: {
+    getPublicKey(): Promise<string>;
+    getNetwork(): Promise<string>;
+    signTransaction(
+      txXdr: string,
+      opts?: { network?: string },
+    ): Promise<{ signedTxXdr: string }>;
+  };
+};
+
+export const LOBSTRAdapter: WalletAdapter = {
+  id: "lobstr",
+  name: "LOBSTR",
+  icon: "/wallets/lobstr.svg",
+
+  isAvailable() {
+    if (typeof window === "undefined") return false;
+    return !!(window as LOBSTRWindow).lobstr;
+  },
+
+  supportsMobile() {
+    return true;
+  },
+
+  mobileDeepLink() {
+    return "https://lobstr.co";
+  },
+
+  async getPublicKey() {
+    const lobstr = (window as LOBSTRWindow).lobstr;
+    if (!lobstr) throw new Error("LOBSTR vault extension is not installed");
+    const pub = await lobstr.getPublicKey();
+    if (!pub) throw new Error("LOBSTR did not return a public key");
+    return pub;
+  },
+
+  async getNetwork() {
+    const lobstr = (window as LOBSTRWindow).lobstr;
+    if (!lobstr) throw new Error("LOBSTR vault extension is not installed");
+    return lobstr.getNetwork();
+  },
+};
+
 // ─── Registry ──────────────────────────────────────────────────────────────
 
 export const WALLET_ADAPTERS: WalletAdapter[] = [
   FreighterAdapter,
   XBullAdapter,
   RabetAdapter,
+  AlbedoAdapter,
+  LOBSTRAdapter,
 ];
 
 export const WALLET_PREFERENCE_KEY = "preferredWallet";
