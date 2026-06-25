@@ -3,6 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import app from '../app.js';
 import { ApiError } from '../http/errors.js';
 
+vi.mock('../services/authService.js', () => ({
+  generateNonce: vi.fn(),
+  verifySignature: vi.fn(),
+  refreshAccessToken: vi.fn(),
+  logout: vi.fn(),
+}));
+
 vi.mock('../services/productService.js', () => ({
   listProducts: vi.fn(),
   getProductById: vi.fn(),
@@ -28,6 +35,65 @@ vi.mock('../services/notificationService.js', () => ({
 import * as productService from '../services/productService.js';
 import * as cartService from '../services/cartService.js';
 import * as notificationService from '../services/notificationService.js';
+import * as authService from '../services/authService.js';
+
+describe('Health endpoint', () => {
+  it('GET /health returns 200 with status UP', async () => {
+    const res = await request(app).get('/health');
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('UP');
+    expect(res.body.service).toBe('Agrocylo-Backend');
+  });
+});
+
+describe('Auth endpoints', () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it('POST /auth/nonce returns 400 when walletAddress is missing', async () => {
+    const res = await request(app).post('/auth/nonce').send({});
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /auth/nonce returns 200 when authService resolves', async () => {
+    vi.mocked(authService.generateNonce).mockResolvedValue({ nonce: 'abc123' });
+    const res = await request(app).post('/auth/nonce').send({ walletAddress: 'GTEST' });
+    expect(res.status).toBe(200);
+    expect(res.body.nonce).toBe('abc123');
+  });
+
+  it('POST /auth/verify returns 400 when walletAddress is missing', async () => {
+    const res = await request(app).post('/auth/verify').send({ signature: 'sig' });
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /auth/verify returns 400 when signature is missing', async () => {
+    const res = await request(app).post('/auth/verify').send({ walletAddress: 'GTEST' });
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /auth/refresh returns 400 when refreshToken is missing', async () => {
+    const res = await request(app).post('/auth/refresh').send({});
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /auth/refresh returns 200 when authService resolves', async () => {
+    vi.mocked(authService.refreshAccessToken).mockResolvedValue({ accessToken: 'new-token' });
+    const res = await request(app).post('/auth/refresh').send({ refreshToken: 'valid-refresh' });
+    expect(res.status).toBe(200);
+    expect(res.body.accessToken).toBe('new-token');
+  });
+
+  it('DELETE /auth/logout returns 400 when refreshToken is missing', async () => {
+    const res = await request(app).delete('/auth/logout').send({});
+    expect(res.status).toBe(400);
+  });
+
+  it('DELETE /auth/logout returns 204 on success', async () => {
+    vi.mocked(authService.logout).mockResolvedValue(undefined);
+    const res = await request(app).delete('/auth/logout').send({ refreshToken: 'token' });
+    expect(res.status).toBe(204);
+  });
+});
 
 describe('Product and cart API endpoints', () => {
   beforeEach(() => {

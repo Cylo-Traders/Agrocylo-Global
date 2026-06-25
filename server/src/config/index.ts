@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { cleanEnv, str, port, bool, url } from "envalid";
+import { validateContractWatcherConfig } from "./validateContractWatcher.js";
 
 const env = cleanEnv(process.env, {
   NODE_ENV: str({
@@ -12,7 +13,7 @@ const env = cleanEnv(process.env, {
   SUPABASE_ANON_KEY: str(),
   REDIS_URL: str({ default: "redis://127.0.0.1:6379" }),
   RUN_WORKERS: bool({ default: false }),
-  RUN_CONTRACT_WATCHER: bool({ default: true }),
+  RUN_CONTRACT_WATCHER: bool({ default: false }),
   METRICS_API_KEY: str({ default: "" }),
   SUPABASE_SERVICE_ROLE_KEY: str({ default: "" }),
   SUPABASE_PRODUCT_IMAGES_BUCKET: str({ default: "product-images" }),
@@ -45,6 +46,9 @@ if (env.NODE_ENV === "production") {
     );
   }
 }
+
+// Fail fast: prevent the server from starting in a misconfigured contract-watch state.
+validateContractWatcherConfig(env.RUN_CONTRACT_WATCHER, env.CONTRACT_ID);
 
 export const config = {
   port: env.PORT,

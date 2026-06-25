@@ -73,6 +73,7 @@ export async function verifySignature(
 
   const accessToken = jwt.sign({ walletAddress, role: 'USER' }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
   const refreshToken = crypto.randomBytes(40).toString('hex');
+  const refreshExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   const refreshExpiresAt = new Date(Date.now() + REFRESH_TTL_MS);
 
   await query(

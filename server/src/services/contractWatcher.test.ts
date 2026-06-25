@@ -36,13 +36,91 @@ vi.mock("./events/escrowEventIngestionService.js", () => ({
   EscrowEventIngestionService: { ingestEvent: vi.fn() },
 }));
 
-import { detectRecoveryGap, loadCheckpoint, persistCheckpoint } from "./contractWatcher.js";
+import { detectRecoveryGap, loadCheckpoint, persistCheckpoint, dispatchEvent } from "./contractWatcher.js";
 import { prisma } from "../config/database.js";
 import logger from "../config/logger.js";
+import { NotificationService } from "./notificationService.js";
+import { wsManager } from "./wsManager.js";
+
+const notifyFromEscrowEvent = vi.mocked(NotificationService.notifyFromEscrowEvent);
+const broadcast = vi.mocked(wsManager.broadcast);
 
 describe("contractWatcher", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+  });
+
+  describe("dispatchEvent", () => {
+    it("notifies escrow and broadcasts on 'created'", () => {
+      dispatchEvent("created", ["order-1", "BUYER", "FARMER", "100", "USDC"], 500);
+
+      expect(notifyFromEscrowEvent).toHaveBeenCalledWith({
+        action: "created",
+        buyerAddress: "BUYER",
+        farmerAddress: "FARMER",
+        orderId: "order-1",
+        amount: "100",
+        token: "USDC",
+      });
+      expect(broadcast).toHaveBeenCalledWith("order:created", {
+        orderId: "order-1",
+        buyer: "BUYER",
+        farmer: "FARMER",
+        amount: "100",
+        token: "USDC",
+      });
+    });
+
+    it("only broadcasts on 'delivered' (no notification)", () => {
+      dispatchEvent("delivered", ["order-2", "FARMER", "BUYER"], 501);
+
+      expect(notifyFromEscrowEvent).not.toHaveBeenCalled();
+      expect(broadcast).toHaveBeenCalledWith("order:delivered", {
+        orderId: "order-2",
+        farmer: "FARMER",
+        buyer: "BUYER",
+      });
+    });
+
+    it("notifies escrow and broadcasts on 'confirmed'", () => {
+      dispatchEvent("confirmed", ["order-3", "BUYER", "FARMER"], 502);
+
+      expect(notifyFromEscrowEvent).toHaveBeenCalledWith({
+        action: "confirmed",
+        buyerAddress: "BUYER",
+        farmerAddress: "FARMER",
+        orderId: "order-3",
+      });
+      expect(broadcast).toHaveBeenCalledWith("order:confirmed", {
+        orderId: "order-3",
+        buyer: "BUYER",
+        farmer: "FARMER",
+      });
+    });
+
+    it("notifies escrow and broadcasts on 'refunded'", () => {
+      dispatchEvent("refunded", ["order-4", "BUYER"], 503);
+
+      expect(notifyFromEscrowEvent).toHaveBeenCalledWith({
+        action: "refunded",
+        buyerAddress: "BUYER",
+        orderId: "order-4",
+      });
+      expect(broadcast).toHaveBeenCalledWith("order:refunded", {
+        orderId: "order-4",
+        buyer: "BUYER",
+      });
+    });
+
+    it("logs a warning for an unknown action and does not broadcast", () => {
+      dispatchEvent("unknown_action", ["order-5"], 504);
+
+      expect(notifyFromEscrowEvent).not.toHaveBeenCalled();
+      expect(broadcast).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("Unhandled event action"),
+      );
+    });
   });
 
   describe("detectRecoveryGap", () => {
