@@ -11,24 +11,27 @@ Install
 npm install
 ```
 
-## Environment Variables
+Env
 
-Copy the example file and fill in real values:
+Copy `../.env.example` to `.env.local` and replace the `REPLACE_WITH_*` placeholders before running the client. Next.js only exposes variables prefixed with `NEXT_PUBLIC_` to browser code, so server contract/RPC settings must be mirrored with the public client names below.
+
+| Server variable | Client variable | Required by client | Notes |
+| --- | --- | --- | --- |
+| `RPC_URL` | `NEXT_PUBLIC_SOROBAN_RPC_URL` | Yes | Soroban RPC endpoint. Defaults to Stellar testnet when omitted. |
+| `PRODUCTION_CONTRACT_ID` | `NEXT_PUBLIC_PRODUCTION_CONTRACT_ID` | Yes for contract flows | Production escrow contract ID used by `src/lib/contractService.ts`. |
+| `PORT` | `NEXT_PUBLIC_API_URL` | Yes for API calls | API base URL, usually `http://localhost:5001/api/v1` in local dev. |
+| `PORT` | `NEXT_PUBLIC_WS_URL` | Optional | WebSocket URL, usually `ws://localhost:5001/ws`; the hook derives this when omitted. |
+| n/a | `NEXT_PUBLIC_NETWORK_PASSPHRASE` | Yes for contract flows | Stellar network passphrase. Defaults to testnet. |
+| n/a | `NEXT_PUBLIC_ANALYTICS_ENABLED` | Optional | Set to `false` to disable client analytics. |
+| n/a | `NEXT_PUBLIC_ERROR_REPORTING_ENABLED` | Optional | Set to `false` to disable client error reporting. |
+
+To export the common client values from a server `.env` file:
 
 ```bash
-cp .env.example .env
+set -a && source ../.env.example && set +a
+node ../scripts/export-client-env.mjs > .client-env.sh
+source .client-env.sh
 ```
-
-A unified example covering both server and client vars lives at `agro-production/.env.example`.
-
-| Client var | Server var it mirrors | Required | Notes |
-|---|---|---|---|
-| `NEXT_PUBLIC_API_URL` | `PORT` (derived) | Yes | REST base URL, e.g. `http://localhost:5001` |
-| `NEXT_PUBLIC_WS_URL` | `PORT` (derived) | No | WebSocket URL; auto-derived from `window.location` if omitted |
-| `NEXT_PUBLIC_SOROBAN_RPC_URL` | `RPC_URL` | Yes | Both client and server should point to the same RPC endpoint |
-| `NEXT_PUBLIC_PRODUCTION_CONTRACT_ID` | `PRODUCTION_CONTRACT_ID` / `PRODUCTION_ESCROW_CONTRACT_ID` | Yes | On-chain production-escrow contract address |
-| `NEXT_PUBLIC_NETWORK_PASSPHRASE` | — | Yes | Stellar network passphrase (client-only) |
-| `NEXT_PUBLIC_NATIVE_TOKEN_CONTRACT_ID` | — | No | XLM native token SAC address |
 
 Available scripts
 - `npm run dev` — start Next.js dev server
