@@ -1,5 +1,5 @@
 [package]
-name = "production_escrow"
+name = "production-escrow-v2"
 version = "0.1.0"
 edition = "2021"
 description = "Canonical Soroban production escrow contract for Agrocylo"
