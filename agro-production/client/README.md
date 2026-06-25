@@ -12,9 +12,26 @@ npm install
 ```
 
 Env
-- `NEXT_PUBLIC_API_URL` — API base URL (default: http://localhost:3001/api/v1)
-- `NEXT_PUBLIC_SOROBAN_RPC_URL` — Soroban RPC endpoint
-- `NEXT_PUBLIC_NETWORK_PASSPHRASE` — Network passphrase
+
+Copy `../.env.example` to `.env.local` and replace the `REPLACE_WITH_*` placeholders before running the client. Next.js only exposes variables prefixed with `NEXT_PUBLIC_` to browser code, so server contract/RPC settings must be mirrored with the public client names below.
+
+| Server variable | Client variable | Required by client | Notes |
+| --- | --- | --- | --- |
+| `RPC_URL` | `NEXT_PUBLIC_SOROBAN_RPC_URL` | Yes | Soroban RPC endpoint. Defaults to Stellar testnet when omitted. |
+| `PRODUCTION_CONTRACT_ID` | `NEXT_PUBLIC_PRODUCTION_CONTRACT_ID` | Yes for contract flows | Production escrow contract ID used by `src/lib/contractService.ts`. |
+| `PORT` | `NEXT_PUBLIC_API_URL` | Yes for API calls | API base URL, usually `http://localhost:5001/api/v1` in local dev. |
+| `PORT` | `NEXT_PUBLIC_WS_URL` | Optional | WebSocket URL, usually `ws://localhost:5001/ws`; the hook derives this when omitted. |
+| n/a | `NEXT_PUBLIC_NETWORK_PASSPHRASE` | Yes for contract flows | Stellar network passphrase. Defaults to testnet. |
+| n/a | `NEXT_PUBLIC_ANALYTICS_ENABLED` | Optional | Set to `false` to disable client analytics. |
+| n/a | `NEXT_PUBLIC_ERROR_REPORTING_ENABLED` | Optional | Set to `false` to disable client error reporting. |
+
+To export the common client values from a server `.env` file:
+
+```bash
+set -a && source ../.env.example && set +a
+node ../scripts/export-client-env.mjs > .client-env.sh
+source .client-env.sh
+```
 
 Available scripts
 - `npm run dev` — start Next.js dev server
