@@ -1,20 +1,56 @@
 import 'dotenv/config';
 
+const ENV_HELP_PATH = 'agro-production/.env.example';
+
 const REQUIRED_IN_PRODUCTION = [
-  'DATABASE_URL',
-  'RPC_URL',
-  'PRODUCTION_CONTRACT_ID',
-  'ESCROW_CONTRACT_ID',
+  {
+    key: 'DATABASE_URL',
+    description: 'PostgreSQL connection string used by Prisma and the API server',
+    clientKey: undefined,
+  },
+  {
+    key: 'RPC_URL',
+    description: 'Soroban RPC endpoint for server-side watchers and contract calls',
+    clientKey: 'NEXT_PUBLIC_SOROBAN_RPC_URL',
+  },
+  {
+    key: 'PRODUCTION_CONTRACT_ID',
+    description: 'Production escrow contract ID used by server watchers',
+    clientKey: 'NEXT_PUBLIC_PRODUCTION_CONTRACT_ID',
+  },
+  {
+    key: 'ESCROW_CONTRACT_ID',
+    description: 'Escrow contract ID used by server-side escrow services',
+    clientKey: undefined,
+  },
 ] as const;
+
+type RequiredEnvKey = (typeof REQUIRED_IN_PRODUCTION)[number]['key'];
 
 function getEnv(key: string): string | undefined {
   return process.env[key];
 }
 
-function requireEnv(key: string): string {
+function formatMissingEnvError(keys: readonly RequiredEnvKey[]): string {
+  const details = keys
+    .map((key) => {
+      const meta = REQUIRED_IN_PRODUCTION.find((entry) => entry.key === key);
+      const clientHint = meta?.clientKey ? ` Mirror to ${meta.clientKey} for the Next.js client.` : '';
+      return `  - ${key}: ${meta?.description ?? 'Required runtime setting'}.${clientHint}`;
+    })
+    .join('\n');
+
+  return [
+    '[config] Startup aborted — missing required environment variables:',
+    details,
+    `Copy ${ENV_HELP_PATH}, replace every REPLACE_WITH_* placeholder, and set these values before starting the server.`,
+  ].join('\n');
+}
+
+function requireEnv(key: RequiredEnvKey): string {
   const value = getEnv(key);
   if (!value) {
-    throw new Error(`Missing required environment variable: ${key}`);
+    throw new Error(formatMissingEnvError([key]));
   }
   return value;
 }
@@ -22,12 +58,11 @@ function requireEnv(key: string): string {
 const isProduction = (process.env['NODE_ENV'] ?? 'development') === 'production';
 
 if (isProduction) {
-  const missing = REQUIRED_IN_PRODUCTION.filter((key) => !process.env[key]);
+  const missing = REQUIRED_IN_PRODUCTION
+    .map((entry) => entry.key)
+    .filter((key) => !process.env[key]);
   if (missing.length > 0) {
-    throw new Error(
-      `[config] Startup aborted — missing required environment variables in production:\n  ${missing.join('\n  ')}\n` +
-      `Set these in your deployment environment before starting the server.`,
-    );
+    throw new Error(formatMissingEnvError(missing));
   }
 }
 
