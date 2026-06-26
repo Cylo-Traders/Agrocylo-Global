@@ -33,3 +33,57 @@ export function formatAmount(raw: string): string {
   const xlm = Number(n) / 1e7;
   return xlm.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
+
+export interface CreateCampaignRequest {
+  farmerAddress: string;
+  tokenAddress: string;
+  targetAmount: string;
+  deadline: string;
+}
+
+export interface CampaignCreationPhase {
+  phase: "idle" | "building" | "signing" | "submitting" | "confirming" | "registering" | "reconciling" | "success" | "failed";
+  error?: string;
+  txHash?: string;
+  campaignId?: string;
+}
+
+/**
+ * Create an on-chain campaign and register it off-chain.
+ * Returns the campaign ID once it's been indexed.
+ */
+export async function createCampaign(
+  request: CreateCampaignRequest,
+  onPhaseChange?: (phase: CampaignCreationPhase) => void,
+): Promise<{ success: boolean; campaignId?: string; error?: string; txHash?: string }> {
+  try {
+    const { buildCreateCampaign } = await import("@/lib/contractService");
+    const { signAndSubmitTransaction } = await import("@/lib/signTransaction");
+
+    const targetAmount = BigInt(request.targetAmount);
+    const deadline = Math.floor(new Date(request.deadline).getTime() / 1000);
+
+    onPhaseChange?.({ phase: "building" });
+    const built = await buildCreateCampaign(request.farmerAddress, request.tokenAddress, targetAmount, deadline);
+    if (!built.success || !built.data) {
+      throw new Error(built.error ?? "Could not build the campaign creation transaction");
+    }
+
+    onPhaseChange?.({ phase: "signing" });
+    const submitted = await signAndSubmitTransaction(built.data);
+    if (!submitted.success || !submitted.txHash) {
+      throw new Error(submitted.error ?? "Campaign transaction was not confirmed on-chain");
+    }
+
+    onPhaseChange?.({ phase: "registering", txHash: submitted.txHash });
+    const campaign = await api.post<Campaign>("/campaigns", request);
+
+    onPhaseChange?.({ phase: "reconciling", txHash: submitted.txHash });
+
+    return { success: true, campaignId: campaign.id, txHash: submitted.txHash };
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    onPhaseChange?.({ phase: "failed", error: errorMsg });
+    return { success: false, error: errorMsg };
+  }
+}

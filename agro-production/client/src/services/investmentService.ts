@@ -126,3 +126,42 @@ export function claimableReturn(investment: InvestmentWithCampaign): bigint {
   if (totalRaised === 0n) return 0n;
   return (totalRevenue * contributed) / totalRaised;
 }
+
+export interface ClaimReturnsResult {
+  success: boolean;
+  txHash?: string;
+  claimedAmount?: string;
+  error?: string;
+}
+
+/**
+ * Claim settlement returns for a campaign.
+ * Builds the claim_returns transaction, signs via wallet, and submits.
+ */
+export async function claimReturns(
+  investorAddress: string,
+  campaignId: string,
+  onChainCampaignId: string,
+): Promise<ClaimReturnsResult> {
+  try {
+    const { buildClaimReturns } = await import("@/lib/contractService");
+    const { signAndSubmitTransaction } = await import("@/lib/signTransaction");
+
+    const built = await buildClaimReturns(investorAddress, onChainCampaignId);
+    if (!built.success || !built.data) {
+      return { success: false, error: built.error ?? "Could not build the claim transaction" };
+    }
+
+    const submitted = await signAndSubmitTransaction(built.data);
+    if (!submitted.success || !submitted.txHash) {
+      return { success: false, error: submitted.error ?? "Claim transaction was not confirmed on-chain" };
+    }
+
+    return { success: true, txHash: submitted.txHash };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "Failed to claim returns",
+    };
+  }
+}
