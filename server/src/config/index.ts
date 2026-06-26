@@ -1,51 +1,46 @@
 import "dotenv/config";
-import { cleanEnv, str, port, bool, url } from "envalid";
+import { z } from "zod";
 import { validateContractWatcherConfig } from "./validateContractWatcher.js";
 
-const env = cleanEnv(process.env, {
-  NODE_ENV: str({
-    choices: ["development", "test", "production"],
-    default: "development",
-  }),
-  PORT: port({ default: 5000 }),
-  DATABASE_URL: str(),
-  SUPABASE_URL: url(),
-  SUPABASE_ANON_KEY: str(),
-  REDIS_URL: str({ default: "redis://127.0.0.1:6379" }),
-  RUN_WORKERS: bool({ default: false }),
-  RUN_CONTRACT_WATCHER: bool({ default: false }),
-  METRICS_API_KEY: str({ default: "" }),
-  SUPABASE_SERVICE_ROLE_KEY: str({ default: "" }),
-  SUPABASE_PRODUCT_IMAGES_BUCKET: str({ default: "product-images" }),
-  PRODUCT_IMAGE_PLACEHOLDER_URL: str({
-    default: "https://placehold.co/800x800/png?text=No+Image",
-  }),
-  JWT_SECRET: str({
-    default: undefined,
-    devDefault: "dev-secret-change-in-production",
-    desc: "Secret key for signing JWT tokens. MUST be set in production.",
-  }),
-  CONTRACT_ID: str({ default: "" }),
-  RPC_URL: str({ default: "https://soroban-testnet.stellar.org" }),
-  WS_PATH: str({ default: "/ws" }),
+const booleanFromEnv = z
+  .enum(["true", "false", "1", "0"])
+  .optional()
+  .transform((value) => value === "true" || value === "1");
+
+const envSchema = z.object({
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  PORT: z.coerce.number().int().positive().default(5000),
+  DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
+  SUPABASE_URL: z.url("SUPABASE_URL must be a valid URL"),
+  SUPABASE_ANON_KEY: z.string().min(1, "SUPABASE_ANON_KEY is required"),
+  REDIS_URL: z.url().default("redis://127.0.0.1:6379"),
+  RUN_WORKERS: booleanFromEnv.default(false),
+  RUN_CONTRACT_WATCHER: booleanFromEnv.default(false),
+  METRICS_API_KEY: z.string().default(""),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().default(""),
+  SUPABASE_PRODUCT_IMAGES_BUCKET: z.string().min(1).default("product-images"),
+  PRODUCT_IMAGE_PLACEHOLDER_URL: z.url().default("https://placehold.co/800x800/png?text=No+Image"),
+  JWT_SECRET: z
+    .string()
+    .min(32, "JWT_SECRET must be set and at least 32 characters long")
+    .refine((value) => !["changeme", "dev-secret", "dev-secret-change-in-production"].includes(value), {
+      message: "JWT_SECRET cannot use default values. Please set a strong secret.",
+    }),
+  CONTRACT_ID: z.string().default(""),
+  RPC_URL: z.url().default("https://soroban-testnet.stellar.org"),
+  WS_PATH: z.string().min(1).default("/ws"),
 });
 
-// Enforce strong JWT secret in production
-if (env.NODE_ENV === "production") {
-  if (!process.env["JWT_SECRET"] || process.env["JWT_SECRET"].length < 32) {
-    throw new Error(
-      "JWT_SECRET must be set and at least 32 characters long in production environment",
-    );
-  }
-  if (
-    process.env["JWT_SECRET"] === "changeme" ||
-    process.env["JWT_SECRET"] === "dev-secret"
-  ) {
-    throw new Error(
-      "JWT_SECRET cannot use default values in production. Please set a strong secret.",
-    );
-  }
+const parsedEnv = envSchema.safeParse(process.env);
+
+if (!parsedEnv.success) {
+  const details = parsedEnv.error.issues
+    .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+    .join("; ");
+  throw new Error(`Invalid environment configuration: ${details}`);
 }
+
+const env = parsedEnv.data;
 
 // Fail fast: prevent the server from starting in a misconfigured contract-watch state.
 validateContractWatcherConfig(env.RUN_CONTRACT_WATCHER, env.CONTRACT_ID);

@@ -1,5 +1,5 @@
-import type { PoolClient } from 'pg';
-import { query, withTransaction } from '../config/database.js';
+import { Prisma } from '@prisma/client';
+import { prisma } from '../config/database.js';
 import { ApiError } from '../http/errors.js';
 import { wsManager } from './wsManager.js';
 
@@ -19,34 +19,33 @@ type CartItemRow = {
   is_available: boolean;
 };
 
-type CartIdRow = { id: string };
-type CartStatusRow = { status: string };
-type ExistingItemRow = { id: string; quantity: string };
+type Tx = Prisma.TransactionClient;
 
 function fee(amount: bigint): bigint {
   return (amount * FEE_BPS) / HUNDRED;
 }
 
-async function getOrCreateActiveCart(client: PoolClient, wallet: string): Promise<string> {
-  const existing = await client.query<CartIdRow>(
-    `select id::text from public.carts where buyer_wallet = $1 and status = 'active' limit 1`,
-    [wallet],
-  );
-  if (existing.rows[0]) return String(existing.rows[0].id);
-  const created = await client.query<CartIdRow>(
-    `insert into public.carts (buyer_wallet, status) values ($1, 'active') returning id::text`,
-    [wallet],
-  );
-  return String(created.rows[0]?.id);
+async function getOrCreateActiveCart(tx: Tx, wallet: string): Promise<string> {
+  const existing = await tx.cart.findFirst({
+    where: { buyerWallet: wallet, status: 'active' },
+    select: { id: true },
+  });
+  if (existing) return existing.id;
+
+  const created = await tx.cart.create({
+    data: { buyerWallet: wallet, status: 'active' },
+    select: { id: true },
+  });
+  return created.id;
 }
 
-async function ensureCartActive(client: PoolClient, cartId: string, buyerWallet: string): Promise<void> {
-  const status = await client.query<CartStatusRow>(
-    `select status from public.carts where id = $1::uuid and buyer_wallet = $2`,
-    [cartId, buyerWallet],
-  );
-  if (!status.rows[0]) throw new ApiError(404, 'Not Found', 'Active cart not found');
-  if (status.rows[0].status !== 'active') throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
+async function ensureCartActive(tx: Tx, cartId: string, buyerWallet: string): Promise<void> {
+  const cart = await tx.cart.findFirst({
+    where: { id: cartId, buyerWallet },
+    select: { status: true },
+  });
+  if (!cart) throw new ApiError(404, 'Not Found', 'Active cart not found');
+  if (cart.status !== 'active') throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
 }
 
 /**
@@ -100,36 +99,38 @@ function groupRows(rows: CartItemRow[]) {
   return Array.from(groups.values()).map((g) => ({ ...g, subtotal: g.subtotal.toString() }));
 }
 
-async function fetchCartRows(cartId: string) {
-  const items = await query<CartItemRow>(
-    `select
-      ci.id::text as item_id,
-      ci.product_id::text as product_id,
-      p.name as product_name,
-      p.unit,
-      ci.quantity::text,
-      ci.unit_price::text,
-      ci.currency,
-      ci.farmer_wallet,
-      pr.display_name as farmer_name,
-      p.is_available
-    from public.cart_items ci
-    join public.products p on p.id = ci.product_id
-    join public.profiles pr on pr.wallet_address = ci.farmer_wallet
-    where ci.cart_id = $1::uuid
-    order by ci.created_at asc`,
-    [cartId],
-  );
-  return items.rows;
+async function fetchCartRows(cartId: string, tx: Tx | typeof prisma = prisma): Promise<CartItemRow[]> {
+  const items = await tx.cartItem.findMany({
+    where: { cartId },
+    orderBy: { createdAt: 'asc' },
+    include: {
+      product: {
+        include: { farmer: true },
+      },
+    },
+  });
+
+  return items.map((item) => ({
+    item_id: item.id,
+    product_id: item.productId,
+    product_name: item.product.name,
+    unit: item.product.unit,
+    quantity: item.quantity.toString(),
+    unit_price: item.unitPrice.toString(),
+    currency: item.currency,
+    farmer_wallet: item.farmerWallet,
+    farmer_name: item.product.farmer.name ?? '',
+    is_available: item.product.isAvailable,
+  }));
 }
 
 export async function getActiveCart(buyerWallet: string) {
-  const cart = await query<CartIdRow>(
-    `select id::text from public.carts where buyer_wallet = $1 and status = 'active' limit 1`,
-    [buyerWallet],
-  );
-  if (!cart.rows[0]) return { cart_id: null, groups: [] };
-  const cartId = String(cart.rows[0].id);
+  const cart = await prisma.cart.findFirst({
+    where: { buyerWallet, status: 'active' },
+    select: { id: true },
+  });
+  if (!cart) return { cart_id: null, groups: [] };
+  const cartId = cart.id;
   const rows = await fetchCartRows(cartId);
   return { cart_id: cartId, groups: groupRows(rows) };
 }
@@ -142,110 +143,115 @@ export async function addItem(buyerWallet: string, payload: { product_id?: strin
   if (!payload.product_id || !payload.quantity) {
     throw new ApiError(400, 'Bad Request', 'product_id and quantity are required');
   }
+  const productId = payload.product_id;
+  const quantity = payload.quantity;
 
-  return withTransaction(async (client) => {
-    const cartId = await getOrCreateActiveCart(client, buyerWallet);
-    await ensureCartActive(client, cartId, buyerWallet);
-    const product = await client.query(
-      `select id::text, farmer_wallet, price_per_unit::text, currency, is_available
-       from public.products where id = $1::uuid`,
-      [payload.product_id],
-    );
-    if (!product.rows[0]) throw new ApiError(404, 'Not Found', 'Product not found');
-    if (!product.rows[0].is_available) throw new ApiError(409, 'Conflict', 'Product is not available');
+  return prisma.$transaction(async (tx) => {
+    const cartId = await getOrCreateActiveCart(tx, buyerWallet);
+    await ensureCartActive(tx, cartId, buyerWallet);
+    const product = await tx.product.findUnique({
+      where: { id: productId },
+      select: {
+        id: true,
+        farmerWallet: true,
+        pricePerUnit: true,
+        currency: true,
+        isAvailable: true,
+      },
+    });
+    if (!product) throw new ApiError(404, 'Not Found', 'Product not found');
+    if (!product.isAvailable) throw new ApiError(409, 'Conflict', 'Product is not available');
 
-    const existing = await client.query<ExistingItemRow>(
-      `select id::text, quantity::text from public.cart_items where cart_id = $1::uuid and product_id = $2::uuid limit 1`,
-      [cartId, payload.product_id],
-    );
+    const existing = await tx.cartItem.findFirst({
+      where: { cartId, productId },
+      select: { id: true },
+    });
 
-    if (existing.rows[0]) {
-      await client.query(
-        `update public.cart_items set quantity = quantity + $1::numeric where id = $2::uuid`,
-        [payload.quantity, existing.rows[0].id],
-      );
+    if (existing) {
+      await tx.cartItem.update({
+        where: { id: existing.id },
+        data: { quantity: { increment: new Prisma.Decimal(quantity) } },
+      });
     } else {
-      await client.query(
-        `insert into public.cart_items (cart_id, product_id, farmer_wallet, quantity, unit_price, currency)
-         values ($1::uuid,$2::uuid,$3,$4::numeric,$5::numeric,$6)`,
-        [
+      await tx.cartItem.create({
+        data: {
           cartId,
-          payload.product_id,
-          product.rows[0].farmer_wallet,
-          payload.quantity,
-          product.rows[0].price_per_unit,
-          product.rows[0].currency,
-        ],
-      );
+          productId: product.id,
+          farmerWallet: product.farmerWallet,
+          quantity: new Prisma.Decimal(quantity),
+          unitPrice: product.pricePerUnit,
+          currency: product.currency,
+        },
+      });
     }
-    const result = await getActiveCart(buyerWallet);
+    const rows = await fetchCartRows(cartId, tx);
+    const result = { cart_id: cartId, groups: groupRows(rows) };
     emitCartEvent(buyerWallet, result);
     return result;
   });
 }
 
 export async function updateItemQuantity(buyerWallet: string, itemId: string, quantity: string) {
-  return withTransaction(async (client) => {
-    const owner = await client.query(
-      `select ci.cart_id::text, c.status
-       from public.cart_items ci
-       join public.carts c on c.id = ci.cart_id
-       where ci.id = $1::uuid and c.buyer_wallet = $2`,
-      [itemId, buyerWallet],
-    );
-    if (!owner.rows[0]) throw new ApiError(404, 'Not Found', 'Cart item not found');
-    if (owner.rows[0].status !== 'active') throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
-    await client.query(`update public.cart_items set quantity = $1::numeric where id = $2::uuid`, [quantity, itemId]);
-    const result = await getActiveCart(buyerWallet);
+  return prisma.$transaction(async (tx) => {
+    const owner = await tx.cartItem.findFirst({
+      where: { id: itemId, cart: { buyerWallet } },
+      select: { cartId: true, cart: { select: { status: true } } },
+    });
+    if (!owner) throw new ApiError(404, 'Not Found', 'Cart item not found');
+    if (owner.cart.status !== 'active') throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
+    await tx.cartItem.update({
+      where: { id: itemId },
+      data: { quantity: new Prisma.Decimal(quantity) },
+    });
+    const rows = await fetchCartRows(owner.cartId, tx);
+    const result = { cart_id: owner.cartId, groups: groupRows(rows) };
     emitCartEvent(buyerWallet, result);
     return result;
   });
 }
 
 export async function removeItem(buyerWallet: string, itemId: string) {
-  return withTransaction(async (client) => {
-    const owner = await client.query(
-      `select c.status
-       from public.cart_items ci
-       join public.carts c on c.id = ci.cart_id
-       where ci.id = $1::uuid and c.buyer_wallet = $2`,
-      [itemId, buyerWallet],
-    );
-    if (!owner.rows[0]) throw new ApiError(404, 'Not Found', 'Cart item not found');
-    if (owner.rows[0].status !== 'active') throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
-    await client.query(`delete from public.cart_items where id = $1::uuid`, [itemId]);
-    const result = await getActiveCart(buyerWallet);
+  return prisma.$transaction(async (tx) => {
+    const owner = await tx.cartItem.findFirst({
+      where: { id: itemId, cart: { buyerWallet } },
+      select: { cartId: true, cart: { select: { status: true } } },
+    });
+    if (!owner) throw new ApiError(404, 'Not Found', 'Cart item not found');
+    if (owner.cart.status !== 'active') throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
+    await tx.cartItem.delete({ where: { id: itemId } });
+    const rows = await fetchCartRows(owner.cartId, tx);
+    const result = { cart_id: owner.cartId, groups: groupRows(rows) };
     emitCartEvent(buyerWallet, result);
     return result;
   });
 }
 
 export async function clearCart(buyerWallet: string) {
-  return withTransaction(async (client) => {
-    const cart = await client.query<CartIdRow & CartStatusRow>(
-      `select id::text, status from public.carts where buyer_wallet = $1 and status = 'active' limit 1`,
-      [buyerWallet],
-    );
-    if (!cart.rows[0]) return { cart_id: null, groups: [] };
-    if (cart.rows[0].status !== 'active') throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
-    await client.query(`delete from public.cart_items where cart_id = $1::uuid`, [cart.rows[0].id]);
-    const result = { cart_id: String(cart.rows[0].id), groups: [] };
+  return prisma.$transaction(async (tx) => {
+    const cart = await tx.cart.findFirst({
+      where: { buyerWallet, status: 'active' },
+      select: { id: true, status: true },
+    });
+    if (!cart) return { cart_id: null, groups: [] };
+    if (cart.status !== 'active') throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
+    await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
+    const result = { cart_id: cart.id, groups: [] };
     emitCartEvent(buyerWallet, result);
     return result;
   });
 }
 
 export async function checkout(buyerWallet: string) {
-  return withTransaction(async (client) => {
-    const cart = await client.query<CartIdRow & CartStatusRow>(
-      `select id::text, status from public.carts where buyer_wallet = $1 and status = 'active' limit 1`,
-      [buyerWallet],
-    );
-    if (!cart.rows[0]) throw new ApiError(404, 'Not Found', 'Active cart not found');
-    const cartId = String(cart.rows[0].id);
-    if (cart.rows[0].status !== 'active') throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
+  return prisma.$transaction(async (tx) => {
+    const cart = await tx.cart.findFirst({
+      where: { buyerWallet, status: 'active' },
+      select: { id: true, status: true },
+    });
+    if (!cart) throw new ApiError(404, 'Not Found', 'Active cart not found');
+    const cartId = cart.id;
+    if (cart.status !== 'active') throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
 
-    const rows = await fetchCartRows(cartId);
+    const rows = await fetchCartRows(cartId, tx);
     const unavailable = rows.filter((r) => !r.is_available);
     if (unavailable.length > 0) {
       throw new ApiError(409, 'Conflict', `Unavailable items in cart: ${unavailable.map((x) => x.product_name).join(', ')}`);
@@ -271,7 +277,7 @@ export async function checkout(buyerWallet: string) {
     const totalFee = orders.reduce((acc, o) => acc + BigInt(o.fee_amount), 0n);
     const totalNet = orders.reduce((acc, o) => acc + BigInt(o.net_amount), 0n);
 
-    await client.query(`update public.carts set status = 'checked_out' where id = $1::uuid`, [cartId]);
+    await tx.cart.update({ where: { id: cartId }, data: { status: 'checked_out' } });
     return { orders, total_gross: totalGross.toString(), total_fee: totalFee.toString(), total_net: totalNet.toString() };
   });
 }
