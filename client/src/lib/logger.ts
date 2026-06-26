@@ -1,5 +1,7 @@
 "use client";
 
+import { API_BASE_URL } from "./apiConfig";
+
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 export interface LogEntry {
@@ -128,8 +130,7 @@ class Logger {
 
   private async sendToBackend(entries: LogEntry[]) {
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000";
-      await fetch(`${apiUrl}/api/logs`, {
+      await fetch(`${API_BASE_URL}/api/logs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ logs: entries }),

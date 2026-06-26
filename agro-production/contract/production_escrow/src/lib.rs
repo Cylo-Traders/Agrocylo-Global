@@ -8,7 +8,19 @@
 //! Lifecycle:
 //!   Funding -> Funded -> InProduction -> Harvested -> Settled
 //!   Funding -> Failed (deadline passed without target)
+//!   Funded | InProduction | Harvested -> Failed (mark_campaign_failed)
 //!   any -> Disputed -> resolved (Settled / Failed)
+//!
+//! Failure recovery:
+//!   - Failure before funding target (Funding): full refund of contributions.
+//!   - Failure after funding but before production start (Funded): full refund.
+//!   - Failure during production (InProduction): proportional refund from remaining
+//!     escrow after tranche(s) released.
+//!   - Failure after harvest (Harvested): proportional refund from remaining escrow
+//!     plus any accrued revenue.
+//!   - Shortfall: when tranche releases exceed available escrow for refunds,
+//!     investors receive their proportional share of what remains. The farmer is
+//!     not obligated to return released tranches — the loss is proportional.
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, Map,
@@ -43,6 +55,9 @@ pub enum EscrowError {
     CampaignOverfunded = 29,
     CampaignDeadlinePassed = 30,
     CampaignDeadlineNotPassed = 31,
+    CampaignAlreadyTerminal = 32,
+    CampaignNotFailedOrSettled = 33,
+    CampaignNotFundedOrBeyond = 34,
 
     OrderNotFound = 40,
     OrderNotPending = 41,
@@ -58,6 +73,8 @@ pub enum EscrowError {
     TrancheAlreadyReleased = 70,
     InvalidTranche = 71,
     InvalidResolution = 72,
+
+    NoShortfall = 80,
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +160,11 @@ pub enum DataKey {
 const TRANCHE_START_BPS: i128 = 3_000; // 30% on production start
 const TRANCHE_HARVEST_BPS: i128 = 4_000; // +40% on harvest marked (70% total)
 const BPS_DENOM: i128 = 10_000;
+
+/// Maximum cumulative tranche cap (proportion of total_raised).
+/// No more than 70% of raised funds may be released as tranches,
+/// guaranteeing at least 30% remains for investor refunds.
+const MAX_TRANCHE_BPS: i128 = 7_000;
 
 const TTL_THRESHOLD: u32 = 1_000;
 const TTL_EXTEND: u32 = 100_000;
@@ -536,8 +558,12 @@ impl ProductionEscrowContract {
         Ok(payout)
     }
 
-    /// Anyone can trigger failure finalization once the deadline passes
-    /// without the target being reached.
+    // -----------------------------------------------------------------------
+    // Failure model
+    // -----------------------------------------------------------------------
+
+    /// Anyone can trigger campaign failure once the deadline passes
+    /// without the target being reached (Funding state only).
     pub fn finalize_failed(env: Env, campaign_id: u64) -> Result<(), EscrowError> {
         let mut campaign = load_campaign(&env, campaign_id)?;
         if campaign.status != CampaignStatus::Funding {
@@ -554,7 +580,48 @@ impl ProductionEscrowContract {
         Ok(())
     }
 
-    /// Investor reclaims their contribution on a failed campaign.
+    /// Farmer or admin can mark a campaign failed from any non-terminal
+    /// state (Funded, InProduction, Harvested). This triggers proportional
+    /// refund logic — investors get their share of the remaining escrow pool.
+    ///
+    /// Recovery outcomes:
+    ///   - Funded: full refund (no tranches released yet).
+    ///   - InProduction: proportional refund (remaining after start tranche).
+    ///   - Harvested: proportional refund (remaining after all tranches + revenue).
+    pub fn mark_campaign_failed(
+        env: Env,
+        caller: Address,
+        campaign_id: u64,
+    ) -> Result<(), EscrowError> {
+        caller.require_auth();
+        let mut campaign = load_campaign(&env, campaign_id)?;
+        let admin = admin(&env)?;
+
+        // Only farmer or admin can trigger failure after funding
+        if caller != campaign.farmer && caller != admin {
+            return Err(EscrowError::NotAdmin);
+        }
+
+        match campaign.status {
+            CampaignStatus::Funded
+            | CampaignStatus::InProduction
+            | CampaignStatus::Harvested => {
+                campaign.status = CampaignStatus::Failed;
+                save_campaign(&env, &campaign);
+                env.events().publish(
+                    (t_campaign(), symbol_short!("failed")),
+                    (campaign_id,),
+                );
+                Ok(())
+            }
+            _ => Err(EscrowError::CampaignNotFundedOrBeyond),
+        }
+    }
+
+    /// Investor reclaims their proportional share on a failed campaign.
+    ///
+    /// Before production (Funding/Funded -> Failed): returns full contribution.
+    /// During/after production: returns proportional share of remaining escrow.
     pub fn refund(env: Env, investor: Address, campaign_id: u64) -> Result<i128, EscrowError> {
         investor.require_auth();
         let campaign = load_campaign(&env, campaign_id)?;
@@ -576,13 +643,78 @@ impl ProductionEscrowContract {
         env.storage().persistent().set(&claim_key, &true);
 
         let token_client = token::Client::new(&env, &campaign.token);
-        token_client.transfer(&env.current_contract_address(), &investor, &contribution);
+
+        // Determine refund amount based on campaign state at failure time.
+        // If no tranches were released, full refund is available.
+        if campaign.tranche_released <= 0 {
+            // Full refund: all funds are still in escrow.
+            token_client.transfer(
+                &env.current_contract_address(),
+                &investor,
+                &contribution,
+            );
+            env.events().publish(
+                (t_campaign(), symbol_short!("refunded")),
+                (campaign_id, investor, contribution),
+            );
+            return Ok(contribution);
+        }
+
+        // Proportional refund: remaining pool = raised + revenue - released.
+        let pool = campaign.total_raised + campaign.total_revenue - campaign.tranche_released;
+        if pool <= 0 {
+            return Err(EscrowError::NothingToClaim);
+        }
+
+        let payout = (pool * contribution) / campaign.total_raised;
+        if payout <= 0 {
+            return Err(EscrowError::NothingToClaim);
+        }
+
+        token_client.transfer(
+            &env.current_contract_address(),
+            &investor,
+            &payout,
+        );
 
         env.events().publish(
             (t_campaign(), symbol_short!("refunded")),
-            (campaign_id, investor, contribution),
+            (campaign_id, investor, payout),
         );
-        Ok(contribution)
+        Ok(payout)
+    }
+
+    /// View the refundable amount for a contributor on a failed campaign.
+    /// Returns 0 if not applicable (not failed, not an investor, or already claimed).
+    pub fn refundable_amount(
+        env: Env,
+        investor: Address,
+        campaign_id: u64,
+    ) -> i128 {
+        let campaign = match load_campaign(&env, campaign_id) {
+            Ok(c) => c,
+            Err(_) => return 0,
+        };
+        if campaign.status != CampaignStatus::Failed {
+            return 0;
+        }
+        let contribs = load_contribs(&env, campaign_id);
+        let contribution = contribs.get(investor.clone()).unwrap_or(0);
+        if contribution <= 0 {
+            return 0;
+        }
+        let claim_key = DataKey::Claimed(campaign_id, investor);
+        if env.storage().persistent().has(&claim_key) {
+            return 0;
+        }
+        if campaign.tranche_released <= 0 {
+            return contribution;
+        }
+        let pool = campaign.total_raised + campaign.total_revenue - campaign.tranche_released;
+        if pool <= 0 {
+            return 0;
+        }
+        (pool * contribution) / campaign.total_raised
     }
 
     // -----------------------------------------------------------------------
@@ -697,6 +829,9 @@ impl ProductionEscrowContract {
         let contribs = load_contribs(&env, campaign_id);
         let token_client = token::Client::new(&env, &campaign.token);
 
+        let pool = campaign.total_raised + campaign.total_revenue - campaign.tranche_released;
+        let full_refund = campaign.tranche_released <= 0;
+
         let mut count: u32 = 0;
         let mut total: i128 = 0;
 
@@ -710,13 +845,26 @@ impl ProductionEscrowContract {
                 continue;
             }
             env.storage().persistent().set(&claim_key, &true);
+
+            let payout = if full_refund {
+                contribution
+            } else {
+                if pool <= 0 {
+                    continue;
+                }
+                (pool * contribution) / campaign.total_raised
+            };
+            if payout <= 0 {
+                continue;
+            }
+
             token_client.transfer(
                 &env.current_contract_address(),
                 &investor,
-                &contribution,
+                &payout,
             );
             count += 1;
-            total += contribution;
+            total += payout;
         }
 
         // Emit a single summary event for the whole batch.
@@ -857,6 +1005,13 @@ fn release_tranche_internal(
     }
     let available = campaign.total_raised - campaign.tranche_released;
     if amount > available {
+        return Err(EscrowError::InvalidTranche);
+    }
+    // Enforce maximum cumulative tranche cap to always preserve at least
+    // (100% - MAX_TRANCHE_BPS) of raised funds for investor refunds.
+    let new_total = campaign.tranche_released + amount;
+    let max_allowed = (campaign.total_raised * MAX_TRANCHE_BPS) / BPS_DENOM;
+    if new_total > max_allowed {
         return Err(EscrowError::InvalidTranche);
     }
     let token_client = token::Client::new(env, &campaign.token);

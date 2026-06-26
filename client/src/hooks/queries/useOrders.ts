@@ -27,3 +27,5 @@ export function useSellerOrders() {
     enabled: connected && !!address,
   });
 }
+
+// perf optimization

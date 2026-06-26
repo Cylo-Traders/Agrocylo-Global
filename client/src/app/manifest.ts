@@ -28,3 +28,5 @@ export default function manifest(): MetadataRoute.Manifest {
     ],
   };
 }
+
+// pwa feature

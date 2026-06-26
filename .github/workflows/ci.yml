@@ -52,6 +52,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Generate Next.js types
+        run: node -e "require('fs').writeFileSync('next-env.d.ts','/// <reference types=\"next\" />\n/// <reference types=\"next/image-types/global\" />\n\n// NOTE: This file should not be edited\n// see https://nextjs.org/docs/basic-features/typescript for more information.\n')"
+
       - name: Type check
         run: npx tsc --noEmit
 

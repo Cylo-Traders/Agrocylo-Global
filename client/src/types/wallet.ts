@@ -10,6 +10,7 @@ export interface WalletState {
   error: string | null;
   network: string | null; // Current Stellar network name
   activeWalletId: string | null; // ID of the currently active wallet adapter
+  restoring: boolean; // true when restoring from localStorage
 }
 
 export interface WalletContextType extends WalletState {

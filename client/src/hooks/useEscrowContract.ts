@@ -17,6 +17,20 @@ interface ActionState {
   error: string | null;
 }
 
+export interface TransactionApi {
+  /** Unified loading state — true when any transaction action is in flight. */
+  isLoading: boolean;
+  /** Unified error — the most recent error from any action. */
+  error: string | null;
+  /** The action type that caused the current state, or null when idle. */
+  activeAction: "confirm" | "refund" | "dispute" | null;
+  /** Clear the unified error. */
+  clearError: () => void;
+  confirm: (orderId: string) => Promise<{ success: boolean; txHash?: string }>;
+  refund: (orderId: string) => Promise<{ success: boolean; txHash?: string }>;
+  dispute: (orderId: string, reason: string, evidence: string) => Promise<{ success: boolean }>;
+}
+
 export function useEscrowContract() {
   const { address, signAndSubmit } = useWallet();
   const [createState, setCreateState] = useState<ActionState>({ isLoading: false, error: null });
@@ -26,6 +40,7 @@ export function useEscrowContract() {
   const [resolveState, setResolveState] = useState<ActionState>({ isLoading: false, error: null });
   const [splitState, setSplitState] = useState<ActionState>({ isLoading: false, error: null });
   const [queryState, setQueryState] = useState<ActionState>({ isLoading: false, error: null });
+  const [activeAction, setActiveAction] = useState<TransactionApi["activeAction"]>(null);
 
   const createOrder = useCallback(
     async (farmerAddress: string, tokenAddress: string, amount: bigint, deliveryDeadline?: string) => {
@@ -54,6 +69,7 @@ export function useEscrowContract() {
   const confirmReceipt = useCallback(
     async (orderId: string) => {
       if (!address) throw new Error("Wallet not connected");
+      setActiveAction("confirm");
       setConfirmState({ isLoading: true, error: null });
       try {
         if (isTestMode()) {
@@ -81,6 +97,8 @@ export function useEscrowContract() {
         const msg = err instanceof Error ? err.message : String(err);
         setConfirmState({ isLoading: false, error: msg });
         throw err;
+      } finally {
+        setActiveAction(null);
       }
     },
     [address, signAndSubmit]
@@ -89,6 +107,7 @@ export function useEscrowContract() {
   const requestRefund = useCallback(
     async (orderId: string) => {
       if (!address) throw new Error("Wallet not connected");
+      setActiveAction("refund");
       setRefundState({ isLoading: true, error: null });
       try {
         const result = await buildRefundOrder(address, orderId);
@@ -105,6 +124,8 @@ export function useEscrowContract() {
         const msg = err instanceof Error ? err.message : String(err);
         setRefundState({ isLoading: false, error: msg });
         throw err;
+      } finally {
+        setActiveAction(null);
       }
     },
     [address, signAndSubmit]
@@ -113,6 +134,7 @@ export function useEscrowContract() {
   const openDispute = useCallback(
     async (orderId: string, reason: string, evidence: string) => {
       if (!address) throw new Error("Wallet not connected");
+      setActiveAction("dispute");
       setDisputeState({ isLoading: true, error: null });
       try {
         const result = await buildOpenDispute(address, orderId, reason, evidence);
@@ -129,6 +151,8 @@ export function useEscrowContract() {
         const msg = err instanceof Error ? err.message : String(err);
         setDisputeState({ isLoading: false, error: msg });
         throw err;
+      } finally {
+        setActiveAction(null);
       }
     },
     [address, signAndSubmit]
@@ -203,7 +227,27 @@ export function useEscrowContract() {
     []
   );
 
+  const clearError = useCallback(() => {
+    setConfirmState((s) => ({ ...s, error: null }));
+    setRefundState((s) => ({ ...s, error: null }));
+    setDisputeState((s) => ({ ...s, error: null }));
+  }, []);
+
+  const isLoading = activeAction !== null;
+  const unifiedError = confirmState.error ?? refundState.error ?? disputeState.error;
+
+  const tx: TransactionApi = {
+    isLoading,
+    error: unifiedError,
+    activeAction,
+    clearError,
+    confirm: confirmReceipt,
+    refund: requestRefund,
+    dispute: openDispute,
+  };
+
   return {
+    tx,
     createOrder,
     confirmReceipt,
     requestRefund,

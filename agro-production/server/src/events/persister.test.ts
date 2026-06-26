@@ -272,7 +272,10 @@ describe("EventPersister", () => {
           await fn({
             user: { upsert: vi.fn().mockResolvedValue({}) },
             campaign: { findUnique: vi.fn().mockResolvedValue(null) },
-            transaction: { create: vi.fn().mockResolvedValue({}) },
+            transaction: {
+              findUnique: vi.fn().mockResolvedValue(null),
+              create: vi.fn().mockResolvedValue({}),
+            },
           });
         },
       );
@@ -317,23 +320,37 @@ describe("EventPersister", () => {
   });
 
   describe("generic campaign lifecycle events", () => {
-    const lifecycleActions: GenericCampaignEvent["action"][] = [
+    const statusActions: GenericCampaignEvent["action"][] = [
       "campaign.produce",
       "campaign.harvest",
       "campaign.failed",
       "campaign.disputed",
-      "campaign.claimed",
-      "campaign.refunded",
-      "campaign.tranche",
     ];
 
-    for (const action of lifecycleActions) {
-      it(`persists ${action}`, async () => {
+    for (const action of statusActions) {
+      it(`persists ${action} via $transaction`, async () => {
         const { prisma } = await import("../db/client.js");
 
         await EventPersister.persist(makeGenericCampaign(action));
 
         expect(prisma.$transaction).toHaveBeenCalledOnce();
+      });
+    }
+
+    const rawActions: GenericCampaignEvent["action"][] = [
+      "campaign.claimed",
+      "campaign.refunded",
+      "campaign.tranche",
+    ];
+
+    for (const action of rawActions) {
+      it(`persists ${action} via recordTransaction`, async () => {
+        const { prisma } = await import("../db/client.js");
+
+        await EventPersister.persist(makeGenericCampaign(action));
+
+        expect(prisma.transaction.create).toHaveBeenCalledOnce();
+        expect(prisma.$transaction).not.toHaveBeenCalled();
       });
     }
   });

@@ -22,10 +22,9 @@ import { useAnalytics } from "@/hooks/useAnalytics";
 import { createOrderFormSchema } from "@/lib/validation";
 import { FormError } from "@/components/FormError";
 
-const PLATFORM_FEE_PCT = 3;
+import { requireNativeTokenContractId } from "@/services/stellar/networkConfig";
 
-const NATIVE_TOKEN_CONTRACT_ID =
-  process.env.NEXT_PUBLIC_NATIVE_TOKEN_CONTRACT_ID ?? "";
+const PLATFORM_FEE_PCT = 3;
 
 type FormErrors = Partial<Record<"farmer" | "amount" | "deliveryDeadline", string>>;
 
@@ -86,7 +85,10 @@ export default function CreateOrderForm() {
 
   async function handleSubmit() {
     if (!validate()) return;
-    if (!NATIVE_TOKEN_CONTRACT_ID) {
+    let nativeTokenContractId: string;
+    try {
+      nativeTokenContractId = requireNativeTokenContractId();
+    } catch {
       setTxStep("error");
       return;
     }
@@ -107,7 +109,7 @@ export default function CreateOrderForm() {
       const stroops = BigInt(Math.round(numAmount * 1e7));
       const result = await createOrder(
         farmer.trim(),
-        NATIVE_TOKEN_CONTRACT_ID,
+        nativeTokenContractId,
         stroops,
         deliveryDeadline,
       );
@@ -189,7 +191,14 @@ export default function CreateOrderForm() {
     );
   }
 
-  if (!NATIVE_TOKEN_CONTRACT_ID) {
+  let nativeTokenContractId: string | null = null;
+  try {
+    nativeTokenContractId = requireNativeTokenContractId();
+  } catch {
+    // not configured — handled below
+  }
+
+  if (!nativeTokenContractId) {
     return (
       <Card className="mx-auto max-w-lg">
         <CardContent className="space-y-2 py-6 text-sm">

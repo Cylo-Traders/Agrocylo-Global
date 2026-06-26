@@ -2562,3 +2562,341 @@ fn test_batch_refund_orders_count_and_total_are_correct() {
     assert_eq!(count, 3);
     assert_eq!(total, 600); // 100 + 200 + 300
 }
+
+// ===========================================================================
+// Issue #462 — Formal Failure & Dispute Model
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// 25. mark_campaign_failed Tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_mark_campaign_failed_from_funded_state_full_refund() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &6_000);
+    t.client.invest(&t.investor2, &id, &4_000); // → Funded
+
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Funded);
+
+    // Farmer marks campaign as failed
+    t.client.mark_campaign_failed(&t.farmer, &id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+
+    // Full refund: no tranches released, so all contributions are returned
+    let r1 = t.client.refund(&t.investor1, &id);
+    let r2 = t.client.refund(&t.investor2, &id);
+    assert_eq!(r1, 6_000);
+    assert_eq!(r2, 4_000);
+}
+
+#[test]
+fn test_mark_campaign_failed_from_in_production_proportional_refund() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &6_000);
+    t.client.invest(&t.investor2, &id, &4_000); // → Funded
+    t.client.start_production(&t.farmer, &id); // 30% tranche released (3_000)
+    assert_eq!(t.client.get_campaign(&id).tranche_released, 3_000);
+
+    // Farmer marks campaign as failed during production
+    t.client.mark_campaign_failed(&t.farmer, &id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+
+    // Pool = 10_000 - 3_000 = 7_000
+    // Investor1: (7_000 * 6_000) / 10_000 = 4_200
+    // Investor2: (7_000 * 4_000) / 10_000 = 2_800
+    let r1 = t.client.refund(&t.investor1, &id);
+    let r2 = t.client.refund(&t.investor2, &id);
+    assert_eq!(r1, 4_200);
+    assert_eq!(r2, 2_800);
+}
+
+#[test]
+fn test_mark_campaign_failed_from_harvested_proportional_refund() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000); // → Funded
+    t.client.start_production(&t.farmer, &id); // 30% → 3_000
+    t.client.mark_harvest(&t.farmer, &id); // +40% → 7_000 total
+
+    // Add some revenue via an order
+    let order_id = t.client.create_order(&t.buyer, &id, &2_000);
+    t.client.confirm_order(&t.buyer, &order_id);
+    assert_eq!(t.client.get_campaign(&id).total_revenue, 2_000);
+
+    // Admin marks campaign as failed after harvest
+    t.client.mark_campaign_failed(&t.admin, &id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+
+    // Pool = 10_000 (raised) + 2_000 (revenue) - 7_000 (tranches) = 5_000
+    let before = balance(&t, &t.investor1);
+    let r = t.client.refund(&t.investor1, &id);
+    assert_eq!(r, 5_000);
+    assert_eq!(balance(&t, &t.investor1), before + 5_000);
+}
+
+#[test]
+fn test_mark_campaign_failed_from_funding_state_rejected() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    // Still in Funding state
+    let err = t
+        .client
+        .try_mark_campaign_failed(&t.farmer, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignNotFundedOrBeyond);
+}
+
+#[test]
+fn test_mark_campaign_failed_non_farmer_non_admin_rejected() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000); // → Funded
+    // Investor (not farmer or admin) cannot mark as failed
+    let err = t
+        .client
+        .try_mark_campaign_failed(&t.investor1, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::NotAdmin);
+}
+
+#[test]
+fn test_mark_campaign_failed_admin_can_fail_campaign() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000); // → Funded
+    t.client.start_production(&t.farmer, &id);
+    // Admin can also mark as failed
+    t.client.mark_campaign_failed(&t.admin, &id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+}
+
+// ---------------------------------------------------------------------------
+// 26. refundable_amount View Tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_refundable_amount_full_refund_before_production() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &6_000);
+    t.client.invest(&t.investor2, &id, &4_000); // → Funded
+    t.client.mark_campaign_failed(&t.farmer, &id);
+
+    assert_eq!(t.client.refundable_amount(&t.investor1, &id), 6_000);
+    assert_eq!(t.client.refundable_amount(&t.investor2, &id), 4_000);
+}
+
+#[test]
+fn test_refundable_amount_proportional_after_production() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id); // 3_000 released
+    t.client.mark_campaign_failed(&t.farmer, &id);
+
+    // Pool = 10_000 - 3_000 = 7_000
+    // Investor1 has 100% share → 7_000
+    assert_eq!(t.client.refundable_amount(&t.investor1, &id), 7_000);
+}
+
+#[test]
+fn test_refundable_amount_after_refund_returns_zero() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.mark_campaign_failed(&t.farmer, &id);
+
+    assert_eq!(t.client.refundable_amount(&t.investor1, &id), 10_000);
+    t.client.refund(&t.investor1, &id);
+    assert_eq!(t.client.refundable_amount(&t.investor1, &id), 0);
+}
+
+#[test]
+fn test_refundable_amount_non_failed_returns_zero() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    // Campaign is Funded, not Failed
+    assert_eq!(t.client.refundable_amount(&t.investor1, &id), 0);
+}
+
+#[test]
+fn test_refundable_amount_non_investor_returns_zero() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.mark_campaign_failed(&t.farmer, &id);
+    // investor2 never invested
+    assert_eq!(t.client.refundable_amount(&t.investor2, &id), 0);
+}
+
+// ---------------------------------------------------------------------------
+// 27. Proportional Batch Refund After Production Failure
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_batch_refund_investors_proportional_after_production_failure() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &6_000);
+    t.client.invest(&t.investor2, &id, &4_000); // → Funded
+    t.client.start_production(&t.farmer, &id); // 30% → 3_000 released
+    t.client.mark_campaign_failed(&t.farmer, &id);
+
+    let before1 = balance(&t, &t.investor1);
+    let before2 = balance(&t, &t.investor2);
+
+    let mut investors = Vec::new(&t.env);
+    investors.push_back(t.investor1.clone());
+    investors.push_back(t.investor2.clone());
+
+    let (count, total) = t.client.batch_refund_investors(&id, &investors);
+    // Pool = 10_000 - 3_000 = 7_000
+    // Investor1: (7_000 * 6_000) / 10_000 = 4_200
+    // Investor2: (7_000 * 4_000) / 10_000 = 2_800
+    assert_eq!(count, 2);
+    assert_eq!(total, 7_000);
+    assert_eq!(balance(&t, &t.investor1), before1 + 4_200);
+    assert_eq!(balance(&t, &t.investor2), before2 + 2_800);
+}
+
+#[test]
+fn test_batch_refund_investors_proportional_with_revenue() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id); // 3_000 released
+    t.client.mark_harvest(&t.farmer, &id); // +4_000 = 7_000 total
+
+    // Order adds revenue
+    let order_id = t.client.create_order(&t.buyer, &id, &2_000);
+    t.client.confirm_order(&t.buyer, &order_id);
+
+    t.client.mark_campaign_failed(&t.admin, &id);
+
+    let before = balance(&t, &t.investor1);
+    let mut investors = Vec::new(&t.env);
+    investors.push_back(t.investor1.clone());
+
+    // Pool = 10_000 + 2_000 - 7_000 = 5_000
+    let (count, total) = t.client.batch_refund_investors(&id, &investors);
+    assert_eq!(count, 1);
+    assert_eq!(total, 5_000);
+    assert_eq!(balance(&t, &t.investor1), before + 5_000);
+}
+
+// ---------------------------------------------------------------------------
+// 28. Tranche Cap Enforcement
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_tranche_cannot_exceed_max_tranche_bps() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    // The max cumulative tranche is 70% (7_000 bps).
+    // Starting production releases 30%, marking harvest releases 40%.
+    // Total = 70% — this is the cap. No additional tranches can be released.
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id); // 3_000 (30%)
+    t.client.mark_harvest(&t.farmer, &id); // +4_000 = 7_000 (70%)
+
+    // Verify the campaign at least 30% remains in escrow
+    let c = t.client.get_campaign(&id);
+    assert_eq!(c.tranche_released, 7_000);
+    let remaining_in_escrow = c.total_raised - c.tranche_released;
+    assert_eq!(remaining_in_escrow, 3_000); // 30% of 10_000
+}
+
+// ---------------------------------------------------------------------------
+// 29. Token Balance Invariant Tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_token_balance_invariant_full_failure_before_production() {
+    // Investors should get their full investment back; farmer gets nothing.
+    let t = setup();
+    let inv_before = balance(&t, &t.investor1);
+    let farmer_before = balance(&t, &t.farmer);
+
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000); // → Funded
+    t.client.mark_campaign_failed(&t.farmer, &id);
+    t.client.refund(&t.investor1, &id);
+
+    assert_eq!(balance(&t, &t.investor1), inv_before);
+    assert_eq!(balance(&t, &t.farmer), farmer_before);
+}
+
+#[test]
+fn test_token_balance_invariant_proportional_failure() {
+    // After production failure with tranches released, tokens are conserved:
+    // farmer keeps released tranche, investor gets proportional refund.
+    let t = setup();
+    let inv1_before = balance(&t, &t.investor1);
+    let farmer_before = balance(&t, &t.farmer);
+
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000); // investor loses 10_000
+    t.client.start_production(&t.farmer, &id); // farmer gets 3_000
+    t.client.mark_campaign_failed(&t.farmer, &id);
+    // investor gets back proportional: 10_000 - 3_000 = 7_000
+    t.client.refund(&t.investor1, &id);
+
+    // Farmer has original + 3_000 (tranche)
+    assert_eq!(balance(&t, &t.farmer), farmer_before + 3_000);
+    // Investor has original - 10_000 + 7_000 (refund)
+    assert_eq!(balance(&t, &t.investor1), inv1_before - 3_000);
+}

@@ -38,5 +38,34 @@ export class OrderService {
       orderBy: ORDER_BY_CREATED_DESC,
     });
   }
-}
 
+  static async getSellerStats(sellerAddress: string) {
+    const [totalOrders, completedCount, refundedCount, disputedCount] =
+      await Promise.all([
+        prisma.order.count({ where: { sellerAddress } }),
+        prisma.order.count({ where: { sellerAddress, status: "COMPLETED" } }),
+        prisma.order.count({ where: { sellerAddress, status: "REFUNDED" } }),
+        prisma.dispute.count({
+          where: {
+            order: { sellerAddress },
+          },
+        }),
+      ]);
+
+    if (totalOrders === 0) {
+      return {
+        totalOrders: 0,
+        successRate: 100,
+        disputeRate: 0,
+        refundRatio: 0,
+      };
+    }
+
+    return {
+      totalOrders,
+      successRate: (completedCount / totalOrders) * 100,
+      disputeRate: (disputedCount / totalOrders) * 100,
+      refundRatio: (refundedCount / totalOrders) * 100,
+    };
+  }
+}

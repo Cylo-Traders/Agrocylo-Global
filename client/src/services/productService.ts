@@ -417,6 +417,35 @@ export function clearSearchHistory() {
   writeLocal<string[]>(SEARCH_HISTORY_KEY, []);
 }
 
+// ─── Favorites / Wishlist ─────────────────────────────────────────────────
+
+const FAVORITES_KEY = "market:favorites";
+
+export function getFavoriteIds(): string[] {
+  return readLocal<string[]>(FAVORITES_KEY, []);
+}
+
+export function isFavorite(productId: string): boolean {
+  return getFavoriteIds().includes(productId);
+}
+
+export function toggleFavorite(productId: string): boolean {
+  const current = getFavoriteIds();
+  const index = current.indexOf(productId);
+  let next: string[];
+  if (index >= 0) {
+    next = current.filter((id) => id !== productId);
+  } else {
+    next = [productId, ...current];
+  }
+  writeLocal(FAVORITES_KEY, next);
+  return index < 0;
+}
+
+export function clearFavorites() {
+  writeLocal<string[]>(FAVORITES_KEY, []);
+}
+
 // ─── Search Analytics ─────────────────────────────────────────────────────
 
 const FALLBACK_POPULAR_SEARCHES = [

@@ -139,6 +139,29 @@ function logDuplicateSkip(event: ParsedEvent, stage: string) {
 
 async function handleCampaignInvested(event: CampaignInvestedEvent) {
   // Idempotency: investment upsert key includes campaign/investor/ledger.
+  // Broadcast payloads are captured inside the transaction but sent only after
+  // prisma.$transaction resolves (i.e. after the DB commit) so clients never
+  // receive a notification for a rolled-back write.
+  type PostCommitPayloads = {
+    campaignInvested: {
+      campaignId: string;
+      investorAddress: string;
+      amount: string;
+      totalRaised: string;
+      txHash: string | undefined;
+    };
+    investmentIndexed: {
+      id: string;
+      campaignId: string;
+      investorAddress: string;
+      amount: string;
+      ledger: number;
+      txHash: string | undefined;
+      createdAt: string;
+    };
+  };
+  let post: PostCommitPayloads | null = null;
+
   await prisma.$transaction(async (tx) => {
     if (await skipDuplicateInTransaction(tx, event)) return;
     await upsertUser(tx, event.investor, "INVESTOR");
@@ -161,7 +184,7 @@ async function handleCampaignInvested(event: CampaignInvestedEvent) {
       },
     });
 
-    await tx.investment.upsert({
+    const inv = await tx.investment.upsert({
       where: {
         campaignId_investorAddress_ledger: {
           campaignId: campaign.id,
@@ -179,14 +202,6 @@ async function handleCampaignInvested(event: CampaignInvestedEvent) {
       update: {},
     });
 
-    broadcast("campaign.invested", {
-      campaignId: campaign.id,
-      investorAddress: event.investor,
-      amount: event.amount,
-      totalRaised: event.totalRaised,
-      txHash: event.txHash,
-    });
-
     await tx.transaction.create({
       data: {
         campaignId: campaign.id,
@@ -197,7 +212,31 @@ async function handleCampaignInvested(event: CampaignInvestedEvent) {
         txHash: event.txHash,
       },
     });
+
+    post = {
+      campaignInvested: {
+        campaignId: campaign.id,
+        investorAddress: event.investor,
+        amount: event.amount,
+        totalRaised: event.totalRaised,
+        txHash: event.txHash,
+      },
+      investmentIndexed: {
+        id: inv.id,
+        campaignId: campaign.id,
+        investorAddress: inv.investorAddress,
+        amount: inv.amount,
+        ledger: inv.ledger,
+        txHash: inv.txHash ?? undefined,
+        createdAt: inv.createdAt.toISOString(),
+      },
+    };
   });
+
+  if (post) {
+    broadcast("campaign.invested", (post as PostCommitPayloads).campaignInvested);
+    broadcast("investment.indexed", (post as PostCommitPayloads).investmentIndexed);
+  }
 }
 
 async function handleCampaignSettled(event: CampaignSettledEvent) {

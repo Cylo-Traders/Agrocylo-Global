@@ -55,12 +55,59 @@ export function getNetworkConfig(): NetworkConfig {
     process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? TESTNET_PASSPHRASE;
 
   const contractId = process.env.NEXT_PUBLIC_CONTRACT_ID ?? "";
-  if (!contractId) {
-    console.warn(
-      "[networkConfig] NEXT_PUBLIC_CONTRACT_ID is not set. " +
-        "Contract calls will fail until a deployed contract address is provided."
-    );
-  }
 
   return { rpcUrl, networkPassphrase, contractId };
+}
+
+/**
+ * Validates that a deployed contract ID is available at runtime.
+ * Throws a descriptive error when it is missing so consumers don't
+ * silently attempt contract operations that will fail.
+ */
+export function requireContractId(): string {
+  const id = process.env.NEXT_PUBLIC_CONTRACT_ID;
+  if (!id) {
+    throw new Error(
+      "Contract ID is not configured. " +
+        "Set NEXT_PUBLIC_CONTRACT_ID in your environment to point to the deployed escrow contract address. " +
+        "Contract-dependent features will be unavailable until this is set.",
+    );
+  }
+  return id;
+}
+
+/**
+ * Validates that the native token contract ID is configured.
+ * Throws a user-readable error naming the missing env var before any signing starts.
+ */
+export function requireNativeTokenContractId(): string {
+  const id = process.env.NEXT_PUBLIC_NATIVE_TOKEN_CONTRACT_ID ?? "";
+  if (!id) {
+    throw new Error(
+      "Native token contract ID is not configured. " +
+        "Set NEXT_PUBLIC_NATIVE_TOKEN_CONTRACT_ID in your environment. " +
+        "Native XLM token operations will be unavailable until this is set.",
+    );
+  }
+  return id;
+}
+
+/**
+ * One-stop helper: given a currency code, returns the corresponding token
+ * contract ID. Throws when the currency is unknown or not configured.
+ *
+ * Use this from cart checkout, escrow pages, and any contract service call
+ * so that token resolution is always consistent.
+ */
+export function getTokenContractId(currency: string): string {
+  return requireTokenContractId(currency);
+}
+
+/**
+ * Checks whether the contract ID environment variable is configured,
+ * without throwing. Useful for UI guards that want to show a fallback
+ * message instead of crashing.
+ */
+export function isContractConfigured(): boolean {
+  return !!process.env.NEXT_PUBLIC_CONTRACT_ID;
 }

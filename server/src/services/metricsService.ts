@@ -1,8 +1,39 @@
 import { prisma } from "../config/database.js";
 
-function utcCalendarDayBounds(reference = new Date()): { start: Date; end: Date; day: string } {
+// Request counter for metrics
+let requestCount = 0;
+let errorCount = 0;
+
+export function incrementRequestCount() {
+  requestCount++;
+}
+
+export function incrementErrorCount() {
+  errorCount++;
+}
+
+export function getAppMetrics() {
+  return {
+    request_count: requestCount,
+    error_count: errorCount,
+  };
+}
+
+function utcCalendarDayBounds(reference = new Date()): {
+  start: Date;
+  end: Date;
+  day: string;
+} {
   const start = new Date(
-    Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), reference.getUTCDate(), 0, 0, 0, 0),
+    Date.UTC(
+      reference.getUTCFullYear(),
+      reference.getUTCMonth(),
+      reference.getUTCDate(),
+      0,
+      0,
+      0,
+      0,
+    ),
   );
   const end = new Date(start);
   end.setUTCDate(end.getUTCDate() + 1);
@@ -34,19 +65,20 @@ export async function getPlatformMetrics() {
   const { start, end, day } = utcCalendarDayBounds();
   const activeSince = new Date(Date.now() - ACTIVE_USER_WINDOW_MS);
 
-  const [ordersPerDay, campaignsCreated, orderAmounts, recentOrders] = await Promise.all([
-    prisma.order.count({
-      where: { createdAt: { gte: start, lt: end } },
-    }),
-    prisma.product.count({
-      where: { createdAt: { gte: start, lt: end } },
-    }),
-    prisma.order.findMany({ select: { amount: true } }),
-    prisma.order.findMany({
-      where: { createdAt: { gte: activeSince } },
-      select: { buyerAddress: true, sellerAddress: true },
-    }),
-  ]);
+  const [ordersPerDay, campaignsCreated, orderAmounts, recentOrders] =
+    await Promise.all([
+      prisma.order.count({
+        where: { createdAt: { gte: start, lt: end } },
+      }),
+      prisma.product.count({
+        where: { createdAt: { gte: start, lt: end } },
+      }),
+      prisma.order.findMany({ select: { amount: true } }),
+      prisma.order.findMany({
+        where: { createdAt: { gte: activeSince } },
+        select: { buyerAddress: true, sellerAddress: true },
+      }),
+    ]);
 
   const totalVolume = sumNumericAmounts(orderAmounts.map((o) => o.amount));
 
@@ -63,5 +95,8 @@ export async function getPlatformMetrics() {
     campaigns_created: campaignsCreated,
     total_volume: totalVolume,
     active_users: wallets.size,
+    request_count: requestCount,
+    error_count: errorCount,
+    error_rate: requestCount > 0 ? (errorCount / requestCount) * 100 : 0,
   };
 }

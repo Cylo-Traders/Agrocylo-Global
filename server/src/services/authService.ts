@@ -5,10 +5,13 @@ import { query } from "../config/database.js";
 import { ApiError } from "../http/errors.js";
 import { config } from "../config/index.js";
 
-const JWT_SECRET = config.jwtSecret;
+if (!config.jwtSecret) {
+  throw new Error("JWT_SECRET is not configured");
+}
+const JWT_SECRET: string = config.jwtSecret;
 const JWT_EXPIRES_IN = "15m";
-const REFRESH_EXPIRES_IN = "7d";
-const NONCE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const NONCE_TTL_MS = 5 * 60 * 1000;
+const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 function isStellarAddress(address: string): boolean {
   try {
@@ -46,7 +49,6 @@ export async function verifySignature(
     throw new ApiError(400, "Bad Request", "Invalid Stellar wallet address");
   }
 
-  // Fetch and validate nonce
   const result = await query(
     `select nonce, "expiresAt" from public."Nonce" where "walletAddress" = $1`,
     [walletAddress],
@@ -56,14 +58,9 @@ export async function verifySignature(
   if (!row)
     throw new ApiError(401, "Unauthorized", "No nonce found for this wallet");
   if (new Date(row.expiresAt) < new Date()) {
-    throw new ApiError(
-      401,
-      "Unauthorized",
-      "Nonce has expired, request a new one",
-    );
+    throw new ApiError(401, "Unauthorized", "Nonce has expired, request a new one");
   }
 
-  // Verify Stellar signature
   try {
     const keypair = Keypair.fromPublicKey(walletAddress);
     const messageBuffer = Buffer.from(row.nonce, "utf-8");
@@ -74,19 +71,12 @@ export async function verifySignature(
     throw new ApiError(401, "Unauthorized", "Invalid signature");
   }
 
-  // Delete used nonce
-  await query(`delete from public."Nonce" where "walletAddress" = $1`, [
-    walletAddress,
-  ]);
+  // One-time nonce: delete immediately after successful verification
+  await query(`delete from public."Nonce" where "walletAddress" = $1`, [walletAddress]);
 
-  // Issue tokens
   const accessToken = jwt.sign({ walletAddress, role: 'USER' }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
   const refreshToken = crypto.randomBytes(40).toString('hex');
-  const accessToken = jwt.sign({ walletAddress }, JWT_SECRET, {
-    expiresIn: JWT_EXPIRES_IN,
-  });
-  const refreshToken = crypto.randomBytes(40).toString("hex");
-  const refreshExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const refreshExpiresAt = new Date(Date.now() + REFRESH_TTL_MS);
 
   await query(
     `insert into public."RefreshToken" (id, "walletAddress", token, "expiresAt") values (gen_random_uuid(), $1, $2, $3)`,
@@ -98,7 +88,7 @@ export async function verifySignature(
 
 export async function refreshAccessToken(
   refreshToken: string,
-): Promise<{ accessToken: string }> {
+): Promise<{ accessToken: string; refreshToken: string }> {
   const result = await query(
     `select "walletAddress", "expiresAt" from public."RefreshToken" where token = $1`,
     [refreshToken],
@@ -107,28 +97,27 @@ export async function refreshAccessToken(
   const row = result.rows[0];
   if (!row) throw new ApiError(401, "Unauthorized", "Invalid refresh token");
   if (new Date(row.expiresAt) < new Date()) {
-    await query(`delete from public."RefreshToken" where token = $1`, [
-      refreshToken,
-    ]);
+    await query(`delete from public."RefreshToken" where token = $1`, [refreshToken]);
     throw new ApiError(401, "Unauthorized", "Refresh token expired");
   }
+
+  // Rotate: invalidate the used token and issue a fresh one
+  await query(`delete from public."RefreshToken" where token = $1`, [refreshToken]);
 
   const accessToken = jwt.sign({ walletAddress: row.walletAddress, role: 'USER' }, JWT_SECRET, {
     expiresIn: JWT_EXPIRES_IN,
   });
-  const accessToken = jwt.sign(
-    { walletAddress: row.walletAddress },
-    JWT_SECRET,
-    {
-      expiresIn: JWT_EXPIRES_IN,
-    },
+  const newRefreshToken = crypto.randomBytes(40).toString('hex');
+  const refreshExpiresAt = new Date(Date.now() + REFRESH_TTL_MS);
+
+  await query(
+    `insert into public."RefreshToken" (id, "walletAddress", token, "expiresAt") values (gen_random_uuid(), $1, $2, $3)`,
+    [row.walletAddress, newRefreshToken, refreshExpiresAt],
   );
 
-  return { accessToken };
+  return { accessToken, refreshToken: newRefreshToken };
 }
 
 export async function logout(refreshToken: string): Promise<void> {
-  await query(`delete from public."RefreshToken" where token = $1`, [
-    refreshToken,
-  ]);
+  await query(`delete from public."RefreshToken" where token = $1`, [refreshToken]);
 }

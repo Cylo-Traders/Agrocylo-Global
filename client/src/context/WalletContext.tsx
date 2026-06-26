@@ -23,6 +23,7 @@ const initialState: WalletContextType = {
   balance: null,
   connected: false,
   loading: false,
+  restoring: false,
   error: null,
   network: null,
   activeWalletId: null,
@@ -41,6 +42,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
   const [balance, setBalance] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [network, setNetwork] = useState<string | null>(null);
   const [activeWalletId, setActiveWalletId] = useState<string | null>(null);
@@ -58,10 +60,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
     const cachedWalletId = localStorage.getItem("activeWalletId");
     if (!cachedAddr) return;
 
-    setAddress(cachedAddr);
-    setConnected(true);
-    if (cachedNet) setNetwork(cachedNet);
-    if (cachedWalletId) setActiveWalletId(cachedWalletId);
+    setRestoring(true);
 
     (async () => {
       try {
@@ -69,32 +68,32 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
           WALLET_ADAPTERS.find((a) => a.id === cachedWalletId) ??
           FreighterAdapter;
         const livePub = await adapter.getPublicKey();
+        const liveNet = await adapter.getNetwork();
 
         if (!mountedRef.current) return;
 
-        if (livePub && livePub !== cachedAddr) {
-          setAddress(livePub);
+        if (livePub !== cachedAddr) {
           localStorage.setItem("walletAddress", livePub);
-          const liveNet = await adapter.getNetwork();
-          setNetwork(liveNet);
+        }
+        if (liveNet !== cachedNet) {
           localStorage.setItem("walletNetwork", liveNet);
-          const b = await getXlmBalance(livePub);
-          setBalance(b);
-          return;
         }
 
-        const b = await getXlmBalance(cachedAddr);
-        setBalance(b);
+        setAddress(livePub);
+        setNetwork(liveNet);
+        setConnected(true);
+        if (cachedWalletId) setActiveWalletId(cachedWalletId);
+
+        const b = await getXlmBalance(livePub);
+        if (mountedRef.current) setBalance(b);
       } catch {
-        if (!mountedRef.current) return;
-        setAddress(null);
-        setConnected(false);
-        setNetwork(null);
-        setBalance(null);
-        setActiveWalletId(null);
-        localStorage.removeItem("walletAddress");
-        localStorage.removeItem("walletNetwork");
-        localStorage.removeItem("activeWalletId");
+        if (mountedRef.current) {
+          localStorage.removeItem("walletAddress");
+          localStorage.removeItem("walletNetwork");
+          localStorage.removeItem("activeWalletId");
+        }
+      } finally {
+        if (mountedRef.current) setRestoring(false);
       }
     })();
   }, []);
@@ -229,6 +228,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
       balance,
       connected,
       loading,
+      restoring,
       error,
       network,
       activeWalletId,
@@ -242,6 +242,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
       balance,
       connected,
       loading,
+      restoring,
       error,
       network,
       activeWalletId,

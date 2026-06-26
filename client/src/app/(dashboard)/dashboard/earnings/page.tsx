@@ -1,15 +1,21 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { DollarSign, TrendingUp, Clock } from "lucide-react";
 import { ColumnDef } from "@tanstack/react-table";
 
 import { StatCard } from "@/components/shared/stat-card";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { DataTable } from "@/components/shared/data-table";
-import { EarningsLineChart } from "@/components/shared/charts";
 import { useSellerOrders } from "@/hooks/queries/useOrders";
 import type { Order } from "@/types/order";
+
+const EarningsLineChart = dynamic(
+  () => import("@/components/shared/charts").then((m) => ({ default: m.EarningsLineChart })),
+  { ssr: false, loading: () => <Skeleton className="h-80 w-full" /> }
+);
 
 const PLATFORM_FEE = 0.03;
 

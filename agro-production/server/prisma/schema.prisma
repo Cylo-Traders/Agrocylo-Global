@@ -34,6 +34,7 @@ model Campaign {
   totalRaised    String         @default("0")
   totalRevenue   String         @default("0")
   trancheReleased String        @default("0")
+  imageUrl       String?
   deadline       DateTime
   status         CampaignStatus @default(FUNDING)
   createdAt      DateTime       @default(now())
@@ -107,6 +108,32 @@ model Transaction {
   @@index([walletAddress])
   @@index([txHash])
   @@map("transactions")
+}
+
+model AuthNonce {
+  id            String   @id @default(uuid())
+  walletAddress String
+  nonce         String   @unique
+  audience      String   @default("agro-production")
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime @default(now())
+
+  @@index([nonce])
+  @@index([walletAddress])
+  @@map("auth_nonces")
+}
+
+model EventCursor {
+  id         String   @id @default(uuid())
+  contractId String
+  ledger     Int
+  eventIndex Int
+  updatedAt  DateTime @updatedAt
+  createdAt  DateTime @default(now())
+
+  @@unique([contractId])
+  @@map("event_cursors")
 }
 
 enum CampaignStatus {

@@ -1,11 +1,19 @@
 "use client";
 
+import { useState } from "react";
 import Image from "next/image";
 import { ColumnDef } from "@tanstack/react-table";
 import { MoreHorizontal, EyeOff, Trash2 } from "lucide-react";
-
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,7 +27,7 @@ import { useProducts, useAdminSetVisibility, useAdminDelistProduct } from "@/hoo
 import { toast } from "sonner";
 import type { Product } from "@/types/product";
 
-function ActionCell({ product }: { product: Product }) {
+function ActionCell({ product, onDelist }: { product: Product; onDelist: (p: Product) => void }) {
   const setVisibility = useAdminSetVisibility();
   const delist = useAdminDelistProduct();
 
@@ -34,11 +42,7 @@ function ActionCell({ product }: { product: Product }) {
   };
 
   const handleDelist = () => {
-    if (!confirm(`Permanently delist "${product.name}"? This cannot be undone.`)) return;
-    delist.mutate(product.id, {
-      onSuccess: () => toast("Product delisted"),
-      onError: (e) => toast.error((e as Error).message),
-    });
+    onDelist(product);
   };
 
   return (
@@ -137,13 +141,15 @@ const columns: ColumnDef<Product>[] = [
     header: "",
     enableGlobalFilter: false,
     enableSorting: false,
-    cell: ({ row }) => <ActionCell product={row.original} />,
+    cell: ({ row }) => <ActionCell product={row.original} onDelist={setConfirmDelistProduct} />,
   },
 ];
 
 export default function AdminProductsPage() {
   const { data, isLoading, error } = useProducts({ pageSize: 100 });
   const products = data?.items ?? [];
+  const delist = useAdminDelistProduct();
+  const [confirmDelistProduct, setConfirmDelistProduct] = useState<Product | null>(null);
 
   return (
     <div className="space-y-8">
@@ -173,6 +179,44 @@ export default function AdminProductsPage() {
           searchPlaceholder="Search products…"
         />
       )}
+
+      <Dialog
+        open={confirmDelistProduct !== null}
+        onOpenChange={(open) => !open && setConfirmDelistProduct(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delist Product</DialogTitle>
+            <DialogDescription>
+              Permanently delist "{confirmDelistProduct?.name}"? This cannot be
+              undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmDelistProduct(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (!confirmDelistProduct) return;
+                delist.mutate(confirmDelistProduct.id, {
+                  onSuccess: () => {
+                    toast("Product delisted");
+                    setConfirmDelistProduct(null);
+                  },
+                  onError: (e) => toast.error((e as Error).message),
+                });
+              }}
+            >
+              Delist
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -9,6 +9,8 @@ import {
   validateResponse,
 } from "../middleware/validate.js";
 import { writeLimiter } from "../middleware/rateLimit.js";
+import { requireWallet, type WalletRequest } from "../middleware/walletAuth.js";
+import { problemDetail } from "../middleware/errors.js";
 import {
   CampaignIdParamSchema,
   CreateCampaignSchema,
@@ -27,7 +29,6 @@ import {
   InvestmentSchema,
 } from "../schemas/responses.js";
 import { broadcast } from "../services/wsServer.js";
-import { problemDetail } from "../middleware/errors.js";
 
 const router = Router();
 
@@ -84,15 +85,17 @@ router.get(
   },
 );
 
-// POST /campaigns — register a newly-created campaign (for off-chain metadata)
+// POST /campaigns — register a newly-created campaign (off-chain metadata)
+// Requires authenticated session; farmerAddress is derived from session, not body
 router.post(
   "/campaigns",
+  requireWallet,
   writeLimiter,
-  validateBody(CreateCampaignSchema),
+  validateBody(CreateCampaignSchema.omit({ farmerAddress: true })),
   validateResponse(CampaignSchema),
-  async (req: Request, res: Response) => {
-    const { farmerAddress, tokenAddress, targetAmount, deadline } =
-      req.body as CreateCampaignInput;
+  async (req: WalletRequest, res: Response) => {
+    const farmerAddress = req.walletAddress!;
+    const { tokenAddress, targetAmount, deadline } = req.body as Omit<CreateCampaignInput, "farmerAddress">;
 
     await prisma.user.upsert({
       where: { walletAddress: farmerAddress },
@@ -163,14 +166,17 @@ router.get(
 );
 
 // POST /campaigns/:id/invest — record an investment (indexer shortcut)
+// Requires authenticated session; investorAddress is derived from session, not body
 router.post(
   "/campaigns/:id/invest",
+  requireWallet,
   writeLimiter,
   validateParams(CampaignIdParamSchema),
-  validateBody(InvestSchema),
+  validateBody(InvestSchema.omit({ investorAddress: true })),
   validateResponse(InvestmentSchema),
-  async (req: Request, res: Response) => {
-    const { investorAddress, amount } = req.body as InvestInput;
+  async (req: WalletRequest, res: Response) => {
+    const investorAddress = req.walletAddress!;
+    const { amount } = req.body as Omit<InvestInput, "investorAddress">;
 
     const campaign = await prisma.campaign.findUnique({ where: { id: req.params.id } });
     if (!campaign) {

@@ -9,6 +9,20 @@ import { wsManager } from "./services/wsManager.js";
 
 async function bootstrap() {
   try {
+    logger.info("[bootstrap]: Starting Agrocylo Backend");
+    logger.info(`[bootstrap]: Environment: ${config.nodeEnv}`);
+    logger.info(`[bootstrap]: Port: ${config.port}`);
+    logger.info(`[bootstrap]: RPC URL: ${config.rpcUrl}`);
+    logger.info(
+      `[bootstrap]: Contract ID: ${config.contractId ? "configured" : "not configured"}`,
+    );
+    logger.info(`[bootstrap]: Supabase URL: ${config.supabaseUrl}`);
+    logger.info(`[bootstrap]: Redis URL: ${config.redisUrl}`);
+    logger.info(`[bootstrap]: Workers enabled: ${config.runWorkers}`);
+    logger.info(
+      `[bootstrap]: Contract watcher enabled: ${config.runContractWatcher}`,
+    );
+
     await connectDb();
 
     const server = http.createServer(app);
@@ -25,8 +39,12 @@ async function bootstrap() {
     const runningWorkers = config.runWorkers ? startWorkers() : null;
 
     server.listen(config.port, () => {
-      logger.info(`[server]: Server is running at http://localhost:${config.port}`);
-      logger.info(`[server]: WebSocket accepting connections at ws://localhost:${config.port}${config.wsPath}`);
+      logger.info(
+        `[server]: Server is running at http://localhost:${config.port}`,
+      );
+      logger.info(
+        `[server]: WebSocket accepting connections at ws://localhost:${config.port}${config.wsPath}`,
+      );
     });
 
     const shutdown = async (signal: string) => {

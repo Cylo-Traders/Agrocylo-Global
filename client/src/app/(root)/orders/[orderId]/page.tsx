@@ -40,6 +40,7 @@ import { getOrder, type Order } from "@/services/stellar/contractService";
 import { formatTruncatedAddress } from "@/lib/helpers/format-address";
 import CountdownTimer from "@/components/orders/CountdownTimer";
 import DisputeForm from "@/components/orders/DisputeForm";
+import { toast } from "sonner";
 
 const EXPIRY_HOURS = 96;
 
@@ -48,9 +49,7 @@ export default function OrderDetailsPage() {
   const orderId = params?.orderId;
 
   const { address, connected } = useWallet();
-  const { confirmReceipt, confirmState } = useEscrowContract();
-  const { requestRefund, refundState } = useEscrowContract();
-  const { openDispute, disputeState } = useEscrowContract();
+  const { tx, confirmState, refundState, disputeState, confirmReceipt, requestRefund, openDispute } = useEscrowContract();
   const { on: onSocket } = useSocket();
 
   const [loading, setLoading] = useState(true);
@@ -59,6 +58,7 @@ export default function OrderDetailsPage() {
   const [refundTxHash, setRefundTxHash] = useState<string | null>(null);
   const [confirmTxHash, setConfirmTxHash] = useState<string | null>(null);
   const [showDisputeDialog, setShowDisputeDialog] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const [isExpired, setIsExpired] = useState(false);
 
@@ -133,39 +133,51 @@ export default function OrderDetailsPage() {
 
   const onConfirmReceipt = useCallback(async () => {
     if (!orderId) return;
+    setActionError(null);
     try {
-      const result = await confirmReceipt(orderId);
+      const result = await tx.confirm(orderId);
       if (result.success && result.txHash) setConfirmTxHash(result.txHash);
+      toast.success("Receipt confirmed successfully");
       await fetchOrder();
     } catch {
-      // confirmState.error already set
+      const msg = tx.error || "Confirm receipt failed. Please try again.";
+      setActionError(msg);
+      toast.error(msg);
     }
-  }, [orderId, confirmReceipt, fetchOrder]);
+  }, [orderId, tx, fetchOrder]);
 
   const onRequestRefund = useCallback(async () => {
     if (!orderId) return;
     setRefundTxHash(null);
+    setActionError(null);
     try {
-      const result = await requestRefund(orderId);
+      const result = await tx.refund(orderId);
       if (result.success && result.txHash) setRefundTxHash(result.txHash);
+      toast.success("Refund processed successfully");
       await fetchOrder();
     } catch {
-      // refundState.error already set
+      const msg = tx.error || "Refund failed. Please try again.";
+      setActionError(msg);
+      toast.error(msg);
     }
-  }, [orderId, requestRefund, fetchOrder]);
+  }, [orderId, tx, fetchOrder]);
 
   const onOpenDispute = useCallback(
     async (reason: string, evidence: string) => {
       if (!orderId) return;
+      setActionError(null);
       try {
-        await openDispute(orderId, reason, evidence);
+        await tx.dispute(orderId, reason, evidence);
         setShowDisputeDialog(false);
+        toast.success("Dispute opened successfully");
         await fetchOrder();
       } catch {
-        // disputeState.error already set
+        const msg = tx.error || "Opening dispute failed. Please try again.";
+        setActionError(msg);
+        toast.error(msg);
       }
     },
-    [orderId, openDispute, fetchOrder],
+    [orderId, tx, fetchOrder],
   );
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -316,7 +328,7 @@ export default function OrderDetailsPage() {
                   {canConfirm && (
                     <Button
                       onClick={() => void onConfirmReceipt()}
-                      isLoading={confirmState.isLoading}
+                      isLoading={tx.isLoading && tx.activeAction === "confirm"}
                       className="w-full"
                     >
                       <CheckCircle2 className="size-4" />
@@ -328,7 +340,7 @@ export default function OrderDetailsPage() {
                     <Button
                       variant="destructive"
                       onClick={() => void onRequestRefund()}
-                      isLoading={refundState.isLoading}
+                      isLoading={tx.isLoading && tx.activeAction === "refund"}
                       className="w-full"
                     >
                       <RefreshCcw className="size-4" />
@@ -355,12 +367,17 @@ export default function OrderDetailsPage() {
                     </p>
                   )}
 
-                  {confirmState.error && (
+                  {actionError && (
+                    <p className="text-destructive text-xs" role="alert">
+                      {actionError}
+                    </p>
+                  )}
+                  {!actionError && confirmState.error && (
                     <p className="text-destructive text-xs">
                       {confirmState.error}
                     </p>
                   )}
-                  {refundState.error && (
+                  {!actionError && refundState.error && (
                     <p className="text-destructive text-xs">
                       {refundState.error}
                     </p>

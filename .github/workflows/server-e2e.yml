@@ -1,0 +1,90 @@
+name: Server E2E · Soroban Integration
+
+# Runs on PRs and pushes that touch the server or E2E test files.
+# Gated as a separate job from unit tests so fast feedback from unit tests
+# is never blocked by the heavier E2E suite.
+
+on:
+  pull_request:
+    paths:
+      - "agro-production/server/**"
+      - "agro-production/contract/**"
+      - "agro-production/client/src/lib/contractService.ts"
+      - ".github/workflows/server-e2e.yml"
+  push:
+    branches: [main]
+    paths:
+      - "agro-production/server/**"
+      - "agro-production/contract/**"
+      - "agro-production/client/src/lib/contractService.ts"
+      - ".github/workflows/server-e2e.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  # E2E_DATABASE_URL is constructed below from the postgres service.
+  POSTGRES_DB: agro_e2e
+  POSTGRES_USER: agro
+  POSTGRES_PASSWORD: agro_secret
+
+jobs:
+  e2e:
+    name: E2E · invest flow
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: agro-production/server
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: agro-production/server/package-lock.json
+
+      - name: Install server dependencies
+        run: npm ci
+
+      # The E2E test imports contractService from the client package.
+      - name: Install client dependencies
+        working-directory: agro-production/client
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Run E2E tests
+        env:
+          E2E_DATABASE_URL: postgresql://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@localhost:5432/${{ env.POSTGRES_DB }}
+          DATABASE_URL: postgresql://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@localhost:5432/${{ env.POSTGRES_DB }}
+          NODE_ENV: test
+          LOG_LEVEL: error
+        run: npm run test:e2e

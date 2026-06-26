@@ -141,11 +141,44 @@ curl http://localhost:5001/api/docs/openapi.json
 
 Import this URL into Swagger UI, Postman, or any OpenAPI client. Validation failures return `application/problem+json` with per-field `errors` (field path, message, and Zod code).
 
-### Health
+### Health & Readiness
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/health` | Returns `{ status: "UP", service, env, timestamp }` |
+| `GET` | `/health` | Shallow liveness probe — always 200 while process is running |
+| `GET` | `/livez` | Alias liveness probe — returns uptime |
+| `GET` | `/readyz` | Deep readiness probe — checks DB + RPC; returns 503 if either is down |
+
+**`/health` response:**
+```json
+{ "status": "UP", "service": "agro-production-server", "env": "production", "timestamp": "..." }
+```
+
+**`/readyz` response (200 when ready):**
+```json
+{
+  "status": "ready",
+  "checks": {
+    "database": { "status": "UP" },
+    "rpc": { "status": "UP" }
+  },
+  "lastLedger": 12345,
+  "timestamp": "..."
+}
+```
+
+**`/readyz` response (503 when not ready):**
+```json
+{
+  "status": "not_ready",
+  "checks": {
+    "database": { "status": "DOWN", "message": "connection refused" },
+    "rpc": { "status": "UP" }
+  },
+  "lastLedger": 0,
+  "timestamp": "..."
+}
+```
 
 ### Campaigns
 
@@ -180,17 +213,41 @@ Import this URL into Swagger UI, Postman, or any OpenAPI client. Validation fail
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/metrics` | JSON snapshot of platform activity |
+| `GET` | `/metrics` | Prometheus text format — four key platform metrics |
 | `GET` | `/metrics/rate-limits` | In-memory rate-limit hit counters (`default_hits`, `write_hits`, `total_hits`) |
+| `GET` | `/metrics/events` | In-memory event ingestion counters broken down by action |
 
-**Metrics response fields:**
+**`/metrics` — Prometheus text format (4 metrics):**
 
-- `orders_per_day` — count of orders with `createdAt` on the current UTC calendar day
-- `campaigns_created` — count of product/campaign rows created that same UTC day
-- `total_volume` — sum of `orders.amount` for all time (parses as finite number)
-- `active_users` — distinct buyer/seller wallet addresses on any order in the last 30 days
+| Metric | Type | Description |
+|---|---|---|
+| `events_processed_total` | counter | Total Soroban events indexed since server start |
+| `last_indexed_ledger` | gauge | Last ledger sequence number successfully indexed |
+| `ws_clients_connected` | gauge | Number of active WebSocket client connections |
+| `api_requests_total` | counter | Total HTTP requests received since server start |
 
-**Auth:** If `METRICS_API_KEY` is set, send `x-metrics-api-key: <key>` or `Authorization: Bearer <key>`.
+**Sample Prometheus scrape config:**
+
+```yaml
+scrape_configs:
+  - job_name: agro_production
+    static_configs:
+      - targets: ['localhost:5001']
+    metrics_path: /metrics
+    # If METRICS_API_KEY is set:
+    params:
+      {}
+    authorization:
+      type: Bearer
+      credentials: <your-METRICS_API_KEY>
+```
+
+Or send the key as a header:
+```
+x-metrics-api-key: <your-METRICS_API_KEY>
+```
+
+**Auth:** If `METRICS_API_KEY` is set, all `/metrics*` endpoints require `x-metrics-api-key: <key>` or `Authorization: Bearer <key>`. Leave `METRICS_API_KEY` blank to allow unauthenticated access (development).
 
 **Common headers:**
 

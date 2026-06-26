@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { Router } from 'express';
 import logger from '../config/logger.js';
 import { ApiError, sendProblem } from '../http/errors.js';
+import { authRateLimiter } from '../middleware/rateLimiter.js';
 import {
   generateNonce,
   verifySignature,
@@ -12,7 +13,7 @@ import {
 const router = Router();
 
 // POST /auth/nonce
-router.post('/nonce', async (req: Request, res: Response) => {
+router.post('/nonce', authRateLimiter, async (req: Request, res: Response) => {
   try {
     const { walletAddress } = req.body as { walletAddress?: string };
     if (!walletAddress) {
@@ -28,7 +29,7 @@ router.post('/nonce', async (req: Request, res: Response) => {
 });
 
 // POST /auth/verify
-router.post('/verify', async (req: Request, res: Response) => {
+router.post('/verify', authRateLimiter, async (req: Request, res: Response) => {
   try {
     const { walletAddress, signature } = req.body as {
       walletAddress?: string;
@@ -47,15 +48,15 @@ router.post('/verify', async (req: Request, res: Response) => {
   }
 });
 
-// POST /auth/refresh
+// POST /auth/refresh — returns a rotated refresh token alongside the new access token
 router.post('/refresh', async (req: Request, res: Response) => {
   try {
     const { refreshToken } = req.body as { refreshToken?: string };
     if (!refreshToken) {
       return sendProblem(res, req, new ApiError(400, 'Bad Request', 'refreshToken is required'));
     }
-    const data = await refreshAccessToken(refreshToken);
-    return res.status(200).json(data);
+    const tokens = await refreshAccessToken(refreshToken);
+    return res.status(200).json(tokens);
   } catch (err) {
     if (err instanceof ApiError) return sendProblem(res, req, err);
     logger.error('Token refresh failed', err);

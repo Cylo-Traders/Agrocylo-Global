@@ -8,9 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest",
-    "test:watch": "vitest --watch",
-    "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "test:watch": "vitest --watch"
   },
   "dependencies": {
     "@stellar/freighter-api": "^1.4.0",
@@ -22,8 +20,6 @@
     "sonner": "^2.0.7"
   },
   "devDependencies": {
-    "@storybook/addon-essentials": "^7.0.0",
-    "@storybook/react": "^7.0.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.0.0",
     "@testing-library/react": "^14.0.0",

@@ -4,7 +4,7 @@ Base URL: `http://localhost:5000` (configurable via `NEXT_PUBLIC_API_URL` env va
 
 ## Products
 
-### GET /api/products
+### GET /products
 List products with optional filters.
 
 **Query Parameters:**
@@ -19,65 +19,65 @@ List products with optional filters.
 
 **Response:** `{ data: Product[], total: number, page: number, limit: number }`
 
-### GET /api/products/:id
+### GET /products/:id
 Get a single product by ID.
 
-### POST /api/products
+### POST /products
 Create a new product listing.
 
 **Body:** `{ name, category, price_per_unit, currency, unit, stock_quantity?, description?, is_available?, location?, delivery_window? }`
 
-### PUT /api/products/:id
+### PUT /products/:id
 Update a product listing.
 
-### DELETE /api/products/:id
+### DELETE /products/:id
 Delete a product listing (farmer wallet required in auth).
 
 ## Orders
 
-### GET /api/orders/buyer
+### GET /orders/buyer
 Get orders where the current user is the buyer.
 
-### GET /api/orders/seller
+### GET /orders/seller
 Get orders where the current user is the seller.
 
-### POST /api/orders
+### POST /orders
 Create a new order.
 
 ## Cart
 
-### GET /api/cart/:walletAddress
+### GET /cart/:walletAddress
 Get active cart for a wallet.
 
-### POST /api/cart/items
+### POST /cart/items
 Add item to cart.
 
-### PUT /api/cart/items/:id
+### PUT /cart/items/:id
 Update cart item quantity.
 
-### DELETE /api/cart/items/:id
+### DELETE /cart/items/:id
 Remove item from cart.
 
-### DELETE /api/cart/:walletAddress
+### DELETE /cart/:walletAddress
 Clear entire cart.
 
 ## Profile
 
-### GET /api/profile/:walletAddress
+### GET /profile/:walletAddress
 Get user profile.
 
-### PUT /api/profile/:walletAddress
+### PUT /profile/:walletAddress
 Update user profile.
 
 ## Notifications
 
-### GET /api/notifications
+### GET /notifications
 Get paginated notifications.
 
-### PUT /api/notifications/read
+### PUT /notifications/read
 Mark notifications as read.
 
-### DELETE /api/notifications/:id
+### DELETE /notifications/:id
 Delete a notification.
 
 ## Locations

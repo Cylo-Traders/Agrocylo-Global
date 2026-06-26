@@ -11,10 +11,24 @@ Install
 npm install
 ```
 
-Env
-- `NEXT_PUBLIC_API_URL` — API base URL (default: http://localhost:3001/api/v1)
-- `NEXT_PUBLIC_SOROBAN_RPC_URL` — Soroban RPC endpoint
-- `NEXT_PUBLIC_NETWORK_PASSPHRASE` — Network passphrase
+## Environment Variables
+
+Copy the example file and fill in real values:
+
+```bash
+cp .env.example .env
+```
+
+A unified example covering both server and client vars lives at `agro-production/.env.example`.
+
+| Client var | Server var it mirrors | Required | Notes |
+|---|---|---|---|
+| `NEXT_PUBLIC_API_URL` | `PORT` (derived) | Yes | REST base URL, e.g. `http://localhost:5001` |
+| `NEXT_PUBLIC_WS_URL` | `PORT` (derived) | No | WebSocket URL; auto-derived from `window.location` if omitted |
+| `NEXT_PUBLIC_SOROBAN_RPC_URL` | `RPC_URL` | Yes | Both client and server should point to the same RPC endpoint |
+| `NEXT_PUBLIC_PRODUCTION_CONTRACT_ID` | `PRODUCTION_CONTRACT_ID` / `PRODUCTION_ESCROW_CONTRACT_ID` | Yes | On-chain production-escrow contract address |
+| `NEXT_PUBLIC_NETWORK_PASSPHRASE` | — | Yes | Stellar network passphrase (client-only) |
+| `NEXT_PUBLIC_NATIVE_TOKEN_CONTRACT_ID` | — | No | XLM native token SAC address |
 
 Available scripts
 - `npm run dev` — start Next.js dev server

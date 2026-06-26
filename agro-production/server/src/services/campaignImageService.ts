@@ -1,6 +1,6 @@
 import sharp from 'sharp';
 import { randomUUID } from 'node:crypto';
-import { query } from '../config/database.js';
+import { prisma } from '../db/client.js';
 import { getSupabaseAdmin } from '../config/supabase.js';
 import { config } from '../config/index.js';
 
@@ -12,12 +12,6 @@ export class HttpError extends Error {
     super(message);
     this.name = 'HttpError';
   }
-}
-
-interface CampaignRow {
-  id: string;
-  farmer_wallet: string;
-  image_url: string | null;
 }
 
 function mimeTypeToExt(mimeType: string): 'jpg' | 'png' | 'webp' {
@@ -43,26 +37,18 @@ function parsePathFromUrl(imageUrl: string | null): string | null {
   return imageUrl.slice(idx + marker.length);
 }
 
-async function getCampaign(campaignId: string): Promise<CampaignRow | null> {
-  const result = await query<CampaignRow>(
-    `select id::text as id, farmer_wallet, image_url
-     from public.campaigns
-     where id = $1::uuid
-     limit 1`,
-    [campaignId],
-  );
-  return result.rows[0] ?? null;
-}
-
 async function assertCampaignOwnership(
   campaignId: string,
   walletAddress: string,
-): Promise<CampaignRow> {
-  const campaign = await getCampaign(campaignId);
+) {
+  const campaign = await prisma.campaign.findUnique({
+    where: { id: campaignId },
+    select: { id: true, farmerAddress: true, imageUrl: true },
+  });
   if (!campaign) {
     throw new HttpError(404, 'Campaign not found.');
   }
-  if (campaign.farmer_wallet.toLowerCase() !== walletAddress.toLowerCase()) {
+  if (campaign.farmerAddress.toLowerCase() !== walletAddress.toLowerCase()) {
     throw new HttpError(403, 'Forbidden: you do not own this campaign.');
   }
   return campaign;
@@ -183,15 +169,6 @@ async function clearExistingFiles(prefix: string): Promise<void> {
   }
 }
 
-/**
- * Upload an image for a campaign.
- *
- * Stores the original plus 400×400 and 800×800 WebP thumbnails in Supabase
- * Storage, then updates the campaigns table with the public URL of the
- * 800×800 thumbnail.
- *
- * Returns the public image URL.
- */
 export async function uploadCampaignImage(params: {
   campaignId: string;
   walletAddress: string;
@@ -226,12 +203,10 @@ export async function uploadCampaignImage(params: {
   const imageUrl = publicUrlForPath(thumb800Path);
 
   try {
-    await query(
-      `update public.campaigns
-       set image_url = $1
-       where id = $2::uuid`,
-      [imageUrl, campaign.id],
-    );
+    await prisma.campaign.update({
+      where: { id: campaign.id },
+      data: { imageUrl },
+    });
   } catch (error) {
     const supabaseAdmin = getSupabaseAdmin();
     const rollbackPaths = [originalPath, thumb400Path, thumb800Path];
@@ -249,9 +224,6 @@ export async function uploadCampaignImage(params: {
   return { imageUrl };
 }
 
-/**
- * Delete all images for a campaign and reset its image_url to the placeholder.
- */
 export async function deleteCampaignImage(params: {
   campaignId: string;
   walletAddress: string;
@@ -275,8 +247,8 @@ export async function deleteCampaignImage(params: {
       .from(config.campaignImagesBucket)
       .remove(paths);
     if (removeError) throw classifyStorageError('delete', removeError);
-  } else if (campaign.image_url) {
-    const pathFromUrl = parsePathFromUrl(campaign.image_url);
+  } else if (campaign.imageUrl) {
+    const pathFromUrl = parsePathFromUrl(campaign.imageUrl);
     if (pathFromUrl) {
       const { error: removeError } = await supabaseAdmin.storage
         .from(config.campaignImagesBucket)
@@ -285,10 +257,8 @@ export async function deleteCampaignImage(params: {
     }
   }
 
-  await query(
-    `update public.campaigns
-     set image_url = $1
-     where id = $2::uuid`,
-    [config.campaignImagePlaceholderUrl, campaign.id],
-  );
+  await prisma.campaign.update({
+    where: { id: campaign.id },
+    data: { imageUrl: config.campaignImagePlaceholderUrl },
+  });
 }
