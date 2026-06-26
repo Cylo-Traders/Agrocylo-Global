@@ -312,7 +312,6 @@ export default function BarterOfferForm({
         notes: notes.trim() || null,
       };
 
-      await new Promise((r) => setTimeout(r, 500));
       trackTransactionAttempt("barter", "confirmed", {
         recipientWallet: recipientWallet.trim(),
       });

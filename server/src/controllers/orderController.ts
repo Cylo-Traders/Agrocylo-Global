@@ -54,6 +54,9 @@ export class OrderController {
 
   static async getSellerStats(req: Request, res: Response) {
     const { sellerAddress } = req.params;
+    if (!sellerAddress) {
+      return res.status(400).json({ error: "Seller address is required" });
+    }
     try {
       const stats = await OrderService.getSellerStats(sellerAddress);
       return res.status(200).json(stats);

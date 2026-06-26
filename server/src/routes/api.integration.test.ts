@@ -77,7 +77,7 @@ describe('Auth endpoints', () => {
   });
 
   it('POST /auth/refresh returns 200 when authService resolves', async () => {
-    vi.mocked(authService.refreshAccessToken).mockResolvedValue({ accessToken: 'new-token' });
+    vi.mocked(authService.refreshAccessToken).mockResolvedValue({ accessToken: 'new-token', refreshToken: 'new-refresh' });
     const res = await request(app).post('/auth/refresh').send({ refreshToken: 'valid-refresh' });
     expect(res.status).toBe(200);
     expect(res.body.accessToken).toBe('new-token');

@@ -5,7 +5,10 @@ import { query } from "../config/database.js";
 import { ApiError } from "../http/errors.js";
 import { config } from "../config/index.js";
 
-const JWT_SECRET = config.jwtSecret;
+if (!config.jwtSecret) {
+  throw new Error("JWT_SECRET is not configured");
+}
+const JWT_SECRET: string = config.jwtSecret;
 const JWT_EXPIRES_IN = "15m";
 const NONCE_TTL_MS = 5 * 60 * 1000;
 const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -73,7 +76,6 @@ export async function verifySignature(
 
   const accessToken = jwt.sign({ walletAddress, role: 'USER' }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
   const refreshToken = crypto.randomBytes(40).toString('hex');
-  const refreshExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   const refreshExpiresAt = new Date(Date.now() + REFRESH_TTL_MS);
 
   await query(
