@@ -18,6 +18,7 @@ import {
   type ListOrdersQuery,
 } from "../schemas/order.js";
 import { OrderSchema } from "../schemas/responses.js";
+import { requireIdempotencyKey, getCachedResponse, setCachedResponse } from "../middleware/idempotency.js";
 
 const router = Router();
 
@@ -97,10 +98,24 @@ router.post(
         buyerAddress,
         amount,
         ledger: 0,
+        txHash: transactionHash,
       },
     });
 
-    jsonValidated(res, OrderSchema, 201, order);
+    await prisma.transaction.create({
+      data: {
+        campaignId: campaign.id,
+        eventType: "order.created_intent",
+        payload: { transactionHash, intent: true },
+        ledger: 0,
+        eventIndex: 0,
+        txHash: transactionHash,
+      },
+    });
+
+    const response = order;
+    setCachedResponse(key, 201, response);
+    jsonValidated(res, OrderSchema, 201, response);
   },
 );
 

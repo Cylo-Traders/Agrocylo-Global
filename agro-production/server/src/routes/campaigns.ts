@@ -113,9 +113,20 @@ router.post(
       },
     });
 
-    broadcast("campaign.created", campaign);
+    await prisma.transaction.create({
+      data: {
+        campaignId: campaign.id,
+        eventType: "campaign.created_intent",
+        payload: { transactionHash, intent: true },
+        ledger: 0,
+        eventIndex: 0,
+        txHash: transactionHash,
+      },
+    });
 
-    jsonValidated(res, CampaignSchema, 201, campaign);
+    const response = campaign;
+    setCachedResponse(key, 201, response);
+    jsonValidated(res, CampaignSchema, 201, response);
   },
 );
 
@@ -171,6 +182,7 @@ router.post(
   "/campaigns/:id/invest",
   requireWallet,
   writeLimiter,
+  requireIdempotencyKey,
   validateParams(CampaignIdParamSchema),
   validateBody(InvestSchema.omit({ investorAddress: true })),
   validateResponse(InvestmentSchema),
@@ -205,18 +217,25 @@ router.post(
         campaignId: campaign.id,
         investorAddress,
         amount,
-        ledger: 0, // will be updated by indexer
+        ledger: 0,
+        txHash: transactionHash,
       },
     });
 
-    broadcast("campaign.invested", {
-      campaignId: campaign.id,
-      investorAddress,
-      amount,
-      totalRaised: campaign.totalRaised,
+    await prisma.transaction.create({
+      data: {
+        campaignId: campaign.id,
+        eventType: "campaign.invested_intent",
+        payload: { transactionHash, intent: true },
+        ledger: 0,
+        eventIndex: 0,
+        txHash: transactionHash,
+      },
     });
 
-    jsonValidated(res, InvestmentSchema, 201, investment);
+    const response = investment;
+    setCachedResponse(key, 201, response);
+    jsonValidated(res, InvestmentSchema, 201, response);
   },
 );
 

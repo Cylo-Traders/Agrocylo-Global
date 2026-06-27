@@ -16,11 +16,13 @@ export const CreateCampaignSchema = z.object({
     (d) => new Date(d).getTime() > Date.now(),
     "Deadline must be in the future",
   ),
+  transactionHash: z.string().min(1, "Transaction hash is required"),
 });
 
 export const InvestSchema = z.object({
   investorAddress: stellarAddress,
   amount: positiveInt128,
+  transactionHash: z.string().min(1, "Transaction hash is required"),
 });
 
 export const CampaignIdParamSchema = z.object({

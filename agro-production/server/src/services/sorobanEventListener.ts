@@ -1,3 +1,10 @@
+/**
+ * DEPRECATED: This module is no longer used. The canonical Soroban event ingestion
+ * pipeline has been consolidated into src/events/watcher.ts (startProductionWatcher).
+ * This file is kept for historical reference and potential data migration tooling.
+ * Do not use this code for new event processing.
+ */
+
 import { rpc, scValToNative, xdr } from '@stellar/stellar-sdk';
 import logger from '../config/logger.js';
 import { prisma } from '../db/client.js';
@@ -63,18 +70,24 @@ function buildContracts(): ContractConfig[] {
 
 function parseEvent(event: rpc.Api.EventResponse, label: string): ParsedEvent | null {
   try {
-    const topics = event.topic.map((t: string) =>
-      scValToNative(xdr.ScVal.fromXDR(t, 'base64')),
-    );
+    const topics = event.topic.map((t) => {
+      if (typeof t === 'string') {
+        return scValToNative(xdr.ScVal.fromXDR(t, 'base64'));
+      }
+      return scValToNative(t as xdr.ScVal);
+    });
     const action = String(topics[1]);
-    const data = scValToNative(xdr.ScVal.fromXDR(event.value, 'base64'));
+    const value = typeof event.value === 'string'
+      ? xdr.ScVal.fromXDR(event.value, 'base64')
+      : (event.value as xdr.ScVal);
+    const data = scValToNative(value);
     return {
-      contractId: event.contractId,
+      contractId: typeof event.contractId === 'string' ? event.contractId : String(event.contractId ?? ''),
       contractLabel: label,
       action,
       data,
       ledger: event.ledger,
-      txHash: event.txHash,
+      txHash: event.txHash ?? '',
     };
   } catch (err) {
     logger.error(`Failed to parse event from ${label}:`, err);

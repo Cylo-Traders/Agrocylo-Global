@@ -5,6 +5,7 @@ export const CreateOrderSchema = z.object({
   buyerAddress: stellarAddress,
   campaignId: uuidParam,
   amount: positiveInt128,
+  transactionHash: z.string().min(1, "Transaction hash is required"),
 });
 
 export const ConfirmOrderSchema = z.object({

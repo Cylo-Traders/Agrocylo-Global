@@ -1,13 +1,13 @@
 import { WebSocket, WebSocketServer } from "ws";
 import type { Server } from "http";
+import type { RawData } from "ws";
 import logger from "../config/logger.js";
 
-/** Version 1 of the public WebSocket event names. */
-export type WsEventName =
-  | "production:update"
-  | "production:created"
-  | "production:deleted"
-  | "order:status_changed"
+/**
+ * Versioned WebSocket event types. All emitted events conform to WsEventEnvelope,
+ * which uses a discriminated union to ensure type safety on the client.
+ */
+export type WsEventType =
   | "campaign.created"
   | "campaign.invested"
   | "campaign.settled"
@@ -20,82 +20,96 @@ export type WsEventName =
   | "dispute.dismissed"
   | "error";
 
-export interface WsEnvelope<T = unknown> {
-  event: WsEventName;
+export interface WsEventEnvelope<T = unknown> {
+  version: "1";
+  type: WsEventType;
   payload: T;
   timestamp: string;
 }
 
-export interface ProductionUpdatePayload {
-  productionId: string;
-  farmerId: string;
-  status: string;
-  updatedAt: string;
-}
-
-export interface ProductionCreatedPayload {
-  productionId: string;
-  farmerId: string;
-  crop: string;
-  quantity: number;
-  unit: string;
-}
-
-export interface ProductionDeletedPayload {
-  productionId: string;
-}
-
-export interface OrderStatusChangedPayload {
-  orderId: string;
-  buyerAddress: string;
-  sellerAddress: string;
-  status: string;
-}
-
 /**
- * One websocket implementation used both by the standalone test server and
- * the production HTTP server. `path` is optional to preserve the root-path
- * test harness; application traffic is explicitly attached at `/ws`.
+ * One websocket implementation used by the production HTTP server.
+ * Manages client connections, broadcasts events with serialization safety,
+ * and enforces backpressure to prevent unbounded buffering.
  */
 export class WsServer {
   private readonly wss: WebSocketServer;
+  private readonly maxQueueDepth = 100;
+  private readonly clientQueues = new WeakMap<WebSocket, string[]>();
 
-  constructor(server: Server, path?: string) {
-    this.wss = new WebSocketServer(path ? { server, path } : { server });
+  constructor(server: Server, path: string = "/ws") {
+    this.wss = new WebSocketServer({ server, path });
 
-    this.wss.on("connection", (socket, request) => {
-      const ip = request.socket.remoteAddress ?? "unknown";
-      logger.debug("WebSocket client connected", { ip });
-      socket.on("close", () => logger.debug("WebSocket client disconnected", { ip }));
-      socket.on("error", (error) => logger.warn("WebSocket client error", { ip, error: error.message }));
+    this.wss.on("connection", (socket: WebSocket, request) => {
+      const ip = (request.socket.remoteAddress as string | undefined) ?? "unknown";
+      logger.debug("WebSocket client connected", { ip, clients: this.wss.clients.size });
+      this.clientQueues.set(socket, []);
+
+      socket.on("close", () => {
+        logger.debug("WebSocket client disconnected", { ip, clients: this.wss.clients.size });
+      });
+
+      socket.on("error", (error: Error) => {
+        logger.warn("WebSocket client error", { ip, error: error.message });
+      });
     });
-    this.wss.on("error", (error) => logger.error("WebSocket server error", { error: error.message }));
+
+    this.wss.on("error", (error: Error) => {
+      logger.error("WebSocket server error", { error: error.message });
+    });
   }
 
-  broadcast<T>(event: WsEventName, payload: T): void {
+  broadcast<T>(type: WsEventType, payload: T): void {
     let message: string;
     try {
       message = JSON.stringify({
-        event,
+        version: "1",
+        type,
         payload,
         timestamp: new Date().toISOString(),
-      } satisfies WsEnvelope<T>);
+      } satisfies WsEventEnvelope<T>);
     } catch (error) {
       logger.warn("Unable to serialize WebSocket message", {
-        event,
+        type,
         error: error instanceof Error ? error.message : String(error),
       });
       return;
     }
 
     for (const client of this.wss.clients) {
-      // Avoid unbounded buffering behind slow clients. The event is best-effort
-      // and clients can always refresh from the indexer-backed REST endpoint.
-      if (client.readyState !== WebSocket.OPEN || client.bufferedAmount > 1_000_000) continue;
-      client.send(message, (error) => {
-        if (error) logger.debug("WebSocket delivery failed", { event, error: error.message });
-      });
+      if (client.readyState !== WebSocket.OPEN) continue;
+
+      const queue = this.clientQueues.get(client);
+      if (queue) {
+        if (queue.length >= this.maxQueueDepth) {
+          queue.shift();
+          logger.warn("WebSocket send queue exceeded, dropping oldest message", {
+            clientCount: this.wss.clients.size,
+            queueDepth: this.maxQueueDepth,
+          });
+        }
+        queue.push(message);
+      }
+
+      this.flushQueue(client, type);
     }
+  }
+
+  private flushQueue(client: WebSocket, type: WsEventType): void {
+    const queue = this.clientQueues.get(client);
+    if (!queue || queue.length === 0) return;
+
+    const message = queue[0];
+    client.send(message, (error: Error | undefined) => {
+      if (error) {
+        logger.debug("WebSocket delivery failed", { type, error: error.message });
+      } else {
+        queue.shift();
+        if (queue.length > 0) {
+          process.nextTick(() => this.flushQueue(client, type));
+        }
+      }
+    });
   }
 
   get clientCount(): number {
@@ -118,9 +132,8 @@ export function attachWebSocketServer(server: Server): void {
   logger.info("WebSocket server attached at /ws");
 }
 
-/** Broadcast an indexer event to currently connected clients. */
-export function broadcast(event: WsEventName, payload: unknown): void {
-  activeServer?.broadcast(event, payload);
+export function broadcast(type: WsEventType, payload: unknown): void {
+  activeServer?.broadcast(type, payload);
 }
 
 export function getWsClientCount(): number {
