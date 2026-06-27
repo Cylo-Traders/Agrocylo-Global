@@ -2,6 +2,13 @@ import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import app from '../app.js';
 
+vi.mock('../middleware/walletAuth.js', () => ({
+  requireWallet: (req: any, _res: any, next: any) => {
+    req.walletAddress = req.headers['x-wallet-address'];
+    next();
+  },
+}));
+
 vi.mock('../services/notificationService.js', () => ({
   listNotifications: vi.fn(),
   markNotificationsRead: vi.fn(),
