@@ -14,6 +14,10 @@ export type WsEventName =
   | "investment.indexed"
   | "order.created"
   | "order.confirmed"
+  | "dispute.opened"
+  | "dispute.evidence_submitted"
+  | "dispute.resolved"
+  | "dispute.dismissed"
   | "error";
 
 export interface WsEnvelope<T = unknown> {

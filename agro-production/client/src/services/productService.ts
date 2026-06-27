@@ -1,11 +1,12 @@
-import type { Product, ProductListResponse, ProductCategory } from "@/types";
+import type { Product, ProductDetail, ProductListResponse } from "@/types";
 import api from "../lib/apiClient";
 
 export interface ProductFilters {
-  category?: ProductCategory;
-  location?: string;
-  minPrice?: string;
-  maxPrice?: string;
+  category?: string;
+  campaignId?: string;
+  isActive?: boolean;
+  priceMin?: string;
+  priceMax?: string;
   page?: number;
   limit?: number;
 }
@@ -15,17 +16,18 @@ export async function fetchProducts(
 ): Promise<ProductListResponse> {
   const query = new URLSearchParams();
   if (filters.category) query.set("category", filters.category);
-  if (filters.location) query.set("location", filters.location);
-  if (filters.minPrice) query.set("minPrice", filters.minPrice);
-  if (filters.maxPrice) query.set("maxPrice", filters.maxPrice);
+  if (filters.campaignId) query.set("campaignId", filters.campaignId);
+  if (filters.isActive !== undefined) query.set("isActive", String(filters.isActive));
+  if (filters.priceMin) query.set("priceMin", filters.priceMin);
+  if (filters.priceMax) query.set("priceMax", filters.priceMax);
   if (filters.page) query.set("page", String(filters.page));
   if (filters.limit) query.set("limit", String(filters.limit));
 
   return api.get<ProductListResponse>(`/products?${query}`);
 }
 
-export async function fetchProduct(id: string): Promise<Product> {
-  return api.get<Product>(`/products/${id}`);
+export async function fetchProduct(id: string): Promise<ProductDetail> {
+  return api.get<ProductDetail>(`/products/${id}`);
 }
 
 export function formatPrice(raw: string): string {
