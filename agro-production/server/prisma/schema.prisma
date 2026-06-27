@@ -44,6 +44,8 @@ model Campaign {
   investments  Investment[]
   orders       Order[]
   transactions Transaction[]
+  disputes     Dispute[]
+  products     Product[]
 
   @@index([farmerAddress])
   @@index([status])
@@ -82,6 +84,7 @@ model Order {
 
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   buyer    User     @relation(fields: [buyerAddress], references: [walletAddress], onDelete: Restrict)
+  disputes Dispute[]
 
   @@index([campaignId])
   @@index([buyerAddress])
@@ -157,4 +160,69 @@ enum TransactionStatus {
 enum OrderStatus {
   PENDING
   CONFIRMED
+}
+
+enum DisputeStatus {
+  Open
+  EvidenceSubmitted
+  Resolved
+  Dismissed
+}
+
+model Dispute {
+  id                  String           @id @default(uuid())
+  campaignId          String
+  orderId             String?
+  initiatorAddress    String
+  respondentAddress   String
+  status              DisputeStatus    @default(Open)
+  resolutionOutcome   String?
+  resolutionNotes     String?
+  transactionHash     String           @unique
+  ledgerSequence      Int
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  campaign            Campaign         @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  order               Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  evidence            DisputeEvidence[]
+  auditEntries        DisputeAuditEntry[]
+
+  @@index([campaignId])
+  @@index([orderId])
+  @@index([initiatorAddress])
+  @@index([respondentAddress])
+  @@index([status])
+  @@index([transactionHash])
+  @@map("disputes")
+}
+
+model DisputeEvidence {
+  id              String   @id @default(uuid())
+  disputeId       String
+  submitterAddress String
+  evidenceUrl     String
+  evidenceHash    String
+  submittedAt     DateTime @default(now())
+
+  dispute         Dispute  @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+
+  @@index([disputeId])
+  @@index([submitterAddress])
+  @@map("dispute_evidence")
+}
+
+model DisputeAuditEntry {
+  id            String   @id @default(uuid())
+  disputeId     String
+  action        String   // "opened", "evidence_submitted", "resolved", "dismissed"
+  actorAddress  String
+  details       Json     @default("{}")
+  createdAt     DateTime @default(now())
+
+  dispute       Dispute  @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+
+  @@index([disputeId])
+  @@index([createdAt])
+  @@map("dispute_audit_entries")
 }

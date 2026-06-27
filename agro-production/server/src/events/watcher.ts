@@ -12,6 +12,7 @@ const MAX_BACKFILL_BATCH = 100;
 // base64 encoding of "campaign" and "order" short symbols
 const CAMPAIGN_TOPIC = "AAAADwAAAAhjYW1wYWlnbg==";
 const ORDER_TOPIC = "AAAADwAAAAVvcmRlcg==";
+const DISPUTE_TOPIC = "AAAADwAAAAdkaXNwdXRl";
 
 const CONTRACT_ID = config.contractId;
 
@@ -243,9 +244,60 @@ export async function startProductionWatcher(): Promise<ReturnType<typeof setInt
         });
       }
     } catch (err) {
-      logger.error("Production watcher poll error", { error: err });
+      logger.error("Soroban watcher poll error", { error: err });
     }
   }, POLL_INTERVAL_MS);
 
   return interval;
+}
+
+function buildContractFilters() {
+  const filters: any[] = [];
+
+  if (config.escrowContractId) {
+    filters.push(
+      {
+        type: "contract" as const,
+        contractIds: [config.escrowContractId],
+        topics: [[ORDER_TOPIC, "*"]],
+      }
+    );
+  }
+
+  if (config.productionEscrowContractId) {
+    filters.push(
+      {
+        type: "contract" as const,
+        contractIds: [config.productionEscrowContractId],
+        topics: [[CAMPAIGN_TOPIC, "*"]],
+      },
+      {
+        type: "contract" as const,
+        contractIds: [config.productionEscrowContractId],
+        topics: [[ORDER_TOPIC, "*"]],
+      },
+      {
+        type: "contract" as const,
+        contractIds: [config.productionEscrowContractId],
+        topics: [[DISPUTE_TOPIC, "*"]],
+      }
+    );
+  }
+
+  if (config.contractId && config.contractId !== "C...") {
+    filters.push(
+      {
+        type: "contract" as const,
+        contractIds: [config.contractId],
+        topics: [[CAMPAIGN_TOPIC, "*"]],
+      },
+      {
+        type: "contract" as const,
+        contractIds: [config.contractId],
+        topics: [[ORDER_TOPIC, "*"]],
+      }
+    );
+  }
+
+  return filters;
 }

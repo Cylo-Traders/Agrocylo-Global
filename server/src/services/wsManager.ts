@@ -16,6 +16,7 @@ interface ClientSocket {
 }
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
+const MAX_CONNECTIONS = 1_000;
 
 export class WsManager {
   private wss: WebSocketServer | null = null;
@@ -38,7 +39,17 @@ export class WsManager {
       if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     });
 
+    this.wss.on("error", (err: Error) => {
+      logger.error("WebSocket server error", err);
+    });
+
     this.wss.on("connection", (ws: WebSocket) => {
+      if (this.clients.size >= MAX_CONNECTIONS) {
+        ws.close(1013, "Server overloaded");
+        logger.warn(`WebSocket connection rejected: limit of ${MAX_CONNECTIONS} reached`);
+        return;
+      }
+
       const client: ClientSocket = { ws, wallet: null, isAlive: true };
       this.clients.set(ws, client);
       logger.info(`WebSocket client connected (total: ${this.clients.size})`);

@@ -2,6 +2,8 @@ import { Server as SocketIOServer } from "socket.io";
 import type { Server as HTTPServer } from "http";
 import logger from "../config/logger.js";
 
+const MAX_CONNECTIONS = 1_000;
+
 export class SocketService {
   private static instance: SocketIOServer | null = null;
 
@@ -17,11 +19,25 @@ export class SocketService {
       },
     });
 
+    this.instance.on("error", (err: Error) => {
+      logger.error("[SocketService]: Server error", err);
+    });
+
     this.instance.on("connection", (socket) => {
+      if (this.instance!.sockets.sockets.size > MAX_CONNECTIONS) {
+        logger.warn("[SocketService]: Connection limit reached, disconnecting client");
+        socket.disconnect(true);
+        return;
+      }
+
       logger.info(`[SocketService]: Client connected: ${socket.id}`);
 
-      socket.on("disconnect", () => {
-        logger.info(`[SocketService]: Client disconnected: ${socket.id}`);
+      socket.on("error", (err: Error) => {
+        logger.error(`[SocketService]: Socket error: ${socket.id}`, err);
+      });
+
+      socket.on("disconnect", (reason: string) => {
+        logger.info(`[SocketService]: Client disconnected: ${socket.id}`, { reason });
       });
     });
 

@@ -3,6 +3,35 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import app from '../app.js';
 import { ApiError } from '../http/errors.js';
 
+vi.mock('../config/database.js', () => ({
+  prisma: {
+    $queryRaw: vi.fn().mockResolvedValue([{ '?column?': 1 }]),
+    order: { findMany: vi.fn(), findUnique: vi.fn() },
+    notification: { create: vi.fn() },
+  },
+  query: vi.fn(),
+  withTransaction: vi.fn(),
+}));
+
+vi.mock('../config/supabase.js', () => ({
+  getSupabaseAdmin: vi.fn().mockReturnValue({
+    from: vi.fn().mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        limit: vi.fn().mockReturnValue({
+          maybeSingle: vi.fn().mockResolvedValue({ error: null }),
+        }),
+      }),
+    }),
+  }),
+}));
+
+vi.mock('../middleware/walletAuth.js', () => ({
+  requireWallet: (req: any, _res: any, next: any) => {
+    req.walletAddress = req.headers['x-wallet-address'];
+    next();
+  },
+}));
+
 vi.mock('../services/authService.js', () => ({
   generateNonce: vi.fn(),
   verifySignature: vi.fn(),

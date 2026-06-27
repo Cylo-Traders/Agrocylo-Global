@@ -84,16 +84,23 @@ export interface Product {
   id: string;
   name: string;
   description: string;
-  category: ProductCategory;
-  pricePerUnit: string;
-  unit: string;
-  quantity: number;
-  location: string;
-  farmerAddress: string;
-  campaignId?: string;
-  imageUrl?: string;
+  imageUrl: string | null;
+  priceTokens: string; // i64 stored as BigInt, serialized to string in JSON
+  campaignId: string | null;
+  inventoryCount: number;
+  category: string;
+  isActive: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ProductDetail extends Product {
+  campaign: {
+    id: string;
+    onChainId: string;
+    farmerAddress: string;
+    status: CampaignStatus;
+  } | null;
 }
 
 export interface ProductListResponse {

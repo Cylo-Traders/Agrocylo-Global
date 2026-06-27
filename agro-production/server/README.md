@@ -339,12 +339,72 @@ The frontend `useWebSocket` hook (in `agro-production/client/`) handles reconnec
 
 ## Testing
 
+### Running Tests Locally
+
 ```bash
 # Run all unit tests (vitest)
 npm test
 
 # Run a single test file
 npx vitest run src/events/parser.test.ts
+
+# Run tests in watch mode (rebuild on file change)
+npx vitest
 ```
 
-Test files live alongside their source files (`*.test.ts`). Integration tests in `src/test/api.test.ts` require a running database — set `DATABASE_URL` before running them.
+Test files live alongside their source files (`*.test.ts`). Integration tests in `src/test/integration.test.ts` validate:
+- Wallet authorization (x-wallet-address header)
+- CORS policy enforcement
+- Rate limiting behavior
+- Event idempotency and checkpoint tracking
+- WebSocket event contract compliance
+- RFC 7807 problem detail error responses
+
+### Test Database Setup
+
+To run integration tests locally:
+
+```bash
+# Start PostgreSQL (if using Docker)
+docker run -d \
+  -e POSTGRES_USER=test_user \
+  -e POSTGRES_PASSWORD=test_password \
+  -e POSTGRES_DB=agrocylo_test \
+  -p 5432:5432 \
+  postgres:15
+
+# Set test database URL
+export DATABASE_URL="postgresql://test_user:test_password@localhost:5432/agrocylo_test"
+
+# Run migrations on test database
+npx prisma migrate deploy
+
+# Run tests
+npm test
+```
+
+## Environment Requirements
+
+### Node.js Version
+
+- **Minimum**: 20.x (LTS)
+- **Recommended**: 20.11.0 or later
+- Check: `node --version`
+
+### PostgreSQL Version
+
+- **Minimum**: 15
+- **Recommended**: 15.x (latest)
+- Check: `psql --version`
+
+The server connects via `DATABASE_URL` which must use `postgresql://` protocol.
+
+## Continuous Integration
+
+A GitHub Actions workflow (`.github/workflows/server-ci.yml`) runs on every push:
+
+1. **install-and-build** — Installs dependencies, generates Prisma types, builds TypeScript, runs linter
+2. **test** — Spins up PostgreSQL service container, runs `npm test`
+3. **security** — Runs `npm audit --audit-level=high`, fails if vulnerabilities found
+
+All jobs run in parallel; **test** and **security** wait for **install-and-build** to complete.

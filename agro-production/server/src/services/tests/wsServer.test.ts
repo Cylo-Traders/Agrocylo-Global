@@ -11,7 +11,7 @@ function connectClient(port: number, path?: string): Promise<WebSocket> {
   });
 }
 
-function nextMessage(ws: WebSocket): Promise<{ event: string; payload: unknown; timestamp: string }> {
+function nextMessage(ws: WebSocket): Promise<{ version: string; type: string; payload: unknown; timestamp: string }> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error('No message received within 2s')), 2000);
     ws.once("message", (data) => {
@@ -51,7 +51,8 @@ describe("WebSocket server (functional)", () => {
     broadcast("campaign.created", { id: "1", farmerAddress: "G...", tokenAddress: "G..." });
 
     const envelope = await msgPromise;
-    expect(envelope.event).toBe("campaign.created");
+    expect(envelope.version).toBe("1");
+    expect(envelope.type).toBe("campaign.created");
     expect(envelope.payload).toMatchObject({ id: "1" });
     expect(typeof envelope.timestamp).toBe("string");
     client.close();
@@ -75,14 +76,14 @@ describe("WebSocket server (functional)", () => {
 
     const results = await Promise.all([msg1, msg2]);
     expect(results).toHaveLength(2);
-    results.forEach((msg) => expect(msg.event).toBe("campaign.invested"));
+    results.forEach((msg) => expect(msg.type).toBe("campaign.invested"));
     c1.close();
     c2.close();
   });
 
   it("broadcast does not throw when no clients connected", () => {
     expect(() =>
-      broadcast("campaign.updated", { id: "1", status: "HARVESTED" })
+      broadcast("campaign.invested", { campaignId: "1", investorAddress: "G...", amount: "100", totalRaised: "200" })
     ).not.toThrow();
   });
 
