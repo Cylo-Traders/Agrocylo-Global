@@ -39,6 +39,7 @@ import {
 } from "@/services/stellar/contractService";
 import { getNetworkConfig, requireTokenContractId } from "@/services/stellar/networkConfig";
 import { formatTruncatedAddress } from "@/lib/helpers/format-address";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -104,12 +105,12 @@ export default function CartDrawer() {
 
   async function createOrdersForCart(groups: CartGroup[]) {
     if (!address || !connected) {
-      alert("Connect your wallet to checkout.");
+      toast.error("Connect your wallet to checkout.");
       return;
     }
     const deadline = deliveryDeadline?.trim();
     if (!deadline) {
-      alert("Please select a delivery deadline.");
+      toast.error("Please select a delivery deadline.");
       return;
     }
 

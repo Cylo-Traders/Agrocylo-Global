@@ -11,14 +11,17 @@ interface WalletConnectProps {
   className?: string;
 }
 
+const NETWORK_NAME = process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE === "Public Global Stellar Network ; September 2015"
+  ? "Stellar Public Network"
+  : "Stellar Test Network";
+
 export default function WalletConnect({ className = "" }: WalletConnectProps) {
-  const { address, connected, loading, reconnecting, error, connect, disconnect } = useWallet();
+  const { address, connected, loading, reconnecting, error, walletState, connect, disconnect } = useWallet();
   const busy = loading || reconnecting;
 
-  function handleConnect() {
-    connect().then(() => {
-      if (address) trackWalletConnected(address);
-    });
+  async function handleConnect() {
+    const addr = await connect();
+    if (addr) trackWalletConnected(addr);
   }
 
   function handleDisconnect() {
@@ -26,7 +29,7 @@ export default function WalletConnect({ className = "" }: WalletConnectProps) {
     disconnect();
   }
 
-  if (connected && address) {
+  if (walletState === "connected" && address) {
     return (
       <div className={`flex items-center gap-2 ${className}`}>
         <span
@@ -43,6 +46,34 @@ export default function WalletConnect({ className = "" }: WalletConnectProps) {
         >
           Disconnect
         </button>
+      </div>
+    );
+  }
+
+  if (walletState === "wrong_network") {
+    return (
+      <div className={`flex flex-col items-start gap-1 ${className}`}>
+        <p className="text-xs text-yellow-700 max-w-xs" role="alert">
+          Connected to wrong network — switch to {NETWORK_NAME} in Freighter
+        </p>
+      </div>
+    );
+  }
+
+  if (walletState === "unavailable") {
+    return (
+      <div className={`flex flex-col items-start gap-1 ${className}`}>
+        <p className="text-xs text-red-600 max-w-xs" role="alert">
+          Freighter extension not found.{" "}
+          <a
+            href="https://freighter.app"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-red-700"
+          >
+            Install Freighter
+          </a>
+        </p>
       </div>
     );
   }

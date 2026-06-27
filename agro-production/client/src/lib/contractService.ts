@@ -34,6 +34,58 @@ function contract(): StellarSdk.Contract {
 }
 
 /**
+ * Build a `create_campaign` transaction for the production-escrow contract.
+ *
+ * @param farmer       - Stellar public key of the farmer
+ * @param tokenAddress - Token contract address
+ * @param targetAmount - Target funding amount in base units (i128)
+ * @param deadline     - Deadline timestamp in seconds (u64)
+ */
+export async function buildCreateCampaign(
+  farmer: string,
+  tokenAddress: string,
+  targetAmount: bigint,
+  deadline: number,
+): Promise<ContractResult<string>> {
+  try {
+    const rpcServer = server();
+    const escrow = contract();
+    const sourceAccount = await rpcServer.getAccount(farmer);
+
+    const tx = new StellarSdk.TransactionBuilder(sourceAccount, {
+      fee: StellarSdk.BASE_FEE,
+      networkPassphrase: NETWORK_PASSPHRASE,
+    })
+      .addOperation(
+        escrow.call(
+          "create_campaign",
+          new StellarSdk.Address(farmer).toScVal(),
+          new StellarSdk.Address(tokenAddress).toScVal(),
+          StellarSdk.nativeToScVal(targetAmount, { type: "i128" }),
+          StellarSdk.nativeToScVal(BigInt(deadline), { type: "u64" }),
+        ),
+      )
+      .setTimeout(30)
+      .build();
+
+    const simulated = await rpcServer.simulateTransaction(tx);
+    if (StellarSdk.rpc.Api.isSimulationError(simulated)) {
+      throw new Error(
+        `Simulation failed: ${(simulated as StellarSdk.rpc.Api.SimulateTransactionErrorResponse).error}`,
+      );
+    }
+
+    const prepared = StellarSdk.rpc
+      .assembleTransaction(tx, simulated as StellarSdk.rpc.Api.SimulateTransactionSuccessResponse)
+      .build();
+
+    return { success: true, data: prepared.toXDR() };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
  * Build a `create_order` transaction for the production-escrow contract.
  *
  * @param buyer      - Stellar public key of the buyer
@@ -111,6 +163,51 @@ export async function buildInvest(
           new StellarSdk.Address(investor).toScVal(),
           StellarSdk.nativeToScVal(BigInt(campaignId), { type: "u64" }),
           StellarSdk.nativeToScVal(amount, { type: "i128" }),
+        ),
+      )
+      .setTimeout(30)
+      .build();
+
+    const simulated = await rpcServer.simulateTransaction(tx);
+    if (StellarSdk.rpc.Api.isSimulationError(simulated)) {
+      throw new Error(
+        `Simulation failed: ${(simulated as StellarSdk.rpc.Api.SimulateTransactionErrorResponse).error}`,
+      );
+    }
+
+    const prepared = StellarSdk.rpc
+      .assembleTransaction(tx, simulated as StellarSdk.rpc.Api.SimulateTransactionSuccessResponse)
+      .build();
+
+    return { success: true, data: prepared.toXDR() };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Build a `claim_returns` transaction for the production-escrow contract.
+ *
+ * The investor claims their proportional share of remaining escrow after settlement.
+ */
+export async function buildClaimReturns(
+  investor: string,
+  campaignId: string,
+): Promise<ContractResult<string>> {
+  try {
+    const rpcServer = server();
+    const escrow = contract();
+    const sourceAccount = await rpcServer.getAccount(investor);
+
+    const tx = new StellarSdk.TransactionBuilder(sourceAccount, {
+      fee: StellarSdk.BASE_FEE,
+      networkPassphrase: NETWORK_PASSPHRASE,
+    })
+      .addOperation(
+        escrow.call(
+          "claim_returns",
+          new StellarSdk.Address(investor).toScVal(),
+          StellarSdk.nativeToScVal(BigInt(campaignId), { type: "u64" }),
         ),
       )
       .setTimeout(30)

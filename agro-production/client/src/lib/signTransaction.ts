@@ -11,6 +11,15 @@ export interface SignAndSubmitResult {
 
 export type TransactionSubmissionStage = "signing" | "submitting" | "confirming";
 
+export class NetworkMismatchError extends Error {
+  constructor(expected: string, actual: string) {
+    super(
+      `Network mismatch: expected "${expected}" but Freighter is connected to "${actual}"`
+    );
+    this.name = "NetworkMismatchError";
+  }
+}
+
 const RPC_URL =
   process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
 const NETWORK_PASSPHRASE =
@@ -31,6 +40,10 @@ export async function signAndSubmitTransaction(
 ): Promise<SignAndSubmitResult> {
   try {
     const networkPassphrase = await resolveNetworkPassphrase();
+
+    if (networkPassphrase !== NETWORK_PASSPHRASE) {
+      throw new NetworkMismatchError(NETWORK_PASSPHRASE, networkPassphrase);
+    }
 
     onStage?.("signing");
     const signer = getFreighterSignerFromWindow();

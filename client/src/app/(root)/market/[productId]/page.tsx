@@ -1,5 +1,6 @@
-"use client";
+ "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -108,13 +109,14 @@ export default function ProductDetailPage() {
       </nav>
 
       <div className="grid grid-cols-1 gap-10 md:grid-cols-2">
-        <div className="bg-secondary aspect-square overflow-hidden rounded-2xl">
+        <div className="bg-secondary relative aspect-square overflow-hidden rounded-2xl">
           {product.image_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <Image
               src={product.image_url}
               alt={product.name}
-              className="size-full object-cover"
+              fill
+              sizes="(max-width: 768px) 100vw, 50vw"
+              className="object-cover"
             />
           ) : (
             <div className="grid size-full place-content-center text-7xl">

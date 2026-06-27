@@ -2563,6 +2563,12 @@ fn test_batch_refund_orders_count_and_total_are_correct() {
     assert_eq!(total, 600); // 100 + 200 + 300
 }
 
+// ---------------------------------------------------------------------------
+// 15. Issue #455 - Late Confirm Order Rejection (after settlement)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_reject_confirm_order_after_settlement() {
 // ===========================================================================
 // Issue #462 — Formal Failure & Dispute Model
 // ===========================================================================
@@ -2578,6 +2584,27 @@ fn test_mark_campaign_failed_from_funded_state_full_refund() {
     let id = t
         .client
         .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+
+    // Create order before settlement is OK
+    let order_id = t.client.create_order(&t.buyer, &id, &2_000);
+
+    // Settlement prevents further order confirmations
+    t.client.settle(&t.farmer, &id);
+
+    // Confirming order after settlement should fail (Issue #455)
+    let err = t
+        .client
+        .try_confirm_order(&t.buyer, &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignNotHarvested);
+}
+
+#[test]
+fn test_confirm_order_before_settlement_allowed() {
     t.client.invest(&t.investor1, &id, &6_000);
     t.client.invest(&t.investor2, &id, &4_000); // → Funded
 
@@ -2669,6 +2696,26 @@ fn test_mark_campaign_failed_non_farmer_non_admin_rejected() {
     let id = t
         .client
         .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+
+    // Create and confirm order before settlement
+    let order_id = t.client.create_order(&t.buyer, &id, &2_000);
+    t.client.confirm_order(&t.buyer, &order_id);
+
+    // Should transition to Harvested with revenue recorded
+    let campaign = t.client.get_campaign(&id);
+    assert_eq!(campaign.status, CampaignStatus::Harvested);
+    assert_eq!(campaign.total_revenue, 2_000);
+
+    // Now settle
+    t.client.settle(&t.farmer, &id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Settled);
+}
+
+#[test]
+fn test_order_transitions_to_refunded_on_batch_expiry() {
     t.client.invest(&t.investor1, &id, &10_000); // → Funded
     // Investor (not farmer or admin) cannot mark as failed
     let err = t
@@ -2720,6 +2767,23 @@ fn test_refundable_amount_proportional_after_production() {
         .client
         .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
     t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &id);
+
+    let order_id = t.client.create_order(&t.buyer, &id, &2_000);
+
+    // Advance past ORDER_EXPIRY_SECS
+    advance_ledger(&t.env, ORDER_EXPIRY_SECS + 1);
+
+    // Batch refund should mark order as Refunded (Issue #455)
+    let mut ids = Vec::new(&t.env);
+    ids.push_back(order_id);
+    let (count, total) = t.client.batch_refund_orders(&ids);
+    assert_eq!(count, 1);
+    assert_eq!(total, 2_000);
+
+    let order = t.client.get_order(&order_id);
+    assert_eq!(order.status, OrderStatus::Refunded);
     t.client.start_production(&t.farmer, &id); // 3_000 released
     t.client.mark_campaign_failed(&t.farmer, &id);
 

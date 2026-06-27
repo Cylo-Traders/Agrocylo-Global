@@ -58,7 +58,7 @@ const CATEGORIES: ProductCategory[] = [
   "Livestock",
   "Other",
 ];
-const CURRENCIES: ProductCurrency[] = ["STRK", "USDC"];
+const CURRENCIES: ProductCurrency[] = ["XLM", "USDC"];
 const UNITS: ProductUnit[] = ["kg", "bag", "crate", "piece", "litre", "dozen"];
 const MAX_IMAGES = 8;
 
@@ -85,7 +85,7 @@ export default function ProductFormModal({
   const [name, setName] = useState("");
   const [category, setCategory] = useState<ProductCategory | null>(null);
   const [pricePerUnit, setPricePerUnit] = useState("");
-  const [currency, setCurrency] = useState<ProductCurrency>("STRK");
+  const [currency, setCurrency] = useState<ProductCurrency>("XLM");
   const [unit, setUnit] = useState<ProductUnit>("kg");
   const [stockQuantity, setStockQuantity] = useState<string>("");
   const [description, setDescription] = useState<string>("");
@@ -105,7 +105,7 @@ export default function ProductFormModal({
     setName(initialProduct?.name ?? "");
     setCategory(initialProduct?.category ?? null);
     setPricePerUnit(initialProduct?.price_per_unit ?? "");
-    setCurrency((initialProduct?.currency as ProductCurrency) ?? "STRK");
+    setCurrency((initialProduct?.currency as ProductCurrency) ?? "XLM");
     setUnit((initialProduct?.unit as ProductUnit) ?? "kg");
     setStockQuantity(initialProduct?.stock_quantity ?? "");
     setDescription(initialProduct?.description ?? "");
@@ -220,7 +220,7 @@ export default function ProductFormModal({
             {mode === "add" ? "Add Product" : "Edit Listing"}
           </DialogTitle>
           <DialogDescription>
-            Listings on AgroCylo can be priced in STRK or USDC and are
+            Listings on AgroCylo can be priced in XLM or USDC and are
             settled by the Soroban escrow when a buyer confirms receipt.
           </DialogDescription>
         </DialogHeader>

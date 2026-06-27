@@ -130,6 +130,50 @@ Enable swift, fair, and transparent trade
     * Writing documentation or tests
     * Please open an issue or submit a pull request.
 
+### 🔌 API Documentation
+
+#### Product Endpoints
+
+The backend server (`/agro-production/server`) exposes product endpoints for the marketplace.
+
+**Get all products**
+```
+GET /api/v1/products
+```
+
+**Get product by ID**
+```
+GET /api/v1/products/:id
+```
+
+**Running locally**
+
+1. Navigate to the server directory:
+   ```bash
+   cd agro-production/server
+   ```
+
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+3. Start the development server:
+   ```bash
+   npm run dev
+   ```
+
+   The server runs on `http://localhost:3001` by default.
+
+**Environment Variables**
+
+For local development, no specific environment variables are required for product endpoints. The server uses in-memory seed data.
+
+For production, ensure the following are configured (see `.env.example`):
+- `NODE_ENV`: Set to `production`
+- `DATABASE_URL`: Supabase PostgreSQL connection string (for production data)
+- `CORS_ORIGINS`: Comma-separated list of allowed origins
+
 ### Contact 
 * [Telegram](https://t.me/Tiya_jd)
 * [X](https://x.com/Tiya_JD)

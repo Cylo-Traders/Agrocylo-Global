@@ -19,7 +19,7 @@ export interface NetworkConfig {
 
 /** Currency → token contract ID map, validated once at module load. */
 export const TOKEN_CONTRACT_IDS: Record<string, string> = {
-  STRK: process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID_STRK ?? "",
+  XLM: process.env.NEXT_PUBLIC_NATIVE_TOKEN_CONTRACT_ID ?? "",
   USDC: process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID_USDC ?? "",
 };
 

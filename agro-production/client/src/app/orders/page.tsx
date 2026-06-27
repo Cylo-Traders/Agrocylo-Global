@@ -3,10 +3,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useWallet } from "@/context/WalletContext";
-import { fetchOrdersByBuyer, fetchOrdersByFarmer } from "@/services/orderService";
+import { fetchOrdersByBuyer, fetchOrdersByFarmer, confirmOrderReceipt } from "@/services/orderService";
 import { formatAmount } from "@/services/campaignService";
 import { isNetworkError } from "@/lib/apiClient";
 import { OrderTableSkeleton, ButtonSpinner } from "@/components/Skeletons";
+import ConfirmOrderModal from "@/components/ui/ConfirmOrderModal";
 import type { Order, OrderStatus } from "@/types";
 
 const STATUS_STYLES: Record<OrderStatus, string> = {
@@ -14,36 +15,109 @@ const STATUS_STYLES: Record<OrderStatus, string> = {
   CONFIRMED: "bg-primary-100 text-primary-700",
 };
 
-function OrderRow({ order }: { order: Order }) {
+function OrderRow({
+  order,
+  buyerAddress,
+  isBuyerTab,
+  onConfirmClick,
+}: {
+  order: Order;
+  buyerAddress?: string;
+  isBuyerTab: boolean;
+  onConfirmClick: (order: Order) => void;
+}) {
+  const canConfirm =
+    isBuyerTab &&
+    buyerAddress === order.buyerAddress &&
+    order.status === "PENDING";
+
   return (
     <tr className="border-b border-border last:border-0 hover:bg-surface text-sm">
       <td className="px-4 py-3 font-mono text-xs text-muted">{order.id.slice(0, 8)}…</td>
       <td className="px-4 py-3 font-mono text-xs text-muted">{order.campaignId.slice(0, 8)}…</td>
       <td className="px-4 py-3 font-medium text-foreground text-right">{formatAmount(order.amount)} XLM</td>
-      <td className="px-4 py-3 text-center"><span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_STYLES[order.status]}`}>{order.status}</span></td>
-      <td className="px-4 py-3 text-right text-muted">{new Date(order.createdAt).toLocaleDateString()}</td>
-      <td className="px-4 py-3 text-right"><Link href={`/campaigns/${order.campaignId}`} className="text-xs text-primary-600 hover:underline" aria-label={`View campaign for order ${order.id.slice(0, 8)}…`}>View Campaign</Link></td>
+      <td className="px-4 py-3 text-center">
+        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_STYLES[order.status]}`}>
+          {order.status}
+        </span>
+      </td>
+      <td className="px-4 py-3 text-right text-muted">
+        {new Date(order.createdAt).toLocaleDateString()}
+      </td>
+      <td className="px-4 py-3 text-right space-x-2">
+        <Link
+          href={`/campaigns/${order.campaignId}`}
+          className="text-xs text-primary-600 hover:underline"
+          aria-label={`View campaign for order ${order.id.slice(0, 8)}…`}
+        >
+          View Campaign
+        </Link>
+        {canConfirm && (
+          <button
+            onClick={() => onConfirmClick(order)}
+            className="text-xs text-primary-600 hover:underline font-medium"
+            aria-label={`Confirm receipt for order ${order.id.slice(0, 8)}…`}
+          >
+            Confirm Receipt
+          </button>
+        )}
+      </td>
     </tr>
   );
 }
 
-function OrderTable({ orders, emptyText, label }: { orders: Order[]; emptyText: string; label: string }) {
-  if (orders.length === 0) return <p className="text-sm text-muted py-4 text-center">{emptyText}</p>;
+function OrderTable({
+  orders,
+  emptyText,
+  label,
+  buyerAddress,
+  isBuyerTab,
+  onConfirmClick,
+}: {
+  orders: Order[];
+  emptyText: string;
+  label: string;
+  buyerAddress?: string;
+  isBuyerTab: boolean;
+  onConfirmClick: (order: Order) => void;
+}) {
+  if (orders.length === 0)
+    return <p className="text-sm text-muted py-4 text-center">{emptyText}</p>;
   return (
     <div className="border border-border rounded-xl overflow-hidden">
       <table className="w-full text-sm" aria-label={label}>
         <caption className="sr-only">{label}</caption>
         <thead className="bg-surface border-b border-border">
           <tr>
-            <th scope="col" className="text-left px-4 py-2 text-muted font-medium">Order ID</th>
-            <th scope="col" className="text-left px-4 py-2 text-muted font-medium">Campaign</th>
-            <th scope="col" className="text-right px-4 py-2 text-muted font-medium">Amount</th>
-            <th scope="col" className="text-center px-4 py-2 text-muted font-medium">Status</th>
-            <th scope="col" className="text-right px-4 py-2 text-muted font-medium">Date</th>
+            <th scope="col" className="text-left px-4 py-2 text-muted font-medium">
+              Order ID
+            </th>
+            <th scope="col" className="text-left px-4 py-2 text-muted font-medium">
+              Campaign
+            </th>
+            <th scope="col" className="text-right px-4 py-2 text-muted font-medium">
+              Amount
+            </th>
+            <th scope="col" className="text-center px-4 py-2 text-muted font-medium">
+              Status
+            </th>
+            <th scope="col" className="text-right px-4 py-2 text-muted font-medium">
+              Date
+            </th>
             <th scope="col" className="px-4 py-2" />
           </tr>
         </thead>
-        <tbody>{orders.map((o) => <OrderRow key={o.id} order={o} />)}</tbody>
+        <tbody>
+          {orders.map((o) => (
+            <OrderRow
+              key={o.id}
+              order={o}
+              buyerAddress={buyerAddress}
+              isBuyerTab={isBuyerTab}
+              onConfirmClick={onConfirmClick}
+            />
+          ))}
+        </tbody>
       </table>
     </div>
   );
@@ -58,18 +132,50 @@ export default function OrdersPage() {
   const [farmerOrders, setFarmerOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
 
-  useEffect(() => {
+  const refreshOrders = async () => {
     if (!address) return;
     setLoading(true);
     setError(null);
-    const buyerFetch = fetchOrdersByBuyer(address).catch(() => [] as Order[]);
-    const farmerFetch = fetchOrdersByFarmer(address).catch(() => [] as Order[]);
-    Promise.all([buyerFetch, farmerFetch])
-      .then(([b, f]) => { setBuyerOrders(b); setFarmerOrders(f); })
-      .catch((err: unknown) => setError(isNetworkError(err) ? "Network error — check your connection and try again" : err instanceof Error ? err.message : "Failed to load orders"))
-      .finally(() => setLoading(false));
+    try {
+      const [b, f] = await Promise.all([
+        fetchOrdersByBuyer(address).catch(() => [] as Order[]),
+        fetchOrdersByFarmer(address).catch(() => [] as Order[]),
+      ]);
+      setBuyerOrders(b);
+      setFarmerOrders(f);
+    } catch (err: unknown) {
+      setError(
+        isNetworkError(err)
+          ? "Network error — check your connection and try again"
+          : err instanceof Error
+            ? err.message
+            : "Failed to load orders"
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!address) return;
+    void refreshOrders();
   }, [address]);
+
+  const handleConfirmReceipt = async (orderId: string) => {
+    if (!address) return;
+    try {
+      await confirmOrderReceipt(orderId, address);
+      // Refresh orders to update status
+      await refreshOrders();
+      setConfirmModalOpen(false);
+      setSelectedOrder(null);
+    } catch (err) {
+      throw err;
+    }
+  };
 
   if (!connected) {
     return (
@@ -102,9 +208,47 @@ export default function OrdersPage() {
         </div>
       )}
       {loading && <OrderTableSkeleton rows={3} />}
-      {!loading && error && (<div className="border border-red-200 bg-red-50 rounded-xl p-4 text-red-700 text-sm" role="alert">{error}</div>)}
-      {!loading && !error && tab === "buyer" && (<OrderTable orders={buyerOrders} emptyText="No orders found. Browse campaigns to place your first order." label="Buyer orders" />)}
-      {!loading && !error && tab === "farmer" && (<OrderTable orders={farmerOrders} emptyText="No orders on your campaigns yet." label="Farmer orders" />)}
+      {!loading && error && (
+        <div
+          className="border border-red-200 bg-red-50 rounded-xl p-4 text-red-700 text-sm"
+          role="alert"
+        >
+          {error}
+        </div>
+      )}
+      {!loading && !error && tab === "buyer" && (
+        <OrderTable
+          orders={buyerOrders}
+          emptyText="No orders found. Browse campaigns to place your first order."
+          label="Buyer orders"
+          buyerAddress={address ?? undefined}
+          isBuyerTab={true}
+          onConfirmClick={(order) => {
+            setSelectedOrder(order);
+            setConfirmModalOpen(true);
+          }}
+        />
+      )}
+      {!loading && !error && tab === "farmer" && (
+        <OrderTable
+          orders={farmerOrders}
+          emptyText="No orders on your campaigns yet."
+          label="Farmer orders"
+          buyerAddress={address ?? undefined}
+          isBuyerTab={false}
+          onConfirmClick={() => {}}
+        />
+      )}
+
+      <ConfirmOrderModal
+        open={confirmModalOpen}
+        order={selectedOrder}
+        onClose={() => {
+          setConfirmModalOpen(false);
+          setSelectedOrder(null);
+        }}
+        onConfirm={handleConfirmReceipt}
+      />
     </div>
   );
 }

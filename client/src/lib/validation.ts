@@ -60,7 +60,7 @@ export const categorySchema = z.enum([
   "Other",
 ]);
 
-export const currencySchema = z.enum(["STRK", "USDC"]);
+export const currencySchema = z.enum(["XLM", "USDC"]);
 
 export const unitSchema = z.enum(["kg", "bag", "crate", "piece", "litre", "dozen", "bunch"]);
 

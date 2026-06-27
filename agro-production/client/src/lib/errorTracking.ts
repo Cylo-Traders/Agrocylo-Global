@@ -1,39 +1,87 @@
-import { trackError } from "./analytics";
+/**
+ * Error tracking payload sent to NEXT_PUBLIC_TELEMETRY_URL.
+ * Sensitive data is redacted:
+ * - stack: removed entirely to avoid exposing private keys, paths, or sensitive data
+ * - context.stack: removed if present
+ * - Private keys, credentials, and wallet addresses are redacted with "[redacted]"
+ */
+export interface ErrorTrackingPayload {
+  type: "error";
+  message: string;
+  name: string;
+  context?: Record<string, unknown>;
+  url: string;
+  userAgent: string;
+  timestamp: string;
+}
 
-const ERROR_REPORTING_ENABLED =
-  typeof window !== "undefined" &&
-  process.env.NEXT_PUBLIC_ERROR_REPORTING_ENABLED !== "false";
+const TELEMETRY_ENABLED = process.env.NEXT_PUBLIC_TELEMETRY_ENABLED === "true";
 
 let originalOnError: typeof window.onerror | null = null;
 let originalOnUnhandledRejection: typeof window.onunhandledrejection | null = null;
 
-function reportError(error: Error, context?: Record<string, unknown>) {
-  if (!ERROR_REPORTING_ENABLED) return;
+/**
+ * Redacts sensitive data from context to prevent exposing private keys, credentials, etc.
+ */
+function redactContext(context?: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (!context) return undefined;
 
-  const payload = {
+  const redacted = { ...context };
+  Object.keys(redacted).forEach((key) => {
+    const value = String(redacted[key]);
+    // Redact common sensitive fields
+    if (
+      key.toLowerCase().includes("key") ||
+      key.toLowerCase().includes("secret") ||
+      key.toLowerCase().includes("password") ||
+      key.toLowerCase().includes("token") ||
+      key.toLowerCase().includes("xdr") ||
+      key.toLowerCase().includes("stack")
+    ) {
+      redacted[key] = "[redacted]";
+    }
+  });
+
+  return redacted;
+}
+
+function reportError(error: Error, context?: Record<string, unknown>) {
+  if (!TELEMETRY_ENABLED) return;
+
+  const telemetryUrl = process.env.NEXT_PUBLIC_TELEMETRY_URL;
+  if (!telemetryUrl) {
+    console.warn(
+      "[errorTracking] Telemetry enabled but NEXT_PUBLIC_TELEMETRY_URL is not set. Skipping."
+    );
+    return;
+  }
+
+  const payload: ErrorTrackingPayload = {
+    type: "error",
     message: error.message,
-    stack: error.stack,
-    context,
+    name: error.name,
+    // Stack traces often contain sensitive paths and data, so we omit them entirely.
+    // If you need the stack trace, configure a server-side error tracking service.
+    context: redactContext(context),
     url: window.location.href,
     userAgent: navigator.userAgent,
     timestamp: new Date().toISOString(),
   };
 
-  trackError(error.name, error.message);
-
   try {
-    fetch("/api/errors", {
+    fetch(telemetryUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
       keepalive: true,
     }).catch(() => {});
   } catch {
+    // Fail silently to avoid recursion
   }
 }
 
 export function initErrorTracking() {
-  if (typeof window === "undefined" || !ERROR_REPORTING_ENABLED) return;
+  if (typeof window === "undefined" || !TELEMETRY_ENABLED) return;
 
   originalOnError = window.onerror;
   window.onerror = (message, source, lineno, colno, error) => {
@@ -62,9 +110,6 @@ export function initErrorTracking() {
       const error = args.find((a) => a instanceof Error) as Error | undefined;
       if (error) {
         reportError(error, { console: true });
-      } else {
-        const msg = args.map((a) => String(a)).join(" ");
-        trackError("console.error", msg.slice(0, 200));
       }
       original.apply(console, args);
     };

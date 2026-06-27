@@ -30,7 +30,6 @@ describe("signAndSubmitTransaction", () => {
   it("returns success when signer and rpc succeed", async () => {
     (globalThis as any).freighterApi = { signTransaction: async (x: string) => x };
     const res = await signAndSubmitTransaction("XDR_PLACEHOLDER");
-    console.log('signTx result:', res);
     expect(res.success).toBe(true);
     expect(res.txHash).toBe("TXHASH");
   });

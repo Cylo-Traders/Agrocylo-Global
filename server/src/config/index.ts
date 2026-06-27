@@ -48,6 +48,7 @@ validateContractWatcherConfig(env.RUN_CONTRACT_WATCHER, env.CONTRACT_ID);
 export const config = {
   port: env.PORT,
   nodeEnv: env.NODE_ENV,
+  allowedOrigins: env.ALLOWED_ORIGINS.split(",").map(origin => origin.trim()),
   redisUrl: env.REDIS_URL,
   runWorkers: env.RUN_WORKERS,
   runContractWatcher: env.RUN_CONTRACT_WATCHER,

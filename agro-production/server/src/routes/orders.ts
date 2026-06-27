@@ -119,6 +119,30 @@ router.get(
   },
 );
 
+// PUT /orders/:id — update txHash after on-chain confirmation
+router.put(
+  "/orders/:id",
+  writeLimiter,
+  validateParams(OrderIdParamSchema),
+  validateBody(z.object({ txHash: z.string() })),
+  validateResponse(OrderSchema),
+  async (req: Request, res: Response) => {
+    const order = await prisma.order.findUnique({ where: { id: req.params.id } });
+    if (!order) {
+      problemDetail(res, req, 404, "Order Not Found", `No order with id ${req.params.id}`);
+      return;
+    }
+
+    const updated = await prisma.order.update({
+      where: { id: order.id },
+      data: { txHash: req.body.txHash },
+    });
+
+    jsonValidated(res, OrderSchema, 200, updated);
+  },
+);
+
+// PATCH /orders/:id/confirm
 // PATCH /orders/:id/confirm — requires authenticated session; buyerAddress derived from session
 router.patch(
   "/orders/:id/confirm",
