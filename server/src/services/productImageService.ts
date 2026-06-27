@@ -1,6 +1,6 @@
 import sharp from 'sharp';
 import { randomUUID } from 'node:crypto';
-import { query } from '../config/database.js';
+import { prisma } from '../config/database.js';
 import { getSupabaseAdmin } from '../config/supabase.js';
 import { config } from '../config/index.js';
 
@@ -52,14 +52,16 @@ function parseProductPathFromUrl(imageUrl: string | null): string | null {
 }
 
 async function getProduct(productId: string): Promise<ProductRow | null> {
-  const result = await query<ProductRow>(
-    `select id::text as id, farmer_wallet, image_url
-     from public.products
-     where id = $1::uuid
-     limit 1`,
-    [productId],
-  );
-  return result.rows[0] ?? null;
+  const product = await prisma.product.findUnique({
+    where: { id: productId },
+    select: { id: true, farmerWallet: true, imageUrl: true },
+  });
+  if (!product) return null;
+  return {
+    id: product.id,
+    farmer_wallet: product.farmerWallet,
+    image_url: product.imageUrl,
+  };
 }
 
 async function assertProductOwnership(productId: string, walletAddress: string): Promise<ProductRow> {
@@ -149,12 +151,10 @@ export async function uploadProductImage(params: {
   const nextImageUrl = publicUrlForPath(uploadedPaths.thumb800Path);
 
   try {
-    await query(
-      `update public.products
-       set image_url = $1
-       where id = $2::uuid`,
-      [nextImageUrl, product.id],
-    );
+    await prisma.product.update({
+      where: { id: product.id },
+      data: { imageUrl: nextImageUrl },
+    });
   } catch (error) {
     await supabaseAdmin.storage
       .from(config.productImagesBucket)
@@ -197,10 +197,8 @@ export async function deleteProductImage(params: {
     }
   }
 
-  await query(
-    `update public.products
-     set image_url = $1
-     where id = $2::uuid`,
-    [config.productImagePlaceholderUrl, product.id],
-  );
+  await prisma.product.update({
+    where: { id: product.id },
+    data: { imageUrl: config.productImagePlaceholderUrl },
+  });
 }

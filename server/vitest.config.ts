@@ -6,6 +6,7 @@ export default defineConfig({
       DATABASE_URL: "postgresql://test:test@localhost:5432/test",
       SUPABASE_URL: "https://test.supabase.co",
       SUPABASE_ANON_KEY: "test-anon-key",
+      JWT_SECRET: "test-secret-at-least-32-chars-long!!",
     },
     coverage: {
       provider: "v8",

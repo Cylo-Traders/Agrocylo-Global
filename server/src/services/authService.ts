@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import { Keypair } from "@stellar/stellar-sdk";
-import { query } from "../config/database.js";
+import { prisma } from "../config/database.js";
 import { ApiError } from "../http/errors.js";
 import { config } from "../config/index.js";
 
@@ -31,13 +31,11 @@ export async function generateNonce(
 
   const nonce = crypto.randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + NONCE_TTL_MS);
-  await query(
-    `insert into public."Nonce" (id, "walletAddress", nonce, "expiresAt")
-     values (gen_random_uuid(), $1, $2, $3)
-     on conflict ("walletAddress") do update
-     set nonce = $2, "expiresAt" = $3, "createdAt" = now()`,
-    [walletAddress, nonce, expiresAt],
-  );
+  await prisma.nonce.upsert({
+    where: { walletAddress },
+    create: { walletAddress, nonce, expiresAt },
+    update: { nonce, expiresAt, createdAt: new Date() },
+  });
   return { nonce };
 }
 
@@ -49,12 +47,7 @@ export async function verifySignature(
     throw new ApiError(400, "Bad Request", "Invalid Stellar wallet address");
   }
 
-  const result = await query(
-    `select nonce, "expiresAt" from public."Nonce" where "walletAddress" = $1`,
-    [walletAddress],
-  );
-
-  const row = result.rows[0];
+  const row = await prisma.nonce.findUnique({ where: { walletAddress } });
   if (!row)
     throw new ApiError(401, "Unauthorized", "No nonce found for this wallet");
   if (new Date(row.expiresAt) < new Date()) {
@@ -72,16 +65,15 @@ export async function verifySignature(
   }
 
   // One-time nonce: delete immediately after successful verification
-  await query(`delete from public."Nonce" where "walletAddress" = $1`, [walletAddress]);
+  await prisma.nonce.delete({ where: { walletAddress } });
 
   const accessToken = jwt.sign({ walletAddress, role: 'USER' }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
   const refreshToken = crypto.randomBytes(40).toString('hex');
   const refreshExpiresAt = new Date(Date.now() + REFRESH_TTL_MS);
 
-  await query(
-    `insert into public."RefreshToken" (id, "walletAddress", token, "expiresAt") values (gen_random_uuid(), $1, $2, $3)`,
-    [walletAddress, refreshToken, refreshExpiresAt],
-  );
+  await prisma.refreshToken.create({
+    data: { walletAddress, token: refreshToken, expiresAt: refreshExpiresAt },
+  });
 
   return { accessToken, refreshToken };
 }
@@ -89,20 +81,15 @@ export async function verifySignature(
 export async function refreshAccessToken(
   refreshToken: string,
 ): Promise<{ accessToken: string; refreshToken: string }> {
-  const result = await query(
-    `select "walletAddress", "expiresAt" from public."RefreshToken" where token = $1`,
-    [refreshToken],
-  );
-
-  const row = result.rows[0];
+  const row = await prisma.refreshToken.findUnique({ where: { token: refreshToken } });
   if (!row) throw new ApiError(401, "Unauthorized", "Invalid refresh token");
   if (new Date(row.expiresAt) < new Date()) {
-    await query(`delete from public."RefreshToken" where token = $1`, [refreshToken]);
+    await prisma.refreshToken.delete({ where: { token: refreshToken } });
     throw new ApiError(401, "Unauthorized", "Refresh token expired");
   }
 
   // Rotate: invalidate the used token and issue a fresh one
-  await query(`delete from public."RefreshToken" where token = $1`, [refreshToken]);
+  await prisma.refreshToken.delete({ where: { token: refreshToken } });
 
   const accessToken = jwt.sign({ walletAddress: row.walletAddress, role: 'USER' }, JWT_SECRET, {
     expiresIn: JWT_EXPIRES_IN,
@@ -110,14 +97,13 @@ export async function refreshAccessToken(
   const newRefreshToken = crypto.randomBytes(40).toString('hex');
   const refreshExpiresAt = new Date(Date.now() + REFRESH_TTL_MS);
 
-  await query(
-    `insert into public."RefreshToken" (id, "walletAddress", token, "expiresAt") values (gen_random_uuid(), $1, $2, $3)`,
-    [row.walletAddress, newRefreshToken, refreshExpiresAt],
-  );
+  await prisma.refreshToken.create({
+    data: { walletAddress: row.walletAddress, token: newRefreshToken, expiresAt: refreshExpiresAt },
+  });
 
   return { accessToken, refreshToken: newRefreshToken };
 }
 
 export async function logout(refreshToken: string): Promise<void> {
-  await query(`delete from public."RefreshToken" where token = $1`, [refreshToken]);
+  await prisma.refreshToken.deleteMany({ where: { token: refreshToken } });
 }
