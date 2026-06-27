@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import {
   fetchUserInvestments,
   claimableReturn,
+  claimReturns,
   type InvestmentWithCampaign,
 } from "@/services/investmentService";
 import { formatAmount } from "@/services/campaignService";
@@ -104,7 +105,7 @@ export default function InvestmentDashboard({ investorAddress }: Props) {
       ) : (
         <div className="space-y-3" aria-label="Investments list">
           {investments.map((inv) => (
-            <InvestmentRow key={inv.id} investment={inv} />
+            <InvestmentRow key={inv.id} investment={inv} onInvestmentUpdated={load} />
           ))}
         </div>
       )}
@@ -139,9 +140,13 @@ function SummaryCard({
   );
 }
 
-function InvestmentRow({ investment }: { investment: InvestmentWithCampaign }) {
+function InvestmentRow({ investment, onInvestmentUpdated }: { investment: InvestmentWithCampaign; onInvestmentUpdated: () => void }) {
   const { campaign } = investment;
   const claimable = claimableReturn(investment);
+  const [claiming, setClaiming] = useState(false);
+  const [claimError, setClaimError] = useState<string | null>(null);
+  const [claimed, setClaimed] = useState(false);
+
   const statusColors: Record<string, string> = {
     FUNDING: "text-warning",
     FUNDED: "text-primary-600",
@@ -151,6 +156,37 @@ function InvestmentRow({ investment }: { investment: InvestmentWithCampaign }) {
     FAILED: "text-error",
     DISPUTED: "text-error",
   };
+
+  const handleClaim = useCallback(async () => {
+    if (!campaign.onChainId || campaign.onChainId === "pending" || claiming || claimed) return;
+
+    setClaiming(true);
+    setClaimError(null);
+    try {
+      const result = await claimReturns(
+        investment.investorAddress,
+        investment.campaignId,
+        campaign.onChainId,
+      );
+
+      if (!result.success) {
+        if (result.error?.includes("AlreadyClaimed")) {
+          setClaimError("Already claimed");
+        } else {
+          setClaimError(result.error ?? "Failed to claim returns");
+        }
+      } else {
+        setClaimed(true);
+        onInvestmentUpdated();
+      }
+    } catch (error) {
+      setClaimError(error instanceof Error ? error.message : "Failed to claim returns");
+    } finally {
+      setClaiming(false);
+    }
+  }, [campaign.onChainId, claiming, claimed, investment.investorAddress, investment.campaignId, onInvestmentUpdated]);
+
+  const canClaim = campaign.status === "SETTLED" && claimable > 0n && !claimed;
 
   return (
     <div className="bg-surface border border-border rounded-xl p-5 flex flex-col sm:flex-row sm:items-center gap-4">
@@ -178,13 +214,31 @@ function InvestmentRow({ investment }: { investment: InvestmentWithCampaign }) {
         )}
       </div>
 
-      <span
-        className={`text-xs font-semibold uppercase tracking-wide ${
-          statusColors[campaign.status] ?? "text-muted"
-        }`}
-      >
-        {campaign.status.replace("_", " ")}
-      </span>
+      <div className="flex items-center gap-2">
+        {canClaim && (
+          <button
+            onClick={handleClaim}
+            disabled={claiming}
+            aria-label={claiming ? "Claiming returns" : "Claim returns"}
+            className="whitespace-nowrap bg-success text-white px-3 py-1.5 rounded text-xs font-medium hover:bg-green-600 disabled:opacity-50 transition-colors"
+          >
+            {claiming ? "Claiming…" : "Claim"}
+          </button>
+        )}
+        {claimError && (
+          <p className="text-xs text-error" role="alert">{claimError}</p>
+        )}
+        {claimed && (
+          <p className="text-xs text-success font-medium">Claimed ✓</p>
+        )}
+        <span
+          className={`text-xs font-semibold uppercase tracking-wide ${
+            statusColors[campaign.status] ?? "text-muted"
+          }`}
+        >
+          {campaign.status.replace("_", " ")}
+        </span>
+      </div>
     </div>
   );
 }

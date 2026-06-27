@@ -8,13 +8,16 @@ import {
   saveWalletSession,
 } from "@/lib/walletSession";
 
+export type WalletState = "unavailable" | "disconnected" | "wrong_network" | "connected";
+
 interface WalletContextType {
   address: string | null;
   connected: boolean;
   loading: boolean;
   reconnecting: boolean;
   error: string | null;
-  connect: () => Promise<void>;
+  walletState: WalletState;
+  connect: () => Promise<string | null>;
   disconnect: () => void;
 }
 
@@ -24,7 +27,8 @@ const defaultCtx: WalletContextType = {
   loading: false,
   reconnecting: false,
   error: null,
-  connect: async () => {},
+  walletState: "disconnected",
+  connect: async () => null,
   disconnect: () => {},
 };
 
@@ -94,10 +98,13 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       const pub = await getFreighterPublicKey();
       if (!pub) throw new Error("Could not get public key from Freighter");
       applyConnection(pub);
+      return pub;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const errMsg = err instanceof Error ? err.message : String(err);
+      setError(errMsg);
       setConnected(false);
       setAddress(null);
+      return null;
     } finally {
       setLoading(false);
     }
@@ -107,9 +114,15 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     clearConnection();
   }, [clearConnection]);
 
+  const walletState: WalletState = !connected
+    ? address
+      ? "wrong_network"
+      : "disconnected"
+    : "connected";
+
   return (
     <WalletContext.Provider
-      value={{ address, connected, loading, reconnecting, error, connect, disconnect }}
+      value={{ address, connected, loading, reconnecting, error, walletState, connect, disconnect }}
     >
       {children}
     </WalletContext.Provider>

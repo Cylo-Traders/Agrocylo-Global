@@ -1,6 +1,15 @@
 "use client";
 
 import { useState } from 'react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { useMessaging } from '../../hooks/useMessaging';
 import ConversationList from '../../components/ConversationList';
 import ChatWindow from '../../components/ChatWindow';
@@ -14,6 +23,7 @@ export default function MessagesPage({ initialConversationId }: MessagesPageProp
   const [activeConversationId, setActiveConversationId] = useState<string | undefined>(
     initialConversationId,
   );
+  const [blockConfirmUser, setBlockConfirmUser] = useState<{ id: string; name: string } | null>(null);
   const {
     conversations,
     messages,
@@ -34,9 +44,13 @@ export default function MessagesPage({ initialConversationId }: MessagesPageProp
 
   const handleBlock = async () => {
     if (!currentConversation || !otherUser) return;
-    if (confirm(`Block ${otherUser.name}? You won't receive messages from them.`)) {
-      await blockUser(currentConversation.id, otherUser.id);
-    }
+    setBlockConfirmUser({ id: otherUser.id, name: otherUser.name });
+  };
+
+  const confirmBlock = async () => {
+    if (!currentConversation || !blockConfirmUser) return;
+    await blockUser(currentConversation.id, blockConfirmUser.id);
+    setBlockConfirmUser(null);
   };
 
   const handleMute = async () => {
@@ -95,6 +109,32 @@ export default function MessagesPage({ initialConversationId }: MessagesPageProp
           </div>
         )}
       </div>
+
+      <Dialog
+        open={blockConfirmUser !== null}
+        onOpenChange={(open) => !open && setBlockConfirmUser(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Block User</DialogTitle>
+            <DialogDescription>
+              Block {blockConfirmUser?.name}? You won't receive messages from
+              them.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setBlockConfirmUser(null)}
+            >
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmBlock}>
+              Block
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

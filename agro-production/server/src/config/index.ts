@@ -1,7 +1,6 @@
 import 'dotenv/config';
 
 const REQUIRED_IN_PRODUCTION = [
-  'DATABASE_URL',
   'RPC_URL',
   'PRODUCTION_CONTRACT_ID',
   'ESCROW_CONTRACT_ID',
@@ -41,7 +40,7 @@ export const config = {
   nodeEnv: getEnv('NODE_ENV') ?? 'development',
   logLevel: getEnv('LOG_LEVEL') ?? 'debug',
 
-  databaseUrl: isProduction ? requireEnv('DATABASE_URL') : (getEnv('DATABASE_URL') ?? ''),
+  databaseUrl: requireEnv('DATABASE_URL'),
 
   rpcUrl: isProduction
     ? requireEnv('RPC_URL')

@@ -1,4 +1,3 @@
-import { Prisma } from "@prisma/client";
 import { prisma } from "../config/database.js";
 import { ApiError } from "../http/errors.js";
 import { z } from "zod";
@@ -16,11 +15,11 @@ const demandBodySchema = z.object({
 });
 
 async function assertBuyerProfile(wallet: string): Promise<void> {
-  const rows = await prisma.$queryRaw<{ role: string }[]>(
-    Prisma.sql`SELECT role::text AS role FROM "Profile" WHERE wallet_address = ${wallet} LIMIT 1`,
-  );
-  const row = rows[0];
-  if (!row) {
+  const profile = await prisma.profile.findUnique({
+    where: { wallet_address: wallet },
+    select: { role: true },
+  });
+  if (!profile) {
     throw new ApiError(
       404,
       "Not Found",
@@ -28,7 +27,7 @@ async function assertBuyerProfile(wallet: string): Promise<void> {
       "https://cylos.io/errors/not-found",
     );
   }
-  if (row.role !== "BUYER") {
+  if (profile.role !== "BUYER") {
     throw new ApiError(
       403,
       "Forbidden",

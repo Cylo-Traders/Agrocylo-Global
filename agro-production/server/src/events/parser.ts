@@ -26,14 +26,13 @@ export class ProductionEventParser {
     const verb: string = String(topics[1]);
     const action = `${namespace}.${verb}` as EventAction;
 
-    const data: unknown[] = (() => {
-      try {
-        const native = scValToNative(xdr.ScVal.fromXDR(raw.value, "base64"));
-        return Array.isArray(native) ? native : [native];
-      } catch {
-        return [];
-      }
-    })();
+    let data: unknown[];
+    try {
+      const native = scValToNative(xdr.ScVal.fromXDR(raw.value, "base64"));
+      data = Array.isArray(native) ? native : [native];
+    } catch {
+      throw new Error(`Event ${raw.id}: malformed value XDR`);
+    }
 
     const base = {
       ledger: raw.ledger,

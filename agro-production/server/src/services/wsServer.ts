@@ -11,6 +11,7 @@ export type WsEventType =
   | "campaign.created"
   | "campaign.invested"
   | "campaign.settled"
+  | "investment.indexed"
   | "order.created"
   | "order.confirmed";
 
@@ -116,14 +117,13 @@ export class WsServer {
     });
   }
 }
-
 let activeServer: WsServer | null = null;
 
 export function attachWebSocketServer(server: Server): void {
   if (activeServer) {
     throw new Error("WebSocket server is already attached");
   }
-  activeServer = new WsServer(server);
+  activeServer = new WsServer(server, "/ws");
   logger.info("WebSocket server attached at /ws");
 }
 
@@ -131,15 +131,14 @@ export function broadcast(type: WsEventType, payload: unknown): void {
   activeServer?.broadcast(type, payload);
 }
 
-export async function closeWebSocketServer(): Promise<void> {
-  if (!activeServer) {
-    return;
-  }
-  await activeServer.close();
-  activeServer = null;
-  logger.info("WebSocket server closed");
+export function getWsClientCount(): number {
+  return activeServer?.clientCount ?? 0;
 }
 
-export function getWebSocketServer(): WsServer | null {
-  return activeServer;
+export function closeWebSocketServer(): Promise<void> {
+  if (!activeServer) return Promise.resolve();
+  return activeServer.close().then(() => {
+    activeServer = null;
+    logger.info("WebSocket server closed");
+  });
 }

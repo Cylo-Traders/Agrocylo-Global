@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import {
   ChevronLeft,
   ChevronRight,
@@ -188,11 +189,16 @@ function GridCard({
         className="bg-secondary relative aspect-[4/3] overflow-hidden"
       >
         {product.image_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <Image
             src={product.image_url}
             alt={product.name}
-            className="size-full object-cover transition group-hover:scale-105"
+            fill
+            className="object-cover transition group-hover:scale-105"
+            sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 33vw"
+            loading="lazy"
+            onError={(e) => {
+              e.currentTarget.style.display = "none";
+            }}
           />
         ) : (
           <div className="grid size-full place-content-center text-5xl">🌱</div>
@@ -248,11 +254,16 @@ function ListRow({
         className="bg-secondary relative aspect-[4/3] w-full overflow-hidden rounded-xl sm:w-40 sm:shrink-0"
       >
         {product.image_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <Image
             src={product.image_url}
             alt={product.name}
-            className="size-full object-cover"
+            fill
+            className="object-cover"
+            sizes="(max-width: 768px) 100vw, 160px"
+            loading="lazy"
+            onError={(e) => {
+              e.currentTarget.style.display = "none";
+            }}
           />
         ) : (
           <div className="grid size-full place-content-center text-4xl">🌱</div>

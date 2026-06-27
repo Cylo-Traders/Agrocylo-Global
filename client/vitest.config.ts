@@ -4,6 +4,12 @@ import path from 'path';
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      'next/link': path.resolve(__dirname, './__mocks__/next-link.tsx'),
+      'next/navigation': path.resolve(__dirname, './__mocks__/next-navigation.ts'),
+    },
+  },
   test: {
     environment: 'jsdom',
     globals: true,

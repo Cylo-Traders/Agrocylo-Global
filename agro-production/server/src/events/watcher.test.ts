@@ -1,12 +1,31 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ---------------------------------------------------------------------------
-// Mocks — must be hoisted before any imports that pull these modules.
+// Mocks — vi.hoisted provides variables visible to both vi.mock factories and
+// test body without hoisting issues.
 // ---------------------------------------------------------------------------
+const {
+  mockEventCursorFindUnique,
+  mockEventCursorUpsert,
+  mockTransactionCreate,
+  mockGetEvents,
+  mockGetLatestLedger,
+} = vi.hoisted(() => ({
+  mockEventCursorFindUnique: vi.fn().mockResolvedValue(null),
+  mockEventCursorUpsert: vi.fn().mockResolvedValue({}),
+  mockTransactionCreate: vi.fn().mockResolvedValue({}),
+  mockGetEvents: vi.fn().mockResolvedValue({ events: [] }),
+  mockGetLatestLedger: vi.fn().mockResolvedValue({ sequence: 500 }),
+}));
+
 vi.mock("../db/client.js", () => ({
   prisma: {
+    eventCursor: {
+      findUnique: mockEventCursorFindUnique,
+      upsert: mockEventCursorUpsert,
+    },
     transaction: {
-      findFirst: vi.fn().mockResolvedValue(null),
+      create: mockTransactionCreate,
     },
   },
 }));
@@ -30,10 +49,6 @@ vi.mock("./persister.js", () => ({
   EventPersister: { persist: vi.fn().mockResolvedValue(undefined) },
 }));
 
-// rpc.Server mock
-const mockGetEvents = vi.fn().mockResolvedValue({ events: [] });
-const mockGetLatestLedger = vi.fn().mockResolvedValue({ sequence: 500 });
-
 vi.mock("@stellar/stellar-sdk", () => ({
   rpc: {
     Server: vi.fn().mockImplementation(() => ({
@@ -47,7 +62,6 @@ vi.mock("@stellar/stellar-sdk", () => ({
 // After all mocks are declared we can import the module under test.
 // ---------------------------------------------------------------------------
 import { startProductionWatcher } from "./watcher.js";
-import { prisma } from "../db/client.js";
 import { ProductionEventParser } from "./parser.js";
 import { EventPersister } from "./persister.js";
 import logger from "../config/logger.js";
@@ -62,59 +76,66 @@ describe("startProductionWatcher", () => {
     vi.useRealTimers();
   });
 
-  describe("checkpoint loading", () => {
-    it("resumes from the last persisted ledger when a transaction record exists", async () => {
-      vi.mocked(prisma.transaction.findFirst).mockResolvedValueOnce({
+  describe("cursor loading", () => {
+    it("resumes from the persisted cursor when an eventCursor record exists", async () => {
+      mockEventCursorFindUnique.mockResolvedValueOnce({
+        contractId: "CTEST",
         ledger: 300,
-      } as never);
+        eventIndex: 2,
+      });
 
       await startProductionWatcher();
 
       expect(logger.info).toHaveBeenCalledWith(
-        "Production watcher: resuming from persisted checkpoint",
-        expect.objectContaining({ ledger: 300 }),
+        "Production watcher: resuming from persisted cursor",
+        expect.objectContaining({ ledger: 300, eventIndex: 2 }),
       );
     });
 
-    it("falls back to the current ledger tip when no checkpoint exists", async () => {
-      vi.mocked(prisma.transaction.findFirst).mockResolvedValueOnce(null);
+    it("falls back to the current ledger tip when no cursor exists", async () => {
+      mockEventCursorFindUnique.mockResolvedValueOnce(null);
       mockGetLatestLedger.mockResolvedValueOnce({ sequence: 500 });
 
       await startProductionWatcher();
 
       expect(logger.info).toHaveBeenCalledWith(
-        "Production watcher: no checkpoint found, starting from current ledger",
+        "Production watcher: no cursor found, starting from current ledger",
         expect.objectContaining({ ledger: 500 }),
       );
     });
   });
 
-  describe("gap reconciliation", () => {
-    it("fast-forwards checkpoint when gap exceeds MAX_LEDGER_GAP", async () => {
-      // Checkpoint is at ledger 100; current tip is at 1200 → gap of 1100 > 1000.
-      vi.mocked(prisma.transaction.findFirst).mockResolvedValueOnce({
+  describe("gap handling", () => {
+    it("logs an error when gap exceeds MAX_BACKFILL_BATCH but continues", async () => {
+      mockEventCursorFindUnique.mockResolvedValueOnce({
+        contractId: "CTEST",
         ledger: 100,
-      } as never);
+        eventIndex: 0,
+      });
       mockGetLatestLedger.mockResolvedValue({ sequence: 1200 });
 
       await startProductionWatcher();
+      await vi.advanceTimersByTimeAsync(5_000);
 
-      expect(logger.warn).toHaveBeenCalledWith(
-        "Production watcher: large ledger gap detected, fast-forwarding checkpoint",
-        expect.objectContaining({ gap: 1100 }),
+      expect(logger.error).toHaveBeenCalledWith(
+        "Production watcher: large ledger gap detected, backfill may not cover all events",
+        expect.objectContaining({ gap: 1100, maxBatch: 100 }),
       );
     });
 
-    it("does not fast-forward when the gap is within MAX_LEDGER_GAP", async () => {
-      vi.mocked(prisma.transaction.findFirst).mockResolvedValueOnce({
+    it("does not log a gap warning when the gap is within MAX_BACKFILL_BATCH", async () => {
+      mockEventCursorFindUnique.mockResolvedValueOnce({
+        contractId: "CTEST",
         ledger: 490,
-      } as never);
+        eventIndex: 0,
+      });
       mockGetLatestLedger.mockResolvedValue({ sequence: 500 });
 
       await startProductionWatcher();
+      await vi.advanceTimersByTimeAsync(5_000);
 
-      expect(logger.warn).not.toHaveBeenCalledWith(
-        "Production watcher: large ledger gap detected, fast-forwarding checkpoint",
+      expect(logger.error).not.toHaveBeenCalledWith(
+        "Production watcher: large ledger gap detected, backfill may not cover all events",
         expect.anything(),
       );
     });
@@ -122,9 +143,11 @@ describe("startProductionWatcher", () => {
 
   describe("poll loop", () => {
     it("calls getEvents with the correct startLedger on the first tick", async () => {
-      vi.mocked(prisma.transaction.findFirst).mockResolvedValueOnce({
+      mockEventCursorFindUnique.mockResolvedValueOnce({
+        contractId: "CTEST",
         ledger: 300,
-      } as never);
+        eventIndex: 0,
+      });
       mockGetLatestLedger.mockResolvedValue({ sequence: 301 });
       mockGetEvents.mockResolvedValue({ events: [] });
 
@@ -136,10 +159,12 @@ describe("startProductionWatcher", () => {
       );
     });
 
-    it("advances the checkpoint after processing events", async () => {
-      vi.mocked(prisma.transaction.findFirst).mockResolvedValueOnce({
+    it("advances the cursor after processing events", async () => {
+      mockEventCursorFindUnique.mockResolvedValueOnce({
+        contractId: "CTEST",
         ledger: 300,
-      } as never);
+        eventIndex: 0,
+      });
       mockGetLatestLedger.mockResolvedValue({ sequence: 301 });
 
       const fakeEvent = {
@@ -157,16 +182,26 @@ describe("startProductionWatcher", () => {
       await startProductionWatcher();
       await vi.advanceTimersByTimeAsync(5_000);
 
-      // Second tick should use the advanced checkpoint (302 + 1 = 303).
+      // eventCursor.upsert should have been called with the max event ledger
+      expect(mockEventCursorUpsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { contractId: expect.any(String) },
+          create: expect.objectContaining({ ledger: 302, eventIndex: 0 }),
+          update: expect.objectContaining({ ledger: 302, eventIndex: 0 }),
+        }),
+      );
+
+      // Second tick should use the advanced ledger
       mockGetEvents.mockResolvedValueOnce({ events: [] });
+      mockGetLatestLedger.mockResolvedValue({ sequence: 302 });
       await vi.advanceTimersByTimeAsync(5_000);
 
       const calls = mockGetEvents.mock.calls;
-      expect(calls[1][0]).toMatchObject({ startLedger: 303 });
+      expect(calls[1][0]).toMatchObject({ startLedger: 302 });
     });
 
     it("logs and continues when getEvents throws", async () => {
-      vi.mocked(prisma.transaction.findFirst).mockResolvedValueOnce(null);
+      mockEventCursorFindUnique.mockResolvedValueOnce(null);
       mockGetLatestLedger.mockResolvedValue({ sequence: 500 });
       mockGetEvents.mockRejectedValueOnce(new Error("RPC timeout"));
 
@@ -180,7 +215,7 @@ describe("startProductionWatcher", () => {
     });
 
     it("skips events that fail to parse (tryParse returns null)", async () => {
-      vi.mocked(prisma.transaction.findFirst).mockResolvedValueOnce(null);
+      mockEventCursorFindUnique.mockResolvedValueOnce(null);
       mockGetLatestLedger.mockResolvedValue({ sequence: 500 });
 
       const badEvent = {
@@ -199,10 +234,12 @@ describe("startProductionWatcher", () => {
       await vi.advanceTimersByTimeAsync(5_000);
 
       expect(EventPersister.persist).not.toHaveBeenCalled();
+      // Cursor should still advance since parse-failed events don't block
+      expect(mockEventCursorUpsert).toHaveBeenCalled();
     });
 
     it("persists events that parse successfully", async () => {
-      vi.mocked(prisma.transaction.findFirst).mockResolvedValueOnce(null);
+      mockEventCursorFindUnique.mockResolvedValueOnce(null);
       mockGetLatestLedger.mockResolvedValue({ sequence: 500 });
 
       const rawEvent = {
@@ -236,8 +273,8 @@ describe("startProductionWatcher", () => {
       expect(EventPersister.persist).toHaveBeenCalledWith(parsedEvent);
     });
 
-    it("logs persist errors without crashing the poll loop", async () => {
-      vi.mocked(prisma.transaction.findFirst).mockResolvedValueOnce(null);
+    it("sends persist failures to dead-letter and does NOT advance cursor past them", async () => {
+      mockEventCursorFindUnique.mockResolvedValueOnce(null);
       mockGetLatestLedger.mockResolvedValue({ sequence: 500 });
 
       const rawEvent = {
@@ -261,15 +298,25 @@ describe("startProductionWatcher", () => {
 
       mockGetEvents.mockResolvedValueOnce({ events: [rawEvent] });
       vi.mocked(ProductionEventParser.tryParse).mockReturnValueOnce(parsedEvent);
-      vi.mocked(EventPersister.persist).mockRejectedValueOnce(new Error("write failed"));
+      vi.mocked(EventPersister.persist).mockRejectedValue(new Error("write failed"));
 
       await startProductionWatcher();
-      await vi.advanceTimersByTimeAsync(5_000);
+      // Advance past poll interval (5s) plus retry delays (~2.8s total)
+      await vi.advanceTimersByTimeAsync(10_000);
 
-      expect(logger.error).toHaveBeenCalledWith(
-        "EventPersister error",
-        expect.objectContaining({ error: expect.any(Error) }),
+      // Should record dead-letter
+      expect(mockTransactionCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            eventType: "dead_letter",
+            status: "failed",
+            ledger: 501,
+          }),
+        }),
       );
+
+      // Cursor should NOT have advanced past the failed event
+      expect(mockEventCursorUpsert).not.toHaveBeenCalled();
     });
   });
 });

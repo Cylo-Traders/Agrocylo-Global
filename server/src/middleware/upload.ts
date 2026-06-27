@@ -9,7 +9,12 @@ export const imageUpload = multer({
     fileSize: maxUploadBytes,
     files: 1,
   },
-  fileFilter: (_req, _file, cb) => cb(null, true),
+  fileFilter: (_req, file, cb) => {
+    if (!allowedMimeTypes.has(file.mimetype)) {
+      return cb(new Error('UNSUPPORTED_MIME_TYPE'));
+    }
+    cb(null, true);
+  },
 });
 
 export function isUnsupportedMimeType(file?: Express.Multer.File): boolean {

@@ -19,6 +19,11 @@ export function requireWallet(req: WalletRequest, res: Response, next: NextFunct
 
   const token = authHeader.slice(7); // Remove 'Bearer ' prefix
 
+  if (!config.jwtSecret) {
+    res.status(500).json({ message: 'Server configuration error: JWT secret is not set.' });
+    return;
+  }
+
   try {
     const decoded = jwt.verify(token, config.jwtSecret) as TokenPayload;
     if (!decoded.walletAddress) {

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import {
   DollarSign,
   Package,
@@ -10,15 +11,22 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 import { StatCard } from "@/components/shared/stat-card";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
-import {
-  EarningsLineChart,
-  OrdersBarChart,
-} from "@/components/shared/charts";
 import { useMyProducts } from "@/hooks/queries/useProducts";
 import { useSellerOrders } from "@/hooks/queries/useOrders";
+
+const EarningsLineChart = dynamic(
+  () => import("@/components/shared/charts").then((m) => ({ default: m.EarningsLineChart })),
+  { ssr: false, loading: () => <Skeleton className="h-80 w-full" /> }
+);
+
+const OrdersBarChart = dynamic(
+  () => import("@/components/shared/charts").then((m) => ({ default: m.OrdersBarChart })),
+  { ssr: false, loading: () => <Skeleton className="h-80 w-full" /> }
+);
 
 export default function DashboardOverviewPage() {
   // Live data from the backend; charts still use placeholder series until

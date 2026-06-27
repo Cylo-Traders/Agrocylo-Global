@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { CheckCheck } from "lucide-react";
+import { CheckCheck, AlertCircle } from "lucide-react";
 import { IoCopyOutline } from "react-icons/io5";
 import { useEffect, useState } from "react";
 import type { FC, ReactNode } from "react";
@@ -13,13 +13,15 @@ interface CopyButtonProps {
   iconClassName?: string;
 }
 
+type CopyState = "idle" | "copied" | "error";
+
 const CopyButton: FC<CopyButtonProps> = ({
   text,
   children,
   iconClassName,
   className = "flex items-center gap-2",
 }) => {
-  const [isCopied, setIsCopied] = useState(false);
+  const [copyState, setCopyState] = useState<CopyState>("idle");
 
   function handleFallbackCopy(text: string) {
     const textarea = document.createElement("textarea");
@@ -29,9 +31,9 @@ const CopyButton: FC<CopyButtonProps> = ({
     textarea.select();
     try {
       const successful = document.execCommand("copy");
-      setIsCopied(successful);
-    } catch (error) {
-      console.error("Fallback: Oops, unable to copy", error);
+      setCopyState(successful ? "copied" : "error");
+    } catch {
+      setCopyState("error");
     }
     document.body.removeChild(textarea);
   }
@@ -41,29 +43,33 @@ const CopyButton: FC<CopyButtonProps> = ({
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard
         .writeText(text)
-        .then(() => setIsCopied(true))
-        .catch((err) => console.log(err));
+        .then(() => setCopyState("copied"))
+        .catch(() => handleFallbackCopy(text));
     } else {
       handleFallbackCopy(text);
     }
   }
 
   useEffect(() => {
+    if (copyState === "idle") return;
     const id = setTimeout(() => {
-      setIsCopied(false);
-    }, 1500);
-
+      setCopyState("idle");
+    }, 2000);
     return () => clearTimeout(id);
-  }, [isCopied]);
+  }, [copyState]);
 
-  const Icon = isCopied ? CheckCheck : IoCopyOutline;
+  const Icon = copyState === "copied" ? CheckCheck : copyState === "error" ? AlertCircle : IoCopyOutline;
 
   return (
     <button
-      aria-label={isCopied ? "Copied!" : "copy"}
-      aria-live="assertive"
-      title={isCopied ? "Copied!" : "click to copy address"}
-      className={cn("cursor-pointer", className)}
+      aria-label={copyState === "copied" ? "Copied!" : copyState === "error" ? "Copy failed" : "copy"}
+      aria-live="polite"
+      title={copyState === "copied" ? "Copied!" : copyState === "error" ? "Copy failed" : "click to copy"}
+      className={cn(
+        "cursor-pointer",
+        copyState === "error" && "text-destructive",
+        className,
+      )}
       onClick={(e) => {
         e.preventDefault();
         handleCopyClick();
@@ -71,6 +77,9 @@ const CopyButton: FC<CopyButtonProps> = ({
     >
       {children}
       <Icon aria-hidden className={cn("size-[14px]", iconClassName)} />
+      {copyState === "error" && (
+        <span role="alert" className="text-xs">Copy failed</span>
+      )}
     </button>
   );
 };

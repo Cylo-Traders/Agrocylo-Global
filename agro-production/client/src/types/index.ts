@@ -9,6 +9,8 @@ export type CampaignStatus =
 
 export type OrderStatus = "PENDING" | "CONFIRMED";
 
+export type OrderLifecycle = "draft" | "submitted" | "confirmed" | "failed";
+
 export interface Campaign {
   id: string;
   onChainId: string;

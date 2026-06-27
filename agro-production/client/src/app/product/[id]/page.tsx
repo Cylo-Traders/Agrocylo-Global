@@ -6,13 +6,15 @@ import { useParams } from "next/navigation";
 import { fetchProduct, formatPrice } from "@/services/productService";
 import { useTransaction } from "@/hooks/useTransaction";
 import { buildCreateOrder } from "@/lib/contractService";
+import { createOrder } from "@/services/orderService";
 import { useWallet } from "@/context/WalletContext";
 import WalletConnect from "@/components/WalletConnect";
-import { validateQuantity } from "@/lib/validation";
+import { validateQuantity, sanitizeString } from "@/lib/validation";
 import { trackProductViewed } from "@/lib/analytics";
+import { classifyError, logErrorWithContext } from "@/lib/errorHandling";
 import { isNetworkError } from "@/lib/apiClient";
 import { ButtonSpinner } from "@/components/Skeletons";
-import type { Product } from "@/types";
+import type { Product, Order } from "@/types";
 
 export default function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -21,6 +23,7 @@ export default function ProductDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [quantityError, setQuantityError] = useState<string | null>(null);
+  const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
   const { address, connected } = useWallet();
   const tx = useTransaction();
 
@@ -62,12 +65,56 @@ export default function ProductDetailPage() {
   const unitPrice = BigInt(product.pricePerUnit || "0");
   const totalPrice = unitPrice * BigInt(quantity);
 
+  /**
+   * Order lifecycle: draft → submitted → confirmed | failed
+   * 1. Create off-chain order record via createOrder
+   * 2. Build unsigned transaction via buildCreateOrder
+   * 3. Sign and submit via signAndSubmitTransaction (handled by useTransaction)
+   * 4. On success, order status moves to confirmed
+   */
   async function handleOrder() {
     if (!address || !product) return;
+
     const campaignId = product.campaignId ?? "0";
-    const result = await buildCreateOrder(address, campaignId, totalPrice);
-    if (!result.success) throw new Error(result.error ?? "Failed to build transaction");
-    await tx.execute(async () => result.data!);
+
+    // Quantity validation already occurred via quantityError state
+    if (quantityError) return;
+
+    // Pass a builder function to tx.execute that will:
+    // 1. Create off-chain order record
+    // 2. Build the transaction XDR
+    await tx.execute(async () => {
+      try {
+        // Step 1: Create off-chain order record
+        const order = await createOrder({
+          buyerAddress: address,
+          campaignId: sanitizeString(campaignId),
+          amount: String(totalPrice),
+        });
+        setCreatedOrder(order);
+
+        // Step 2: Build transaction with the same amount (no floating-point issues with BigInt)
+        const builtResult = await buildCreateOrder(address, campaignId, totalPrice);
+        if (!builtResult.success || !builtResult.data) {
+          const classified = classifyError(builtResult.error, "buildOrderTransaction");
+          throw new Error(builtResult.error ?? classified.actionableMessage);
+        }
+
+        return builtResult.data;
+      } catch (err) {
+        const classified = classifyError(err, "productCheckout");
+        logErrorWithContext(err, {
+          feature: "productCheckout",
+          action: "checkout",
+          productId: id,
+          campaignId,
+          quantity,
+          address,
+          category: classified.category,
+        });
+        throw err;
+      }
+    });
   }
 
   return (
@@ -112,8 +159,8 @@ export default function ProductDetailPage() {
                 )}
               </div>
               <p className="text-sm text-muted">Total: <span className="font-semibold text-foreground">{formatPrice(String(totalPrice))} XLM</span></p>
-              {tx.isSuccess && (<div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-800" role="status">Order placed! {tx.txHash && (<span className="font-mono text-xs">Tx: {tx.txHash.slice(0, 12)}…</span>)}</div>)}
-              {tx.isError && (<div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700" role="alert">{tx.error}</div>)}
+              {tx.isSuccess && (<div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-800" role="status"><p className="font-semibold mb-1">✓ Order Created Successfully</p>{createdOrder && <p>Order ID: {createdOrder.id}</p>}{tx.txHash && (<p className="text-xs mt-1 font-mono">Tx: {tx.txHash}</p>)}</div>)}
+              {tx.isError && (<div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700" role="alert"><p className="font-semibold mb-1">Error</p><p>{tx.error}</p></div>)}
               <button
                 onClick={() => void handleOrder()}
                 disabled={tx.isPending || tx.isSuccess || !!quantityError}

@@ -23,6 +23,7 @@ export const ReadyzResponseSchema = z.object({
     status: z.enum(["UP", "DOWN"]),
     message: z.string().optional(),
   })),
+  lastLedger: z.number().optional(),
   timestamp: z.string().datetime(),
 });
 

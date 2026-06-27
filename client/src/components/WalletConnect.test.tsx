@@ -11,7 +11,7 @@ const mockFreighter = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // @ts-ignore - mocking window.freighter
+  // @ts-expect-error – test mock extends FreighterDirect with isConnected
   window.freighter = mockFreighter;
 });
 

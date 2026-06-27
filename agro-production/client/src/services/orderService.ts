@@ -22,3 +22,17 @@ export async function createOrder(data: {
   // retries: 0 prevents double-submission on a non-idempotent POST
   return api.post<Order>(`/orders`, sanitized, { retries: 0 });
 }
+
+export async function confirmOrderReceipt(orderId: string, buyerAddress: string): Promise<Order> {
+  // Note: This is a client-side acknowledgement only. The API call does not release on-chain escrow funds.
+  // On-chain confirmation via the smart contract is the authoritative release mechanism.
+  const sanitized = {
+    buyerAddress: buyerAddress.replace(/[<>]/g, "").trim(),
+  };
+  return api.patch<Order>(`/orders/${orderId}/confirm`, sanitized, { retries: 0 });
+export async function updateOrderWithTxHash(orderId: string, txHash: string): Promise<Order> {
+  const sanitized = {
+    txHash: txHash.replace(/[^a-zA-Z0-9]/g, ""),
+  };
+  return api.put<Order>(`/orders/${orderId}`, sanitized);
+}

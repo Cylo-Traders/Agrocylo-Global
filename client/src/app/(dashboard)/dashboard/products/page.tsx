@@ -8,6 +8,14 @@ import { ColumnDef } from "@tanstack/react-table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -36,6 +44,7 @@ export default function FarmerProductsDashboard() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"add" | "edit">("add");
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [confirmDeleteProduct, setConfirmDeleteProduct] = useState<Product | null>(null);
 
   function openAdd() {
     setModalMode("add");
@@ -57,11 +66,7 @@ export default function FarmerProductsDashboard() {
   }
 
   async function handleDelete(p: Product) {
-    const ok = window.confirm(
-      `Delete "${p.name}"? This will soft-delete the product.`,
-    );
-    if (!ok) return;
-    await deleteProduct.mutateAsync(p.id);
+    setConfirmDeleteProduct(p);
   }
 
   const columns: ColumnDef<Product>[] = [
@@ -231,6 +236,39 @@ export default function FarmerProductsDashboard() {
           // useMutation invalidates queries on success — nothing more to do here.
         }}
       />
+
+      <Dialog
+        open={confirmDeleteProduct !== null}
+        onOpenChange={(open) => !open && setConfirmDeleteProduct(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Product</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete "{confirmDeleteProduct?.name}"?
+              This will soft-delete the product.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmDeleteProduct(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (!confirmDeleteProduct) return;
+                await deleteProduct.mutateAsync(confirmDeleteProduct.id);
+                setConfirmDeleteProduct(null);
+              }}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

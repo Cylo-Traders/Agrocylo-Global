@@ -100,19 +100,62 @@ model FarmerSupply {
 }
 
 model Product {
-  id           String   @id @default(uuid())
-  farmerWallet String
-  name         String
-  pricePerUnit String   @map("price_per_unit")
-  currency     String
-  isAvailable  Boolean  @default(true) @map("is_available")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id            String     @id @default(uuid()) @db.Uuid
+  farmerWallet  String     @map("farmer_wallet")
+  name          String
+  description   String?
+  category      String?
+  pricePerUnit  Decimal    @map("price_per_unit") @db.Decimal(18, 6)
+  currency      String
+  unit          String
+  stockQuantity Decimal?   @map("stock_quantity") @db.Decimal(10, 2)
+  imageUrl      String?    @map("image_url")
+  location      String?
+  isAvailable   Boolean    @default(true) @map("is_available")
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  farmer       Profile    @relation(fields: [farmerWallet], references: [wallet_address], onDelete: Cascade)
+  cartItems    CartItem[]
   orders       Order[]
   priceHistory PriceHistory[]
 
+  @@index([farmerWallet, isAvailable])
   @@map("products")
+}
+
+model Cart {
+  id          String     @id @default(uuid()) @db.Uuid
+  buyerWallet String     @map("buyer_wallet")
+  status      String     @default("active")
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  buyer Profile    @relation(fields: [buyerWallet], references: [wallet_address], onDelete: Cascade)
+  items CartItem[]
+
+  @@index([buyerWallet])
+  @@map("carts")
+}
+
+model CartItem {
+  id           String   @id @default(uuid()) @db.Uuid
+  cartId       String   @map("cart_id") @db.Uuid
+  productId    String   @map("product_id") @db.Uuid
+  farmerWallet String   @map("farmer_wallet")
+  quantity     Decimal  @db.Decimal(10, 2)
+  unitPrice    Decimal  @map("unit_price") @db.Decimal(18, 6)
+  currency     String
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([cartId, farmerWallet])
+  @@index([cartId])
+  @@index([productId])
+  @@map("cart_items")
 }
 
 model Order {
@@ -230,11 +273,13 @@ model PriceHistory {
 
 model Profile {
   wallet_address String    @id
-  name           String?
+  name           String?   @map("display_name")
   bio            String?
   avatar_url     String?
   role           String    @default("BUYER")
   location       Location?
+  products       Product[]
+  carts          Cart[]
 
   @@map("profiles")
 }

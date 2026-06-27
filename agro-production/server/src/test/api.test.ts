@@ -1,6 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import request from "supertest";
 
+const { mockVerifySession } = vi.hoisted(() => ({
+  mockVerifySession: vi.fn(),
+}));
+
+vi.mock("../services/walletAuthService.js", () => ({
+  verifySession: mockVerifySession,
+}));
+
+vi.mock("express-rate-limit", () => ({
+  default: vi.fn(() => (_req: unknown, _res: unknown, next: () => void) => next()),
+}));
+
 vi.mock("../db/client.js", () => ({
   prisma: {
     campaign: {
@@ -37,8 +49,8 @@ vi.mock("../services/wsServer.js", () => ({
 import app from "../app.js";
 import { prisma } from "../db/client.js";
 
-// Valid test fixtures
-const FARMER = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+// Valid test fixtures — Stellar addresses must be 56 chars (G + 55 alphanumeric)
+const FARMER = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const INVESTOR = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
 const BUYER = "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
 const TOKEN = "GDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD";
@@ -184,60 +196,64 @@ describe("GET /api/v1/campaigns/:id", () => {
 });
 
 describe("POST /api/v1/campaigns", () => {
+  beforeEach(() => {
+    mockVerifySession.mockResolvedValue({
+      walletAddress: FARMER,
+      sessionToken: "test-session",
+    });
+  });
+
   it("creates a campaign and returns 201", async () => {
     db.campaign.create.mockResolvedValue(mockCampaign);
     db.user.upsert.mockResolvedValue({});
 
-    const res = await request(app).post("/api/v1/campaigns").send({
-      farmerAddress: FARMER,
-      tokenAddress: TOKEN,
-      targetAmount: "1000",
-      deadline: FUTURE_DATE,
-    });
+    const res = await request(app)
+      .post("/api/v1/campaigns")
+      .set("Authorization", "Bearer test-session")
+      .send({
+        tokenAddress: TOKEN,
+        targetAmount: "1000",
+        deadline: FUTURE_DATE,
+      });
 
     expect(res.status).toBe(201);
     expect(res.body.id).toBe(CAMPAIGN_UUID);
     expect(db.campaign.create).toHaveBeenCalledOnce();
   });
 
-  it("returns 400 for an invalid Stellar address", async () => {
-    const res = await request(app).post("/api/v1/campaigns").send({
-      farmerAddress: "invalid",
-      tokenAddress: TOKEN,
-      targetAmount: "1000",
-      deadline: FUTURE_DATE,
-    });
-
-    expect(res.status).toBe(400);
-    expect(res.body.title).toBe("Validation Failed");
-  });
-
   it("returns 400 for a past deadline", async () => {
-    const res = await request(app).post("/api/v1/campaigns").send({
-      farmerAddress: FARMER,
-      tokenAddress: TOKEN,
-      targetAmount: "1000",
-      deadline: "2000-01-01T00:00:00.000Z",
-    });
+    const res = await request(app)
+      .post("/api/v1/campaigns")
+      .set("Authorization", "Bearer test-session")
+      .send({
+        tokenAddress: TOKEN,
+        targetAmount: "1000",
+        deadline: "2000-01-01T00:00:00.000Z",
+      });
 
     expect(res.status).toBe(400);
     expect(res.body.title).toBe("Validation Failed");
   });
 
   it("returns 400 for a zero amount", async () => {
-    const res = await request(app).post("/api/v1/campaigns").send({
-      farmerAddress: FARMER,
-      tokenAddress: TOKEN,
-      targetAmount: "0",
-      deadline: FUTURE_DATE,
-    });
+    const res = await request(app)
+      .post("/api/v1/campaigns")
+      .set("Authorization", "Bearer test-session")
+      .send({
+        tokenAddress: TOKEN,
+        targetAmount: "0",
+        deadline: FUTURE_DATE,
+      });
 
     expect(res.status).toBe(400);
     expect(res.body.title).toBe("Validation Failed");
   });
 
   it("returns 400 when required fields are missing", async () => {
-    const res = await request(app).post("/api/v1/campaigns").send({});
+    const res = await request(app)
+      .post("/api/v1/campaigns")
+      .set("Authorization", "Bearer test-session")
+      .send({});
 
     expect(res.status).toBe(400);
     expect(res.body.errors.length).toBeGreaterThan(0);
@@ -293,6 +309,13 @@ describe("GET /api/v1/investments", () => {
 });
 
 describe("POST /api/v1/campaigns/:id/invest", () => {
+  beforeEach(() => {
+    mockVerifySession.mockResolvedValue({
+      walletAddress: INVESTOR,
+      sessionToken: "test-session",
+    });
+  });
+
   it("records an investment and returns 201", async () => {
     db.campaign.findUnique.mockResolvedValue(mockCampaign);
     db.investment.create.mockResolvedValue(mockInvestment);
@@ -300,7 +323,8 @@ describe("POST /api/v1/campaigns/:id/invest", () => {
 
     const res = await request(app)
       .post(`/api/v1/campaigns/${CAMPAIGN_UUID}/invest`)
-      .send({ investorAddress: INVESTOR, amount: "100" });
+      .set("Authorization", "Bearer test-session")
+      .send({ amount: "100" });
 
     expect(res.status).toBe(201);
     expect(db.investment.create).toHaveBeenCalledOnce();
@@ -311,7 +335,8 @@ describe("POST /api/v1/campaigns/:id/invest", () => {
 
     const res = await request(app)
       .post(`/api/v1/campaigns/${CAMPAIGN_UUID}/invest`)
-      .send({ investorAddress: INVESTOR, amount: "100" });
+      .set("Authorization", "Bearer test-session")
+      .send({ amount: "100" });
 
     expect(res.status).toBe(404);
   });
@@ -321,23 +346,17 @@ describe("POST /api/v1/campaigns/:id/invest", () => {
 
     const res = await request(app)
       .post(`/api/v1/campaigns/${CAMPAIGN_UUID}/invest`)
-      .send({ investorAddress: INVESTOR, amount: "100" });
+      .set("Authorization", "Bearer test-session")
+      .send({ amount: "100" });
 
     expect(res.status).toBe(409);
-  });
-
-  it("returns 400 for an invalid investor address", async () => {
-    const res = await request(app)
-      .post(`/api/v1/campaigns/${CAMPAIGN_UUID}/invest`)
-      .send({ investorAddress: "invalid", amount: "100" });
-
-    expect(res.status).toBe(400);
   });
 
   it("returns 400 for a zero investment amount", async () => {
     const res = await request(app)
       .post(`/api/v1/campaigns/${CAMPAIGN_UUID}/invest`)
-      .send({ investorAddress: INVESTOR, amount: "0" });
+      .set("Authorization", "Bearer test-session")
+      .send({ amount: "0" });
 
     expect(res.status).toBe(400);
   });
@@ -382,16 +401,25 @@ describe("GET /api/v1/orders", () => {
 });
 
 describe("POST /api/v1/orders", () => {
+  beforeEach(() => {
+    mockVerifySession.mockResolvedValue({
+      walletAddress: BUYER,
+      sessionToken: "test-session",
+    });
+  });
+
   it("creates an order for a HARVESTED campaign and returns 201", async () => {
     db.campaign.findUnique.mockResolvedValue({ ...mockCampaign, status: "HARVESTED" });
     db.order.create.mockResolvedValue(mockOrder);
     db.user.upsert.mockResolvedValue({});
 
-    const res = await request(app).post("/api/v1/orders").send({
-      buyerAddress: BUYER,
-      campaignId: CAMPAIGN_UUID,
-      amount: "50",
-    });
+    const res = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", "Bearer test-session")
+      .send({
+        campaignId: CAMPAIGN_UUID,
+        amount: "50",
+      });
 
     expect(res.status).toBe(201);
     expect(db.order.create).toHaveBeenCalledOnce();
@@ -402,11 +430,13 @@ describe("POST /api/v1/orders", () => {
     db.order.create.mockResolvedValue(mockOrder);
     db.user.upsert.mockResolvedValue({});
 
-    const res = await request(app).post("/api/v1/orders").send({
-      buyerAddress: BUYER,
-      campaignId: CAMPAIGN_UUID,
-      amount: "50",
-    });
+    const res = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", "Bearer test-session")
+      .send({
+        campaignId: CAMPAIGN_UUID,
+        amount: "50",
+      });
 
     expect(res.status).toBe(201);
   });
@@ -414,11 +444,13 @@ describe("POST /api/v1/orders", () => {
   it("returns 404 when the campaign does not exist", async () => {
     db.campaign.findUnique.mockResolvedValue(null);
 
-    const res = await request(app).post("/api/v1/orders").send({
-      buyerAddress: BUYER,
-      campaignId: CAMPAIGN_UUID,
-      amount: "50",
-    });
+    const res = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", "Bearer test-session")
+      .send({
+        campaignId: CAMPAIGN_UUID,
+        amount: "50",
+      });
 
     expect(res.status).toBe(404);
   });
@@ -426,21 +458,25 @@ describe("POST /api/v1/orders", () => {
   it("returns 409 when the campaign is still in FUNDING status", async () => {
     db.campaign.findUnique.mockResolvedValue({ ...mockCampaign, status: "FUNDING" });
 
-    const res = await request(app).post("/api/v1/orders").send({
-      buyerAddress: BUYER,
-      campaignId: CAMPAIGN_UUID,
-      amount: "50",
-    });
+    const res = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", "Bearer test-session")
+      .send({
+        campaignId: CAMPAIGN_UUID,
+        amount: "50",
+      });
 
     expect(res.status).toBe(409);
   });
 
   it("returns 400 when campaignId is not a UUID", async () => {
-    const res = await request(app).post("/api/v1/orders").send({
-      buyerAddress: BUYER,
-      campaignId: "not-a-uuid",
-      amount: "50",
-    });
+    const res = await request(app)
+      .post("/api/v1/orders")
+      .set("Authorization", "Bearer test-session")
+      .send({
+        campaignId: "not-a-uuid",
+        amount: "50",
+      });
 
     expect(res.status).toBe(400);
   });
@@ -472,13 +508,20 @@ describe("GET /api/v1/orders/:id", () => {
 });
 
 describe("PATCH /api/v1/orders/:id/confirm", () => {
+  beforeEach(() => {
+    mockVerifySession.mockResolvedValue({
+      walletAddress: BUYER,
+      sessionToken: "test-session",
+    });
+  });
+
   it("confirms a pending order", async () => {
     db.order.findUnique.mockResolvedValue(mockOrder);
     db.order.update.mockResolvedValue({ ...mockOrder, status: "CONFIRMED" });
 
     const res = await request(app)
       .patch(`/api/v1/orders/${ORDER_UUID}/confirm`)
-      .send({ buyerAddress: BUYER });
+      .set("Authorization", "Bearer test-session");
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("CONFIRMED");
@@ -489,17 +532,21 @@ describe("PATCH /api/v1/orders/:id/confirm", () => {
 
     const res = await request(app)
       .patch(`/api/v1/orders/${ORDER_UUID}/confirm`)
-      .send({ buyerAddress: BUYER });
+      .set("Authorization", "Bearer test-session");
 
     expect(res.status).toBe(404);
   });
 
   it("returns 403 when a different buyer tries to confirm", async () => {
+    mockVerifySession.mockResolvedValue({
+      walletAddress: INVESTOR, // different from BUYER who owns the order
+      sessionToken: "test-session",
+    });
     db.order.findUnique.mockResolvedValue(mockOrder);
 
     const res = await request(app)
       .patch(`/api/v1/orders/${ORDER_UUID}/confirm`)
-      .send({ buyerAddress: INVESTOR });
+      .set("Authorization", "Bearer test-session");
 
     expect(res.status).toBe(403);
   });
@@ -509,17 +556,9 @@ describe("PATCH /api/v1/orders/:id/confirm", () => {
 
     const res = await request(app)
       .patch(`/api/v1/orders/${ORDER_UUID}/confirm`)
-      .send({ buyerAddress: BUYER });
+      .set("Authorization", "Bearer test-session");
 
     expect(res.status).toBe(409);
-  });
-
-  it("returns 400 for an invalid buyer address", async () => {
-    const res = await request(app)
-      .patch(`/api/v1/orders/${ORDER_UUID}/confirm`)
-      .send({ buyerAddress: "bad" });
-
-    expect(res.status).toBe(400);
   });
 });
 

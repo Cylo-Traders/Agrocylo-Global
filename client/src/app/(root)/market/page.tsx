@@ -3,16 +3,18 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { RefreshCw, Search, WifiOff } from "lucide-react";
+import { Heart, RefreshCw, Search, WifiOff } from "lucide-react";
 
 import Wrapper from "@/components/shared/wrapper";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import { siteConfig } from "@/config/site.config";
 import { useAnalytics } from "@/hooks/useAnalytics";
 import { useCart } from "@/context/CartContext";
 import { useProducts } from "@/hooks/queries/useProducts";
+import { useFavorites } from "@/hooks/useFavorites";
 import { useWallet } from "@/hooks/useWallet";
 import type { ProductCategory } from "@/types/product";
 
@@ -38,12 +40,14 @@ export default function MarketPage() {
   const { connected } = useWallet();
   const { cart, setQuantityForProduct } = useCart();
   const { trackFilterUsage, trackSearchQuery, trackFeatureAdoption } = useAnalytics();
+  const { favoriteIds, toggleFavorite } = useFavorites();
 
   const [category, setCategory] = useState<ProductCategory | "All">("All");
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("newest");
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
 
   const queryParams = useMemo(
     () => ({
@@ -60,8 +64,12 @@ export default function MarketPage() {
   );
 
   const { data, isLoading, error, refetch, isFetching } = useProducts(queryParams);
-  const products = data?.items ?? [];
+  let products = data?.items ?? [];
   const errorMessage = error instanceof Error ? error.message : error ? String(error) : null;
+
+  if (showFavoritesOnly) {
+    products = products.filter((p) => favoriteIds.includes(p.id));
+  }
 
   const quantityByProductId = useMemo(() => {
     const map = new Map<string, number>();
@@ -179,6 +187,27 @@ export default function MarketPage() {
                 </Badge>
               </button>
             ))}
+
+            <button
+              onClick={() => setShowFavoritesOnly((v) => !v)}
+              className="inline-flex min-h-11 cursor-pointer items-center"
+            >
+              <Badge
+                variant={showFavoritesOnly ? "default" : "outline"}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs"
+              >
+                <Heart
+                  className={cn(
+                    "size-3",
+                    showFavoritesOnly && "fill-background",
+                  )}
+                />
+                Favorites
+                {favoriteIds.length > 0 && (
+                  <span className="ml-0.5">({favoriteIds.length})</span>
+                )}
+              </Badge>
+            </button>
           </div>
         </div>
       </Wrapper>
@@ -212,7 +241,9 @@ export default function MarketPage() {
               <p className="text-muted-foreground text-sm">
                 {isLoading
                   ? "Loading products..."
-                  : `${products.length} product${products.length === 1 ? "" : "s"} found`}
+                  : showFavoritesOnly
+                    ? `${products.length} favorited product${products.length === 1 ? "" : "s"} found`
+                    : `${products.length} product${products.length === 1 ? "" : "s"} found`}
               </p>
             </div>
 
@@ -245,6 +276,29 @@ export default function MarketPage() {
                       <Badge className="absolute left-3 top-3" variant="secondary">
                         {product.category}
                       </Badge>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          toggleFavorite(product.id);
+                        }}
+                        className="absolute right-3 top-3 flex size-8 items-center justify-center rounded-full bg-background/60 backdrop-blur-sm transition-colors hover:bg-background/80"
+                        aria-label={
+                          favoriteIds.includes(product.id)
+                            ? "Remove from favorites"
+                            : "Add to favorites"
+                        }
+                      >
+                        <Heart
+                          className={cn(
+                            "size-4",
+                            favoriteIds.includes(product.id)
+                              ? "fill-destructive text-destructive"
+                              : "text-muted-foreground",
+                          )}
+                        />
+                      </button>
                     </Link>
 
                     <div className="flex flex-1 flex-col gap-3 p-5">

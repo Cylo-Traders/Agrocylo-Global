@@ -3,9 +3,11 @@ import { buildInvest } from "@/lib/contractService";
 import { signAndSubmitTransaction } from "@/lib/signTransaction";
 import {
   InvestmentIndexingTimeoutError,
+  resolveIndexedInvestment,
   waitForIndexedInvestment,
 } from "@/services/investmentService";
 import type { Investment } from "@/types";
+import { useWebSocket } from "./useWebSocket";
 
 export type InvestmentPhase =
   | "idle"
@@ -26,6 +28,15 @@ export interface InvestmentRequest {
 }
 
 export function useInvest() {
+  // Resolve any pending waitForIndexedInvestment call as soon as the server
+  // emits the investment.indexed WebSocket event, avoiding REST polling.
+  useWebSocket((msg) => {
+    if (msg.event === "investment.indexed") {
+      const payload = msg.payload as Investment & { txHash?: string };
+      if (payload.txHash) resolveIndexedInvestment(payload.txHash, payload);
+    }
+  });
+
   const [phase, setPhase] = useState<InvestmentPhase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);

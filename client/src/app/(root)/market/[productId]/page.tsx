@@ -1,5 +1,6 @@
-"use client";
+ "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -108,13 +109,14 @@ export default function ProductDetailPage() {
       </nav>
 
       <div className="grid grid-cols-1 gap-10 md:grid-cols-2">
-        <div className="bg-secondary aspect-square overflow-hidden rounded-2xl">
+        <div className="bg-secondary relative aspect-square overflow-hidden rounded-2xl">
           {product.image_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <Image
               src={product.image_url}
               alt={product.name}
-              className="size-full object-cover"
+              fill
+              sizes="(max-width: 768px) 100vw, 50vw"
+              className="object-cover"
             />
           ) : (
             <div className="grid size-full place-content-center text-7xl">
@@ -184,39 +186,47 @@ export default function ProductDetailPage() {
 
           {connected ? (
             currentQty > 0 ? (
-              <div className="flex items-center justify-between gap-3">
-                <div className="bg-secondary flex items-center gap-2 rounded-full p-1">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="size-11 rounded-full"
-                    onClick={() => {
-                      trackFunnelStep("purchase", "quantity_decremented", {
-                        productId: product.id,
-                      });
-                      setQuantityForProduct(product.id, currentQty - 1);
-                    }}
-                  >
-                    −
-                  </Button>
-                  <span className="min-w-8 text-center font-medium">
-                    {currentQty}
-                  </span>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="size-11 rounded-full"
-                    onClick={() => {
-                      trackFunnelStep("purchase", "quantity_incremented", {
-                        productId: product.id,
-                      });
-                      setQuantityForProduct(product.id, currentQty + 1);
-                    }}
-                  >
-                    +
-                  </Button>
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="bg-secondary flex items-center gap-2 rounded-full p-1">
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="size-11 rounded-full"
+                      onClick={() => {
+                        trackFunnelStep("purchase", "quantity_decremented", {
+                          productId: product.id,
+                        });
+                        setQuantityForProduct(product.id, currentQty - 1);
+                      }}
+                    >
+                      −
+                    </Button>
+                    <span className="min-w-8 text-center font-medium">
+                      {currentQty}
+                    </span>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="size-11 rounded-full"
+                      onClick={() => {
+                        trackFunnelStep("purchase", "quantity_incremented", {
+                          productId: product.id,
+                        });
+                        setQuantityForProduct(product.id, currentQty + 1);
+                      }}
+                    >
+                      +
+                    </Button>
+                  </div>
+                  <p className="text-muted-foreground text-sm">In your cart</p>
                 </div>
-                <p className="text-muted-foreground text-sm">In your cart</p>
+                <p className="text-right text-lg font-semibold">
+                  Total: {(
+                    Number(product.price_per_unit) * currentQty
+                  ).toFixed(2)}{" "}
+                  {product.currency}
+                </p>
               </div>
             ) : (
               <Button

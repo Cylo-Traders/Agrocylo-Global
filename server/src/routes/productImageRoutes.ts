@@ -2,12 +2,14 @@ import express from 'express';
 import multer from 'multer';
 import { imageUpload, isUnsupportedMimeType } from '../middleware/upload.js';
 import { requireWallet, type WalletRequest } from '../middleware/walletAuth.js';
+import { uploadRateLimiter } from '../middleware/rateLimiter.js';
 import { HttpError, deleteProductImage, uploadProductImage } from '../services/productImageService.js';
 
 const router = express.Router();
 
 router.post(
   '/products/:product_id/image',
+  uploadRateLimiter,
   requireWallet,
   imageUpload.single('image'),
   async (req: WalletRequest, res, next) => {

@@ -1,7 +1,8 @@
-import { query } from '../config/database.js';
+import { Prisma } from '@prisma/client';
+import type { Product } from '@prisma/client';
+import { prisma } from '../config/database.js';
 import { ApiError } from '../http/errors.js';
 import { wsManager } from './wsManager.js';
-import type { QueryResultRow } from 'pg';
 
 export interface ProductWriteInput {
   name?: string;
@@ -15,18 +16,41 @@ export interface ProductWriteInput {
   is_available?: boolean;
 }
 
-interface ProductIdRow extends QueryResultRow {
+export type ProductDto = {
   id: string;
-}
-
-interface ProductOwnerRow extends QueryResultRow {
-  farmer_wallet: string;
-}
+  [key: string]: unknown;
+};
 
 function parsePage(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
   const parsed = Number.parseInt(value, 10);
   return Number.isNaN(parsed) || parsed <= 0 ? fallback : parsed;
+}
+
+function toProductDto(product: Product): ProductDto {
+  return {
+    id: product.id,
+    farmer_wallet: product.farmerWallet,
+    name: product.name,
+    description: product.description,
+    category: product.category,
+    price_per_unit: product.pricePerUnit.toString(),
+    currency: product.currency,
+    unit: product.unit,
+    stock_quantity: product.stockQuantity?.toString() ?? null,
+    location: product.location,
+    image_url: product.imageUrl,
+    is_available: product.isAvailable,
+    created_at: product.createdAt,
+    updated_at: product.updatedAt,
+  };
+}
+
+function decimalFilter(value: string | undefined): Prisma.Decimal | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number.parseFloat(value);
+  if (Number.isNaN(parsed)) return undefined;
+  return new Prisma.Decimal(value);
 }
 
 export async function listProducts(params: {
@@ -39,144 +63,112 @@ export async function listProducts(params: {
   page?: string;
   pageSize?: string;
   includeUnavailable?: boolean;
-}) {
+}): Promise<{ page: number; page_size: number; total: number; totalPages: number; items: ProductDto[] }> {
   const page = parsePage(params.page, 1);
   const pageSize = Math.min(parsePage(params.pageSize, 20), 100);
-  const where: string[] = ['is_available = true'];
-  const values: unknown[] = [];
-
-  if (params.includeUnavailable) {
-    // Farmer dashboard needs access to both listed and unlisted products.
-    where.length = 0;
-  }
+  const where: Prisma.ProductWhereInput = params.includeUnavailable ? {} : { isAvailable: true };
 
   if (params.farmer) {
-    values.push(params.farmer.toLowerCase());
-    where.push(`farmer_wallet = $${values.length}`);
+    where.farmerWallet = params.farmer.toLowerCase();
   }
   if (params.category) {
-    values.push(params.category);
-    where.push(`category = $${values.length}`);
+    where.category = params.category;
   }
   if (params.search) {
-    const searchTerm = `%${params.search}%`;
-    values.push(searchTerm, searchTerm, searchTerm);
-    where.push(`(name ILIKE $${values.length - 2} OR COALESCE(description, '') ILIKE $${values.length - 1} OR COALESCE(category, '') ILIKE $${values.length})`);
+    where.OR = [
+      { name: { contains: params.search, mode: 'insensitive' } },
+      { description: { contains: params.search, mode: 'insensitive' } },
+      { category: { contains: params.search, mode: 'insensitive' } },
+    ];
   }
   if (params.location) {
-    values.push(`%${params.location}%`);
-    where.push(`location ILIKE $${values.length}`);
+    where.location = { contains: params.location, mode: 'insensitive' };
   }
-  if (params.minPrice) {
-    const minPrice = parseFloat(params.minPrice);
-    if (!isNaN(minPrice)) {
-      values.push(minPrice);
-      where.push(`price_per_unit::numeric >= $${values.length}`);
-    }
-  }
-  if (params.maxPrice) {
-    const maxPrice = parseFloat(params.maxPrice);
-    if (!isNaN(maxPrice)) {
-      values.push(maxPrice);
-      where.push(`price_per_unit::numeric <= $${values.length}`);
-    }
+  const minPrice = decimalFilter(params.minPrice);
+  const maxPrice = decimalFilter(params.maxPrice);
+  if (minPrice || maxPrice) {
+    where.pricePerUnit = {
+      ...(minPrice ? { gte: minPrice } : {}),
+      ...(maxPrice ? { lte: maxPrice } : {}),
+    };
   }
 
-  values.push(pageSize, (page - 1) * pageSize);
-  const whereClause = where.length > 0 ? `where ${where.join(' and ')}` : '';
+  const [total, products] = await prisma.$transaction([
+    prisma.product.count({ where }),
+    prisma.product.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: pageSize,
+      skip: (page - 1) * pageSize,
+    }),
+  ]);
 
-  const countSql = `select count(*) as total from public.products ${whereClause}`;
-  const countResult = await query(countSql, values.slice(0, -2)); // exclude pageSize and offset
-  const total = parseInt(countResult.rows[0]?.total ?? "0", 10);
-
-  const sql = `
-    select id::text, farmer_wallet, name, description, category,
-           price_per_unit::text, currency, unit, stock_quantity::text,
-           location, image_url, is_available, created_at, updated_at
-    from public.products
-    ${whereClause}
-    order by created_at desc
-    limit $${values.length - 1} offset $${values.length}
-  `;
-  const rows = await query(sql, values);
-  return { page, page_size: pageSize, total, totalPages: Math.ceil(total / pageSize), items: rows.rows };
+  return {
+    page,
+    page_size: pageSize,
+    total,
+    totalPages: Math.ceil(total / pageSize),
+    items: products.map(toProductDto),
+  };
 }
 
 async function emitProductEvent(event: string, product: unknown) {
   wsManager.broadcast(event, product);
 }
 
-export async function getProductById(productId: string) {
-  const result = await query(
-    `select id::text, farmer_wallet, name, description, category,
-            price_per_unit::text, currency, unit, stock_quantity::text,
-            location, image_url, is_available, created_at, updated_at
-     from public.products
-     where id = $1::uuid`,
-    [productId],
-  );
-  if (!result.rows[0]) throw new ApiError(404, 'Not Found', 'Product not found');
-  return result.rows[0];
+export async function getProductById(productId: string): Promise<ProductDto> {
+  const product = await prisma.product.findUnique({ where: { id: productId } });
+  if (!product) throw new ApiError(404, 'Not Found', 'Product not found');
+  return toProductDto(product);
 }
 
-export async function createProduct(farmerWallet: string, input: ProductWriteInput) {
+export async function createProduct(farmerWallet: string, input: ProductWriteInput): Promise<ProductDto> {
   if (!input.name || !input.price_per_unit || !input.currency || !input.unit) {
     throw new ApiError(400, 'Bad Request', 'name, price_per_unit, currency, and unit are required');
   }
 
-  const inserted = await query<ProductIdRow>(
-    `insert into public.products (
-      farmer_wallet, name, description, category, price_per_unit, currency, unit, stock_quantity, location, is_available
-    ) values ($1,$2,$3,$4,$5::numeric,$6,$7,$8::numeric,$9,$10)
-    returning id::text`,
-    [
-      farmerWallet.toLowerCase(),
-      input.name,
-      input.description ?? null,
-      input.category ?? null,
-      input.price_per_unit,
-      input.currency,
-      input.unit,
-      input.stock_quantity ?? null,
-      input.location ?? null,
-      input.is_available ?? true,
-    ],
-  );
-  const result = await getProductById(String(inserted.rows[0]?.id));
+  const product = await prisma.product.create({
+    data: {
+      farmerWallet: farmerWallet.toLowerCase(),
+      name: input.name,
+      description: input.description ?? null,
+      category: input.category ?? null,
+      pricePerUnit: new Prisma.Decimal(input.price_per_unit),
+      currency: input.currency,
+      unit: input.unit,
+      stockQuantity: input.stock_quantity ? new Prisma.Decimal(input.stock_quantity) : null,
+      location: input.location ?? null,
+      isAvailable: input.is_available ?? true,
+    },
+  });
+  const result = toProductDto(product);
   emitProductEvent('product:created', result);
   return result;
 }
 
-export async function updateProduct(productId: string, farmerWallet: string, input: ProductWriteInput) {
-  const owner = await query<ProductOwnerRow>(
-    `select farmer_wallet from public.products where id = $1::uuid`,
-    [productId],
-  );
-  if (!owner.rows[0]) throw new ApiError(404, 'Not Found', 'Product not found');
-  if (String(owner.rows[0].farmer_wallet).toLowerCase() !== farmerWallet.toLowerCase()) {
+export async function updateProduct(productId: string, farmerWallet: string, input: ProductWriteInput): Promise<ProductDto> {
+  const existing = await prisma.product.findUnique({ where: { id: productId } });
+  if (!existing) throw new ApiError(404, 'Not Found', 'Product not found');
+  if (existing.farmerWallet.toLowerCase() !== farmerWallet.toLowerCase()) {
     throw new ApiError(403, 'Forbidden', 'You do not own this product');
   }
 
-  const fields: string[] = [];
-  const values: unknown[] = [];
-  const push = (k: string, v: unknown, cast = '') => {
-    values.push(v);
-    fields.push(`${k} = $${values.length}${cast}`);
-  };
+  const data: Prisma.ProductUpdateInput = {};
+  if (input.name !== undefined) data.name = input.name;
+  if (input.description !== undefined) data.description = input.description;
+  if (input.category !== undefined) data.category = input.category;
+  if (input.price_per_unit !== undefined) data.pricePerUnit = new Prisma.Decimal(input.price_per_unit);
+  if (input.currency !== undefined) data.currency = input.currency;
+  if (input.unit !== undefined) data.unit = input.unit;
+  if (input.stock_quantity !== undefined) {
+    data.stockQuantity = input.stock_quantity === null ? null : new Prisma.Decimal(input.stock_quantity);
+  }
+  if (input.location !== undefined) data.location = input.location;
+  if (input.is_available !== undefined) data.isAvailable = input.is_available;
 
-  if (input.name !== undefined) push('name', input.name);
-  if (input.description !== undefined) push('description', input.description);
-  if (input.category !== undefined) push('category', input.category);
-  if (input.price_per_unit !== undefined) push('price_per_unit', input.price_per_unit, '::numeric');
-  if (input.currency !== undefined) push('currency', input.currency);
-  if (input.unit !== undefined) push('unit', input.unit);
-  if (input.stock_quantity !== undefined) push('stock_quantity', input.stock_quantity, '::numeric');
-  if (input.is_available !== undefined) push('is_available', input.is_available);
-
-  if (fields.length === 0) throw new ApiError(400, 'Bad Request', 'No fields provided to update');
-  values.push(productId);
-  await query(`update public.products set ${fields.join(', ')} where id = $${values.length}::uuid`, values);
-  const result = await getProductById(productId);
+  if (Object.keys(data).length === 0) throw new ApiError(400, 'Bad Request', 'No fields provided to update');
+  const product = await prisma.product.update({ where: { id: productId }, data });
+  const result = toProductDto(product);
   emitProductEvent('product:updated', result);
   return result;
 }

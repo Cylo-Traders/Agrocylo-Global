@@ -1,4 +1,4 @@
-import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from 'pg';
+import { Pool } from 'pg';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import logger from './logger.js';
@@ -6,8 +6,12 @@ import logger from './logger.js';
 const connectionString = process.env['DATABASE_URL']!;
 const pool = new Pool({ connectionString });
 const adapter = new PrismaPg(pool);
+const isDevelopment = (process.env['NODE_ENV'] ?? 'development') === 'development';
 
-export const prisma = new PrismaClient({ adapter });
+export const prisma = new PrismaClient({
+  adapter,
+  log: isDevelopment ? ['query', 'info', 'warn', 'error'] : ['warn', 'error'],
+});
 
 export async function connectDb() {
   try {
@@ -18,27 +22,3 @@ export async function connectDb() {
     process.exit(1);
   }
 }
-
-export async function query<T extends QueryResultRow = QueryResultRow>(
-  text: string,
-  params: unknown[] = [],
-): Promise<QueryResult<T>> {
-  return pool.query<T>(text, params);
-}
-
-export async function withTransaction<T>(handler: (client: PoolClient) => Promise<T>): Promise<T> {
-  const client = await pool.connect();
-  try {
-    await client.query('begin');
-    const result = await handler(client);
-    await client.query('commit');
-    return result;
-  } catch (error) {
-    await client.query('rollback');
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
-export default pool;

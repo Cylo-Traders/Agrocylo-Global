@@ -5,16 +5,16 @@ import { ShieldCheck, Lock, BadgeCheck } from "lucide-react";
 import Wrapper from "@/components/shared/wrapper";
 import { PageHeader } from "@/components/shared/page-header";
 import EnhancedEscrowTransaction from "@/components/EnhancedEscrowTransaction";
+import { requireNativeTokenContractId } from "@/services/stellar/networkConfig";
 
-// Demo / sandbox flow — a fixed product against which to test the
-// Soroban create_order pipeline. Wire to a real product page later.
-const demoProduct = {
-  farmerAddress: "GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37",
-  // XLM SAC contract for the active network. Configure via env.
-  tokenAddress: process.env.NEXT_PUBLIC_NATIVE_TOKEN_CONTRACT_ID ?? "",
-  pricePerUnit: 10.5,
-  productName: "Organic Tomatoes (Sandbox)",
-};
+function getDemoProduct() {
+  return {
+    farmerAddress: "GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37",
+    tokenAddress: requireNativeTokenContractId(),
+    pricePerUnit: 10.5,
+    productName: "Organic Tomatoes (Sandbox)",
+  };
+}
 
 const features = [
   {
@@ -38,6 +38,19 @@ const features = [
 ];
 
 export default function EscrowDemoPage() {
+  let product: {
+    farmerAddress: string;
+    tokenAddress: string;
+    pricePerUnit: number;
+    productName: string;
+  } | null = null;
+  let configError: string | null = null;
+  try {
+    product = getDemoProduct();
+  } catch (e) {
+    configError = e instanceof Error ? e.message : "Token contract not configured";
+  }
+
   return (
     <Wrapper className="pt-32 pb-20 md:pt-40">
       <PageHeader
@@ -61,12 +74,18 @@ export default function EscrowDemoPage() {
       </div>
 
       <div className="mt-10">
-        <EnhancedEscrowTransaction
-          farmerAddress={demoProduct.farmerAddress}
-          tokenAddress={demoProduct.tokenAddress}
-          pricePerUnit={demoProduct.pricePerUnit}
-          productName={demoProduct.productName}
-        />
+        {product ? (
+          <EnhancedEscrowTransaction
+            farmerAddress={product.farmerAddress}
+            tokenAddress={product.tokenAddress}
+            pricePerUnit={product.pricePerUnit}
+            productName={product.productName}
+          />
+        ) : (
+          <div className="bg-card rounded-2xl border p-6 text-center text-sm text-muted-foreground">
+            {configError}
+          </div>
+        )}
       </div>
     </Wrapper>
   );

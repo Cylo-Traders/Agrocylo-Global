@@ -6,7 +6,7 @@ export type ProductCategory =
   | "Livestock"
   | "Other";
 
-export type ProductCurrency = "STRK" | "USDC";
+export type ProductCurrency = "XLM" | "USDC";
 
 export type ProductUnit =
   | "kg"

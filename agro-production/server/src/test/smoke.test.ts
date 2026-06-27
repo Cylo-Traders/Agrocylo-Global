@@ -1,6 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import request from "supertest";
 
+const { mockVerifySession } = vi.hoisted(() => ({
+  mockVerifySession: vi.fn(),
+}));
+
+vi.mock("../services/walletAuthService.js", () => ({
+  verifySession: mockVerifySession,
+}));
+
+vi.mock("express-rate-limit", () => ({
+  default: vi.fn(() => (_req: unknown, _res: unknown, next: () => void) => next()),
+}));
+
 vi.mock("../db/client.js", () => ({
   prisma: {
     campaign: {
@@ -59,7 +71,7 @@ vi.mock("../config/supabase.js", () => ({
 
 import app from "../app.js";
 
-const WALLET = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const WALLET = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const UUID = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
 const FUTURE = "2030-01-01T00:00:00.000Z";
 
@@ -124,8 +136,18 @@ describe("Smoke tests — all documented public endpoints", () => {
   });
 
   describe("POST /api/v1/campaigns", () => {
+    beforeEach(() => {
+      mockVerifySession.mockResolvedValue({
+        walletAddress: WALLET,
+        sessionToken: "smoke-session",
+      });
+    });
+
     it("returns 400 for missing body", async () => {
-      const res = await request(app).post("/api/v1/campaigns").send({});
+      const res = await request(app)
+        .post("/api/v1/campaigns")
+        .set("Authorization", "Bearer smoke-session")
+        .send({});
       expect(res.status).toBe(400);
     });
   });
@@ -152,8 +174,18 @@ describe("Smoke tests — all documented public endpoints", () => {
   });
 
   describe("POST /api/v1/campaigns/:id/invest", () => {
+    beforeEach(() => {
+      mockVerifySession.mockResolvedValue({
+        walletAddress: WALLET,
+        sessionToken: "smoke-session",
+      });
+    });
+
     it("returns 400 for missing body", async () => {
-      const res = await request(app).post(`/api/v1/campaigns/${UUID}/invest`).send({});
+      const res = await request(app)
+        .post(`/api/v1/campaigns/${UUID}/invest`)
+        .set("Authorization", "Bearer smoke-session")
+        .send({});
       expect(res.status).toBe(400);
     });
   });
@@ -166,8 +198,18 @@ describe("Smoke tests — all documented public endpoints", () => {
   });
 
   describe("POST /api/v1/orders", () => {
+    beforeEach(() => {
+      mockVerifySession.mockResolvedValue({
+        walletAddress: WALLET,
+        sessionToken: "smoke-session",
+      });
+    });
+
     it("returns 400 for missing body", async () => {
-      const res = await request(app).post("/api/v1/orders").send({});
+      const res = await request(app)
+        .post("/api/v1/orders")
+        .set("Authorization", "Bearer smoke-session")
+        .send({});
       expect(res.status).toBe(400);
     });
   });
@@ -180,8 +222,17 @@ describe("Smoke tests — all documented public endpoints", () => {
   });
 
   describe("PATCH /api/v1/orders/:id/confirm", () => {
+    beforeEach(() => {
+      mockVerifySession.mockResolvedValue({
+        walletAddress: WALLET,
+        sessionToken: "smoke-session",
+      });
+    });
+
     it("returns 400 for invalid UUID", async () => {
-      const res = await request(app).patch("/api/v1/orders/not-uuid/confirm").send({ buyerAddress: WALLET });
+      const res = await request(app)
+        .patch("/api/v1/orders/not-uuid/confirm")
+        .set("Authorization", "Bearer smoke-session");
       expect(res.status).toBe(400);
     });
   });

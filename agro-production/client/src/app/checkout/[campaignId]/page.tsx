@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useWallet } from "@/context/WalletContext";
 import { fetchCampaign, formatAmount } from "@/services/campaignService";
-import { createOrder } from "@/services/orderService";
+import { createOrder, updateOrderWithTxHash } from "@/services/orderService";
 import { buildCreateOrder } from "@/lib/contractService";
 import { signAndSubmitTransaction } from "@/lib/signTransaction";
 import { parseXlmToStroops, validateStellarAddress, sanitizeString } from "@/lib/validation";
@@ -71,48 +71,13 @@ export default function CheckoutPage() {
       return;
     }
 
-    // Step 1 — record off-chain
+    // Step 1 — build on-chain transaction
     let current = advanceMachine(idleMachine(), "recording");
-    setTx(current);
-
-    let order: Order;
-    try {
-      order = await createOrder({
-        buyerAddress: addrResult.sanitized,
-        campaignId: sanitizeString(campaign.id),
-        amount: String(amountStroops),
-      });
-      setCreatedOrder(order);
-    } catch (err) {
-      const classified = classifyError(err, "recordOrder");
-      logErrorWithContext(err, {
-        feature: "checkout",
-        action: "recordOrder",
-        campaignId: campaign.id,
-        buyerAddress: addrResult.sanitized,
-        amountStroops: String(amountStroops),
-        category: classified.category,
-      });
-      setTx(advanceMachine(current, "failed", { error: classified.actionableMessage }));
-      return;
-    }
-
-    // Step 2 — sign
-    current = advanceMachine(current, "signing");
     setTx(current);
 
     const builtResult = await buildCreateOrder(addrResult.sanitized, campaign.onChainId, amountStroops);
     if (!builtResult.success || !builtResult.data) {
       const classified = classifyError(builtResult.error, "buildOrderTransaction");
-      const msg = builtResult.error ?? classified.actionableMessage;
-      // Contract not configured — treat off-chain-only order as success
-      if (msg.includes("NEXT_PUBLIC_PRODUCTION_CONTRACT_ID")) {
-        current = advanceMachine(current, "submitting");
-        current = advanceMachine(current, "success");
-        setTx(current);
-        trackOrderPlaced(campaign.id, String(amountStroops));
-        return;
-      }
       logErrorWithContext(builtResult.error ?? "build transaction failed", {
         feature: "checkout",
         action: "buildOrderTransaction",
@@ -126,8 +91,8 @@ export default function CheckoutPage() {
       return;
     }
 
-    // Step 3 — submit
-    current = advanceMachine(current, "submitting");
+    // Step 2 — sign
+    current = advanceMachine(current, "signing");
     setTx(current);
 
     const result = await signAndSubmitTransaction(builtResult.data);
@@ -147,9 +112,52 @@ export default function CheckoutPage() {
       return;
     }
 
+    // Step 3 — submit
+    current = advanceMachine(current, "submitting");
+    setTx(current);
+
     // Step 4 — confirm (immediate for Stellar test network)
     current = advanceMachine(current, "confirming");
     setTx(current);
+
+    // Step 5 — record off-chain after confirmation
+    let order: Order;
+    try {
+      order = await createOrder({
+        buyerAddress: addrResult.sanitized,
+        campaignId: sanitizeString(campaign.id),
+        amount: String(amountStroops),
+      });
+      setCreatedOrder(order);
+
+      // Update order with transaction hash
+      if (result.txHash) {
+        try {
+          await updateOrderWithTxHash(order.id, result.txHash);
+        } catch (err) {
+          logErrorWithContext(err, {
+            feature: "checkout",
+            action: "updateOrderTxHash",
+            orderId: order.id,
+            txHash: result.txHash,
+          });
+        }
+      }
+    } catch (err) {
+      const classified = classifyError(err, "recordOrder");
+      logErrorWithContext(err, {
+        feature: "checkout",
+        action: "recordOrder",
+        campaignId: campaign.id,
+        buyerAddress: addrResult.sanitized,
+        amountStroops: String(amountStroops),
+        txHash: result.txHash,
+        category: classified.category,
+      });
+      setTx(advanceMachine(current, "failed", { error: classified.actionableMessage }));
+      return;
+    }
+
     current = advanceMachine(current, "success", { txHash: result.txHash });
     setTx(current);
     trackOrderPlaced(campaign.id, String(amountStroops));

@@ -10,8 +10,8 @@ import {
 } from "../middleware/validate.js";
 import { problemDetail } from "../middleware/errors.js";
 import { writeLimiter } from "../middleware/rateLimit.js";
+import { requireWallet, type WalletRequest } from "../middleware/walletAuth.js";
 import {
-  ConfirmOrderSchema,
   CreateOrderSchema,
   ListOrdersQuerySchema,
   OrderIdParamSchema,
@@ -58,22 +58,16 @@ router.get(
   },
 );
 
-// POST /orders — create order intent (requires idempotency key and transaction hash)
+// POST /orders — requires authenticated session; buyerAddress derived from session
 router.post(
   "/orders",
+  requireWallet,
   writeLimiter,
-  requireIdempotencyKey,
-  validateBody(CreateOrderSchema),
+  validateBody(CreateOrderSchema.omit({ buyerAddress: true })),
   validateResponse(OrderSchema),
-  async (req: Request, res: Response) => {
-    const key = (req as any).idempotencyKey as string;
-    const cached = getCachedResponse(key);
-    if (cached) {
-      jsonValidated(res, OrderSchema, cached.status, cached.body);
-      return;
-    }
-
-    const { buyerAddress, campaignId, amount, transactionHash } = req.body;
+  async (req: WalletRequest, res: Response) => {
+    const buyerAddress = req.walletAddress!;
+    const { campaignId, amount } = req.body;
 
     const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
     if (!campaign) {
@@ -137,6 +131,63 @@ router.get(
       return;
     }
     jsonValidated(res, OrderSchema, 200, order);
+  },
+);
+
+// PUT /orders/:id — update txHash after on-chain confirmation
+router.put(
+  "/orders/:id",
+  writeLimiter,
+  validateParams(OrderIdParamSchema),
+  validateBody(z.object({ txHash: z.string() })),
+  validateResponse(OrderSchema),
+  async (req: Request, res: Response) => {
+    const order = await prisma.order.findUnique({ where: { id: req.params.id } });
+    if (!order) {
+      problemDetail(res, req, 404, "Order Not Found", `No order with id ${req.params.id}`);
+      return;
+    }
+
+    const updated = await prisma.order.update({
+      where: { id: order.id },
+      data: { txHash: req.body.txHash },
+    });
+
+    jsonValidated(res, OrderSchema, 200, updated);
+  },
+);
+
+// PATCH /orders/:id/confirm
+// PATCH /orders/:id/confirm — requires authenticated session; buyerAddress derived from session
+router.patch(
+  "/orders/:id/confirm",
+  requireWallet,
+  writeLimiter,
+  validateParams(OrderIdParamSchema),
+  validateResponse(OrderSchema),
+  async (req: WalletRequest, res: Response) => {
+    const walletAddress = req.walletAddress!;
+
+    const order = await prisma.order.findUnique({ where: { id: req.params.id } });
+    if (!order) {
+      problemDetail(res, req, 404, "Order Not Found", `No order with id ${req.params.id}`);
+      return;
+    }
+    if (order.buyerAddress !== walletAddress) {
+      problemDetail(res, req, 403, "Forbidden", "Not the buyer for this order");
+      return;
+    }
+    if (order.status !== "PENDING") {
+      problemDetail(res, req, 409, "Order Already Confirmed", "Order is not pending");
+      return;
+    }
+
+    const updated = await prisma.order.update({
+      where: { id: order.id },
+      data: { status: "CONFIRMED" },
+    });
+
+    jsonValidated(res, OrderSchema, 200, updated);
   },
 );
 

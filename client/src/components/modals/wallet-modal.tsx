@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Image from "next/image";
-import { Wallet, AlertTriangle } from "lucide-react";
+import { Wallet, AlertTriangle, Smartphone, Monitor } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { useWallet } from "@/hooks/useWallet";
 import { WALLET_ADAPTERS } from "@/lib/walletAdapters";
+import { Separator } from "@/components/ui/separator";
 
 function isMobileBrowser(): boolean {
   if (typeof navigator === "undefined") return false;
@@ -25,6 +26,16 @@ export default function WalletModal() {
   const [connectingId, setConnectingId] = useState<string | null>(null);
   const onMobile = isMobileBrowser();
 
+  const { mobileAdapters, desktopAdapters } = useMemo(() => {
+    const mobile: typeof WALLET_ADAPTERS = [];
+    const desktop: typeof WALLET_ADAPTERS = [];
+    for (const a of WALLET_ADAPTERS) {
+      if (a.supportsMobile()) mobile.push(a);
+      else desktop.push(a);
+    }
+    return { mobileAdapters: mobile, desktopAdapters: desktop };
+  }, []);
+
   const handleSelect = async (adapterId: string) => {
     setConnectingId(adapterId);
     await connect(adapterId);
@@ -32,6 +43,49 @@ export default function WalletModal() {
     // Dialog stays open when there is an error so the user can read it.
     // connect-wallet-inner.tsx handles post-connection redirect on success.
   };
+
+  function renderAdapterList(adapters: typeof WALLET_ADAPTERS) {
+    return (
+      <ul className="flex flex-col gap-2">
+        {adapters.map((adapter) => {
+          const isConnecting = connectingId === adapter.id;
+
+          return (
+            <li key={adapter.id}>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => void handleSelect(adapter.id)}
+                className="flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <div className="relative size-9 shrink-0 overflow-hidden rounded-md bg-muted">
+                  <Image
+                    src={adapter.icon}
+                    alt={adapter.name}
+                    fill
+                    className="object-contain p-1"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).style.display =
+                        "none";
+                    }}
+                  />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium leading-none">{adapter.name}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {adapter.name} wallet
+                  </p>
+                </div>
+                {isConnecting && (
+                  <span className="ml-auto size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                )}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -64,57 +118,36 @@ export default function WalletModal() {
           </div>
         )}
 
-        <ul className="flex flex-col gap-2">
-          {WALLET_ADAPTERS.map((adapter) => {
-            const unavailable = onMobile && !adapter.supportsMobile();
-            const isConnecting = connectingId === adapter.id;
+        {onMobile && mobileAdapters.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+              <Smartphone className="size-3" />
+              <span>Mobile wallets</span>
+            </div>
+            {renderAdapterList(mobileAdapters)}
+          </div>
+        )}
 
-            return (
-              <li key={adapter.id}>
-                <button
-                  type="button"
-                  disabled={loading || unavailable}
-                  onClick={() => void handleSelect(adapter.id)}
-                  className="flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <div className="relative size-9 shrink-0 overflow-hidden rounded-md bg-muted">
-                    <Image
-                      src={adapter.icon}
-                      alt={adapter.name}
-                      fill
-                      className="object-contain p-1"
-                      onError={(e) => {
-                        (e.currentTarget as HTMLImageElement).style.display =
-                          "none";
-                      }}
-                    />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium leading-none">{adapter.name}</p>
-                    {unavailable && (
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        Desktop only
-                      </p>
-                    )}
-                    {adapter.supportsMobile() && onMobile && (
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        Mobile supported
-                      </p>
-                    )}
-                  </div>
-                  {isConnecting && (
-                    <span className="ml-auto size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                  )}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+        {onMobile && mobileAdapters.length > 0 && desktopAdapters.length > 0 && (
+          <Separator />
+        )}
+
+        {(!onMobile || desktopAdapters.length > 0) && (
+          <div className="space-y-2">
+            {onMobile && (
+              <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                <Monitor className="size-3" />
+                <span>Desktop wallets (not available on mobile)</span>
+              </div>
+            )}
+            {renderAdapterList(onMobile ? desktopAdapters : WALLET_ADAPTERS)}
+          </div>
+        )}
 
         {onMobile && (
           <p className="text-center text-xs text-muted-foreground">
-            On mobile, only wallets marked &quot;Mobile supported&quot; work
-            directly. Others require a desktop browser.
+            Mobile wallets work directly in your browser. Desktop wallets
+            require a browser extension on a computer.
           </p>
         )}
       </DialogContent>

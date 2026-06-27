@@ -12,20 +12,43 @@ type EventName =
 
 type EventProperties = Record<string, string | number | boolean | undefined>;
 
-const ANALYTICS_ENABLED =
-  typeof window !== "undefined" &&
-  process.env.NEXT_PUBLIC_ANALYTICS_ENABLED !== "false";
+/**
+ * Telemetry payload sent to NEXT_PUBLIC_TELEMETRY_URL.
+ * Fields are redacted as follows:
+ * - address: first 8 characters + "..." to avoid exposing full wallet addresses
+ * - stack: not included (see errorTracking.ts for stack handling)
+ */
+export interface AnalyticsPayload {
+  events: Array<{
+    name: EventName;
+    properties?: EventProperties;
+  }>;
+  url: string;
+  userAgent: string;
+  timestamp: string;
+}
+
+const TELEMETRY_ENABLED = process.env.NEXT_PUBLIC_TELEMETRY_ENABLED === "true";
 
 const eventQueue: Array<{ name: EventName; properties?: EventProperties }> = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
-function sendToAnalyticsEndpoint(events: typeof eventQueue) {
-  if (events.length === 0) return;
-  const body = JSON.stringify({ events });
+function sendToTelemetryEndpoint(payload: AnalyticsPayload) {
+  if (!TELEMETRY_ENABLED) return;
+
+  const telemetryUrl = process.env.NEXT_PUBLIC_TELEMETRY_URL;
+  if (!telemetryUrl) {
+    console.warn(
+      "[analytics] Telemetry enabled but NEXT_PUBLIC_TELEMETRY_URL is not set. Skipping."
+    );
+    return;
+  }
+
+  const body = JSON.stringify(payload);
   if (typeof navigator !== "undefined" && "sendBeacon" in navigator) {
-    navigator.sendBeacon("/api/analytics", body);
+    navigator.sendBeacon(telemetryUrl, body);
   } else {
-    fetch("/api/analytics", {
+    fetch(telemetryUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,
@@ -35,17 +58,27 @@ function sendToAnalyticsEndpoint(events: typeof eventQueue) {
 }
 
 function flush() {
+  if (!TELEMETRY_ENABLED) return;
+
   if (flushTimer) {
     clearTimeout(flushTimer);
     flushTimer = null;
   }
   if (eventQueue.length === 0) return;
   const batch = eventQueue.splice(0);
-  sendToAnalyticsEndpoint(batch);
+
+  const payload: AnalyticsPayload = {
+    events: batch,
+    url: typeof window !== "undefined" ? window.location.href : "",
+    userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
+    timestamp: new Date().toISOString(),
+  };
+
+  sendToTelemetryEndpoint(payload);
 }
 
 function enqueue(name: EventName, properties?: EventProperties) {
-  if (!ANALYTICS_ENABLED) return;
+  if (!TELEMETRY_ENABLED) return;
   eventQueue.push({ name, properties });
   if (!flushTimer) {
     flushTimer = setTimeout(flush, 2000);
@@ -89,7 +122,7 @@ export function trackError(errorType: string, message: string) {
 }
 
 export function initAnalytics() {
-  if (typeof window === "undefined" || !ANALYTICS_ENABLED) return;
+  if (typeof window === "undefined" || !TELEMETRY_ENABLED) return;
 
   window.addEventListener("beforeunload", () => flush());
   document.addEventListener("visibilitychange", () => {

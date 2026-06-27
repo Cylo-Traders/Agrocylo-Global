@@ -13,12 +13,26 @@ vi.mock('sharp', () => {
   return { default: sharp };
 });
 
-const mockStorageFrom = {
-  upload: vi.fn().mockResolvedValue({ error: null }),
-  list: vi.fn().mockResolvedValue({ data: [], error: null }),
-  remove: vi.fn().mockResolvedValue({ error: null }),
-  getPublicUrl: vi.fn(() => ({ data: { publicUrl: 'https://supabase.co/storage/v1/object/public/campaign-images/farmer/campaign/thumbnail_800x800.webp' } })),
-};
+const {
+  mockStorageFrom,
+  mockCampaignFindUnique,
+  mockCampaignUpdate,
+  mockVerifySession,
+} = vi.hoisted(() => ({
+  mockStorageFrom: {
+    upload: vi.fn().mockResolvedValue({ error: null }),
+    list: vi.fn().mockResolvedValue({ data: [], error: null }),
+    remove: vi.fn().mockResolvedValue({ error: null }),
+    getPublicUrl: vi.fn(() => ({ data: { publicUrl: 'https://supabase.co/storage/v1/object/public/campaign-images/farmer/campaign/thumbnail_800x800.webp' } })),
+  },
+  mockCampaignFindUnique: vi.fn(),
+  mockCampaignUpdate: vi.fn(),
+  mockVerifySession: vi.fn().mockResolvedValue({ walletAddress: '', sessionToken: 'test-token' }),
+}));
+
+vi.mock('../services/walletAuthService.js', () => ({
+  verifySession: mockVerifySession,
+}));
 
 vi.mock('../config/supabase.js', () => {
   let cached: ReturnType<ReturnType<typeof vi.fn>> | null = null;
@@ -36,12 +50,18 @@ vi.mock('../config/supabase.js', () => {
   };
 });
 
-vi.mock('../config/database.js', () => ({
-  query: vi.fn(),
+vi.mock('../db/client.js', () => ({
+  prisma: {
+    campaign: {
+      findUnique: mockCampaignFindUnique,
+      update: mockCampaignUpdate,
+    },
+  },
 }));
 
+const SESSION_TOKEN = 'test-session-token';
+
 import app from '../app.js';
-import { query } from '../config/database.js';
 import { getSupabaseAdmin } from '../config/supabase.js';
 import sharp from 'sharp';
 
@@ -65,14 +85,24 @@ describe('Campaign Image Upload', () => {
   });
 
   describe('POST /campaigns/:campaign_id/image', () => {
-    it('should upload an image successfully', async () => {
-      (query as ReturnType<typeof vi.fn>).mockResolvedValue({
-        rows: [{ id: VALID_UUID, farmer_wallet: WALLET_ADDRESS.toLowerCase(), image_url: null }],
+    beforeEach(() => {
+      mockVerifySession.mockResolvedValue({
+        walletAddress: WALLET_ADDRESS,
+        sessionToken: SESSION_TOKEN,
       });
+    });
+
+    it('should upload an image successfully', async () => {
+      mockCampaignFindUnique.mockResolvedValue({
+        id: VALID_UUID,
+        farmerAddress: WALLET_ADDRESS.toLowerCase(),
+        imageUrl: null,
+      });
+      mockCampaignUpdate.mockResolvedValue({});
 
       const res = await request(app)
         .post(`/campaigns/${VALID_UUID}/image`)
-        .set('x-wallet-address', WALLET_ADDRESS)
+        .set('Authorization', `Bearer ${SESSION_TOKEN}`)
         .attach('image', fakeImageBuffer(), 'test.jpg');
 
       expect(res.status).toBe(200);
@@ -80,7 +110,7 @@ describe('Campaign Image Upload', () => {
       expect(res.body.image_url).toContain('thumbnail_800x800.webp');
     });
 
-    it('should return 401 if no wallet header', async () => {
+    it('should return 401 if no auth header', async () => {
       const res = await request(app)
         .post(`/campaigns/${VALID_UUID}/image`)
         .attach('image', fakeImageBuffer(), 'test.jpg');
@@ -91,7 +121,7 @@ describe('Campaign Image Upload', () => {
     it('should return 400 if no image file', async () => {
       const res = await request(app)
         .post(`/campaigns/${VALID_UUID}/image`)
-        .set('x-wallet-address', WALLET_ADDRESS);
+        .set('Authorization', `Bearer ${SESSION_TOKEN}`);
 
       expect(res.status).toBe(400);
     });
@@ -99,7 +129,7 @@ describe('Campaign Image Upload', () => {
     it('should return 400 for unsupported file type (rejected by multer)', async () => {
       const res = await request(app)
         .post(`/campaigns/${VALID_UUID}/image`)
-        .set('x-wallet-address', WALLET_ADDRESS)
+        .set('Authorization', `Bearer ${SESSION_TOKEN}`)
         .attach('image', fakeImageBuffer(), 'test.gif');
 
       expect(res.status).toBe(400);
@@ -107,24 +137,26 @@ describe('Campaign Image Upload', () => {
     });
 
     it('should return 404 if campaign not found', async () => {
-      (query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [] });
+      mockCampaignFindUnique.mockResolvedValue(null);
 
       const res = await request(app)
         .post(`/campaigns/${VALID_UUID}/image`)
-        .set('x-wallet-address', WALLET_ADDRESS)
+        .set('Authorization', `Bearer ${SESSION_TOKEN}`)
         .attach('image', fakeImageBuffer(), 'test.jpg');
 
       expect(res.status).toBe(404);
     });
 
     it('should return 403 if wallet does not own campaign', async () => {
-      (query as ReturnType<typeof vi.fn>).mockResolvedValue({
-        rows: [{ id: VALID_UUID, farmer_wallet: 'other_wallet', image_url: null }],
+      mockCampaignFindUnique.mockResolvedValue({
+        id: VALID_UUID,
+        farmerAddress: 'GOTHERWALLET00000000000000000000000000000000000000000',
+        imageUrl: null,
       });
 
       const res = await request(app)
         .post(`/campaigns/${VALID_UUID}/image`)
-        .set('x-wallet-address', WALLET_ADDRESS)
+        .set('Authorization', `Bearer ${SESSION_TOKEN}`)
         .attach('image', fakeImageBuffer(), 'test.jpg');
 
       expect(res.status).toBe(403);
@@ -136,13 +168,15 @@ describe('Campaign Image Upload', () => {
       const mockInstance = mockSharp();
       mockInstance.metadata.mockResolvedValue({ width: 50, height: 50 });
 
-      (query as ReturnType<typeof vi.fn>).mockResolvedValue({
-        rows: [{ id: VALID_UUID, farmer_wallet: WALLET_ADDRESS.toLowerCase(), image_url: null }],
+      mockCampaignFindUnique.mockResolvedValue({
+        id: VALID_UUID,
+        farmerAddress: WALLET_ADDRESS.toLowerCase(),
+        imageUrl: null,
       });
 
       const res = await request(app)
         .post(`/campaigns/${VALID_UUID}/image`)
-        .set('x-wallet-address', WALLET_ADDRESS)
+        .set('Authorization', `Bearer ${SESSION_TOKEN}`)
         .attach('image', fakeImageBuffer(), 'test.jpg');
 
       expect(res.status).toBe(422);
@@ -150,11 +184,12 @@ describe('Campaign Image Upload', () => {
     });
 
     it('should return 500 if database update fails and roll back storage', async () => {
-      (query as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce({
-          rows: [{ id: VALID_UUID, farmer_wallet: WALLET_ADDRESS.toLowerCase(), image_url: null }],
-        })
-        .mockRejectedValueOnce(new Error('DB error'));
+      mockCampaignFindUnique.mockResolvedValue({
+        id: VALID_UUID,
+        farmerAddress: WALLET_ADDRESS.toLowerCase(),
+        imageUrl: null,
+      });
+      mockCampaignUpdate.mockRejectedValue(new Error('DB error'));
 
       const storageRemove = vi.fn().mockResolvedValue({ error: null });
       const supabaseAdmin = getSupabaseAdmin();
@@ -167,7 +202,7 @@ describe('Campaign Image Upload', () => {
 
       const res = await request(app)
         .post(`/campaigns/${VALID_UUID}/image`)
-        .set('x-wallet-address', WALLET_ADDRESS)
+        .set('Authorization', `Bearer ${SESSION_TOKEN}`)
         .attach('image', fakeImageBuffer(), 'test.jpg');
 
       expect(res.status).toBe(500);
@@ -176,19 +211,29 @@ describe('Campaign Image Upload', () => {
   });
 
   describe('DELETE /campaigns/:campaign_id/image', () => {
-    it('should delete campaign image successfully', async () => {
-      (query as ReturnType<typeof vi.fn>).mockResolvedValue({
-        rows: [{ id: VALID_UUID, farmer_wallet: WALLET_ADDRESS.toLowerCase(), image_url: null }],
+    beforeEach(() => {
+      mockVerifySession.mockResolvedValue({
+        walletAddress: WALLET_ADDRESS,
+        sessionToken: SESSION_TOKEN,
       });
+    });
+
+    it('should delete campaign image successfully', async () => {
+      mockCampaignFindUnique.mockResolvedValue({
+        id: VALID_UUID,
+        farmerAddress: WALLET_ADDRESS.toLowerCase(),
+        imageUrl: null,
+      });
+      mockCampaignUpdate.mockResolvedValue({});
 
       const res = await request(app)
         .delete(`/campaigns/${VALID_UUID}/image`)
-        .set('x-wallet-address', WALLET_ADDRESS);
+        .set('Authorization', `Bearer ${SESSION_TOKEN}`);
 
       expect(res.status).toBe(204);
     });
 
-    it('should return 401 if no wallet header', async () => {
+    it('should return 401 if no auth header', async () => {
       const res = await request(app)
         .delete(`/campaigns/${VALID_UUID}/image`);
 
@@ -196,11 +241,11 @@ describe('Campaign Image Upload', () => {
     });
 
     it('should return 404 if campaign not found', async () => {
-      (query as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: [] });
+      mockCampaignFindUnique.mockResolvedValue(null);
 
       const res = await request(app)
         .delete(`/campaigns/${VALID_UUID}/image`)
-        .set('x-wallet-address', WALLET_ADDRESS);
+        .set('Authorization', `Bearer ${SESSION_TOKEN}`);
 
       expect(res.status).toBe(404);
     });

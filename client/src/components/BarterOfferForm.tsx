@@ -35,7 +35,7 @@ const CATEGORIES: ProductCategory[] = [
   "Other",
 ];
 const UNITS: ProductUnit[] = ["kg", "bag", "crate", "piece", "litre", "dozen"];
-const CURRENCIES: ProductCurrency[] = ["STRK", "USDC"];
+const CURRENCIES: ProductCurrency[] = ["XLM", "USDC"];
 const EXPIRY_OPTIONS = [
   { label: "12 hours", value: 12 },
   { label: "24 hours", value: 24 },
@@ -221,7 +221,7 @@ export default function BarterOfferForm({
   const [includeCollateral, setIncludeCollateral] = useState(false);
   const [collateralAmount, setCollateralAmount] = useState("");
   const [collateralCurrency, setCollateralCurrency] =
-    useState<ProductCurrency>("STRK");
+    useState<ProductCurrency>("XLM");
   const [notes, setNotes] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
   const [saving, setSaving] = useState(false);
@@ -312,7 +312,6 @@ export default function BarterOfferForm({
         notes: notes.trim() || null,
       };
 
-      await new Promise((r) => setTimeout(r, 500));
       trackTransactionAttempt("barter", "confirmed", {
         recipientWallet: recipientWallet.trim(),
       });
