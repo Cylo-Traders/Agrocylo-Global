@@ -86,6 +86,7 @@ app.get("/health", async (_req: Request, res: Response) => {
 
   // Check database connectivity
   try {
+    // Raw SQL is limited to this static health probe; it accepts no user input or dynamic parameters.
     await prisma.$queryRaw`SELECT 1`;
     health.database = "UP";
   } catch (error) {

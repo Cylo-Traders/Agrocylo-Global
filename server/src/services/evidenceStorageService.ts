@@ -1,6 +1,7 @@
 import { getSupabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../http/errors.js';
 import crypto from 'crypto';
+import logger from '../config/logger.js';
 
 export class EvidenceStorageService {
   private static BUCKET_NAME = 'dispute-evidence';
@@ -30,7 +31,7 @@ export class EvidenceStorageService {
       });
 
     if (error) {
-      console.error('Supabase Storage Error:', error);
+      logger.error('Supabase storage upload failed', { error });
       throw new ApiError(500, 'Internal Server Error', 'Failed to upload evidence to storage');
     }
 
