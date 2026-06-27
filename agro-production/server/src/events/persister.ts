@@ -7,6 +7,10 @@ import type {
   CampaignCreatedEvent,
   CampaignInvestedEvent,
   CampaignSettledEvent,
+  DisputeOpenedEvent,
+  DisputeEvidenceSubmittedEvent,
+  DisputeResolvedEvent,
+  DisputeDismissedEvent,
   GenericCampaignEvent,
   OrderConfirmedEvent,
   OrderCreatedEvent,
@@ -53,6 +57,18 @@ export class EventPersister {
         break;
       case "campaign.disputed":
         await updateCampaignStatus(event, "DISPUTED");
+        break;
+      case "dispute.opened":
+        await handleDisputeOpened(event as DisputeOpenedEvent);
+        break;
+      case "dispute.evidence_submitted":
+        await handleDisputeEvidenceSubmitted(event as DisputeEvidenceSubmittedEvent);
+        break;
+      case "dispute.resolved":
+        await handleDisputeResolved(event as DisputeResolvedEvent);
+        break;
+      case "dispute.dismissed":
+        await handleDisputeDismissed(event as DisputeDismissedEvent);
         break;
       default:
         // Record the raw transaction but don't update domain models.
@@ -437,6 +453,249 @@ async function upsertUser(
     where: { walletAddress },
     create: { walletAddress, role },
     update: {},
+  });
+}
+
+async function handleDisputeOpened(event: DisputeOpenedEvent) {
+  // Idempotency: dispute upsert by transactionHash makes duplicate events safe.
+  await prisma.$transaction(async (tx) => {
+    if (await skipDuplicateInTransaction(tx, event)) return;
+
+    const campaign = await tx.campaign.findUnique({
+      where: { onChainId: event.campaignId },
+    });
+    if (!campaign) {
+      logger.warn("EventPersister: dispute for unknown campaign", {
+        campaignId: event.campaignId,
+      });
+      return;
+    }
+
+    const dispute = await tx.dispute.upsert({
+      where: { transactionHash: event.txHash! },
+      create: {
+        campaignId: campaign.id,
+        orderId: event.orderId || undefined,
+        initiatorAddress: event.initiatorAddress,
+        respondentAddress: event.respondentAddress,
+        transactionHash: event.txHash!,
+        ledgerSequence: event.ledger,
+        status: "Open",
+      },
+      update: {},
+    });
+
+    // Create audit entry for dispute opened
+    await tx.disputeAuditEntry.create({
+      data: {
+        disputeId: dispute.id,
+        action: "opened",
+        actorAddress: event.initiatorAddress,
+        details: { initiatorAddress: event.initiatorAddress },
+      },
+    });
+
+    broadcast("dispute.opened", {
+      disputeId: dispute.id,
+      campaignId: campaign.id,
+      orderId: event.orderId,
+      initiatorAddress: event.initiatorAddress,
+      respondentAddress: event.respondentAddress,
+      status: "Open",
+      txHash: event.txHash,
+    });
+
+    await tx.transaction.create({
+      data: {
+        campaignId: campaign.id,
+        eventType: event.action,
+        payload: toEventPayload(event),
+        ledger: event.ledger,
+        eventIndex: event.eventIndex,
+        txHash: event.txHash,
+      },
+    });
+  });
+}
+
+async function handleDisputeEvidenceSubmitted(event: DisputeEvidenceSubmittedEvent) {
+  // Idempotency: evidence upsert by transactionHash + evidence_submitted action.
+  await prisma.$transaction(async (tx) => {
+    if (await skipDuplicateInTransaction(tx, event)) return;
+
+    const dispute = await tx.dispute.findMany({
+      where: {},
+      orderBy: { createdAt: "desc" },
+      take: 1,
+    });
+
+    if (!dispute.length) {
+      logger.warn("EventPersister: evidence submitted for unknown dispute", {
+        disputeId: event.disputeId,
+      });
+      return;
+    }
+
+    const currentDispute = dispute[0];
+
+    // Create evidence record
+    await tx.disputeEvidence.create({
+      data: {
+        disputeId: currentDispute.id,
+        submitterAddress: event.submitterAddress,
+        evidenceUrl: event.evidenceUrl,
+        evidenceHash: event.evidenceHash,
+      },
+    });
+
+    // Update dispute status to EvidenceSubmitted if it's Open
+    if (currentDispute.status === "Open") {
+      await tx.dispute.update({
+        where: { id: currentDispute.id },
+        data: { status: "EvidenceSubmitted" },
+      });
+    }
+
+    // Create audit entry
+    await tx.disputeAuditEntry.create({
+      data: {
+        disputeId: currentDispute.id,
+        action: "evidence_submitted",
+        actorAddress: event.submitterAddress,
+        details: { evidenceHash: event.evidenceHash },
+      },
+    });
+
+    broadcast("dispute.evidence_submitted", {
+      disputeId: currentDispute.id,
+      submitterAddress: event.submitterAddress,
+      status: "EvidenceSubmitted",
+      txHash: event.txHash,
+    });
+
+    await tx.transaction.create({
+      data: {
+        campaignId: currentDispute.campaignId,
+        eventType: event.action,
+        payload: toEventPayload(event),
+        ledger: event.ledger,
+        eventIndex: event.eventIndex,
+        txHash: event.txHash,
+      },
+    });
+  });
+}
+
+async function handleDisputeResolved(event: DisputeResolvedEvent) {
+  // Idempotency: status update is idempotent.
+  await prisma.$transaction(async (tx) => {
+    if (await skipDuplicateInTransaction(tx, event)) return;
+
+    const dispute = await tx.dispute.findMany({
+      where: {},
+      orderBy: { createdAt: "desc" },
+      take: 1,
+    });
+
+    if (!dispute.length) {
+      logger.warn("EventPersister: resolve event for unknown dispute", {
+        disputeId: event.disputeId,
+      });
+      return;
+    }
+
+    const currentDispute = dispute[0];
+
+    await tx.dispute.update({
+      where: { id: currentDispute.id },
+      data: {
+        status: "Resolved",
+        resolutionOutcome: event.resolutionOutcome,
+        resolutionNotes: event.resolutionNotes,
+      },
+    });
+
+    // Create audit entry
+    await tx.disputeAuditEntry.create({
+      data: {
+        disputeId: currentDispute.id,
+        action: "resolved",
+        actorAddress: event.txHash || "system",
+        details: { outcome: event.resolutionOutcome },
+      },
+    });
+
+    broadcast("dispute.resolved", {
+      disputeId: currentDispute.id,
+      status: "Resolved",
+      resolutionOutcome: event.resolutionOutcome,
+      txHash: event.txHash,
+    });
+
+    await tx.transaction.create({
+      data: {
+        campaignId: currentDispute.campaignId,
+        eventType: event.action,
+        payload: toEventPayload(event),
+        ledger: event.ledger,
+        eventIndex: event.eventIndex,
+        txHash: event.txHash,
+      },
+    });
+  });
+}
+
+async function handleDisputeDismissed(event: DisputeDismissedEvent) {
+  // Idempotency: status update is idempotent.
+  await prisma.$transaction(async (tx) => {
+    if (await skipDuplicateInTransaction(tx, event)) return;
+
+    const dispute = await tx.dispute.findMany({
+      where: {},
+      orderBy: { createdAt: "desc" },
+      take: 1,
+    });
+
+    if (!dispute.length) {
+      logger.warn("EventPersister: dismiss event for unknown dispute", {
+        disputeId: event.disputeId,
+      });
+      return;
+    }
+
+    const currentDispute = dispute[0];
+
+    await tx.dispute.update({
+      where: { id: currentDispute.id },
+      data: { status: "Dismissed" },
+    });
+
+    // Create audit entry
+    await tx.disputeAuditEntry.create({
+      data: {
+        disputeId: currentDispute.id,
+        action: "dismissed",
+        actorAddress: event.txHash || "system",
+        details: { reason: event.dismissalReason },
+      },
+    });
+
+    broadcast("dispute.dismissed", {
+      disputeId: currentDispute.id,
+      status: "Dismissed",
+      txHash: event.txHash,
+    });
+
+    await tx.transaction.create({
+      data: {
+        campaignId: currentDispute.campaignId,
+        eventType: event.action,
+        payload: toEventPayload(event),
+        ledger: event.ledger,
+        eventIndex: event.eventIndex,
+        txHash: event.txHash,
+      },
+    });
   });
 }
 

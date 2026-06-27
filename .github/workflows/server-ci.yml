@@ -1,0 +1,104 @@
+name: Server CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'agro-production/server/**'
+      - '.github/workflows/server-ci.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'agro-production/server/**'
+      - '.github/workflows/server-ci.yml'
+
+jobs:
+  install-and-build:
+    runs-on: ubuntu-latest
+    name: Install and Build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: agro-production/server
+
+      - name: Generate Prisma types
+        run: npx prisma generate
+        working-directory: agro-production/server
+
+      - name: Build TypeScript
+        run: npm run build
+        working-directory: agro-production/server
+
+      - name: Run linter
+        run: npm run lint
+        working-directory: agro-production/server
+        continue-on-error: true
+
+  test:
+    runs-on: ubuntu-latest
+    name: Test
+    needs: install-and-build
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: agrocylo_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: agro-production/server
+
+      - name: Run migrations
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/agrocylo_test
+        run: npx prisma migrate deploy
+        working-directory: agro-production/server
+
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/agrocylo_test
+        run: npm test
+        working-directory: agro-production/server
+
+  security:
+    runs-on: ubuntu-latest
+    name: Security Audit
+    needs: install-and-build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: agro-production/server
+
+      - name: Run npm audit
+        run: npm audit --audit-level=high
+        working-directory: agro-production/server

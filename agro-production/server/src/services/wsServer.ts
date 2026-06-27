@@ -13,7 +13,12 @@ export type WsEventType =
   | "campaign.settled"
   | "investment.indexed"
   | "order.created"
-  | "order.confirmed";
+  | "order.confirmed"
+  | "dispute.opened"
+  | "dispute.evidence_submitted"
+  | "dispute.resolved"
+  | "dispute.dismissed"
+  | "error";
 
 export interface WsEventEnvelope<T = unknown> {
   version: "1";

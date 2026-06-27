@@ -10,7 +10,11 @@ export type EventAction =
   | "campaign.refunded"
   | "campaign.tranche"
   | "order.created"
-  | "order.confirmed";
+  | "order.confirmed"
+  | "dispute.opened"
+  | "dispute.evidence_submitted"
+  | "dispute.resolved"
+  | "dispute.dismissed";
 
 export interface RawSorobanEvent {
   id: string;
@@ -85,10 +89,44 @@ export interface GenericCampaignEvent extends BaseEvent {
   extra?: unknown[];
 }
 
+export interface DisputeOpenedEvent extends BaseEvent {
+  action: "dispute.opened";
+  disputeId: string;
+  campaignId: string;
+  orderId?: string;
+  initiatorAddress: string;
+  respondentAddress: string;
+}
+
+export interface DisputeEvidenceSubmittedEvent extends BaseEvent {
+  action: "dispute.evidence_submitted";
+  disputeId: string;
+  submitterAddress: string;
+  evidenceUrl: string;
+  evidenceHash: string;
+}
+
+export interface DisputeResolvedEvent extends BaseEvent {
+  action: "dispute.resolved";
+  disputeId: string;
+  resolutionOutcome: string;
+  resolutionNotes?: string;
+}
+
+export interface DisputeDismissedEvent extends BaseEvent {
+  action: "dispute.dismissed";
+  disputeId: string;
+  dismissalReason?: string;
+}
+
 export type ParsedEvent =
   | CampaignCreatedEvent
   | CampaignInvestedEvent
   | CampaignSettledEvent
   | OrderCreatedEvent
   | OrderConfirmedEvent
-  | GenericCampaignEvent;
+  | GenericCampaignEvent
+  | DisputeOpenedEvent
+  | DisputeEvidenceSubmittedEvent
+  | DisputeResolvedEvent
+  | DisputeDismissedEvent;
