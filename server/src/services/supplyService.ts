@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from "../config/database.js";
 import { ApiError } from "../http/errors.js";
 import { z } from "zod";
@@ -35,6 +36,51 @@ async function assertFarmerProfile(wallet: string): Promise<void> {
       "https://cylos.io/errors/forbidden",
     );
   }
+}
+
+function parsePage(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isNaN(parsed) || parsed <= 0 ? fallback : parsed;
+}
+
+function decimalFilter(value: string | undefined): Prisma.Decimal | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number.parseFloat(value);
+  if (Number.isNaN(parsed)) return undefined;
+  return new Prisma.Decimal(value);
+}
+
+export async function listFarmerSupplies(params: {
+  farmerWallet?: string;
+  cropName?: string;
+  minPrice?: string;
+  maxPrice?: string;
+  page?: string;
+  pageSize?: string;
+}): Promise<{ page: number; page_size: number; total: number; totalPages: number; items: unknown[] }> {
+  const page = parsePage(params.page, 1);
+  const pageSize = Math.min(parsePage(params.pageSize, 20), 100);
+  const where: Prisma.FarmerSupplyWhereInput = {};
+
+  if (params.farmerWallet) {
+    where.farmerWallet = params.farmerWallet.toLowerCase();
+  }
+  if (params.cropName) {
+    where.cropName = { contains: params.cropName, mode: 'insensitive' };
+  }
+
+  const [total, items] = await prisma.$transaction([
+    prisma.farmerSupply.count({ where }),
+    prisma.farmerSupply.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: pageSize,
+      skip: (page - 1) * pageSize,
+    }),
+  ]);
+
+  return { page, page_size: pageSize, total, totalPages: Math.ceil(total / pageSize), items };
 }
 
 export async function createFarmerSupply(farmerWallet: string, body: unknown) {

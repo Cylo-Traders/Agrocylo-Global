@@ -78,6 +78,8 @@ model BuyerDemand {
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
   @@index([buyerWallet])
+  @@index([buyerWallet, createdAt(sort: Desc)])
+  @@index([cropName])
   @@map("buyer_demands")
 }
 
@@ -96,6 +98,8 @@ model FarmerSupply {
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
   @@index([farmerWallet])
+  @@index([farmerWallet, availableFrom])
+  @@index([cropName, pricePerUnit])
   @@map("farmer_supplies")
 }
 
