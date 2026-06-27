@@ -1,0 +1,73 @@
+{
+  "common": {
+    "loading": "Chargement",
+    "error": "Erreur",
+    "tryAgain": "Réessayer",
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "confirm": "Confirmer",
+    "delete": "Supprimer",
+    "edit": "Modifier"
+  },
+  "wallet": {
+    "connect": "Connecter le portefeuille",
+    "disconnect": "Déconnecter",
+    "connecting": "Connexion en cours",
+    "reconnecting": "Reconnexion en cours",
+    "connected": "Portefeuille connecté",
+    "wrongNetwork": "Connecté au mauvais réseau — basculez vers {networkName} dans Freighter",
+    "unavailable": "Extension Freighter introuvable.",
+    "installFreighter": "Installer Freighter"
+  },
+  "marketplace": {
+    "title": "Marché",
+    "subtitle": "Achetez des produits frais directement auprès d'agriculteurs vérifiés.",
+    "filterProducts": "Filtrer les produits",
+    "category": "Catégorie",
+    "location": "Localisation",
+    "minPrice": "Prix min (XLM)",
+    "maxPrice": "Prix max (XLM)",
+    "allCategories": "Toutes les catégories",
+    "grains": "Céréales",
+    "vegetables": "Légumes",
+    "fruits": "Fruits",
+    "livestock": "Bétail",
+    "dairy": "Produits laitiers",
+    "other": "Autre",
+    "noProducts": "Aucun produit trouvé",
+    "adjustFilters": "Essayez d'ajuster vos filtres.",
+    "loadingProducts": "Chargement des produits",
+    "networkError": "Erreur réseau — vérifiez votre connexion et réessayez"
+  },
+  "notifications": {
+    "preferences": "Préférences de notification",
+    "orderNotifications": "Notifications de commande",
+    "orderNotificationsDesc": "Recevoir des mises à jour sur vos commandes",
+    "disputeNotifications": "Notifications de litige",
+    "disputeNotificationsDesc": "Être informé des activités de litige",
+    "systemNotifications": "Notifications système",
+    "systemNotificationsDesc": "Recevoir les mises à jour et annonces système",
+    "preferencesUpdated": "Préférences mises à jour avec succès"
+  },
+  "orders": {
+    "title": "Commandes",
+    "orderDetails": "Détails de la commande",
+    "orderTimeline": "Chronologie de la commande",
+    "status": "Statut",
+    "created": "Créé",
+    "escrowFunded": "Caution financée",
+    "shipped": "Expédié",
+    "delivered": "Livré",
+    "disputeOpened": "Litige ouvert",
+    "pending": "En attente",
+    "confirmed": "Confirmé",
+    "nextAction": "Prochaine action",
+    "trackingNumber": "Numéro de suivi",
+    "estimatedDelivery": "Livraison estimée"
+  },
+  "dashboard": {
+    "settings": "Paramètres",
+    "profile": "Profil",
+    "notifications": "Notifications"
+  }
+}
