@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest",
-    "test:watch": "vitest --watch"
+    "test:watch": "vitest --watch",
+    "test:a11y": "vitest run src/a11y.test.tsx"
   },
   "dependencies": {
     "@stellar/freighter-api": "^1.4.0",
