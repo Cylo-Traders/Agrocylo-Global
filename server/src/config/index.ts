@@ -11,6 +11,10 @@ const env = cleanEnv(process.env, {
   DATABASE_URL: str(),
   SUPABASE_URL: url(),
   SUPABASE_ANON_KEY: str(),
+  ALLOWED_ORIGINS: str({
+    default: "http://localhost:3000,http://localhost:3001",
+    desc: "Comma-separated list of allowed CORS origins",
+  }),
   REDIS_URL: str({ default: "redis://127.0.0.1:6379" }),
   RUN_WORKERS: bool({ default: false }),
   RUN_CONTRACT_WATCHER: bool({ default: false }),
@@ -53,6 +57,7 @@ validateContractWatcherConfig(env.RUN_CONTRACT_WATCHER, env.CONTRACT_ID);
 export const config = {
   port: env.PORT,
   nodeEnv: env.NODE_ENV,
+  allowedOrigins: env.ALLOWED_ORIGINS.split(",").map(origin => origin.trim()),
   redisUrl: env.REDIS_URL,
   runWorkers: env.RUN_WORKERS,
   runContractWatcher: env.RUN_CONTRACT_WATCHER,
