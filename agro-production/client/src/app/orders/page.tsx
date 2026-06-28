@@ -46,6 +46,13 @@ function OrderRow({
       </td>
       <td className="px-4 py-3 text-right space-x-2">
         <Link
+          href={`/orders/${order.id}`}
+          className="text-xs text-primary-600 hover:underline"
+          aria-label={`View details for order ${order.id.slice(0, 8)}…`}
+        >
+          View Details
+        </Link>
+        <Link
           href={`/campaigns/${order.campaignId}`}
           className="text-xs text-primary-600 hover:underline"
           aria-label={`View campaign for order ${order.id.slice(0, 8)}…`}

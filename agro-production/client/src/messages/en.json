@@ -1,0 +1,73 @@
+{
+  "common": {
+    "loading": "Loading",
+    "error": "Error",
+    "tryAgain": "Try again",
+    "save": "Save",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "delete": "Delete",
+    "edit": "Edit"
+  },
+  "wallet": {
+    "connect": "Connect Wallet",
+    "disconnect": "Disconnect",
+    "connecting": "Connecting",
+    "reconnecting": "Reconnecting",
+    "connected": "Connected wallet",
+    "wrongNetwork": "Connected to wrong network — switch to {networkName} in Freighter",
+    "unavailable": "Freighter extension not found.",
+    "installFreighter": "Install Freighter"
+  },
+  "marketplace": {
+    "title": "Marketplace",
+    "subtitle": "Buy fresh produce directly from verified farmers.",
+    "filterProducts": "Filter products",
+    "category": "Category",
+    "location": "Location",
+    "minPrice": "Min price (XLM)",
+    "maxPrice": "Max price (XLM)",
+    "allCategories": "All Categories",
+    "grains": "Grains",
+    "vegetables": "Vegetables",
+    "fruits": "Fruits",
+    "livestock": "Livestock",
+    "dairy": "Dairy",
+    "other": "Other",
+    "noProducts": "No products found",
+    "adjustFilters": "Try adjusting your filters.",
+    "loadingProducts": "Loading products",
+    "networkError": "Network error — check your connection and try again"
+  },
+  "notifications": {
+    "preferences": "Notification Preferences",
+    "orderNotifications": "Order Notifications",
+    "orderNotificationsDesc": "Receive updates about your orders",
+    "disputeNotifications": "Dispute Notifications",
+    "disputeNotificationsDesc": "Get notified about dispute activities",
+    "systemNotifications": "System Notifications",
+    "systemNotificationsDesc": "Receive system updates and announcements",
+    "preferencesUpdated": "Preferences updated successfully"
+  },
+  "orders": {
+    "title": "Orders",
+    "orderDetails": "Order Details",
+    "orderTimeline": "Order Timeline",
+    "status": "Status",
+    "created": "Created",
+    "escrowFunded": "Escrow Funded",
+    "shipped": "Shipped",
+    "delivered": "Delivered",
+    "disputeOpened": "Dispute Opened",
+    "pending": "Pending",
+    "confirmed": "Confirmed",
+    "nextAction": "Next Action",
+    "trackingNumber": "Tracking Number",
+    "estimatedDelivery": "Estimated Delivery"
+  },
+  "dashboard": {
+    "settings": "Settings",
+    "profile": "Profile",
+    "notifications": "Notifications"
+  }
+}
