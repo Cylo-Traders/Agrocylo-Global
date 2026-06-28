@@ -6,6 +6,11 @@ members = [
     "agro-production/contract/production_escrow",
 ]
 
+
+# ── Pinned workspace-wide dependencies (see docs/TOOLCHAIN.md) ──────────────
+[workspace.dependencies]
+soroban-sdk = { version = "22.1.1" }
+
 [profile.release]
 opt-level = "z"
 overflow-checks = true
