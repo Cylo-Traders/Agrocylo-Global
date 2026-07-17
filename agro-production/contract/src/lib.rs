@@ -1,11 +1,21 @@
 #![no_std]
+<<<<<<< HEAD
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env, Vec};
+=======
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env,
 };
+>>>>>>> upstream/main
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
+<<<<<<< HEAD
+pub enum Error {
+    AlreadyInitialized = 1,
+    NotInitialized = 2,
+    CampaignNotFound = 3,
+=======
 pub enum ContractError {
     AlreadyInitialized = 1,
     NotAuthorized = 2,
@@ -21,11 +31,21 @@ pub enum ContractError {
     NotFarmer = 12,
     AlreadyHarvested = 13,
     AlreadySettled = 14,
+>>>>>>> upstream/main
 }
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CampaignStatus {
+<<<<<<< HEAD
+    FUNDING,
+    FUNDED,
+    IN_PRODUCTION,
+    HARVESTED,
+    SETTLED,
+    FAILED,
+    DISPUTED,
+=======
     Pending,
     Funded,
     InProduction,
@@ -33,11 +53,22 @@ pub enum CampaignStatus {
     Settled,
     Failed,
     Disputed,
+>>>>>>> upstream/main
 }
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Campaign {
+<<<<<<< HEAD
+    pub campaign_id: u64,
+    pub farmer: Address,
+    pub token: Address,
+    pub target_amount: i128,
+    pub raised_amount: i128,
+    pub start_time: u64,
+    pub harvest_deadline: u64,
+    pub status: CampaignStatus,
+=======
     pub id: u64,
     pub farmer: Address,
     pub target_amount: i128,
@@ -56,58 +87,69 @@ pub struct Campaign {
 pub struct Farmer {
     pub address: Address,
     pub registered: bool,
+>>>>>>> upstream/main
 }
 
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
-    Escrow,
-    Production,
-    Farmer(Address),
+    Admin,
+    SupportedTokens,
+    FeeCollector,
+    Campaign(u64),
 }
 
 #[contract]
-pub struct RegistryContract;
+pub struct ProductionEscrowContract;
 
 #[contractimpl]
-impl RegistryContract {
+impl ProductionEscrowContract {
     pub fn initialize(
         env: Env,
-        escrow: Address,
-        production: Address,
-    ) -> Result<(), RegistryError> {
-        if env.storage().instance().has(&DataKey::Escrow) {
-            return Err(RegistryError::AlreadyInitialized);
+        admin: Address,
+        supported_tokens: Vec<Address>,
+        fee_collector: Address,
+    ) -> Result<(), Error> {
+        if env.storage().instance().has(&DataKey::Admin) {
+            return Err(Error::AlreadyInitialized);
         }
-        env.storage().instance().set(&DataKey::Escrow, &escrow);
-        env.storage().instance().set(&DataKey::Production, &production);
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::SupportedTokens, &supported_tokens);
+        env.storage().instance().set(&DataKey::FeeCollector, &fee_collector);
         Ok(())
     }
 
-    pub fn register_farmer(env: Env, farmer: Address, metadata_ref: String) -> Result<(), RegistryError> {
-        if !env.storage().instance().has(&DataKey::Escrow) {
-            return Err(RegistryError::NotInitialized);
+    pub fn get_campaign(env: Env, campaign_id: u64) -> Result<Campaign, Error> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Campaign(campaign_id))
+            .ok_or(Error::CampaignNotFound)
+    }
+
+    // Helper for testing storage/retrieval
+    pub fn store_campaign(env: Env, campaign: Campaign) -> Result<(), Error> {
+        if !env.storage().instance().has(&DataKey::Admin) {
+            return Err(Error::NotInitialized);
         }
-        
-        env.storage().persistent().set(&DataKey::Farmer(farmer), &metadata_ref);
-        
-        // Extend TTL for persistent storage
-        env.storage().persistent().extend_ttl(&DataKey::Farmer(farmer.clone()), 1000, 100000);
-        
+        env.storage().persistent().set(&DataKey::Campaign(campaign.campaign_id), &campaign);
         Ok(())
     }
 
-    pub fn get_farmer(env: Env, farmer: Address) -> Option<String> {
-        env.storage().persistent().get(&DataKey::Farmer(farmer))
+    pub fn get_admin(env: Env) -> Result<Address, Error> {
+        env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotInitialized)
     }
 
-    pub fn get_escrow(env: Env) -> Result<Address, RegistryError> {
+    pub fn get_supported_tokens(env: Env) -> Vec<Address> {
         env.storage()
             .instance()
-            .get(&DataKey::Escrow)
-            .ok_or(RegistryError::NotInitialized)
+            .get(&DataKey::SupportedTokens)
+            .unwrap_or_else(|| Vec::new(&env))
     }
 
+<<<<<<< HEAD
+    pub fn get_fee_collector(env: Env) -> Result<Address, Error> {
+        env.storage().instance().get(&DataKey::FeeCollector).ok_or(Error::NotInitialized)
+=======
     pub fn get_production(env: Env) -> Result<Address, RegistryError> {
         env.storage()
             .instance()
@@ -532,6 +574,7 @@ impl CampaignContract {
             .persistent()
             .get(&DataKey::Farmer(farmer))
             .ok_or(ContractError::FarmerNotFound)
+>>>>>>> upstream/main
     }
 }
 
