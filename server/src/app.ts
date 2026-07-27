@@ -32,6 +32,8 @@ import demandSupplyRoutes from "./routes/demandSupplyRoutes.js";
 import metricsRoutes from "./routes/metricsRoutes.js";
 import adminRoutes, { adminErrorHandler } from "./routes/adminRoutes.js";
 import disputeRoutes from "./routes/disputeRoutes.js";
+import cropPlanRoutes from "./routes/cropPlanRoutes.js";
+import equipmentRoutes from "./routes/equipmentRoutes.js";
 
 const app = express();
 
@@ -70,6 +72,8 @@ app.use(notificationRoutes);
 app.use("/disputes", disputeRoutes);
 app.use(demandSupplyRoutes);
 app.use(jobRoutes);
+app.use(cropPlanRoutes);
+app.use(equipmentRoutes);
 app.use("/admin", adminRoutes);
 
 app.get("/health", async (_req: Request, res: Response) => {

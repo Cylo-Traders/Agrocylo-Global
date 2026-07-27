@@ -25,6 +25,8 @@ import { cn } from "@/lib/utils";
 const navItems = [
   { title: "Home", href: "/" },
   { title: "Marketplace", href: "/market" },
+  { title: "Crop Planner", href: "/crop-plans" },
+  { title: "Inputs & Equipment", href: "/equipment" },
   { title: "Map", href: "/map" },
   { title: "Orders", href: "/orders" },
   { title: "About", href: "/about" },

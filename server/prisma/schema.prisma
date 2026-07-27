@@ -332,3 +332,63 @@ model Dispute {
 
   @@map("disputes")
 }
+
+model CropPlan {
+  id                   String    @id @default(uuid())
+  farmerWallet         String    @map("farmer_wallet")
+  cropName             String    @map("crop_name")
+  plantedDate          DateTime  @map("planted_date")
+  expectedHarvestStart DateTime  @map("expected_harvest_start")
+  expectedHarvestEnd   DateTime  @map("expected_harvest_end")
+  expectedVolume       Float?    @map("expected_volume")
+  unit                 String?
+  region               String?
+  linkedCampaignId     String?   @map("linked_campaign_id")
+  reminderDaysBefore   Int       @default(7) @map("reminder_days_before")
+  reminderSent         Boolean   @default(false) @map("reminder_sent")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  @@index([farmerWallet])
+  @@index([region, expectedHarvestStart, expectedHarvestEnd])
+  @@map("crop_plans")
+}
+
+model EquipmentListing {
+  id            String            @id @default(uuid())
+  ownerWallet   String            @map("owner_wallet")
+  title         String
+  description   String?
+  listingType   String            @map("listing_type")
+  pricePerUnit  Decimal           @map("price_per_unit") @db.Decimal(18, 6)
+  depositAmount Decimal           @default(0) @map("deposit_amount") @db.Decimal(18, 6)
+  currency      String
+  unit          String
+  location      String?
+  isAvailable   Boolean           @default(true) @map("is_available")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+  rentals       EquipmentRental[]
+
+  @@index([ownerWallet, listingType])
+  @@map("equipment_listings")
+}
+
+model EquipmentRental {
+  id              String           @id @default(uuid())
+  listingId       String           @map("listing_id")
+  renterWallet    String           @map("renter_wallet")
+  startDate       DateTime         @map("start_date")
+  endDate         DateTime         @map("end_date")
+  status          String           @default("ACTIVE")
+  depositAmount   Decimal          @map("deposit_amount") @db.Decimal(18, 6)
+  depositRefunded Boolean          @default(false) @map("deposit_refunded")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  listing EquipmentListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([renterWallet])
+  @@index([listingId])
+  @@map("equipment_rentals")
+}
