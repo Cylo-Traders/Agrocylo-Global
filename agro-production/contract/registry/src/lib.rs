@@ -9,7 +9,7 @@
 // unbounded per-farmer Vec, reducing worst-case from O(n) to O(limit) = O(50) with pagination.
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, String, Vec,
 };
 
 #[contracterror]
@@ -23,6 +23,9 @@ pub enum RegistryError {
     CampaignAlreadyRegistered = 5,
     UnauthorizedContract = 6,
     InvalidFarmerAddress = 7,
+    BatchNotFound = 8,
+    OrderBatchLinkExists = 9,
+    CampaignNotHarvested = 10,
 }
 
 #[contracttype]
@@ -48,6 +51,18 @@ pub struct CampaignRecord {
 }
 
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BatchRecord {
+    pub batch_id: u64,
+    pub campaign_id: u64,
+    pub farmer: Address,
+    pub crop: String,
+    pub harvest_date: u64,
+    pub quantity: i128,
+    pub linked_order_ids: Vec<u64>,
+}
+
+#[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
     Admin,
@@ -61,6 +76,10 @@ pub enum DataKey {
     CampaignAt(u64),
     FarmerCampaignCount(Address),
     FarmerCampaignAt(Address, u64),
+    Batch(u64),
+    BatchCount,
+    OrderBatch(u64),
+    BatchOrderLink(u64, u64),
 }
 
 #[contract]
@@ -352,6 +371,109 @@ impl RegistryContract {
                 {
                     result.push_back(campaign);
                 }
+            }
+        }
+        Ok(result)
+    }
+
+    // ── Provenance Registry (Harvest-to-Delivery) ───────────────────────────
+
+    pub fn mint_batch(
+        env: Env,
+        source_contract: Address,
+        campaign_id: u64,
+        farmer: Address,
+        crop: String,
+        harvest_date: u64,
+        quantity: i128,
+    ) -> Result<u64, RegistryError> {
+        require_initialized(&env)?;
+        let refs = read_contract_refs(&env)?;
+        source_contract.require_auth();
+        if !is_authorized_contract(&source_contract, &refs) {
+            return Err(RegistryError::UnauthorizedContract);
+        }
+        if !env.storage().persistent().has(&DataKey::Campaign(campaign_id)) {
+            return Err(RegistryError::CampaignAlreadyRegistered);
+        }
+
+        let batch_count: u64 = env.storage().persistent().get(&DataKey::BatchCount).unwrap_or(0);
+        let batch_id = batch_count + 1;
+
+        let batch = BatchRecord {
+            batch_id,
+            campaign_id,
+            farmer: farmer.clone(),
+            crop,
+            harvest_date,
+            quantity,
+            linked_order_ids: Vec::new(&env),
+        };
+
+        env.storage().persistent().set(&DataKey::Batch(batch_id), &batch);
+        env.storage().persistent().set(&DataKey::BatchCount, &batch_id);
+
+        env.events().publish(
+            (symbol_short!("batch"), symbol_short!("minted")),
+            (batch_id, campaign_id, farmer, quantity),
+        );
+
+        Ok(batch_id)
+    }
+
+    pub fn link_batch_to_order(
+        env: Env,
+        source_contract: Address,
+        batch_id: u64,
+        order_id: u64,
+    ) -> Result<(), RegistryError> {
+        require_initialized(&env)?;
+        let refs = read_contract_refs(&env)?;
+        source_contract.require_auth();
+        if !is_authorized_contract(&source_contract, &refs) {
+            return Err(RegistryError::UnauthorizedContract);
+        }
+
+        let mut batch: BatchRecord = env.storage().persistent().get(&DataKey::Batch(batch_id))
+            .ok_or(RegistryError::BatchNotFound)?;
+
+        let link_key = DataKey::BatchOrderLink(batch_id, order_id);
+        if env.storage().persistent().has(&link_key) {
+            return Err(RegistryError::OrderBatchLinkExists);
+        }
+
+        batch.linked_order_ids.push_back(order_id);
+        env.storage().persistent().set(&DataKey::Batch(batch_id), &batch);
+        env.storage().persistent().set(&link_key, &true);
+
+        let order_batch_key = DataKey::OrderBatch(order_id);
+        let mut order_batches: Vec<u64> = env.storage().persistent().get(&order_batch_key).unwrap_or_else(|| Vec::new(&env));
+        order_batches.push_back(batch_id);
+        env.storage().persistent().set(&order_batch_key, &order_batches);
+
+        env.events().publish(
+            (symbol_short!("batch"), symbol_short!("linked")),
+            (batch_id, order_id),
+        );
+
+        Ok(())
+    }
+
+    pub fn get_batch(env: Env, batch_id: u64) -> Result<Option<BatchRecord>, RegistryError> {
+        require_initialized(&env)?;
+        Ok(env.storage().persistent().get(&DataKey::Batch(batch_id)))
+    }
+
+    pub fn get_batch_history(env: Env, order_id: u64) -> Result<Vec<BatchRecord>, RegistryError> {
+        require_initialized(&env)?;
+        let batch_ids: Vec<u64> = env.storage().persistent()
+            .get(&DataKey::OrderBatch(order_id))
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let mut result = Vec::new(&env);
+        for id in batch_ids.iter() {
+            if let Some(batch) = env.storage().persistent().get::<_, BatchRecord>(&DataKey::Batch(id)) {
+                result.push_back(batch);
             }
         }
         Ok(result)

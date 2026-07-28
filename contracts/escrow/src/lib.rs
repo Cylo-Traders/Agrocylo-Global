@@ -29,6 +29,10 @@ pub enum EscrowError {
     BuyerCannotEqualFarmer = 18,
     TokenWhitelistEmpty = 19,
     FeeRateTooHigh = 20,
+    ArbitrationNotConfigured = 21,
+    ArbitratorNotFound = 22,
+    QuorumNotReached = 23,
+    AlreadyVoted = 24,
 }
 
 #[contracttype]
@@ -109,6 +113,9 @@ pub enum DataKey {
     SupportedTokens,
     Admin,
     FeeCollector,
+    Arbitrators,
+    Quorum,
+    ArbitratorVote(u64, Address),
 }
 
 const NINETY_SIX_HOURS_IN_SECONDS: u64 = 96 * 60 * 60;
@@ -148,6 +155,71 @@ fn write_dispute(env: &Env, order_id: u64, dispute: &Dispute) {
         TTL_THRESHOLD,
         TTL_EXTEND_TO,
     );
+}
+
+fn resolve_escrow_dispute_internal(
+    env: &Env,
+    order_id: u64,
+    resolution: DisputeResolution,
+) -> Result<(), EscrowError> {
+    let mut order = read_order(env, order_id)?;
+    let mut dispute = read_dispute(env, order_id)?;
+    let token_client = token::Client::new(env, &order.token);
+
+    match resolution.clone() {
+        DisputeResolution::Refund => {
+            order.status = OrderStatus::Refunded;
+            token_client.transfer(&env.current_contract_address(), &order.buyer, &order.amount);
+        }
+        DisputeResolution::Release => {
+            order.status = OrderStatus::Completed;
+            token_client.transfer(
+                &env.current_contract_address(),
+                &order.farmer,
+                &order.amount,
+            );
+        }
+        DisputeResolution::Split(buyer_share_bps) => {
+            if buyer_share_bps > 10_000 {
+                return Err(EscrowError::InvalidSplitRatio);
+            }
+            let refund_amount = order
+                .amount
+                .checked_mul(buyer_share_bps as i128)
+                .ok_or(EscrowError::ArithmeticError)?
+                / 10_000;
+            let release_amount = order
+                .amount
+                .checked_sub(refund_amount)
+                .ok_or(EscrowError::ArithmeticError)?;
+            if refund_amount > 0 {
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &order.buyer,
+                    &refund_amount,
+                );
+            }
+            if release_amount > 0 {
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &order.farmer,
+                    &release_amount,
+                );
+            }
+            order.status = OrderStatus::Completed;
+        }
+    }
+
+    dispute.resolved = true;
+    write_order(env, order_id, &order);
+    write_dispute(env, order_id, &dispute);
+
+    env.events().publish(
+        (symbol_short!("order"), symbol_short!("resolved")),
+        (order_id, resolution, order.buyer, order.farmer),
+    );
+
+    Ok(())
 }
 
 fn read_admin(env: &Env) -> Result<Address, EscrowError> {
@@ -460,73 +532,88 @@ impl EscrowContract {
             return Err(EscrowError::NotAdmin);
         }
 
-        let mut order = read_order(&env, order_id)?;
+        let order = read_order(&env, order_id)?;
         if order.status != OrderStatus::Disputed {
             return Err(EscrowError::OrderNotDisputed);
         }
 
-        let mut dispute = read_dispute(&env, order_id)?;
+        let dispute = read_dispute(&env, order_id)?;
         if dispute.resolved {
             return Err(EscrowError::OrderNotDisputed);
         }
 
-        let token_client = token::Client::new(&env, &order.token);
+        resolve_escrow_dispute_internal(&env, order_id, resolution)
+    }
 
-        match resolution.clone() {
-            DisputeResolution::Refund => {
-                order.status = OrderStatus::Refunded;
-                token_client.transfer(&env.current_contract_address(), &order.buyer, &order.amount);
-            }
-            DisputeResolution::Release => {
-                order.status = OrderStatus::Completed;
-                token_client.transfer(
-                    &env.current_contract_address(),
-                    &order.farmer,
-                    &order.amount,
-                );
-            }
-            DisputeResolution::Split(buyer_share_bps) => {
-                if buyer_share_bps > 10_000 {
-                    return Err(EscrowError::InvalidSplitRatio);
-                }
+    // ── Arbitrator Pool ────────────────────────────────────────────────────
 
-                let refund_amount = order
-                    .amount
-                    .checked_mul(buyer_share_bps as i128)
-                    .ok_or(EscrowError::ArithmeticError)?
-                    / 10_000;
-                let release_amount = order
-                    .amount
-                    .checked_sub(refund_amount)
-                    .ok_or(EscrowError::ArithmeticError)?;
+    pub fn set_arbitrators(
+        env: Env,
+        admin_caller: Address,
+        arbitrators: Vec<Address>,
+        quorum: u32,
+    ) -> Result<(), EscrowError> {
+        admin_caller.require_auth();
+        let stored_admin = read_admin(&env)?;
+        if admin_caller != stored_admin {
+            return Err(EscrowError::NotAdmin);
+        }
+        if quorum == 0 || quorum > arbitrators.len() as u32 {
+            return Err(EscrowError::InvalidSplitRatio);
+        }
+        env.storage().instance().set(&DataKey::Arbitrators, &arbitrators);
+        env.storage().instance().set(&DataKey::Quorum, &quorum);
+        Ok(())
+    }
 
-                if refund_amount > 0 {
-                    token_client.transfer(
-                        &env.current_contract_address(),
-                        &order.buyer,
-                        &refund_amount,
-                    );
-                }
-                if release_amount > 0 {
-                    token_client.transfer(
-                        &env.current_contract_address(),
-                        &order.farmer,
-                        &release_amount,
-                    );
-                }
+    pub fn get_arbitrators(env: Env) -> Vec<Address> {
+        env.storage().instance().get(&DataKey::Arbitrators).unwrap_or_else(|| Vec::new(&env))
+    }
 
-                order.status = OrderStatus::Completed;
+    pub fn get_quorum(env: Env) -> u32 {
+        env.storage().instance().get(&DataKey::Quorum).unwrap_or(0)
+    }
+
+    pub fn vote_to_resolve(
+        env: Env,
+        arbitrator: Address,
+        order_id: u64,
+        resolution: DisputeResolution,
+    ) -> Result<(), EscrowError> {
+        arbitrator.require_auth();
+
+        let arbitrators: Vec<Address> = env.storage().instance()
+            .get(&DataKey::Arbitrators)
+            .ok_or(EscrowError::ArbitrationNotConfigured)?;
+
+        let is_valid_arbitrator = arbitrators.iter().any(|a| a == arbitrator);
+        if !is_valid_arbitrator {
+            return Err(EscrowError::ArbitratorNotFound);
+        }
+
+        let order = read_order(&env, order_id)?;
+        if order.status != OrderStatus::Disputed {
+            return Err(EscrowError::OrderNotDisputed);
+        }
+
+        let vote_key = DataKey::ArbitratorVote(order_id, arbitrator.clone());
+        if env.storage().persistent().has(&vote_key) {
+            return Err(EscrowError::AlreadyVoted);
+        }
+
+        env.storage().persistent().set(&vote_key, &resolution);
+
+        let quorum: u32 = env.storage().instance().get(&DataKey::Quorum).unwrap_or(0);
+        let mut yes_votes: u32 = 0;
+        for a in arbitrators.iter() {
+            if env.storage().persistent().has(&DataKey::ArbitratorVote(order_id, a)) {
+                yes_votes += 1;
             }
         }
 
-        dispute.resolved = true;
-        write_order(&env, order_id, &order);
-        write_dispute(&env, order_id, &dispute);
-
-        env.events().publish(
-            (symbol_short!("order"), symbol_short!("resolved")),
-            (order_id, resolution, order.buyer, order.farmer),
-        );
+        if yes_votes >= quorum {
+            resolve_escrow_dispute_internal(&env, order_id, resolution)?;
+        }
 
         Ok(())
     }
