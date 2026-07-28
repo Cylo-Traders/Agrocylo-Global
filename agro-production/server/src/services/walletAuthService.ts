@@ -1,5 +1,7 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
+import jwt from 'jsonwebtoken';
 import { Keypair } from '@stellar/stellar-sdk';
+import { config } from '../config/index.js';
 import { prisma } from '../db/client.js';
 
 const NONCE_EXPIRY_SECS = 300;
@@ -21,6 +23,7 @@ export interface ChallengeResult {
 }
 
 export interface SessionResult {
+  accessToken: string;
   sessionToken: string;
   walletAddress: string;
   expiresAt: string;
@@ -116,7 +119,15 @@ export async function verifySignatureAndCreateSession(
     },
   });
 
+  // Issue JWT access token for consistency with root server
+  const accessToken = jwt.sign(
+    { walletAddress, role: 'USER' },
+    config.jwtSecret,
+    { expiresIn: '15m' },
+  );
+
   return {
+    accessToken,
     sessionToken,
     walletAddress,
     expiresAt: expiresAt.toISOString(),

@@ -1,7 +1,8 @@
 # Playwright end-to-end suite.
 #
-# Runs on PRs that touch client code. Can also be triggered manually
+# Runs on PRs that touch root client code. Can also be triggered manually
 # via the GitHub Actions UI or `gh workflow run e2e.yml --ref <branch>`.
+# Note: agro-production/client uses vitest instead of playwright; its tests run in CI workflow.
 
 name: E2E · Playwright
 
