@@ -7,6 +7,7 @@ import { wsManager } from "./wsManager.js";
 import type { RawRpcEvent } from "../types/rawRpcEvent.js";
 import { BlockchainEventIngestionService } from "./events/blockchainEventIngestionService.js";
 import { EscrowEventIngestionService } from "./events/escrowEventIngestionService.js";
+import { indexGovernanceEvent } from "./governanceService.js";
 
 const POLL_INTERVAL_MS = 5_000;
 const CHECKPOINT_SERVICE_NAME = "contract-watcher";
@@ -171,10 +172,10 @@ export function detectRecoveryGap(checkpointLedger: number | null, latestLedger:
 }
 
 export async function startContractWatcher(): Promise<void> {
-  const { contractId, rpcUrl } = config;
+  const { contractId, governanceContractId, rpcUrl } = config;
 
-  if (!contractId) {
-    logger.warn("[ContractWatcher] CONTRACT_ID not set — skipping event listener.");
+  if (!contractId && !governanceContractId) {
+    logger.warn("[ContractWatcher] No contract IDs set — skipping event listener.");
     return;
   }
 
@@ -191,13 +192,14 @@ export async function startContractWatcher(): Promise<void> {
   const latestLedger = (await server.getLatestLedger()).sequence;
   detectRecoveryGap(checkpointLedger, latestLedger);
 
-  logger.info(`[ContractWatcher] Listening for events on contract ${contractId} from ledger ${lastLedger}`);
+  const contractIds = [contractId, governanceContractId].filter(Boolean);
+  logger.info(`[ContractWatcher] Listening for events on contracts ${contractIds.join(", ")} from ledger ${lastLedger}`);
 
   setInterval(async () => {
     try {
       const response = await server.getEvents({
         startLedger: lastLedger,
-        filters: [{ type: "contract", contractIds: [contractId] }],
+        filters: [{ type: "contract", contractIds }],
       });
 
       const events = response.events;
@@ -211,10 +213,24 @@ export async function startContractWatcher(): Promise<void> {
           continue;
         }
 
-        const ingestionResults = await Promise.allSettled([
-          BlockchainEventIngestionService.ingestEvent(event),
-          EscrowEventIngestionService.ingestEvent(event),
-        ]);
+        const isGovernanceEvent =
+          Boolean(governanceContractId) && event.contractId === governanceContractId;
+        const decoded = isGovernanceEvent ? decodeEvent(event) : null;
+        const ingestionResults = await Promise.allSettled(
+          isGovernanceEvent && decoded
+            ? [
+                indexGovernanceEvent(
+                  decoded.action,
+                  decoded.data,
+                  event.ledger,
+                  event.eventIndex,
+                ),
+              ]
+            : [
+                BlockchainEventIngestionService.ingestEvent(event),
+                EscrowEventIngestionService.ingestEvent(event),
+              ],
+        );
 
         const failures = ingestionResults.filter((r) => r.status === "rejected");
         if (failures.length > 0) {
@@ -231,7 +247,7 @@ export async function startContractWatcher(): Promise<void> {
           return;
         }
 
-        handleEvent(event);
+        if (!isGovernanceEvent) handleEvent(event);
 
         if (event.ledger >= maxProcessedLedger) {
           maxProcessedLedger = event.ledger + 1;

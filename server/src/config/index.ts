@@ -27,6 +27,7 @@ const envSchema = z.object({
       message: "JWT_SECRET cannot use default values. Please set a strong secret.",
     }),
   CONTRACT_ID: z.string().default(""),
+  GOVERNANCE_CONTRACT_ID: z.string().default(""),
   RPC_URL: z.url().default("https://soroban-testnet.stellar.org"),
   WS_PATH: z.string().min(1).default("/ws"),
 });
@@ -43,7 +44,11 @@ if (!parsedEnv.success) {
 const env = parsedEnv.data;
 
 // Fail fast: prevent the server from starting in a misconfigured contract-watch state.
-validateContractWatcherConfig(env.RUN_CONTRACT_WATCHER, env.CONTRACT_ID);
+validateContractWatcherConfig(
+  env.RUN_CONTRACT_WATCHER,
+  env.CONTRACT_ID,
+  env.GOVERNANCE_CONTRACT_ID,
+);
 
 export const config = {
   port: env.PORT,
@@ -60,6 +65,7 @@ export const config = {
   productImagePlaceholderUrl: env.PRODUCT_IMAGE_PLACEHOLDER_URL,
   jwtSecret: env.JWT_SECRET,
   contractId: env.CONTRACT_ID,
+  governanceContractId: env.GOVERNANCE_CONTRACT_ID,
   rpcUrl: env.RPC_URL,
   wsPath: env.WS_PATH,
 };
