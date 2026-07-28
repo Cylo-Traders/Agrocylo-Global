@@ -302,6 +302,42 @@ model Location {
   @@map("locations")
 }
 
+model PriceIndex {
+  id            String   @id @default(uuid())
+  crop          String
+  region        String
+  currency      String
+  avgPrice      Float    @map("avg_price")
+  minPrice      Float    @map("min_price")
+  maxPrice      Float    @map("max_price")
+  sampleCount   Int      @map("sample_count")
+  sourceCounts  Json     @map("source_counts")
+  computedAt    DateTime @map("computed_at")
+
+  @@unique([crop, region, currency])
+  @@index([crop, region])
+  @@map("price_index")
+}
+
+model WeatherReading {
+  id              String    @id @default(uuid())
+  walletAddress   String    @map("wallet_address")
+  lat             Float
+  lng             Float
+  temperatureC    Float     @map("temperature_c")
+  precipitationMm Float     @map("precipitation_mm")
+  windSpeedKph    Float     @map("wind_speed_kph")
+  conditionCode   Int       @map("condition_code")
+  source          String
+  rawPayload      Json      @map("raw_payload")
+  recordedAt      DateTime  @map("recorded_at")
+  attestedAt      DateTime? @map("attested_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@index([walletAddress, recordedAt(sort: Desc)])
+  @@map("weather_readings")
+}
+
 model OrderMetadata {
   on_chain_order_id String @id
   description       String

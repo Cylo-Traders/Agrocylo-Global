@@ -5,6 +5,7 @@ import { config } from "./config/index.js";
 import { connectDb } from "./config/database.js";
 import { startContractWatcher } from "./services/contractWatcher.js";
 import { startWorkers } from "./queues/workers.js";
+import { schedulePriceIndexAggregation } from "./queues/queues.js";
 import { wsManager } from "./services/wsManager.js";
 
 async function bootstrap() {
@@ -37,6 +38,11 @@ async function bootstrap() {
     }
 
     const runningWorkers = config.runWorkers ? startWorkers() : null;
+    if (config.runWorkers) {
+      await schedulePriceIndexAggregation().catch((error) =>
+        logger.error("Failed to schedule price index aggregation", error),
+      );
+    }
 
     server.listen(config.port, () => {
       logger.info(

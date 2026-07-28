@@ -5,6 +5,7 @@ import type {
   GenerateReportJobData,
 } from "../job-types.js";
 import { prisma } from "../../config/database.js";
+import { runPriceIndexAggregation } from "../../services/priceIndexService.js";
 
 async function handleAggregateMetrics(job: Job<AggregateMetricsJobData>): Promise<void> {
   const { metricName, startDate, endDate } = job.data;
@@ -76,6 +77,16 @@ async function handleAggregateMetrics(job: Job<AggregateMetricsJobData>): Promis
       jobId: job.id,
       metricName,
     });
+    throw error;
+  }
+}
+
+async function handleAggregatePriceIndex(job: Job): Promise<void> {
+  try {
+    const entries = await runPriceIndexAggregation();
+    logger.info("Price index aggregated", { jobId: job.id, entries: entries.length });
+  } catch (error) {
+    logger.error("Failed to aggregate price index", error, { jobId: job.id });
     throw error;
   }
 }
@@ -172,6 +183,9 @@ export async function processAnalytics(job: Job): Promise<void> {
         break;
       case "generate-report":
         await handleGenerateReport(job);
+        break;
+      case "aggregate-price-index":
+        await handleAggregatePriceIndex(job);
         break;
       default:
         logger.warn("Unknown analytics job name", {

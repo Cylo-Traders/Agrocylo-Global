@@ -75,6 +75,7 @@ app.use("/disputes", disputeRoutes);
 app.use(groupOrderRoutes);
 app.use("/graphql", graphqlRoutes);
 app.use(demandSupplyRoutes);
+app.use(analyticsRoutes);
 app.use(jobRoutes);
 app.use("/admin", adminRoutes);
 app.use(referralRoutes);

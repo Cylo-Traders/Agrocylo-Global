@@ -24,6 +24,8 @@ export interface GenerateReportJobData {
   parameters: Record<string, unknown>;
 }
 
+export type AggregatePriceIndexJobData = Record<string, never>;
+
 export interface SendEmailJobData {
   to: string;
   subject: string;

@@ -1,9 +1,11 @@
 import { NotificationEventType } from "../enums/notificationEventType.js";
 
 type NotificationTemplateInput = {
-  orderId: string;
+  orderId?: string;
   amount?: string;
   token?: string;
+  condition?: string;
+  severity?: string;
 };
 
 const templateByType: Record<NotificationEventType, (input: NotificationTemplateInput) => string> = {
