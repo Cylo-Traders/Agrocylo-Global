@@ -313,13 +313,7 @@ function pick<T>(items: T[], seed: number, offset = 0): T {
   return items[(seed + offset) % items.length];
 }
 
-function formatMonthLabel(offset: number): string {
-  const date = new Date();
-  date.setMonth(date.getMonth() - offset);
-  return date.toLocaleString("en", { month: "short" });
-}
-
-function buildReputation(score: number): UserProfileReputation {
+function mapReputation(score: number, computedAt: string): UserProfileReputation {
   const badge =
     score >= 95 ? "legend" : score >= 82 ? "top seller" : score >= 68 ? "trusted" : "new";
 
@@ -330,30 +324,21 @@ function buildReputation(score: number): UserProfileReputation {
     new: "Profile is new and building a reputation.",
   }[badge];
 
-  const history = Array.from({ length: 6 }, (_, index) => {
-    const adjustment = Math.max(0, 5 - index) * 2;
-    return {
-      label: formatMonthLabel(5 - index),
-      score: clamp(score - adjustment, 0, 100),
-      note: index === 5 ? "Current reputation" : "Historical average",
-    };
-  });
-
-  return { score, badge, badgeDescription, history };
+  return {
+    score,
+    badge,
+    badgeDescription,
+    history: [{ label: new Date(computedAt).toLocaleDateString("en"), score, note: "Backend computed score" }],
+  };
 }
 
-function scoreFromStats(stats: UserProfileStats): number {
-  const reviewScore = stats.averageRating * 11;
-  const deliveryScore = stats.onTimeDeliveryRate * 0.25;
-  const responseScore = stats.responseRate * 0.2;
-  const disputePenalty = stats.disputeRate * 18;
-  const transactionScore = Math.min(stats.transactionCount * 1.3, 18);
-
-  return clamp(
-    Math.round(35 + reviewScore + deliveryScore + responseScore + transactionScore - disputePenalty),
-    0,
-    100,
+async function fetchReputation(walletAddress: string): Promise<UserProfileReputation> {
+  const response = await fetch(
+    `${API_BASE}/profiles/${encodeURIComponent(walletAddress)}/reputation`,
   );
+  if (!response.ok) throw new Error(await parseErrorMessage(response));
+  const snapshot = (await response.json()) as { score: number; computedAt: string };
+  return mapReputation(snapshot.score, snapshot.computedAt);
 }
 
 function deriveStats(
@@ -543,7 +528,10 @@ function buildProfileInfo(userId: string, seed: number): UserProfileInfo {
   };
 }
 
-function buildBaseProfile(userId: string): UserProfileData {
+function buildBaseProfile(
+  userId: string,
+  reputation: UserProfileReputation,
+): UserProfileData {
   const seed = hashString(userId);
   const profile = buildProfileInfo(userId, seed);
 
@@ -563,8 +551,6 @@ function buildBaseProfile(userId: string): UserProfileData {
   const reviews = buildReviews(seed, profile);
   const activityTimeline = buildActivity(seed, profile);
   const stats = deriveStats(baseStats, reviews);
-  const reputation = buildReputation(scoreFromStats(stats));
-
   const trustIndicators = buildTrustIndicators(profile, stats, reputation);
 
   return {
@@ -596,19 +582,25 @@ function writeStoredProfile(profile: UserProfileData): void {
 
 function normalizeProfile(profile: UserProfileData): UserProfileData {
   const stats = deriveStats(profile.stats, profile.reviews);
-  const reputation = buildReputation(scoreFromStats(stats));
   return {
     ...profile,
     stats,
-    reputation,
-    trustIndicators: buildTrustIndicators(profile.profile, stats, reputation),
+    trustIndicators: buildTrustIndicators(profile.profile, stats, profile.reputation),
   };
 }
 
 export async function getUserProfile(userId: string): Promise<UserProfileData> {
+  const reputation = await fetchReputation(userId);
   const stored = readStoredProfile(userId);
-  const base = buildBaseProfile(userId);
-  return stored ? normalizeProfile({ ...base, ...stored, profile: { ...base.profile, ...stored.profile } }) : base;
+  const base = buildBaseProfile(userId, reputation);
+  return stored
+    ? normalizeProfile({
+        ...base,
+        ...stored,
+        profile: { ...base.profile, ...stored.profile },
+        reputation,
+      })
+    : base;
 }
 
 export async function updateUserProfile(
