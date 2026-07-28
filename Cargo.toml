@@ -4,6 +4,8 @@ members = [
     "contracts/escrow",
     "agro-production/contract/registry",
     "agro-production/contract/production_escrow",
+    "agro-production/contract/investment_basket",
+    "agro-production/contract/governance",
 ]
 
 

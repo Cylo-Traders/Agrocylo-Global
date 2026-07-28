@@ -61,10 +61,30 @@ vi.mock('../services/notificationService.js', () => ({
   markNotificationsRead: vi.fn(),
 }));
 
+vi.mock('../services/profileService.js', () => ({
+  getProfile: vi.fn(),
+  createProfile: vi.fn(),
+  updateProfile: vi.fn(),
+  getProfileReputation: vi.fn(),
+  getProfileGraphData: vi.fn(),
+}));
+
+vi.mock('../services/graphqlGatewayService.js', () => ({
+  executeGraphQL: vi.fn(),
+}));
+
+vi.mock('../services/groupOrderService.js', () => ({
+  createOrJoinGroupOrder: vi.fn(),
+  getGroupOrderById: vi.fn(),
+}));
+
 import * as productService from '../services/productService.js';
 import * as cartService from '../services/cartService.js';
 import * as notificationService from '../services/notificationService.js';
 import * as authService from '../services/authService.js';
+import * as profileService from '../services/profileService.js';
+import * as graphqlGatewayService from '../services/graphqlGatewayService.js';
+import * as groupOrderService from '../services/groupOrderService.js';
 
 describe('Health endpoint', () => {
   it('GET /health returns 200 with status UP', async () => {
@@ -314,6 +334,97 @@ describe('Product and cart API endpoints', () => {
     expect(notificationService.markNotificationsRead).toHaveBeenCalledWith(
       'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
       ['n1', 'n2'],
+    );
+  });
+
+  it('GET /profiles/:wallet_address/reputation returns the computed reputation snapshot', async () => {
+    vi.mocked(profileService.getProfileReputation).mockResolvedValue({
+      walletAddress: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      score: 88,
+      onChainScore: 81,
+      averageReviewScore: 4.4,
+      reviewCount: 5,
+      completedOrders: 12,
+      disputedOrders: 1,
+      disputeRate: 8.33,
+      cacheHit: false,
+      computedAt: '2026-07-27T00:00:00.000Z',
+      cacheExpiresAt: '2026-07-27T00:01:00.000Z',
+    });
+
+    const res = await request(app).get(
+      '/profiles/GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF/reputation',
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.score).toBe(88);
+    expect(profileService.getProfileReputation).toHaveBeenCalledWith(
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+    );
+  });
+
+  it('POST /graphql executes the gateway with auth context', async () => {
+    vi.mocked(graphqlGatewayService.executeGraphQL).mockResolvedValue({
+      data: {
+        product: {
+          id: 'p1',
+          name: 'Tomato',
+        },
+      },
+      errors: undefined,
+    });
+
+    const res = await request(app)
+      .post('/graphql')
+      .set('x-wallet-address', 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF')
+      .send({
+        query: 'query GetProduct($id: ID!) { product(id: $id) { id name } }',
+        variables: { id: 'p1' },
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.product.id).toBe('p1');
+    expect(graphqlGatewayService.executeGraphQL).toHaveBeenCalledWith(
+      expect.any(String),
+      { id: 'p1' },
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+    );
+  });
+
+  it('POST /group-orders pools buyer intents', async () => {
+    vi.mocked(groupOrderService.createOrJoinGroupOrder).mockResolvedValue({
+      id: 'go1',
+      productId: 'p1',
+      farmerWallet: 'FARMER',
+      targetQuantity: '10',
+      committedQuantity: '5',
+      currency: 'USDC',
+      status: 'PENDING',
+      windowEndsAt: new Date('2026-07-27T01:00:00.000Z'),
+      batchTxHash: null,
+      fulfilledAt: null,
+      expiredAt: null,
+      createdAt: new Date('2026-07-27T00:00:00.000Z'),
+      updatedAt: new Date('2026-07-27T00:00:00.000Z'),
+      contributions: [],
+      thresholdReached: false,
+      submittedOrders: [],
+    });
+
+    const res = await request(app)
+      .post('/group-orders')
+      .set('x-wallet-address', 'BUYER')
+      .send({ productId: 'p1', quantity: '5', targetQuantity: '10' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.thresholdReached).toBe(false);
+    expect(groupOrderService.createOrJoinGroupOrder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        productId: 'p1',
+        buyerWallet: 'BUYER',
+        quantity: '5',
+        targetQuantity: '10',
+      }),
     );
   });
 });

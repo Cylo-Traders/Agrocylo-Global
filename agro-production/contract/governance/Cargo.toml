@@ -1,0 +1,19 @@
+[package]
+name = "governance"
+version = "0.1.0"
+edition = "2021"
+description = "Lightweight proposal + timelock + weighted-vote governance contract for Agrocylo escrow parameters"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+testutils = ["soroban-sdk/testutils"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+production-escrow-v2 = { path = "../production_escrow", features = ["testutils"] }

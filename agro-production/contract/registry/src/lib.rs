@@ -48,6 +48,14 @@ pub struct CampaignRecord {
 }
 
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReputationRecord {
+    pub score: i64,
+    pub completed_orders: u32,
+    pub disputed_orders: u32,
+}
+
+#[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
     Admin,
@@ -61,7 +69,11 @@ pub enum DataKey {
     CampaignAt(u64),
     FarmerCampaignCount(Address),
     FarmerCampaignAt(Address, u64),
+    Reputation(Address),
 }
+
+const COMPLETION_POINTS: i64 = 10;
+const DISPUTE_PENALTY_POINTS: i64 = 15;
 
 #[contract]
 pub struct RegistryContract;
@@ -319,6 +331,76 @@ impl RegistryContract {
             }
         }
         Ok(result)
+    }
+
+    /// Records the outcome of an on-chain order and updates the farmer's reputation
+    /// score. Callable only by the registered escrow/production contracts — the caller
+    /// must be `source_contract` itself (contract-issued auth), and `source_contract`
+    /// must match one of the addresses configured at `initialize`. No end user can
+    /// invoke this directly to inflate or erase their own score.
+    ///
+    /// `disputed_buyer_share_bps`: `None` for a cleanly completed order (buyer
+    /// confirmed receipt); `Some(bps)` for a resolved dispute, mirroring the escrow's
+    /// own split — 0 = fully released to the farmer, 10_000 = fully refunded to the
+    /// buyer, values in between a proportional split.
+    pub fn record_order_outcome(
+        env: Env,
+        source_contract: Address,
+        farmer: Address,
+        disputed_buyer_share_bps: Option<u32>,
+    ) -> Result<ReputationRecord, RegistryError> {
+        let refs = read_contract_refs(&env)?;
+        source_contract.require_auth();
+
+        if !is_authorized_contract(&source_contract, &refs) {
+            return Err(RegistryError::UnauthorizedContract);
+        }
+
+        let key = DataKey::Reputation(farmer.clone());
+        let mut record: ReputationRecord =
+            env.storage().persistent().get(&key).unwrap_or(ReputationRecord {
+                score: 0,
+                completed_orders: 0,
+                disputed_orders: 0,
+            });
+
+        match disputed_buyer_share_bps {
+            None => {
+                record.score += COMPLETION_POINTS;
+                record.completed_orders += 1;
+            }
+            Some(buyer_share_bps) => {
+                let buyer_share_bps = i64::from(buyer_share_bps.min(10_000));
+                let reward = (10_000 - buyer_share_bps) * COMPLETION_POINTS / 10_000;
+                let penalty = buyer_share_bps * DISPUTE_PENALTY_POINTS / 10_000;
+                record.score += reward - penalty;
+                record.disputed_orders += 1;
+            }
+        }
+
+        env.storage().persistent().set(&key, &record);
+
+        env.events().publish(
+            (symbol_short!("reput"), symbol_short!("updated")),
+            (farmer, record.score),
+        );
+
+        Ok(record)
+    }
+
+    /// Read-only: current reputation of `farmer`. Farmers with no recorded orders
+    /// yet have a zeroed record rather than an error.
+    pub fn get_reputation(env: Env, farmer: Address) -> Result<ReputationRecord, RegistryError> {
+        require_initialized(&env)?;
+        Ok(env
+            .storage()
+            .persistent()
+            .get(&DataKey::Reputation(farmer))
+            .unwrap_or(ReputationRecord {
+                score: 0,
+                completed_orders: 0,
+                disputed_orders: 0,
+            }))
     }
 
     pub fn get_farmer_campaigns(

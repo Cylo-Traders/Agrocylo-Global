@@ -29,6 +29,25 @@ export function getNotificationsQueue(): Queue {
   return notificationsQueue;
 }
 
+const PRICE_INDEX_INTERVAL_MS = 60 * 60 * 1000; // hourly
+
+/**
+ * Registers the recurring price-index aggregation job (Issue #594). Idempotent:
+ * BullMQ deduplicates repeatable jobs with the same name/pattern/jobId.
+ */
+export async function schedulePriceIndexAggregation(): Promise<void> {
+  await getAnalyticsQueue().add(
+    "aggregate-price-index",
+    {},
+    {
+      repeat: { every: PRICE_INDEX_INTERVAL_MS },
+      jobId: "price-index-aggregation",
+      removeOnComplete: 10,
+      removeOnFail: 10,
+    },
+  );
+}
+
 export async function closeQueues(): Promise<void> {
   await Promise.allSettled([
     indexingQueue?.close(),

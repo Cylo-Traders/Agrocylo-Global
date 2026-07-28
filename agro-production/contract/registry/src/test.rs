@@ -238,3 +238,102 @@ fn test_repeated_campaign_entries_do_not_corrupt_state() {
     let farmer_campaigns = client.get_campaigns_by_farmer(&farmer_one);
     assert_eq!(farmer_campaigns.len(), 1);
 }
+
+// ── On-chain farmer reputation (Issue #592) ─────────────────────────────────
+
+#[test]
+fn test_reputation_starts_at_zero_for_unknown_farmer() {
+    let (_env, client, _, _, _, _, farmer_one, _) = setup_test();
+
+    let rep = client.get_reputation(&farmer_one);
+    assert_eq!(
+        rep,
+        ReputationRecord {
+            score: 0,
+            completed_orders: 0,
+            disputed_orders: 0,
+        }
+    );
+}
+
+#[test]
+fn test_reputation_accumulates_across_successful_orders() {
+    let (_env, client, _, escrow_contract, _, _, farmer_one, _) = setup_test();
+
+    client.record_order_outcome(&escrow_contract, &farmer_one, &None);
+    client.record_order_outcome(&escrow_contract, &farmer_one, &None);
+    let rep = client.record_order_outcome(&escrow_contract, &farmer_one, &None);
+
+    assert_eq!(rep.completed_orders, 3);
+    assert_eq!(rep.disputed_orders, 0);
+    assert_eq!(rep.score, 30);
+    assert_eq!(client.get_reputation(&farmer_one), rep);
+}
+
+#[test]
+fn test_reputation_penalized_on_dispute_refund_to_buyer() {
+    let (_env, client, _, escrow_contract, _, _, farmer_one, _) = setup_test();
+
+    client.record_order_outcome(&escrow_contract, &farmer_one, &None);
+    let rep = client.record_order_outcome(&escrow_contract, &farmer_one, &Some(10_000u32));
+
+    // +10 for the completed order, then a full-refund dispute applies the max penalty.
+    assert_eq!(rep.completed_orders, 1);
+    assert_eq!(rep.disputed_orders, 1);
+    assert_eq!(rep.score, 10 - 15);
+}
+
+#[test]
+fn test_reputation_rewarded_when_dispute_released_to_farmer() {
+    let (_env, client, _, escrow_contract, _, _, farmer_one, _) = setup_test();
+
+    let rep = client.record_order_outcome(&escrow_contract, &farmer_one, &Some(0u32));
+
+    assert_eq!(rep.disputed_orders, 1);
+    assert_eq!(rep.score, 10);
+}
+
+#[test]
+fn test_reputation_split_dispute_is_proportional() {
+    let (_env, client, _, escrow_contract, _, _, farmer_one, _) = setup_test();
+
+    // 50/50 split: half the completion reward, half the dispute penalty.
+    let rep = client.record_order_outcome(&escrow_contract, &farmer_one, &Some(5_000u32));
+
+    assert_eq!(rep.score, 5 - 7); // (10_000-5000)*10/10_000 - 5000*15/10_000
+}
+
+#[test]
+fn test_reputation_update_from_production_contract_is_authorized() {
+    let (_env, client, _, _, production_contract, _, farmer_one, _) = setup_test();
+
+    let rep =
+        client.record_order_outcome(&production_contract, &farmer_one, &None);
+    assert_eq!(rep.score, 10);
+}
+
+#[test]
+fn test_reputation_update_from_unauthorized_caller_fails() {
+    let (_env, client, _, _, _, unauthorized_contract, farmer_one, _) = setup_test();
+
+    let result =
+        client.try_record_order_outcome(&unauthorized_contract, &farmer_one, &None);
+    assert_eq!(
+        result.unwrap_err().unwrap(),
+        RegistryError::UnauthorizedContract
+    );
+
+    // No score should have been written for a rejected call.
+    assert_eq!(client.get_reputation(&farmer_one).score, 0);
+}
+
+#[test]
+fn test_reputation_is_tracked_independently_per_farmer() {
+    let (_env, client, _, escrow_contract, _, _, farmer_one, farmer_two) = setup_test();
+
+    client.record_order_outcome(&escrow_contract, &farmer_one, &None);
+    client.record_order_outcome(&escrow_contract, &farmer_two, &Some(10_000u32));
+
+    assert_eq!(client.get_reputation(&farmer_one).score, 10);
+    assert_eq!(client.get_reputation(&farmer_two).score, -5);
+}

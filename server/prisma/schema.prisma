@@ -123,6 +123,7 @@ model Product {
   cartItems    CartItem[]
   orders       Order[]
   priceHistory PriceHistory[]
+  groupOrders  GroupOrder[]
 
   @@index([farmerWallet, isAvailable])
   @@map("products")
@@ -284,6 +285,7 @@ model Profile {
   location       Location?
   products       Product[]
   carts          Cart[]
+  reviews        Review[]
 
   @@map("profiles")
 }
@@ -300,6 +302,42 @@ model Location {
   @@map("locations")
 }
 
+model PriceIndex {
+  id            String   @id @default(uuid())
+  crop          String
+  region        String
+  currency      String
+  avgPrice      Float    @map("avg_price")
+  minPrice      Float    @map("min_price")
+  maxPrice      Float    @map("max_price")
+  sampleCount   Int      @map("sample_count")
+  sourceCounts  Json     @map("source_counts")
+  computedAt    DateTime @map("computed_at")
+
+  @@unique([crop, region, currency])
+  @@index([crop, region])
+  @@map("price_index")
+}
+
+model WeatherReading {
+  id              String    @id @default(uuid())
+  walletAddress   String    @map("wallet_address")
+  lat             Float
+  lng             Float
+  temperatureC    Float     @map("temperature_c")
+  precipitationMm Float     @map("precipitation_mm")
+  windSpeedKph    Float     @map("wind_speed_kph")
+  conditionCode   Int       @map("condition_code")
+  source          String
+  rawPayload      Json      @map("raw_payload")
+  recordedAt      DateTime  @map("recorded_at")
+  attestedAt      DateTime? @map("attested_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@index([walletAddress, recordedAt(sort: Desc)])
+  @@map("weather_readings")
+}
+
 model OrderMetadata {
   on_chain_order_id String @id
   description       String
@@ -307,6 +345,92 @@ model OrderMetadata {
   buyer_address     String
 
   @@map("order_metadata")
+}
+
+model ReferralCode {
+  walletAddress String   @id @map("wallet_address")
+  code          String   @unique
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("referral_codes")
+}
+
+model Referral {
+  id                String    @id @default(uuid())
+  referrerWallet    String    @map("referrer_wallet")
+  refereeWallet     String    @unique @map("referee_wallet")
+  code              String
+  /// PENDING until the referee's first confirmed order/investment fires the
+  /// reward; REWARDED once the fee-credit has been issued; INELIGIBLE for
+  /// self-referral or other disqualified linkages.
+  status            String    @default("PENDING")
+  rewardedAt        DateTime? @map("rewarded_at")
+  /// Fee-credit amount granted to the referrer (platform-fee credit, not a
+  /// token mint), denominated in the same unit as order/investment amounts.
+  rewardAmount      String?   @map("reward_amount")
+  triggerOrderId    String?   @map("trigger_order_id")
+  triggerCampaignId String?   @map("trigger_campaign_id")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@index([referrerWallet])
+  @@index([status])
+  @@map("referrals")
+}
+
+model FeeCredit {
+  id            String    @id @default(uuid())
+  walletAddress String    @map("wallet_address")
+  amount        String
+  reason        String
+  sourceReferralId String? @map("source_referral_id")
+  consumedAt    DateTime? @map("consumed_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@index([walletAddress])
+  @@index([walletAddress, consumedAt])
+  @@map("fee_credits")
+}
+
+model IntegratorApiKey {
+  id             String    @id @default(uuid())
+  /// SHA-256 hash of the raw key; the raw value is shown to the admin once
+  /// at creation time and never stored.
+  keyHash        String    @unique @map("key_hash")
+  /// Short, non-secret prefix stored alongside the hash so keys can be
+  /// identified/labeled in the admin UI without re-deriving the hash.
+  keyPrefix      String    @map("key_prefix")
+  organizationName String  @map("organization_name")
+  /// Scope: explicit farmer wallets this key may read data for. Empty when
+  /// the key is scoped by region instead.
+  scopedFarmerWallets String[] @map("scoped_farmer_wallets")
+  /// Scope: region string (matches Location.city/country) this key may read
+  /// aggregate data for. Null when the key is scoped by farmer wallet list.
+  scopedRegion   String?   @map("scoped_region")
+  createdByAdmin String    @map("created_by_admin")
+  revokedAt      DateTime? @map("revoked_at")
+  lastUsedAt     DateTime? @map("last_used_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  usageLogs IntegratorApiKeyUsage[]
+
+  @@index([organizationName])
+  @@map("integrator_api_keys")
+}
+
+model IntegratorApiKeyUsage {
+  id           String   @id @default(uuid())
+  apiKeyId     String   @map("api_key_id")
+  endpoint     String
+  statusCode   Int      @map("status_code")
+  ipAddress    String?  @map("ip_address")
+  requestedAt  DateTime @default(now()) @map("requested_at")
+
+  apiKey IntegratorApiKey @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+
+  @@index([apiKeyId])
+  @@index([apiKeyId, requestedAt(sort: Desc)])
+  @@map("integrator_api_key_usage")
 }
 
 model ContractWatcherCheckpoint {
@@ -333,62 +457,72 @@ model Dispute {
   @@map("disputes")
 }
 
-model CropPlan {
-  id                   String    @id @default(uuid())
-  farmerWallet         String    @map("farmer_wallet")
-  cropName             String    @map("crop_name")
-  plantedDate          DateTime  @map("planted_date")
-  expectedHarvestStart DateTime  @map("expected_harvest_start")
-  expectedHarvestEnd   DateTime  @map("expected_harvest_end")
-  expectedVolume       Float?    @map("expected_volume")
-  unit                 String?
-  region               String?
-  linkedCampaignId     String?   @map("linked_campaign_id")
-  reminderDaysBefore   Int       @default(7) @map("reminder_days_before")
-  reminderSent         Boolean   @default(false) @map("reminder_sent")
-  createdAt            DateTime  @default(now()) @map("created_at")
-  updatedAt            DateTime  @updatedAt @map("updated_at")
+model Review {
+  id                String   @id @default(uuid()) @db.Uuid
+  subjectWallet     String   @map("subject_wallet")
+  reviewerWallet    String   @map("reviewer_wallet")
+  reviewerName      String   @map("reviewer_name")
+  reviewerRole      String   @map("reviewer_role")
+  rating            Int
+  title             String
+  body              String
+  transactionHash   String   @unique @map("transaction_hash")
+  verifiedTransaction Boolean @default(true) @map("verified_transaction")
+  helpfulVotes      Int      @default(0) @map("helpful_votes")
+  helpfulVoteWallets String[] @default([]) @map("helpful_vote_wallets")
+  evidence          String[] @default([])
+  responseMessage   String?  @map("response_message")
+  responderName     String?  @map("responder_name")
+  respondedAt       DateTime? @map("responded_at")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([farmerWallet])
-  @@index([region, expectedHarvestStart, expectedHarvestEnd])
-  @@map("crop_plans")
+  profile Profile @relation(fields: [subjectWallet], references: [wallet_address], onDelete: Cascade)
+
+  @@index([subjectWallet, createdAt(sort: Desc)])
+  @@index([reviewerWallet])
+  @@map("reviews")
 }
 
-model EquipmentListing {
-  id            String            @id @default(uuid())
-  ownerWallet   String            @map("owner_wallet")
-  title         String
-  description   String?
-  listingType   String            @map("listing_type")
-  pricePerUnit  Decimal           @map("price_per_unit") @db.Decimal(18, 6)
-  depositAmount Decimal           @default(0) @map("deposit_amount") @db.Decimal(18, 6)
-  currency      String
-  unit          String
-  location      String?
-  isAvailable   Boolean           @default(true) @map("is_available")
-  createdAt     DateTime          @default(now()) @map("created_at")
-  updatedAt     DateTime          @updatedAt @map("updated_at")
-  rentals       EquipmentRental[]
+model GroupOrder {
+  id                String   @id @default(uuid()) @db.Uuid
+  productId         String   @map("product_id") @db.Uuid
+  farmerWallet      String   @map("farmer_wallet")
+  targetQuantity    Decimal  @map("target_quantity") @db.Decimal(10, 2)
+  committedQuantity Decimal  @default(0) @map("committed_quantity") @db.Decimal(10, 2)
+  currency          String
+  status            String   @default("PENDING")
+  windowEndsAt      DateTime @map("window_ends_at")
+  batchTxHash       String?  @map("batch_tx_hash")
+  fulfilledAt       DateTime? @map("fulfilled_at")
+  expiredAt         DateTime? @map("expired_at")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([ownerWallet, listingType])
-  @@map("equipment_listings")
+  product      Product                 @relation(fields: [productId], references: [id], onDelete: Cascade)
+  contributions GroupOrderContribution[]
+
+  @@index([productId, status])
+  @@index([farmerWallet, status])
+  @@index([windowEndsAt])
+  @@map("group_orders")
 }
 
-model EquipmentRental {
-  id              String           @id @default(uuid())
-  listingId       String           @map("listing_id")
-  renterWallet    String           @map("renter_wallet")
-  startDate       DateTime         @map("start_date")
-  endDate         DateTime         @map("end_date")
-  status          String           @default("ACTIVE")
-  depositAmount   Decimal          @map("deposit_amount") @db.Decimal(18, 6)
-  depositRefunded Boolean          @default(false) @map("deposit_refunded")
-  createdAt       DateTime         @default(now()) @map("created_at")
-  updatedAt       DateTime         @updatedAt @map("updated_at")
+model GroupOrderContribution {
+  id            String   @id @default(uuid()) @db.Uuid
+  groupOrderId   String   @map("group_order_id") @db.Uuid
+  buyerWallet    String   @map("buyer_wallet")
+  quantity       Decimal  @db.Decimal(10, 2)
+  unitPrice      Decimal  @map("unit_price") @db.Decimal(18, 6)
+  currency       String
+  status         String   @default("RESERVED")
+  orderIdOnChain String?  @map("order_id_on_chain")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  listing EquipmentListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  groupOrder GroupOrder @relation(fields: [groupOrderId], references: [id], onDelete: Cascade)
 
-  @@index([renterWallet])
-  @@index([listingId])
-  @@map("equipment_rentals")
+  @@index([groupOrderId, buyerWallet])
+  @@index([buyerWallet, status])
+  @@map("group_order_contributions")
 }

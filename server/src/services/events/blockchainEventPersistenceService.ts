@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database.js";
 import logger from "../../config/logger.js";
 import type { IndexedEvent } from "../../types/indexedEvent.js";
+import { ReferralService } from "../referralService.js";
 
 type PrismaTx = Omit<typeof prisma, "$connect" | "$disconnect" | "$on" | "$use" | "$extends">;
 
@@ -32,9 +33,42 @@ export class BlockchainEventPersistenceService {
           },
         });
       });
+
+      // Referral rewards only fire on a real, first confirmed economic event
+      // (Issue #661) — order.confirmed and campaign.invested are the only
+      // two event types that represent money actually moving on-chain.
+      await this.triggerReferralRewardIfApplicable(event);
     } catch (error) {
       logger.error("Failed to persist indexed blockchain event", { event, error });
       throw error;
+    }
+  }
+
+  private static async triggerReferralRewardIfApplicable(event: IndexedEvent): Promise<void> {
+    try {
+      if (event.eventType === "order.confirmed" && event.actorAddress) {
+        // order.confirmed carries no amount on-chain; the order's amount was
+        // recorded at order.created time, so look it up rather than treating
+        // a missing amount as "nothing to reward".
+        const order = event.orderIdOnChain
+          ? await prisma.order.findUnique({ where: { orderIdOnChain: event.orderIdOnChain } })
+          : null;
+        await ReferralService.triggerRewardOnConfirmedActivity({
+          refereeWallet: event.actorAddress,
+          amount: order?.amount ?? event.amount ?? "0",
+          triggerOrderId: event.orderIdOnChain,
+        });
+      } else if (event.eventType === "campaign.invested" && event.actorAddress) {
+        await ReferralService.triggerRewardOnConfirmedActivity({
+          refereeWallet: event.actorAddress,
+          amount: event.amount ?? "0",
+          triggerCampaignId: event.campaignIdOnChain,
+        });
+      }
+    } catch (error) {
+      // Referral rewards are best-effort and must never block core event
+      // ingestion/persistence.
+      logger.error("Failed to evaluate referral reward for event", { event, error });
     }
   }
 
