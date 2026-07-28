@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useSocket } from "./useSocket";
+import { setAccessToken } from "@/lib/authToken";
 
 type MockSocket = {
   send: ReturnType<typeof vi.fn>;
@@ -33,6 +34,7 @@ describe("useSocket Hook", () => {
   });
 
   afterEach(() => {
+    setAccessToken(null);
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
@@ -53,6 +55,33 @@ describe("useSocket Hook", () => {
     });
 
     expect(result.current.isConnected).toBe(true);
+  });
+
+  it("authenticates with the REST access token on every connection", () => {
+    setAccessToken("jwt-access-token");
+    renderHook(() => useSocket());
+
+    act(() => {
+      const socket = webSocketCtor.mock.results[0]?.value as MockSocket;
+      socket.onopen?.(new Event("open"));
+    });
+
+    expect(mockWs.send).toHaveBeenNthCalledWith(
+      1,
+      JSON.stringify({ type: "auth", token: "jwt-access-token" }),
+    );
+
+    act(() => {
+      const socket = webSocketCtor.mock.results[0]?.value as MockSocket;
+      socket.onclose?.(new Event("close"));
+      vi.advanceTimersByTime(1_000);
+    });
+
+    const reconnectedSocket = webSocketCtor.mock.results[1]?.value as MockSocket;
+    act(() => reconnectedSocket.onopen?.(new Event("open")));
+    expect(reconnectedSocket.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "auth", token: "jwt-access-token" }),
+    );
   });
 
   it("should send subscription signals when registering order listeners", () => {
