@@ -1,0 +1,20 @@
+{
+  "welcome": "Bienvenue sur le Portail de Production Agricole",
+  "navigation": {
+    "campaigns": "Campagnes",
+    "milestones": "Jalons",
+    "escrow": "Escrow",
+    "registry": "Registre",
+    "mainClient": "Retour au Marché Principal"
+  },
+  "campaigns": {
+    "title": "Campagnes de Production",
+    "create": "Ouvrir une Campagne",
+    "goal": "Objectif de Financement",
+    "funded": "Montant Financé"
+  },
+  "sso": {
+    "connectedWallet": "Portefeuille Connecté par SSO",
+    "autoAuthenticated": "Session transférée depuis le marché principal"
+  }
+}

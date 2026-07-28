@@ -1,0 +1,20 @@
+{
+  "welcome": "Welcome to Agrocylo Production Portal",
+  "navigation": {
+    "campaigns": "Campaigns",
+    "milestones": "Milestones",
+    "escrow": "Escrow",
+    "registry": "Registry",
+    "mainClient": "Return to Main Marketplace"
+  },
+  "campaigns": {
+    "title": "Production Campaigns",
+    "create": "Open New Campaign",
+    "goal": "Target Funding",
+    "funded": "Funded Amount"
+  },
+  "sso": {
+    "connectedWallet": "SSO Connected Wallet",
+    "autoAuthenticated": "Session transferred from main marketplace"
+  }
+}
