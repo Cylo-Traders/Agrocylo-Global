@@ -3274,3 +3274,39 @@ fn test_update_supported_tokens_governance_gated() {
     t.client.update_supported_tokens(&governance, &tokens);
     assert_eq!(t.client.get_supported_tokens().len(), 1);
 }
+
+#[test]
+fn test_registry_wired_campaign_creation() {
+    let t = setup();
+
+    // Register real registry contract
+    let registry_id = t.env.register(registry::RegistryContract, ());
+    let registry_client = registry::RegistryContractClient::new(&t.env, &registry_id);
+
+    // Initialize registry contract with escrow and production escrow addresses
+    let dummy_escrow = Address::generate(&t.env);
+    registry_client.initialize(&t.admin, &dummy_escrow, &t.client.address);
+
+    // Wire registry to production escrow
+    t.client.set_registry_contract(&t.admin, &registry_id);
+
+    // Register farmer in registry contract
+    registry_client.register_farmer(&t.admin, &t.farmer);
+
+    // Create campaign in production escrow
+    let deadline = future_deadline(&t);
+    let campaign_id = t.client.create_campaign(
+        &t.farmer,
+        &t.token_id,
+        &100_000,
+        &deadline,
+    );
+
+    // Verify campaign creation is registered in registry
+    let campaigns = registry_client.get_campaigns(&0, &10);
+    assert_eq!(campaigns.len(), 1);
+    let record = campaigns.get(0).unwrap();
+    assert_eq!(record.campaign_id, campaign_id);
+    assert_eq!(record.farmer, t.farmer);
+    assert_eq!(record.source_contract, t.client.address);
+}

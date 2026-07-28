@@ -1,11 +1,12 @@
 import express from 'express';
 import { requireWallet, type WalletRequest } from '../middleware/walletAuth.js';
+import { writeLimiter } from '../middleware/rateLimiter.js';
 import { ApiError, sendProblem } from '../http/errors.js';
 import { createOrderMetadata, getOrderMetadata } from '../services/orderMetadataService.js';
 
 const router = express.Router();
 
-router.post('/', requireWallet, async (req: WalletRequest, res, next) => {
+router.post('/', requireWallet, writeLimiter, async (req: WalletRequest, res, next) => {
   try {
     if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet', 'https://cylos.io/errors/unauthorized');
     const data = await createOrderMetadata(req.body ?? {}, req.walletAddress);

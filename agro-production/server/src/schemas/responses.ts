@@ -91,6 +91,24 @@ export const OrderSchema = z.object({
   campaign: OrderCampaignRefSchema.optional(),
 });
 
+export const MilestoneItemSchema = z.object({
+  name: z.string(),
+  percentage: z.number(),
+  completed: z.boolean(),
+  completedAt: z.string().nullable(),
+});
+
+export const CampaignMilestonesSchema = z.object({
+  campaignId: z.string(),
+  onChainId: z.string(),
+  status: campaignStatusEnum,
+  percentageReleased: z.number(),
+  trancheReleased: z.string(),
+  currentMilestone: z.string(),
+  nextExpectedMilestone: z.string().nullable(),
+  milestones: z.array(MilestoneItemSchema),
+});
+
 export const CampaignDetailSchema = CampaignSchema.extend({
   investments: z.array(InvestmentSchema).optional(),
   orders: z.array(OrderSchema).optional(),
