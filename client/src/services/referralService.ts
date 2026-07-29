@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from "@/lib/apiHelper";
+import { apiRequest } from "@/lib/apiHelper";
 
 export interface ReferralCode {
   code: string;
@@ -24,26 +24,33 @@ export interface ReferralRecord {
 export async function getReferralCode(
   walletAddress: string,
 ): Promise<ReferralCode> {
-  return apiGet<ReferralCode>("/referrals/me", walletAddress);
+  return apiRequest<ReferralCode>("/referrals/me", {
+    headers: { "x-wallet-address": walletAddress },
+  });
 }
 
 export async function getCohortPerformance(walletAddress: string): Promise<{
   performance: ReferralCohortPerformance;
   referrals: ReferralRecord[];
 }> {
-  return apiGet<{
+  return apiRequest<{
     performance: ReferralCohortPerformance;
     referrals: ReferralRecord[];
-  }>("/referrals/me/cohort", walletAddress);
+  }>("/referrals/me/cohort", {
+    headers: { "x-wallet-address": walletAddress },
+  });
 }
 
 export async function submitReferralCode(
   referralCode: string,
   walletAddress: string,
 ): Promise<{ linked: boolean; referral?: ReferralRecord }> {
-  return apiPost<{ linked: boolean; referral?: ReferralRecord }>(
+  return apiRequest<{ linked: boolean; referral?: ReferralRecord }>(
     "/referrals/signup",
-    { referralCode },
-    walletAddress,
+    {
+      method: "POST",
+      headers: { "x-wallet-address": walletAddress },
+      body: { referralCode },
+    },
   );
 }

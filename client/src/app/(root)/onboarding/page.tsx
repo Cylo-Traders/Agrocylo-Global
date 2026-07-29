@@ -161,7 +161,7 @@ export default function OnboardingPage() {
           </p>
         </div>
 
-        <StepProgress currentStep={step} />
+        <StepProgress currentStep={step} hasReferralStep={!!referralFromUrl} />
 
         {error && (
           <div className="bg-destructive/10 text-destructive border-destructive/30 mx-auto mb-4 max-w-md rounded-lg border px-4 py-2 text-sm">

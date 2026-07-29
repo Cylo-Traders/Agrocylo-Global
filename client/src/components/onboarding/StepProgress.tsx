@@ -12,17 +12,38 @@ const STEPS = [
   "Done",
 ];
 
+const STEPS_NO_REFERRAL = [
+  "Connect Wallet",
+  "Select Role",
+  "Profile",
+  "Location",
+  "Done",
+];
+
 interface StepProgressProps {
   currentStep: number;
+  hasReferralStep?: boolean;
 }
 
-export default function StepProgress({ currentStep }: StepProgressProps) {
+export default function StepProgress({
+  currentStep,
+  hasReferralStep = false,
+}: StepProgressProps) {
+  const steps = hasReferralStep ? STEPS : STEPS_NO_REFERRAL;
+
+  // Adjust step number for display when skipping referral step
+  let displayStep = currentStep;
+  if (!hasReferralStep && currentStep >= 5) {
+    // Map internal step 5,6 to display step 4,5
+    displayStep = currentStep - 1;
+  }
+
   return (
     <div className="mb-10 flex items-center justify-center gap-2">
-      {STEPS.map((label, i) => {
+      {steps.map((label, i) => {
         const step = i + 1;
-        const isActive = step === currentStep;
-        const isComplete = step < currentStep;
+        const isActive = step === displayStep;
+        const isComplete = step < displayStep;
         return (
           <div key={label} className="flex items-center gap-2">
             <div className="flex flex-col items-center">
