@@ -647,12 +647,20 @@ impl ProductionEscrowContract {
     ///
     /// The caller must be a buyer (has a confirmed order on this campaign)
     /// or an oracle (admin address acting as oracle).
+    /// Requires independent attester co-signature to prevent self-attest exploits.
     pub fn advance_milestone(
         env: Env,
         caller: Address,
+        attester_caller: Address,
         campaign_id: u64,
     ) -> Result<(), EscrowError> {
         caller.require_auth();
+        attester_caller.require_auth();
+        let attester_addr = attester(&env)?;
+        if attester_caller != attester_addr {
+            return Err(EscrowError::NotAdmin);
+        }
+
         let mut campaign = load_campaign(&env, campaign_id)?;
 
         // Only allow milestone advances during active production.
@@ -667,9 +675,10 @@ impl ProductionEscrowContract {
         let admin_addr = admin(&env)?;
         let is_oracle = caller == admin_addr;
         if !is_oracle {
-            // Check if caller is a buyer (has any confirmed order on this campaign).
-            let is_buyer = has_confirmed_order(&env, campaign_id, &caller);
-            if !is_buyer {
+            // Check if caller is a buyer (has a confirmed order with minimum volume).
+            let buyer_order_volume = get_buyer_order_volume(&env, campaign_id, &caller);
+            let min_order_required = campaign.target_amount / 100; // At least 1% of target
+            if buyer_order_volume < min_order_required {
                 return Err(EscrowError::NotBuyerOrOracle);
             }
         }
@@ -1565,8 +1574,29 @@ fn save_campaign(env: &Env, c: &Campaign) {
         .extend_ttl(&DataKey::Campaign(c.id), TTL_THRESHOLD, TTL_EXTEND);
 }
 
-/// Check if a buyer has at least one confirmed order on a campaign.
-/// Used by advance_milestone to verify caller authorization.
+/// Get the total confirmed order volume for a buyer on a campaign.
+/// Used by advance_milestone to enforce minimum order volume requirement.
+fn get_buyer_order_volume(env: &Env, campaign_id: u64, buyer: &Address) -> i128 {
+    let order_count: u64 = env
+        .storage()
+        .instance()
+        .get(&DataKey::OrderCount)
+        .unwrap_or(0);
+    let mut total = 0i128;
+    for i in 1..=order_count {
+        if let Some(order) = env
+            .storage()
+            .persistent()
+            .get::<_, Order>(&DataKey::Order(i))
+        {
+            if order.campaign_id == campaign_id && order.buyer == *buyer && order.status == OrderStatus::Confirmed {
+                total = total.saturating_add(order.amount);
+            }
+        }
+    }
+    total
+}
+
 fn resolve_dispute_internal(
     env: &Env,
     campaign_id: u64,
