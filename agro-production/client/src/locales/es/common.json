@@ -1,0 +1,20 @@
+{
+  "welcome": "Bienvenido al Portal de Producción Agrícola",
+  "navigation": {
+    "campaigns": "Campañas",
+    "milestones": "Hitos",
+    "escrow": "Garantía Escrow",
+    "registry": "Registro",
+    "mainClient": "Volver al Mercado Principal"
+  },
+  "campaigns": {
+    "title": "Campañas de Producción",
+    "create": "Crear Nueva Campaña",
+    "goal": "Meta de Financiación",
+    "funded": "Monto Financiado"
+  },
+  "sso": {
+    "connectedWallet": "Billetera Conectada por SSO",
+    "autoAuthenticated": "Sesión transferida desde el mercado principal"
+  }
+}

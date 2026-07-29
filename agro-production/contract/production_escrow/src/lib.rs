@@ -189,6 +189,11 @@ pub struct Order {
 pub enum DataKey {
     Admin,
     Attester,
+    /// Governance contract authorized to change fee/token-whitelist parameters
+    /// (Issue #660). While unset, those parameters fall back to admin-only
+    /// control so existing deployments are not bricked; once set, it becomes
+    /// the sole authorized caller for those specific setters.
+    GovernanceContract,
     SupportedTokens,
     RegistryContract,
     FeeCollector,
@@ -294,20 +299,21 @@ impl ProductionEscrowContract {
         Ok(())
     }
 
-    /// Set the registry contract address. Can be called by admin to update registry configuration.
+    /// Set the registry contract address. Authorized caller is the governance
+    /// contract once configured via `set_governance_contract` (Issue #660);
+    /// falls back to admin-only while governance is unset.
     pub fn set_registry_contract(env: Env, admin_caller: Address, registry: Address) -> Result<(), EscrowError> {
         admin_caller.require_auth();
-        let admin = admin(&env)?;
-        if admin_caller != admin {
-            return Err(EscrowError::NotAdmin);
-        }
+        require_governed_caller(&env, &admin_caller)?;
         env.storage()
             .instance()
             .set(&DataKey::RegistryContract, &registry);
         Ok(())
     }
 
-    /// Update fee configuration. Can be called by admin.
+    /// Update fee configuration. Authorized caller is the governance contract
+    /// once configured via `set_governance_contract` (Issue #660); falls back
+    /// to admin-only while governance is unset.
     /// Does not affect orders already created (fees are immutable per-order).
     pub fn set_fee_config(
         env: Env,
@@ -316,10 +322,7 @@ impl ProductionEscrowContract {
         fee_rate_bps: u32,
     ) -> Result<(), EscrowError> {
         admin_caller.require_auth();
-        let admin = admin(&env)?;
-        if admin_caller != admin {
-            return Err(EscrowError::NotAdmin);
-        }
+        require_governed_caller(&env, &admin_caller)?;
         if fee_rate_bps > 10000 {
             return Err(EscrowError::InvalidAmount);
         }
@@ -330,6 +333,51 @@ impl ProductionEscrowContract {
             .instance()
             .set(&DataKey::FeeRateBps, &fee_rate_bps);
         Ok(())
+    }
+
+    /// Set (or update) the governance contract address. Only the original
+    /// admin can do this — a one-time (or migration-time) bootstrapping step
+    /// that hands control of fee/token-whitelist parameters to governance.
+    /// Once set, `set_fee_config`/`set_registry_contract`/`update_supported_tokens`
+    /// can only be called by this address, not by the raw admin key.
+    pub fn set_governance_contract(
+        env: Env,
+        admin_caller: Address,
+        governance: Address,
+    ) -> Result<(), EscrowError> {
+        admin_caller.require_auth();
+        let admin = admin(&env)?;
+        if admin_caller != admin {
+            return Err(EscrowError::NotAdmin);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::GovernanceContract, &governance);
+        Ok(())
+    }
+
+    /// Update the supported token whitelist. Same governance gating as
+    /// `set_fee_config`/`set_registry_contract` (Issue #660) — this is the
+    /// "token whitelist" parameter the issue calls out as a centralization
+    /// risk when controlled by a single admin key.
+    pub fn update_supported_tokens(
+        env: Env,
+        admin_caller: Address,
+        supported_tokens: Vec<Address>,
+    ) -> Result<(), EscrowError> {
+        admin_caller.require_auth();
+        require_governed_caller(&env, &admin_caller)?;
+        if supported_tokens.len() < 1 {
+            return Err(EscrowError::MustSupportOneToken);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::SupportedTokens, &supported_tokens);
+        Ok(())
+    }
+
+    pub fn get_governance_contract(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::GovernanceContract)
     }
 
     /// Set the independent attester role. Can be called by admin.
@@ -1478,6 +1526,29 @@ fn attester(env: &Env) -> Result<Address, EscrowError> {
         .instance()
         .get(&DataKey::Attester)
         .ok_or(EscrowError::ContractNotInitialized)
+}
+
+/// Enforces that `caller` is the authorized party for governance-gated
+/// parameters (Issue #660): the governance contract if one has been set via
+/// `set_governance_contract`, otherwise the raw admin as a fallback so a
+/// deployment that never configures governance keeps working exactly as
+/// before.
+fn require_governed_caller(env: &Env, caller: &Address) -> Result<(), EscrowError> {
+    if let Some(governance) = env
+        .storage()
+        .instance()
+        .get::<_, Address>(&DataKey::GovernanceContract)
+    {
+        if *caller != governance {
+            return Err(EscrowError::NotAdmin);
+        }
+        return Ok(());
+    }
+    let admin_addr = admin(env)?;
+    if *caller != admin_addr {
+        return Err(EscrowError::NotAdmin);
+    }
+    Ok(())
 }
 
 fn load_campaign(env: &Env, id: u64) -> Result<Campaign, EscrowError> {

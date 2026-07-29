@@ -4,13 +4,44 @@
     "home": "Home",
     "market": "Market",
     "orders": "Orders",
-    "profile": "Profile"
+    "profile": "Profile",
+    "cropPlanning": "Crop Planner",
+    "equipment": "Inputs & Equipment",
+    "agroProduction": "Agro Production Portal"
   },
   "market": {
-    "title": "Marketplace",
-    "search": "Search products...",
+    "title": "Produce Marketplace",
+    "search": "Search produce...",
     "buy": "Buy Now",
-    "sell": "Sell"
+    "sell": "List Produce"
+  },
+  "cropPlanning": {
+    "title": "Harvest & Planting Planner",
+    "subtitle": "Log planned crops, track harvest dates, and notify buyers in advance.",
+    "createPlan": "Log New Crop Plan",
+    "cropName": "Crop Name",
+    "plantedDate": "Date Planted",
+    "harvestStart": "Expected Harvest Start",
+    "harvestEnd": "Expected Harvest End",
+    "volume": "Expected Yield Volume",
+    "unit": "Unit (e.g. kg, bags)",
+    "region": "Region",
+    "reminder": "Notify me N days before harvest",
+    "aggregateTitle": "Regional Harvest Projections (Buyer View)"
+  },
+  "equipmentMarket": {
+    "title": "Farmer-to-Farmer Inputs & Equipment",
+    "subtitle": "Trade seeds, fertilizer, and rent tools/machinery directly with other farmers.",
+    "seeds": "Seeds & Fertilizers",
+    "tools": "Tools & Machinery",
+    "rental": "Equipment Rentals",
+    "deposit": "Refundable Security Deposit",
+    "rentNow": "Rent Equipment",
+    "returnEquipment": "Confirm Return & Refund Deposit"
+  },
+  "crossNav": {
+    "agroProduction": "Agro Production Platform",
+    "handoffNotice": "Seamless SSO handoff enabled — your wallet session will carry over."
   },
   "notifications": {
     "title": "Notifications",

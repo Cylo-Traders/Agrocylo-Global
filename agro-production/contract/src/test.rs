@@ -1,212 +1,74 @@
 #![cfg(test)]
 use super::*;
-use soroban_sdk::{testutils::Address as _, Address, Env, String};
+use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
 
 #[test]
 fn test_initialize() {
     let env = Env::default();
-    let contract_id = env.register_contract(None, RegistryContract);
-    let client = RegistryContractClient::new(&env, &contract_id);
+    let contract_id = env.register(CampaignContract, ());
+    let client = CampaignContractClient::new(&env, &contract_id);
 
-    let escrow = Address::generate(&env);
-    let production = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let fee_collector = Address::generate(&env);
+    let supported_tokens = Vec::from_array(&env, [Address::generate(&env)]);
 
-    client.initialize(&escrow, &production);
-
-    assert_eq!(client.get_escrow(), escrow);
-    assert_eq!(client.get_production(), production);
+    // 1. Contract initializes successfully exactly once
+    client.initialize(&admin, &supported_tokens, &fee_collector);
+    
+    // Check if it stored everything correctly
+    // We can't directly read it through client unless we added getters, but the fact it didn't fail is a start.
 }
 
 #[test]
 #[should_panic(expected = "HostError: Error(Contract, #1)")]
 fn test_initialize_already_initialized() {
     let env = Env::default();
-    let contract_id = env.register_contract(None, RegistryContract);
-    let client = RegistryContractClient::new(&env, &contract_id);
-
-    let escrow = Address::generate(&env);
-    let production = Address::generate(&env);
-
-    client.initialize(&escrow, &production);
-    client.initialize(&escrow, &production);
-}
-
-#[test]
-fn test_register_farmer() {
-    let env = Env::default();
-    let contract_id = env.register_contract(None, RegistryContract);
-    let client = RegistryContractClient::new(&env, &contract_id);
-
-    let escrow = Address::generate(&env);
-    let production = Address::generate(&env);
-    client.initialize(&escrow, &production);
-
-    let farmer = Address::generate(&env);
-    let metadata_ref = String::from_str(&env, "ipfs://farmer-metadata");
-
-    client.register_farmer(&farmer, &metadata_ref);
-
-    assert_eq!(client.get_farmer(&farmer), Some(metadata_ref));
-}
-
-#[test]
-fn test_get_farmer_not_registered() {
-    let env = Env::default();
-    let contract_id = env.register_contract(None, RegistryContract);
-    let client = RegistryContractClient::new(&env, &contract_id);
-
-    let farmer = Address::generate(&env);
-    assert_eq!(client.get_farmer(&farmer), None);
-
-use super::*;
-use soroban_sdk::{testutils::Address as _, Address, Env};
-
-fn setup_test() -> (Env, CampaignContractClient<'static>, Address, Address) {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let admin = Address::generate(&env);
-    let farmer = Address::generate(&env);
-
     let contract_id = env.register(CampaignContract, ());
     let client = CampaignContractClient::new(&env, &contract_id);
 
-    client.initialize(&admin);
+    let admin = Address::generate(&env);
+    let fee_collector = Address::generate(&env);
+    let supported_tokens = Vec::from_array(&env, [Address::generate(&env)]);
 
-    (env, client, admin, farmer)
+    client.initialize(&admin, &supported_tokens, &fee_collector);
+
+    // 2. Re-initialization is rejected
+    client.initialize(&admin, &supported_tokens, &fee_collector);
 }
 
 #[test]
-fn test_register_farmer() {
-    let (_env, client, _admin, farmer) = setup_test();
-    client.register_farmer(&farmer);
-    let farmer_data = client.get_farmer(&farmer);
-    assert!(farmer_data.registered);
-}
+fn test_store_and_retrieve_campaign() {
+    let env = Env::default();
+    let contract_id = env.register(CampaignContract, ());
+    let client = CampaignContractClient::new(&env, &contract_id);
 
-#[test]
-fn test_create_campaign() {
-    let (_env, client, _admin, farmer) = setup_test();
-    client.register_farmer(&farmer);
-    let campaign_id = client.create_campaign(&farmer, &1000);
-    assert_eq!(campaign_id, 1);
-    let campaign = client.get_campaign(&campaign_id);
-    assert_eq!(campaign.status, CampaignStatus::Pending);
-}
+    let admin = Address::generate(&env);
+    let fee_collector = Address::generate(&env);
+    let supported_tokens = Vec::from_array(&env, [Address::generate(&env)]);
+    client.initialize(&admin, &supported_tokens, &fee_collector);
 
-#[test]
-fn test_invest_and_funded() {
-    let (env, client, _admin, farmer) = setup_test();
-    let investor = Address::generate(&env);
-    client.register_farmer(&farmer);
-    let campaign_id = client.create_campaign(&farmer, &1000);
-    client.invest(&investor, &campaign_id, &500);
-    client.invest(&investor, &campaign_id, &600);
-    let campaign = client.get_campaign(&campaign_id);
-    assert_eq!(campaign.status, CampaignStatus::Funded);
-}
+    let campaign = Campaign {
+        campaign_id: 1,
+        farmer: Address::generate(&env),
+        token: Address::generate(&env),
+        target_amount: 1000,
+        raised_amount: 0,
+        start_time: 100,
+        harvest_deadline: 200,
+        status: Status::Funding,
+    };
 
-#[test]
-fn test_start_production() {
-    let (env, client, _admin, farmer) = setup_test();
-    let investor = Address::generate(&env);
-    client.register_farmer(&farmer);
-    let campaign_id = client.create_campaign(&farmer, &1000);
-    client.invest(&investor, &campaign_id, &1000);
-    client.start_production(&farmer, &campaign_id);
-    let campaign = client.get_campaign(&campaign_id);
-    assert_eq!(campaign.status, CampaignStatus::InProduction);
-}
+    client.store_campaign(&campaign);
 
-#[test]
-fn test_mark_harvest() {
-    let (env, client, _admin, farmer) = setup_test();
-    let investor = Address::generate(&env);
-    client.register_farmer(&farmer);
-    let campaign_id = client.create_campaign(&farmer, &1000);
-    client.invest(&investor, &campaign_id, &1000);
-    client.start_production(&farmer, &campaign_id);
-    client.mark_harvest(&farmer, &campaign_id);
-    let campaign = client.get_campaign(&campaign_id);
-    assert_eq!(campaign.status, CampaignStatus::Harvested);
-}
+    let retrieved = client.get_campaign(&1);
 
-#[test]
-fn test_settle_campaign() {
-    let (env, client, _admin, farmer) = setup_test();
-    let investor = Address::generate(&env);
-    client.register_farmer(&farmer);
-    let campaign_id = client.create_campaign(&farmer, &1000);
-    client.invest(&investor, &campaign_id, &1000);
-    client.start_production(&farmer, &campaign_id);
-    client.mark_harvest(&farmer, &campaign_id);
-    client.settle_campaign(&campaign_id);
-    let campaign = client.get_campaign(&campaign_id);
-    assert_eq!(campaign.status, CampaignStatus::Settled);
-}
-
-#[test]
-fn test_tranche_release() {
-    let (env, client, _admin, farmer) = setup_test();
-    let investor = Address::generate(&env);
-    client.register_farmer(&farmer);
-    let campaign_id = client.create_campaign(&farmer, &1000);
-    client.invest(&investor, &campaign_id, &1000);
-    client.start_production(&farmer, &campaign_id);
-    let amount = client.release_tranche(&campaign_id, &0);
-    assert_eq!(amount, 400);
-    let campaign = client.get_campaign(&campaign_id);
-    assert!(campaign.initial_released);
-}
-
-#[test]
-fn test_no_invest_after_funded() {
-    let (env, client, _admin, farmer) = setup_test();
-    let investor = Address::generate(&env);
-    client.register_farmer(&farmer);
-    let campaign_id = client.create_campaign(&farmer, &1000);
-    client.invest(&investor, &campaign_id, &1000);
-    let result = client.try_invest(&investor, &campaign_id, &100);
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_no_harvest_before_production() {
-    let (env, client, _admin, farmer) = setup_test();
-    let investor = Address::generate(&env);
-    client.register_farmer(&farmer);
-    let campaign_id = client.create_campaign(&farmer, &1000);
-    client.invest(&investor, &campaign_id, &1000);
-    let result = client.try_mark_harvest(&farmer, &campaign_id);
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_no_settle_twice() {
-    let (env, client, _admin, farmer) = setup_test();
-    let investor = Address::generate(&env);
-    client.register_farmer(&farmer);
-    let campaign_id = client.create_campaign(&farmer, &1000);
-    client.invest(&investor, &campaign_id, &1000);
-    client.start_production(&farmer, &campaign_id);
-    client.mark_harvest(&farmer, &campaign_id);
-    client.settle_campaign(&campaign_id);
-    let result = client.try_settle_campaign(&campaign_id);
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_dispute_resolve() {
-    let (env, client, _admin, farmer) = setup_test();
-    let investor = Address::generate(&env);
-    client.register_farmer(&farmer);
-    let campaign_id = client.create_campaign(&farmer, &1000);
-    client.invest(&investor, &campaign_id, &1000);
-    client.start_production(&farmer, &campaign_id);
-    client.dispute_campaign(&campaign_id);
-    let campaign = client.get_campaign(&campaign_id);
-    assert_eq!(campaign.status, CampaignStatus::Disputed);
-    client.resolve_campaign(&campaign_id, &true);
-    let resolved = client.get_campaign(&campaign_id);
-    assert_eq!(resolved.status, CampaignStatus::Settled);
+    // 3. A Campaign value can be stored and then retrieved, with every field matching what was stored.
+    assert_eq!(retrieved.campaign_id, campaign.campaign_id);
+    assert_eq!(retrieved.farmer, campaign.farmer);
+    assert_eq!(retrieved.token, campaign.token);
+    assert_eq!(retrieved.target_amount, campaign.target_amount);
+    assert_eq!(retrieved.raised_amount, campaign.raised_amount);
+    assert_eq!(retrieved.start_time, campaign.start_time);
+    assert_eq!(retrieved.harvest_deadline, campaign.harvest_deadline);
+    assert_eq!(retrieved.status, campaign.status);
 }

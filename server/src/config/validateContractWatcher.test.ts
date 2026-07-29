@@ -19,4 +19,10 @@ describe("validateContractWatcherConfig", () => {
   it("does not throw when watcher is disabled and CONTRACT_ID is provided", () => {
     expect(() => validateContractWatcherConfig(false, "CTEST123456789")).not.toThrow();
   });
+
+  it("accepts a governance-only watcher configuration", () => {
+    expect(() =>
+      validateContractWatcherConfig(true, "", "CGOVERNANCE123456789"),
+    ).not.toThrow();
+  });
 });

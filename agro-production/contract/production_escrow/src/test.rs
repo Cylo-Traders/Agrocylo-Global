@@ -3192,3 +3192,60 @@ fn test_advance_milestone_refund_after_partial_release() {
     // Remaining pool = 10_000 - (3_000 start + 1_600 milestones) = 5_400.
     assert_eq!(refund, 5_400);
 }
+
+// ---------------------------------------------------------------------------
+// Governance gating (Issue #660)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_fee_config_admin_fallback_before_governance_set() {
+    let t = setup();
+    let fee_collector = Address::generate(&t.env);
+    // No governance contract configured yet: admin can still update fee config.
+    t.client.set_fee_config(&t.admin, &fee_collector, &500);
+}
+
+#[test]
+fn test_fee_config_rejects_admin_once_governance_set() {
+    let t = setup();
+    let governance = Address::generate(&t.env);
+    let fee_collector = Address::generate(&t.env);
+
+    t.client.set_governance_contract(&t.admin, &governance);
+
+    let result = t.client.try_set_fee_config(&t.admin, &fee_collector, &500);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAdmin);
+
+    // The governance contract address is now the sole authorized caller.
+    t.client.set_fee_config(&governance, &fee_collector, &500);
+}
+
+#[test]
+fn test_registry_contract_rejects_admin_once_governance_set() {
+    let t = setup();
+    let governance = Address::generate(&t.env);
+    let registry = Address::generate(&t.env);
+
+    t.client.set_governance_contract(&t.admin, &governance);
+
+    let result = t.client.try_set_registry_contract(&t.admin, &registry);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAdmin);
+
+    t.client.set_registry_contract(&governance, &registry);
+}
+
+#[test]
+fn test_update_supported_tokens_governance_gated() {
+    let t = setup();
+    let governance = Address::generate(&t.env);
+    t.client.set_governance_contract(&t.admin, &governance);
+
+    let mut tokens = Vec::new(&t.env);
+    tokens.push_back(t.token_id.clone());
+
+    let result = t.client.try_update_supported_tokens(&t.admin, &tokens);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAdmin);
+
+    t.client.update_supported_tokens(&governance, &tokens);
+    assert_eq!(t.client.get_supported_tokens().len(), 1);
+}

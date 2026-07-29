@@ -695,3 +695,46 @@ fn test_initialize_duplicate_fails() {
     let result = client.try_initialize(&admin, &fee_collector, &tokens);
     assert_eq!(result.unwrap_err().unwrap(), EscrowError::AlreadyInitialized);
 }
+
+// ---------------------------------------------------------------------------
+// Governance gating (Issue #660)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_fee_config_admin_fallback_before_governance_set() {
+    let (_env, client, _buyer, _farmer, fee_collector, _xlm, _usdc, admin, _investor1, _id) =
+        setup_test();
+
+    // No governance contract configured yet: admin can still update fee config.
+    client.set_fee_config(&admin, &fee_collector, &500);
+    assert_eq!(client.get_fee_rate_bps(), 500);
+}
+
+#[test]
+fn test_fee_config_rejects_admin_once_governance_set() {
+    let (env, client, _buyer, _farmer, fee_collector, _xlm, _usdc, admin, _investor1, _id) =
+        setup_test();
+
+    let governance = Address::generate(&env);
+    client.set_governance_contract(&admin, &governance);
+
+    // Raw admin can no longer call set_fee_config once governance is set.
+    let result = client.try_set_fee_config(&admin, &fee_collector, &500);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotGoverned);
+
+    // The governance contract address can.
+    client.set_fee_config(&governance, &fee_collector, &500);
+    assert_eq!(client.get_fee_rate_bps(), 500);
+}
+
+#[test]
+fn test_create_order_uses_configured_fee_rate() {
+    let (_env, client, buyer, farmer, fee_collector, xlm, _usdc, admin, _investor1, _id) =
+        setup_test();
+
+    client.set_fee_config(&admin, &fee_collector, &1_000); // 10%
+    let order_id = client.create_order(&buyer, &farmer, &xlm.address, &1_000);
+    let order = client.get_order_details(&order_id);
+    // 10% fee -> net amount is 900.
+    assert_eq!(order.amount, 900);
+}

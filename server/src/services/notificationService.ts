@@ -23,9 +23,11 @@ export interface ListNotificationsOptions {
 type NotificationPayload = {
   walletAddress: string;
   type: NotificationEventType;
-  orderId: string;
+  orderId?: string;
   amount?: string;
   token?: string;
+  condition?: string;
+  severity?: string;
 };
 
 type EscrowEventPayload = {
@@ -171,13 +173,15 @@ export class NotificationService {
         orderId: payload.orderId,
         amount: payload.amount,
         token: payload.token,
+        condition: payload.condition,
+        severity: payload.severity,
       });
 
       const record = await prisma.notification.create({
         data: {
           walletAddress: payload.walletAddress,
           message,
-          orderId: payload.orderId,
+          orderId: payload.orderId ?? null,
           type: payload.type,
           isRead: false,
         },
@@ -187,7 +191,7 @@ export class NotificationService {
         id: record.id,
         type: payload.type,
         message,
-        orderId: payload.orderId,
+        orderId: payload.orderId ?? null,
       });
     } catch (error) {
       logger.error("Failed to create notification", error);

@@ -1,9 +1,11 @@
 import { NotificationEventType } from "../enums/notificationEventType.js";
 
 type NotificationTemplateInput = {
-  orderId: string;
+  orderId?: string;
   amount?: string;
   token?: string;
+  condition?: string;
+  severity?: string;
 };
 
 const templateByType: Record<NotificationEventType, (input: NotificationTemplateInput) => string> = {
@@ -23,6 +25,12 @@ const templateByType: Record<NotificationEventType, (input: NotificationTemplate
     `Campaign funded for order #${orderId}.`,
   [NotificationEventType.HARVEST_COMPLETED]: ({ orderId }) =>
     `Harvest completed for order #${orderId}.`,
+  [NotificationEventType.GROUP_ORDER_PROGRESS]: ({ orderId, amount, token }) =>
+    `Group order #${orderId} is progressing${amount && token ? `: ${amount} ${token}` : ""}.`,
+  [NotificationEventType.GROUP_ORDER_FUNDED]: ({ orderId, amount, token }) =>
+    `Group order #${orderId} reached its threshold${amount && token ? ` with ${amount} ${token}` : ""}.`,
+  [NotificationEventType.GROUP_ORDER_EXPIRED]: ({ orderId }) =>
+    `Group order #${orderId} expired before reaching its threshold.`,
 };
 
 export function buildNotificationMessage(

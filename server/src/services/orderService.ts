@@ -1,6 +1,7 @@
 import { prisma } from "../config/database.js";
 import { ApiError, NotFoundError } from "../http/errors.js";
 import logger from "../config/logger.js";
+import { toClientProfile, toClientRole } from "../lib/profileDto.js";
 
 const ORDER_INCLUDE = {
   product: true,
@@ -116,6 +117,61 @@ export class OrderService {
     } catch (error) {
       logger.error("Failed to fetch seller stats", { error, sellerAddress });
       throw new ApiError(500, "Internal Server Error", "Failed to fetch seller statistics");
+    }
+  }
+
+  static async getGraphOrder(orderIdOnChain: string) {
+    try {
+      const order = await prisma.order.findUnique({
+        where: { orderIdOnChain },
+        include: {
+          product: {
+            include: {
+              farmer: true,
+              priceHistory: {
+                orderBy: { timestamp: "desc" },
+              },
+            },
+          },
+          buyerUser: true,
+          sellerUser: true,
+        },
+      });
+
+      if (!order) {
+        throw new NotFoundError("Order", orderIdOnChain);
+      }
+
+      const [buyerProfile, sellerProfile] = await Promise.all([
+        prisma.profile.findUnique({ where: { wallet_address: order.buyerAddress } }),
+        prisma.profile.findUnique({ where: { wallet_address: order.sellerAddress } }),
+      ]);
+
+      return {
+        ...order,
+        buyer: buyerProfile
+          ? toClientProfile(buyerProfile)
+          : {
+              wallet_address: order.buyerAddress,
+              role: toClientRole(order.buyerUser.role ?? "BUYER"),
+              display_name: order.buyerAddress,
+              bio: null,
+              avatar_url: null,
+            },
+        seller: sellerProfile
+          ? toClientProfile(sellerProfile)
+          : {
+              wallet_address: order.sellerAddress,
+              role: toClientRole(order.sellerUser.role ?? "BUYER"),
+              display_name: order.sellerAddress,
+              bio: null,
+              avatar_url: null,
+            },
+      };
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      logger.error("Failed to fetch graph order", { error, orderIdOnChain });
+      throw new ApiError(500, "Internal Server Error", "Failed to fetch order");
     }
   }
 }

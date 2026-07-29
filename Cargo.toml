@@ -5,6 +5,8 @@ members = [
     "contracts/weather-insurance",
     "agro-production/contract/registry",
     "agro-production/contract/production_escrow",
+    "agro-production/contract/investment_basket",
+    "agro-production/contract/governance",
 ]
 
 

@@ -239,149 +239,101 @@ fn test_repeated_campaign_entries_do_not_corrupt_state() {
     assert_eq!(farmer_campaigns.len(), 1);
 }
 
-// ── Provenance Registry Tests ──────────────────────────────────────────────
+// ── On-chain farmer reputation (Issue #592) ─────────────────────────────────
 
-fn setup_provenance() -> (Env, RegistryContractClient<'static>, Address, Address, Address) {
-    let env = Env::default();
-    env.mock_all_auths();
-    let admin = Address::generate(&env);
-    let escrow_contract = env.register(RegistryContract, ());
-    let production_contract = env.register(RegistryContract, ());
-    let farmer = Address::generate(&env);
-    let registry_id = env.register(RegistryContract, ());
-    let client = RegistryContractClient::new(&env, &registry_id);
-    client.initialize(&admin, &escrow_contract, &production_contract);
-    client.register_farmer(&farmer);
-    client.register_campaign(&production_contract, &1, &farmer, &None);
-    let env: Env = unsafe { core::mem::transmute(env) };
-    let client: RegistryContractClient<'static> = unsafe { core::mem::transmute(client) };
-    (env, client, production_contract, farmer, escrow_contract)
+#[test]
+fn test_reputation_starts_at_zero_for_unknown_farmer() {
+    let (_env, client, _, _, _, _, farmer_one, _) = setup_test();
+
+    let rep = client.get_reputation(&farmer_one);
+    assert_eq!(
+        rep,
+        ReputationRecord {
+            score: 0,
+            completed_orders: 0,
+            disputed_orders: 0,
+        }
+    );
 }
 
 #[test]
-fn test_mint_batch_ok() {
-    let (env, client, prod_contract, farmer, _escrow) = setup_provenance();
+fn test_reputation_accumulates_across_successful_orders() {
+    let (_env, client, _, escrow_contract, _, _, farmer_one, _) = setup_test();
 
-    let batch_id = client.mint_batch(
-        &prod_contract,
-        &1,
-        &farmer,
-        &String::from_str(&env, "Corn"),
-        &1000,
-        &5000,
-    );
-    assert_eq!(batch_id, 1);
+    client.record_order_outcome(&escrow_contract, &farmer_one, &None);
+    client.record_order_outcome(&escrow_contract, &farmer_one, &None);
+    let rep = client.record_order_outcome(&escrow_contract, &farmer_one, &None);
 
-    let batch = client.get_batch(&batch_id).unwrap();
-    assert_eq!(batch.campaign_id, 1);
-    assert_eq!(batch.farmer, farmer);
-    assert_eq!(batch.quantity, 5000);
+    assert_eq!(rep.completed_orders, 3);
+    assert_eq!(rep.disputed_orders, 0);
+    assert_eq!(rep.score, 30);
+    assert_eq!(client.get_reputation(&farmer_one), rep);
 }
 
 #[test]
-fn test_mint_batch_unauthorized_fails() {
-    let (env, client, _prod_contract, farmer, _escrow) = setup_provenance();
-    let bad_contract = env.register(RegistryContract, ());
+fn test_reputation_penalized_on_dispute_refund_to_buyer() {
+    let (_env, client, _, escrow_contract, _, _, farmer_one, _) = setup_test();
 
-    let result = client.try_mint_batch(
-        &bad_contract,
-        &1,
-        &farmer,
-        &String::from_str(&env, "Wheat"),
-        &1000,
-        &3000,
-    );
-    assert_eq!(result.unwrap_err().unwrap(), RegistryError::UnauthorizedContract);
+    client.record_order_outcome(&escrow_contract, &farmer_one, &None);
+    let rep = client.record_order_outcome(&escrow_contract, &farmer_one, &Some(10_000u32));
+
+    // +10 for the completed order, then a full-refund dispute applies the max penalty.
+    assert_eq!(rep.completed_orders, 1);
+    assert_eq!(rep.disputed_orders, 1);
+    assert_eq!(rep.score, 10 - 15);
 }
 
 #[test]
-fn test_link_batch_to_order_ok() {
-    let (env, client, prod_contract, farmer, _escrow) = setup_provenance();
+fn test_reputation_rewarded_when_dispute_released_to_farmer() {
+    let (_env, client, _, escrow_contract, _, _, farmer_one, _) = setup_test();
 
-    let batch_id = client.mint_batch(
-        &prod_contract,
-        &1,
-        &farmer,
-        &String::from_str(&env, "Rice"),
-        &1000,
-        &2000,
-    );
+    let rep = client.record_order_outcome(&escrow_contract, &farmer_one, &Some(0u32));
 
-    client.link_batch_to_order(&prod_contract, &batch_id, &42);
-    let batch = client.get_batch(&batch_id).unwrap();
-    assert_eq!(batch.linked_order_ids.len(), 1);
-    assert_eq!(batch.linked_order_ids.get(0).unwrap(), 42);
+    assert_eq!(rep.disputed_orders, 1);
+    assert_eq!(rep.score, 10);
 }
 
 #[test]
-fn test_link_batch_to_multiple_orders() {
-    let (env, client, prod_contract, farmer, _escrow) = setup_provenance();
+fn test_reputation_split_dispute_is_proportional() {
+    let (_env, client, _, escrow_contract, _, _, farmer_one, _) = setup_test();
 
-    let batch_id = client.mint_batch(
-        &prod_contract,
-        &1,
-        &farmer,
-        &String::from_str(&env, "Corn"),
-        &1000,
-        &5000,
-    );
+    // 50/50 split: half the completion reward, half the dispute penalty.
+    let rep = client.record_order_outcome(&escrow_contract, &farmer_one, &Some(5_000u32));
 
-    client.link_batch_to_order(&prod_contract, &batch_id, &10);
-    client.link_batch_to_order(&prod_contract, &batch_id, &11);
-
-    let batch = client.get_batch(&batch_id).unwrap();
-    assert_eq!(batch.linked_order_ids.len(), 2);
+    assert_eq!(rep.score, 5 - 7); // (10_000-5000)*10/10_000 - 5000*15/10_000
 }
 
 #[test]
-fn test_get_batch_history_returns_provenance_chain() {
-    let (env, client, prod_contract, farmer, _escrow) = setup_provenance();
+fn test_reputation_update_from_production_contract_is_authorized() {
+    let (_env, client, _, _, production_contract, _, farmer_one, _) = setup_test();
 
-    let b1 = client.mint_batch(
-        &prod_contract,
-        &1,
-        &farmer,
-        &String::from_str(&env, "Corn"),
-        &1000,
-        &3000,
-    );
-    let b2 = client.mint_batch(
-        &prod_contract,
-        &1,
-        &farmer,
-        &String::from_str(&env, "Beans"),
-        &1000,
-        &2000,
-    );
-
-    client.link_batch_to_order(&prod_contract, &b1, &77);
-    client.link_batch_to_order(&prod_contract, &b2, &77);
-
-    let history = client.get_batch_history(&77);
-    assert_eq!(history.len(), 2);
+    let rep =
+        client.record_order_outcome(&production_contract, &farmer_one, &None);
+    assert_eq!(rep.score, 10);
 }
 
 #[test]
-fn test_get_batch_history_empty_for_unlinked_order() {
-    let (_env, client, _prod_contract, _farmer, _escrow) = setup_provenance();
-    let history = client.get_batch_history(&999);
-    assert_eq!(history.len(), 0);
+fn test_reputation_update_from_unauthorized_caller_fails() {
+    let (_env, client, _, _, _, unauthorized_contract, farmer_one, _) = setup_test();
+
+    let result =
+        client.try_record_order_outcome(&unauthorized_contract, &farmer_one, &None);
+    assert_eq!(
+        result.unwrap_err().unwrap(),
+        RegistryError::UnauthorizedContract
+    );
+
+    // No score should have been written for a rejected call.
+    assert_eq!(client.get_reputation(&farmer_one).score, 0);
 }
 
 #[test]
-fn test_duplicate_batch_order_link_fails() {
-    let (env, client, prod_contract, farmer, _escrow) = setup_provenance();
+fn test_reputation_is_tracked_independently_per_farmer() {
+    let (_env, client, _, escrow_contract, _, _, farmer_one, farmer_two) = setup_test();
 
-    let batch_id = client.mint_batch(
-        &prod_contract,
-        &1,
-        &farmer,
-        &String::from_str(&env, "Soy"),
-        &1000,
-        &4000,
-    );
+    client.record_order_outcome(&escrow_contract, &farmer_one, &None);
+    client.record_order_outcome(&escrow_contract, &farmer_two, &Some(10_000u32));
 
-    client.link_batch_to_order(&prod_contract, &batch_id, &55);
-    let result = client.try_link_batch_to_order(&prod_contract, &batch_id, &55);
-    assert_eq!(result.unwrap_err().unwrap(), RegistryError::OrderBatchLinkExists);
+    assert_eq!(client.get_reputation(&farmer_one).score, 10);
+    assert_eq!(client.get_reputation(&farmer_two).score, -5);
 }

@@ -10,6 +10,7 @@ export const notificationPrefsSchema = z.object({
     priceAlerts: z.boolean(),
     system: z.boolean(),
     demandSignals: z.boolean(),
+    weatherAlerts: z.boolean().default(true),
   }),
   delivery: z.object({
     toast: z.boolean(),
@@ -31,6 +32,7 @@ export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
     priceAlerts: true,
     system: true,
     demandSignals: false,
+    weatherAlerts: true,
   },
   delivery: {
     toast: true,

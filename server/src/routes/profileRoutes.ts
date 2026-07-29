@@ -1,7 +1,12 @@
 import express from 'express';
 import { requireWallet, type WalletRequest } from '../middleware/walletAuth.js';
 import { ApiError, sendProblem } from '../http/errors.js';
-import { getProfile, createProfile, updateProfile } from '../services/profileService.js';
+import {
+  getProfile,
+  createProfile,
+  updateProfile,
+  getProfileReputation,
+} from '../services/profileService.js';
 
 const router = express.Router();
 
@@ -24,6 +29,13 @@ router.patch('/profiles/:wallet_address', requireWallet, async (req: WalletReque
   try {
     if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet', 'https://cylos.io/errors/unauthorized');
     const data = await updateProfile(req.params['wallet_address']!, req.walletAddress, req.body ?? {});
+    res.status(200).json(data);
+  } catch (error) { next(error); }
+});
+
+router.get('/profiles/:wallet_address/reputation', async (req, res, next) => {
+  try {
+    const data = await getProfileReputation(req.params['wallet_address']!);
     res.status(200).json(data);
   } catch (error) { next(error); }
 });
