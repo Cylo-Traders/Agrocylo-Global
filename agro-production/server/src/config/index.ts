@@ -1,6 +1,7 @@
 import 'dotenv/config';
 
 const REQUIRED_IN_PRODUCTION = [
+  'JWT_SECRET',
   'RPC_URL',
   'PRODUCTION_CONTRACT_ID',
   'ESCROW_CONTRACT_ID',
@@ -39,6 +40,10 @@ export const config = {
   port: parseInt(getEnv('PORT') ?? '5001', 10),
   nodeEnv: getEnv('NODE_ENV') ?? 'development',
   logLevel: getEnv('LOG_LEVEL') ?? 'debug',
+
+  jwtSecret: isProduction
+    ? requireEnv('JWT_SECRET')
+    : (getEnv('JWT_SECRET') ?? 'dev-secret-key-do-not-use-in-production'),
 
   databaseUrl: requireEnv('DATABASE_URL'),
 

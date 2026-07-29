@@ -119,7 +119,7 @@ model Product {
   createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  farmer       Profile    @relation(fields: [farmerWallet], references: [wallet_address], onDelete: Cascade)
+  farmer       Profile        @relation(fields: [farmerWallet], references: [wallet_address], onDelete: Cascade)
   cartItems    CartItem[]
   orders       Order[]
   priceHistory PriceHistory[]
@@ -127,6 +127,21 @@ model Product {
 
   @@index([farmerWallet, isAvailable])
   @@map("products")
+}
+
+model ProductPriceTier {
+  id           String   @id @default(uuid()) @db.Uuid
+  productId    String   @map("product_id") @db.Uuid
+  minQuantity  Decimal  @map("min_quantity") @db.Decimal(10, 2)
+  pricePerUnit Decimal  @map("price_per_unit") @db.Decimal(18, 6)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, minQuantity])
+  @@index([productId])
+  @@map("product_price_tiers")
 }
 
 model Cart {

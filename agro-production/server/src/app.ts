@@ -7,6 +7,7 @@ import { jsonValidated } from './middleware/validate.js';
 import { requireMetricsAuth } from './middleware/metricsAuth.js';
 import { isGracefullyShuttingDown, getShutdownPhase, getShutdownSignal } from './services/lifecycle.js';
 import authRoutes from './routes/auth.js';
+import notificationRoutes from './routes/notifications.js';
 import campaignImageRoutes from './routes/campaignImageRoutes.js';
 import campaignRoutes from './routes/campaigns.js';
 import orderRoutes from './routes/orders.js';
@@ -56,6 +57,7 @@ app.use((req: Request, _res: Response, next: express.NextFunction) => {
 });
 
 app.use(authRoutes);
+app.use(notificationRoutes);
 app.use(campaignImageRoutes);
 app.use('/api/v1', campaignRoutes);
 app.use('/api/v1', orderRoutes);
