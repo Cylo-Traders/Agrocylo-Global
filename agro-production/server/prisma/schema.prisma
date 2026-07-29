@@ -40,12 +40,13 @@ model Campaign {
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
-  farmer       User         @relation("FarmerCampaigns", fields: [farmerAddress], references: [walletAddress], onDelete: Restrict)
-  investments  Investment[]
-  orders       Order[]
-  transactions Transaction[]
-  disputes     Dispute[]
-  products     Product[]
+  farmer        User           @relation("FarmerCampaigns", fields: [farmerAddress], references: [walletAddress], onDelete: Restrict)
+  investments   Investment[]
+  orders        Order[]
+  transactions  Transaction[]
+  disputes      Dispute[]
+  products      Product[]
+  conversations Conversation[]
 
   @@index([farmerAddress])
   @@index([status])
@@ -251,4 +252,40 @@ model NotificationPreference {
   updatedAt     DateTime @updatedAt
 
   @@map("notification_preferences")
+}
+
+model Conversation {
+  id              String   @id @default(uuid())
+  campaignId      String
+  investorAddress String  // participant A
+  farmerAddress   String  // participant B
+  lastMessageAt   DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@unique([campaignId, investorAddress, farmerAddress])
+  @@index([campaignId])
+  @@index([investorAddress])
+  @@index([farmerAddress])
+  @@map("conversations")
+}
+
+model Message {
+  id             String   @id @default(uuid())
+  conversationId String
+  senderAddress  String
+  content        String   @db.VarChar(5000)
+  isRead         Boolean  @default(false)
+  readAt         DateTime?
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([senderAddress])
+  @@index([createdAt])
+  @@map("messages")
 }
