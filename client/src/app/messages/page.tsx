@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useMessaging } from '../../hooks/useMessaging';
+import { useWallet } from '../../hooks/useWallet';
 import ConversationList from '../../components/ConversationList';
 import ChatWindow from '../../components/ChatWindow';
 import { blockUser, muteConversation, archiveConversation } from '../../services/messagingService';
@@ -20,6 +21,7 @@ interface MessagesPageProps {
 }
 
 export default function MessagesPage({ initialConversationId }: MessagesPageProps) {
+  const { address: walletAddress } = useWallet();
   const [activeConversationId, setActiveConversationId] = useState<string | undefined>(
     initialConversationId,
   );
@@ -38,9 +40,9 @@ export default function MessagesPage({ initialConversationId }: MessagesPageProp
     addReaction,
     sendTyping,
     searchMessages,
-  } = useMessaging(activeConversationId);
+  } = useMessaging(activeConversationId, walletAddress || undefined);
 
-  const otherUser = currentConversation?.participants.find(p => p.id !== 'current-user');
+  const otherUser = currentConversation?.participants.find(p => p.id !== walletAddress);
 
   const handleBlock = async () => {
     if (!currentConversation || !otherUser) return;
@@ -82,7 +84,7 @@ export default function MessagesPage({ initialConversationId }: MessagesPageProp
         {activeConversationId && currentConversation ? (
           <ChatWindow
             messages={messages}
-            currentUserId="current-user"
+            currentUserId={walletAddress || "unknown"}
             otherUser={otherUser}
             isLoading={isLoading}
             hasMore={hasMore}

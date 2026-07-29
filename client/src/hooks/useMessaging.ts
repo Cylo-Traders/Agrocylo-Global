@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Message, Conversation, TypingIndicator } from '../types/messaging';
 import {
-  messagingSocket,
   fetchConversations,
   fetchMessages,
   sendMessage,
@@ -12,10 +11,11 @@ import {
   addReaction,
   markAsRead,
   searchMessages,
-  sendTypingIndicator,
 } from '../services/messagingService';
+import { useSocket } from './useSocket';
 
-export function useMessaging(conversationId?: string) {
+export function useMessaging(conversationId?: string, currentUserId?: string) {
+  const { on } = useSocket();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -82,40 +82,25 @@ export function useMessaging(conversationId?: string) {
     loadMessages();
     markAsRead(conversationId);
 
-    const unsubMessage = messagingSocket.on('new_message', (msg: Message) => {
-      if (msg.conversationId === conversationId) {
-        setMessages(prev => [...prev, msg]);
+    const unsubMessage = on('message:new', (data: unknown) => {
+      const payload = data as { conversationId?: string; message?: Message };
+      if (payload.conversationId === conversationId && payload.message) {
+        setMessages(prev => [...prev, payload.message]);
         markAsRead(conversationId);
       }
     });
 
-    const unsubEdit = messagingSocket.on('message_edited', (msg: Message) => {
-      if (msg.conversationId === conversationId) {
-        setMessages(prev => prev.map(m => m.id === msg.id ? msg : m));
+    const unsubEdit = on('message:edited', (data: unknown) => {
+      const payload = data as { conversationId?: string; message?: Message };
+      if (payload.conversationId === conversationId && payload.message) {
+        setMessages(prev => prev.map(m => m.id === payload.message!.id ? payload.message! : m));
       }
     });
 
-    const unsubDelete = messagingSocket.on('message_deleted', ({ messageId }: { messageId: string }) => {
-      setMessages(prev => prev.filter(m => m.id !== messageId));
-    });
-
-    const unsubReaction = messagingSocket.on('reaction_added', (msg: Message) => {
-      if (msg.conversationId === conversationId) {
-        setMessages(prev => prev.map(m => m.id === msg.id ? msg : m));
-      }
-    });
-
-    const unsubTyping = messagingSocket.on('typing', (indicator: TypingIndicator) => {
-      if (indicator.conversationId === conversationId) {
-        setTypingUsers(prev => {
-          const next = new Set(prev);
-          if (indicator.isTyping) {
-            next.add(indicator.userId);
-          } else {
-            next.delete(indicator.userId);
-          }
-          return next;
-        });
+    const unsubDelete = on('message:deleted', (data: unknown) => {
+      const payload = data as { conversationId?: string; messageId?: string };
+      if (payload.conversationId === conversationId && payload.messageId) {
+        setMessages(prev => prev.filter(m => m.id !== payload.messageId));
       }
     });
 
@@ -123,10 +108,8 @@ export function useMessaging(conversationId?: string) {
       unsubMessage();
       unsubEdit();
       unsubDelete();
-      unsubReaction();
-      unsubTyping();
     };
-  }, [conversationId, loadMessages]);
+  }, [conversationId, loadMessages, on]);
 
   const loadMore = () => {
     if (hasMore && !isLoading) {
@@ -134,18 +117,13 @@ export function useMessaging(conversationId?: string) {
     }
   };
 
-  //  Send Message 
+  //  Send Message
 
-  const handleSend = useCallback(async (content: string, file?: File) => {
+  const handleSend = useCallback(async (content: string) => {
     if (!conversationId) return;
-    
+
     try {
-      const msg = await sendMessage(
-        conversationId,
-        content,
-        file ? 'file' : 'text',
-        file
-      );
+      const msg = await sendMessage(conversationId, content);
       setMessages(prev => [...prev, msg]);
       return msg;
     } catch (err) {
@@ -219,18 +197,12 @@ export function useMessaging(conversationId?: string) {
     }
   }, [conversationId]);
 
-  // Typing Indicator 
+  // Typing Indicator (placeholder - not yet implemented)
 
   const handleTyping = useCallback(() => {
-    if (!conversationId) return;
-    
-    sendTypingIndicator(conversationId, true);
-    
-    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-    typingTimerRef.current = setTimeout(() => {
-      sendTypingIndicator(conversationId, false);
-    }, 3000);
-  }, [conversationId]);
+    // TODO: Implement typing indicator via WebSocket
+    // This requires the real WebSocket to support typing events
+  }, []);
 
   // Current Conversation 
 
