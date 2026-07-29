@@ -1,40 +1,37 @@
-import { Queue } from "bullmq";
-import { createRedisConnection } from "./connection.js";
+import { createRedisConnection, type ConnectionOptions } from "./connection.js";
 
-type RedisConnectionOptions = ReturnType<typeof createRedisConnection>;
+// bullmq 5.77.6 ships incomplete type declarations, so we work around via require
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { Queue } = require("bullmq") as { Queue: any };
 
-let connection: RedisConnectionOptions | undefined;
-let indexingQueue: Queue | undefined;
-let analyticsQueue: Queue | undefined;
-let notificationsQueue: Queue | undefined;
+let connection: ConnectionOptions | undefined;
+let indexingQueue: any;
+let analyticsQueue: any;
+let notificationsQueue: any;
 
-function getConnection(): RedisConnectionOptions {
+function getConnection(): ConnectionOptions {
   connection ??= createRedisConnection();
   return connection;
 }
 
-export function getIndexingQueue(): Queue {
+export function getIndexingQueue(): any {
   if (!indexingQueue) indexingQueue = new Queue("indexing", { connection: getConnection() });
   return indexingQueue;
 }
 
-export function getAnalyticsQueue(): Queue {
+export function getAnalyticsQueue(): any {
   if (!analyticsQueue) analyticsQueue = new Queue("analytics", { connection: getConnection() });
   return analyticsQueue;
 }
 
-export function getNotificationsQueue(): Queue {
+export function getNotificationsQueue(): any {
   if (!notificationsQueue)
     notificationsQueue = new Queue("notifications", { connection: getConnection() });
   return notificationsQueue;
 }
 
-const PRICE_INDEX_INTERVAL_MS = 60 * 60 * 1000; // hourly
+const PRICE_INDEX_INTERVAL_MS = 60 * 60 * 1000;
 
-/**
- * Registers the recurring price-index aggregation job (Issue #594). Idempotent:
- * BullMQ deduplicates repeatable jobs with the same name/pattern/jobId.
- */
 export async function schedulePriceIndexAggregation(): Promise<void> {
   await getAnalyticsQueue().add(
     "aggregate-price-index",

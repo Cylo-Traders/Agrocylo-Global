@@ -392,6 +392,68 @@ model FeeCredit {
   @@map("fee_credits")
 }
 
+model CropPlan {
+  id                    String    @id @default(uuid())
+  farmerWallet          String    @map("farmer_wallet")
+  cropName              String    @map("crop_name")
+  plantedDate           DateTime  @map("planted_date")
+  expectedHarvestStart  DateTime  @map("expected_harvest_start")
+  expectedHarvestEnd    DateTime  @map("expected_harvest_end")
+  expectedVolume        Float?    @map("expected_volume")
+  unit                  String?
+  region                String?
+  linkedCampaignId      String?   @map("linked_campaign_id")
+  reminderDaysBefore    Int       @default(7) @map("reminder_days_before")
+  reminderSent          Boolean   @default(false) @map("reminder_sent")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@index([farmerWallet])
+  @@index([expectedHarvestStart])
+  @@map("crop_plans")
+}
+
+model EquipmentListing {
+  id              String    @id @default(uuid())
+  ownerWallet     String    @map("owner_wallet")
+  title           String
+  description     String?
+  listingType     String    @map("listing_type")
+  pricePerUnit    String    @map("price_per_unit")
+  depositAmount   String    @default("0") @map("deposit_amount")
+  currency        String
+  unit            String
+  location        String?
+  isAvailable     Boolean   @default(true) @map("is_available")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  rentals EquipmentRental[]
+
+  @@index([ownerWallet])
+  @@index([listingType])
+  @@map("equipment_listings")
+}
+
+model EquipmentRental {
+  id              String    @id @default(uuid())
+  listingId       String    @map("listing_id")
+  renterWallet    String    @map("renter_wallet")
+  startDate       DateTime  @map("start_date")
+  endDate         DateTime  @map("end_date")
+  status          String    @default("ACTIVE")
+  depositAmount   String    @map("deposit_amount")
+  depositRefunded Boolean   @default(false) @map("deposit_refunded")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  listing EquipmentListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+  @@index([renterWallet])
+  @@map("equipment_rentals")
+}
+
 model IntegratorApiKey {
   id             String    @id @default(uuid())
   /// SHA-256 hash of the raw key; the raw value is shown to the admin once
@@ -525,4 +587,31 @@ model GroupOrderContribution {
   @@index([groupOrderId, buyerWallet])
   @@index([buyerWallet, status])
   @@map("group_order_contributions")
+}
+
+model PhoneLink {
+  phoneNumber   String   @id
+  walletAddress String   @map("wallet_address")
+  verifiedAt    DateTime @default(now()) @map("verified_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@index([walletAddress])
+  @@map("phone_links")
+}
+
+model UssdSession {
+  id            String   @id @default(uuid())
+  sessionId     String   @unique @map("session_id")
+  phoneNumber   String   @map("phone_number")
+  step          String   @default("main_menu")
+  state         Json     @default("{}")
+  walletAddress String?  @map("wallet_address")
+  expiresAt     DateTime @map("expires_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@index([phoneNumber])
+  @@index([sessionId, expiresAt])
+  @@map("ussd_sessions")
 }

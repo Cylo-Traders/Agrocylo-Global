@@ -222,7 +222,6 @@ export async function startContractWatcher(): Promise<void> {
             logger.error("[ContractWatcher] Ingestion failed for event", {
               error: f.status === "rejected" ? f.reason : undefined,
               ledger: event.ledger,
-              eventIndex: event.eventIndex,
             });
           }
           logger.error(
