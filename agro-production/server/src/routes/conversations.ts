@@ -11,6 +11,7 @@ import {
 import { problemDetail } from "../middleware/errors.js";
 import { writeLimiter } from "../middleware/rateLimit.js";
 import { requireWallet, type WalletRequest } from "../middleware/walletAuth.js";
+import { broadcastTo } from "../services/wsServer.js";
 import rateLimit from "express-rate-limit";
 import { config } from "../config/index.js";
 
@@ -264,6 +265,16 @@ router.post(
       return;
     }
 
+    // Fetch conversation to get other participant
+    const conversation = await prisma.marketplaceConversation.findUnique({
+      where: { id },
+    });
+
+    if (!conversation) {
+      problemDetail(res, req, 404, "Conversation Not Found", `No conversation with id ${id}`);
+      return;
+    }
+
     const message = await prisma.marketplaceMessage.create({
       data: {
         conversationId: id,
@@ -276,6 +287,15 @@ router.post(
     await prisma.marketplaceConversation.update({
       where: { id },
       data: { updatedAt: new Date() },
+    });
+
+    // Broadcast to other participant
+    const recipientWallet = walletAddress === conversation.buyerAddress
+      ? conversation.sellerAddress
+      : conversation.buyerAddress;
+    broadcastTo(recipientWallet, "message:new", {
+      conversationId: id,
+      message,
     });
 
     jsonValidated(res, MarketplaceMessageResponseSchema, 201, message);
@@ -344,6 +364,21 @@ router.patch(
       data: { content },
     });
 
+    // Fetch conversation to broadcast to other participant
+    const conversation = await prisma.marketplaceConversation.findUnique({
+      where: { id },
+    });
+
+    if (conversation) {
+      const recipientWallet = walletAddress === conversation.buyerAddress
+        ? conversation.sellerAddress
+        : conversation.buyerAddress;
+      broadcastTo(recipientWallet, "message:edited", {
+        conversationId: id,
+        message: updated,
+      });
+    }
+
     jsonValidated(res, MarketplaceMessageResponseSchema, 200, updated);
   },
 );
@@ -402,10 +437,25 @@ router.delete(
       return;
     }
 
-    await prisma.marketplaceMessage.update({
+    const deletedMessage = await prisma.marketplaceMessage.update({
       where: { id: messageId },
       data: { deletedAt: new Date() },
     });
+
+    // Fetch conversation to broadcast to other participant
+    const conversation = await prisma.marketplaceConversation.findUnique({
+      where: { id },
+    });
+
+    if (conversation) {
+      const recipientWallet = walletAddress === conversation.buyerAddress
+        ? conversation.sellerAddress
+        : conversation.buyerAddress;
+      broadcastTo(recipientWallet, "message:deleted", {
+        conversationId: id,
+        messageId,
+      });
+    }
 
     res.status(204).send();
   },
