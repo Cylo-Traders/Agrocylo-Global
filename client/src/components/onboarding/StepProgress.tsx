@@ -3,7 +3,14 @@
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const STEPS = ["Connect Wallet", "Select Role", "Profile", "Location", "Done"];
+const STEPS = [
+  "Connect Wallet",
+  "Select Role",
+  "Profile",
+  "Referral",
+  "Location",
+  "Done",
+];
 
 interface StepProgressProps {
   currentStep: number;

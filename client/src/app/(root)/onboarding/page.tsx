@@ -1,18 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useWallet } from "@/hooks/useWallet";
 import { useProfile } from "@/context/ProfileContext";
 import { useAnalytics } from "@/hooks/useAnalytics";
 import { createProfile, registerLocation } from "@/services/profileService";
+import { submitReferralCode } from "@/services/referralService";
 import StepProgress from "@/components/onboarding/StepProgress";
 import ConnectWallet from "@/components/onboarding/ConnectWallet";
 import SelectRole from "@/components/onboarding/SelectRole";
 import ProfileForm from "@/components/onboarding/ProfileForm";
+import ReferralCodeInput from "@/components/onboarding/ReferralCodeInput";
 import LocationConsent from "@/components/onboarding/LocationConsent";
 import Complete from "@/components/onboarding/Complete";
 
 export default function OnboardingPage() {
+  const searchParams = useSearchParams();
   const { address } = useWallet();
   const { setProfile } = useProfile();
   const { trackFunnelStep, trackFeatureAdoption } = useAnalytics();
@@ -21,6 +25,9 @@ export default function OnboardingPage() {
   const [role, setRole] = useState<"farmer" | "buyer" | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
+  const [referralCode, setReferralCode] = useState(
+    searchParams?.get("ref") || "",
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,6 +51,11 @@ export default function OnboardingPage() {
     });
   }, [step, trackFeatureAdoption]);
 
+  async function handleReferralSubmit(code: string) {
+    setReferralCode(code);
+    setStep(5);
+  }
+
   async function handleLocationComplete(
     location: {
       latitude: number;
@@ -51,7 +63,7 @@ export default function OnboardingPage() {
       city: string;
       country: string;
       isPublic: boolean;
-    } | null
+    } | null,
   ) {
     if (!address || !role) return;
     setIsSubmitting(true);
@@ -64,7 +76,7 @@ export default function OnboardingPage() {
           display_name: displayName.trim(),
           bio: bio.trim() || undefined,
         },
-        address
+        address,
       );
       // Seed the profile cache so AuthGuard sees the user as onboarded immediately,
       // without waiting for a refetch round-trip.
@@ -80,7 +92,7 @@ export default function OnboardingPage() {
               country: location.country || null,
               is_public: location.isPublic,
             },
-            address
+            address,
           );
         } catch (locationError) {
           console.error("Location registration failed", locationError);
@@ -93,11 +105,25 @@ export default function OnboardingPage() {
         }
       }
 
+      // Submit referral code if provided
+      if (referralCode.trim()) {
+        try {
+          await submitReferralCode(referralCode.trim(), address);
+          trackFunnelStep("onboarding_completion", "referral_code_submitted", {
+            hasReferral: true,
+          });
+        } catch (refError) {
+          console.error("Referral code submission failed", refError);
+          // Don't block completion on referral failure
+        }
+      }
+
       trackFunnelStep("onboarding_completion", "completed", {
         role,
         hasLocation: Boolean(location),
+        hasReferral: Boolean(referralCode.trim()),
       });
-      setStep(5);
+      setStep(6);
     } catch (err) {
       if (isNetworkFetchError(err)) {
         setProfile({
@@ -111,7 +137,7 @@ export default function OnboardingPage() {
           role,
           hasLocation: Boolean(location),
         });
-        setStep(5);
+        setStep(6);
         return;
       }
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -165,14 +191,22 @@ export default function OnboardingPage() {
         )}
 
         {step === 4 && (
+          <ReferralCodeInput
+            onSubmit={handleReferralSubmit}
+            onSkip={() => setStep(5)}
+            isSubmitting={false}
+          />
+        )}
+
+        {step === 5 && (
           <LocationConsent
             onComplete={handleLocationComplete}
-            onBack={() => setStep(3)}
+            onBack={() => setStep(4)}
             isSubmitting={isSubmitting}
           />
         )}
 
-        {step === 5 && role && <Complete role={role} />}
+        {step === 6 && role && <Complete role={role} />}
       </div>
     </div>
   );
