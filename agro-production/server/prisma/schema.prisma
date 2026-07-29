@@ -283,9 +283,40 @@ model Message {
   createdAt      DateTime @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  reports      MessageReport[]
 
   @@index([conversationId])
   @@index([senderAddress])
   @@index([createdAt])
   @@map("messages")
+}
+
+model BlockedUser {
+  id                String   @id @default(uuid())
+  conversationId    String
+  blockerAddress    String  // who blocked
+  blockedAddress    String  // who is blocked
+  reason            String?
+  createdAt         DateTime @default(now())
+
+  @@unique([conversationId, blockerAddress, blockedAddress])
+  @@index([conversationId])
+  @@index([blockerAddress])
+  @@index([blockedAddress])
+  @@map("blocked_users")
+}
+
+model MessageReport {
+  id              String   @id @default(uuid())
+  messageId       String
+  reporterAddress String
+  reason          String
+  createdAt       DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@index([reporterAddress])
+  @@index([createdAt])
+  @@map("message_reports")
 }
