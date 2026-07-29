@@ -54,6 +54,7 @@ cp .env.example .env
 | `RPC_URL` | `https://soroban-testnet.stellar.org` | No | Stellar Soroban RPC endpoint |
 | `ESCROW_CONTRACT_ID` | — | **Yes** | Contract ID for the primary EscrowContract |
 | `PRODUCTION_ESCROW_CONTRACT_ID` | — | **Yes** | Contract ID for the ProductionEscrowContract |
+| `REGISTRY_CONTRACT_ID` | — | No | Contract ID for the RegistryContract |
 | `PRODUCTION_CONTRACT_ID` | — | No | Alias used by the legacy single-contract watcher (falls back to `PRODUCTION_ESCROW_CONTRACT_ID`) |
 | `RATE_LIMIT_WINDOW_MS` | `60000` | No | Rate-limit rolling window in milliseconds |
 | `RATE_LIMIT_MAX_REQUESTS` | `100` | No | Max requests per IP per window |
