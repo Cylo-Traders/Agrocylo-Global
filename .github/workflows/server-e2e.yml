@@ -71,12 +71,12 @@ jobs:
           cache-dependency-path: agro-production/server/package-lock.json
 
       - name: Install server dependencies
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       # The E2E test imports contractService from the client package.
       - name: Install client dependencies
         working-directory: agro-production/client
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       - name: Generate Prisma client
         run: npx prisma generate
