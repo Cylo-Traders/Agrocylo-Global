@@ -1,6 +1,74 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+
+// ── Price-index widget (#696) ──────────────────────────────────────────────
+interface PriceIndexEntry {
+  crop: string;
+  region: string;
+  averagePrice: number;
+  sampleCount: number;
+  computedAt: string;
+}
+
+function PriceIndexWidget() {
+  const [entries, setEntries] = useState<PriceIndexEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/v1/analytics/price-index")
+      .then(async (res) => {
+        if (!res.ok) throw new Error("Failed to load price index");
+        const json: { data: PriceIndexEntry[] } = await res.json();
+        setEntries(json.data ?? []);
+      })
+      .catch((err: unknown) =>
+        setError(err instanceof Error ? err.message : "Price index unavailable"),
+      )
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <section aria-labelledby="price-index-heading" className="rounded-xl border border-border bg-surface p-5">
+      <h2 id="price-index-heading" className="text-base font-semibold text-foreground mb-3">
+        Regional Price Index
+      </h2>
+      {loading && <p className="text-sm text-muted animate-pulse">Loading price data…</p>}
+      {!loading && error && (
+        <p className="text-sm text-red-600" role="alert">{error}</p>
+      )}
+      {!loading && !error && entries.length === 0 && (
+        <p className="text-sm text-muted">No price data available yet. Index updates hourly as orders are confirmed.</p>
+      )}
+      {!loading && !error && entries.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm" aria-label="Regional crop price index">
+            <thead className="border-b border-border text-left text-muted">
+              <tr>
+                <th scope="col" className="pb-2 font-medium">Crop</th>
+                <th scope="col" className="pb-2 font-medium">Region</th>
+                <th scope="col" className="pb-2 text-right font-medium">Avg. Price (XLM)</th>
+                <th scope="col" className="pb-2 text-right font-medium">Samples</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((e, i) => (
+                <tr key={i} className="border-b border-border last:border-0">
+                  <td className="py-2 font-medium text-foreground">{e.crop}</td>
+                  <td className="py-2 text-muted">{e.region}</td>
+                  <td className="py-2 text-right text-foreground">{e.averagePrice.toLocaleString()}</td>
+                  <td className="py-2 text-right text-muted">{e.sampleCount}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+// ── end PriceIndexWidget ──────────────────────────────────────────────────
 import Link from "next/link";
 import WalletConnect from "@/components/WalletConnect";
 import { OrderTableSkeleton } from "@/components/Skeletons";
@@ -139,6 +207,9 @@ export default function FarmerDashboardPage() {
           <p className="mt-1 text-xs text-muted">Only confirmed orders contribute to revenue</p>
         </div>
       </section>
+
+      {/* Regional price-index widget (#696) */}
+      <PriceIndexWidget />
 
       {lastUpdated && <p className="text-xs text-muted" aria-live="polite">Live data refreshed {new Date(lastUpdated).toLocaleTimeString()}</p>}
       {loading && <OrderTableSkeleton rows={4} />}

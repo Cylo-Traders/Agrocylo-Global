@@ -97,9 +97,19 @@ export default function CampaignsPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground">Farming Campaigns</h1>
-        <p className="text-muted mt-1">Invest in agricultural production and track progress on-chain.</p>
+      <div className="mb-6 flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Farming Campaigns</h1>
+          <p className="text-muted mt-1">Invest in agricultural production and track progress on-chain.</p>
+        </div>
+        {/* Investment basket entry point (#693) */}
+        <a
+          href="/basket"
+          className="inline-flex items-center gap-2 rounded-lg border border-primary-400 bg-primary-50 px-4 py-2 text-sm font-medium text-primary-700 hover:bg-primary-100 transition-colors"
+          aria-label="View your investment basket"
+        >
+          🧺 My Investment Basket
+        </a>
       </div>
       <nav aria-label="Campaign status filters" className="flex flex-wrap gap-2 mb-6">
         {STATUS_FILTERS.map((f) => (

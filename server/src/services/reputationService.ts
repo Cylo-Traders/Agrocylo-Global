@@ -24,6 +24,22 @@ interface CacheEntry {
 const CACHE_TTL_MS = 60_000;
 const reputationCache = new Map<string, CacheEntry>();
 
+// ── System-of-record policy (#694) ───────────────────────────────────────────
+// The Prisma-derived composite score (completionRate + disputeRate + review
+// average) is the CURRENT system of record for farmer reputation. The on-chain
+// registry (`registry::record_order_outcome`) is the intended long-term source
+// of truth once the escrow contract compile-fix (#694 prerequisite) lands and
+// the call-sites in both escrow contracts are wired up.
+//
+// Until that bridge is in place `onChainScore` in the snapshot is the
+// Prisma-derived approximation (see `loadOnChainSignals`). When the on-chain
+// registry is wired, replace the Prisma query with a read of `get_reputation`
+// from the registry contract and set `onChainScore` to the returned value.
+//
+// Anti-gaming floor: only orders above this threshold count toward reputation
+// to resist cheap self-dealing score inflation between colluding addresses.
+export const MIN_ORDER_AMOUNT_FOR_REPUTATION = 1_000_000; // 1 XLM in stroops
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -60,22 +76,28 @@ async function loadOnChainSignals(walletAddress: string): Promise<{
     OR: [{ buyerAddress: walletAddress }, { sellerAddress: walletAddress }],
   };
 
+  // Only count orders above the anti-gaming floor (#694).
+  const qualifiedFilter = {
+    ...participantFilter,
+    amount: { gte: MIN_ORDER_AMOUNT_FOR_REPUTATION },
+  };
+
   const [completedOrders, disputedOrders, totalOrders] = await Promise.all([
     prisma.order.count({
       where: {
-        ...participantFilter,
+        ...qualifiedFilter,
         status: "COMPLETED",
       },
     }),
     prisma.dispute.count({
       where: {
         order: {
-          is: participantFilter,
+          is: qualifiedFilter,
         },
       },
     }),
     prisma.order.count({
-      where: participantFilter,
+      where: qualifiedFilter,
     }),
   ]);
 
