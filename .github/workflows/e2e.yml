@@ -37,6 +37,7 @@ jobs:
         working-directory: client
     env:
       PLAYWRIGHT_BASE_URL: http://localhost:3000
+      BROWSER: ${{ github.event.inputs.browser || 'chromium' }}
 
     steps:
       - name: Checkout
@@ -54,24 +55,24 @@ jobs:
 
       - name: Install Playwright browsers
         run: |
-          if [ "${{ github.event.inputs.browser }}" = "all" ]; then
+          if [ "$BROWSER" = "all" ]; then
             npx playwright install --with-deps chromium firefox webkit
           else
-            npx playwright install --with-deps "${{ github.event.inputs.browser }}"
+            npx playwright install --with-deps "$BROWSER"
           fi
 
       - name: Run Playwright tests
         run: |
-          if [ "${{ github.event.inputs.browser }}" = "all" ]; then
+          if [ "$BROWSER" = "all" ]; then
             npx playwright test
           else
-            npx playwright test --project="${{ github.event.inputs.browser }}"
+            npx playwright test --project="$BROWSER"
           fi
 
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-${{ github.event.inputs.browser }}
+          name: playwright-report-${{ env.BROWSER }}
           path: client/playwright-report/
           retention-days: 7
