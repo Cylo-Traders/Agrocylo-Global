@@ -1,5 +1,12 @@
-import type { ConnectionOptions } from "bullmq";
 import { config } from "../config/index.js";
+
+export interface ConnectionOptions {
+  host?: string;
+  port?: number;
+  password?: string;
+  maxRetriesPerRequest?: number | null;
+  enableReadyCheck?: boolean;
+}
 
 /**
  * Returns BullMQ connection options parsed from the configured Redis URL.

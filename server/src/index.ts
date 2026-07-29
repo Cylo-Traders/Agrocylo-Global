@@ -6,6 +6,7 @@ import { connectDb } from "./config/database.js";
 import { startContractWatcher } from "./services/contractWatcher.js";
 import { startWorkers } from "./queues/workers.js";
 import { schedulePriceIndexAggregation } from "./queues/queues.js";
+import { startWeatherPolling } from "./services/weatherService.js";
 import { wsManager } from "./services/wsManager.js";
 
 async function bootstrap() {
@@ -42,6 +43,8 @@ async function bootstrap() {
       await schedulePriceIndexAggregation().catch((error) =>
         logger.error("Failed to schedule price index aggregation", error),
       );
+      startWeatherPolling();
+      logger.info("[bootstrap]: Weather advisory polling loop started (interval: 1 h)");
     }
 
     server.listen(config.port, () => {

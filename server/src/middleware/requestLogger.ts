@@ -14,7 +14,8 @@ export function requestLogger(req: AuthenticatedRequest, res: Response, next: Ne
   const originalEnd = res.end;
 
   // Override end to capture any errors
-  res.end = function(...args: unknown[]) {
+  const _originalEnd = originalEnd;
+  res.end = function(this: Response, ...args: unknown[]) {
     const durationMs = Number(process.hrtime.bigint() - start) / 1_000_000;
 
     logger.info("HTTP request", {
@@ -27,8 +28,8 @@ export function requestLogger(req: AuthenticatedRequest, res: Response, next: Ne
       contentLength: res.getHeader("content-length"),
     });
 
-    return originalEnd.apply(res, args);
-  } as unknown as (data?: unknown, encoding?: BufferEncoding) => Response;
+    return _originalEnd.apply(this, args as Parameters<Response["end"]>);
+  };
 
   // Attach error handler for errors thrown during request processing
   res.on("error", (error: unknown) => {

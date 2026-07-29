@@ -31,6 +31,8 @@ const templateByType: Record<NotificationEventType, (input: NotificationTemplate
     `Group order #${orderId} reached its threshold${amount && token ? ` with ${amount} ${token}` : ""}.`,
   [NotificationEventType.GROUP_ORDER_EXPIRED]: ({ orderId }) =>
     `Group order #${orderId} expired before reaching its threshold.`,
+  [NotificationEventType.WEATHER_ALERT]: ({ condition, severity }) =>
+    `Weather ${severity}: ${condition}. Take necessary precautions.`,
 };
 
 export function buildNotificationMessage(

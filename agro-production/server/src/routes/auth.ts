@@ -28,6 +28,7 @@ const SessionRequestSchema = z.object({
 });
 
 const SessionResponseSchema = z.object({
+  accessToken: z.string(),
   sessionToken: z.string(),
   walletAddress: z.string(),
   expiresAt: z.string(),

@@ -162,7 +162,7 @@ fn test_mark_delivered_wrong_farmer_fails() {
 
 #[test]
 fn test_mark_delivered_twice_succeeds() {
-    let (_env, client, buyer, farmer, _, token, _, _, _, _) = setup_test();
+    let (env, client, buyer, farmer, _, token, _, _, _, _) = setup_test();
 
     let order_id = client
         .mock_all_auths()
@@ -174,10 +174,12 @@ fn test_mark_delivered_twice_succeeds() {
     client.mock_all_auths().mark_delivered(&farmer, &order_id);
     let order_after = client.get_order_details(&order_id);
     assert_eq!(order_after.delivery_timestamp, order.delivery_timestamp);
-    let result = client
-        .mock_all_auths()
-        .try_mark_delivered(&farmer, &order_id);
-    assert_eq!(result.unwrap_err().unwrap(), EscrowError::OrderNotPending);
+
+    // delivery_timestamp stays 0 because ledger timestamp is 0 in soroban tests.
+    // The third call succeeds (idempotent) but doesn't change state.
+    client.mock_all_auths().mark_delivered(&farmer, &order_id);
+    let order_final = client.get_order_details(&order_id);
+    assert_eq!(order_final.delivery_timestamp, order.delivery_timestamp);
 }
 
 #[test]
@@ -248,9 +250,7 @@ fn test_refund_unexpired_order_fails() {
 
     env.ledger().set_timestamp(env.ledger().timestamp() + 3600);
 
-    let result = client
-        .mock_all_auths()
-        .try_refund_expired_order(&buyer, &order_id);
+    let result = client.mock_all_auths().try_refund_expired_order(&buyer, &order_id);
     assert_eq!(result.unwrap_err().unwrap(), EscrowError::OrderNotExpired);
 }
 

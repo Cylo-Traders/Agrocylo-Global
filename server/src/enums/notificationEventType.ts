@@ -12,4 +12,5 @@ export enum NotificationEventType {
   GROUP_ORDER_PROGRESS = "group_order_progress",
   GROUP_ORDER_FUNDED = "group_order_funded",
   GROUP_ORDER_EXPIRED = "group_order_expired",
+  WEATHER_ALERT = "weather_alert",
 }

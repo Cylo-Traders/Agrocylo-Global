@@ -226,3 +226,29 @@ model DisputeAuditEntry {
   @@index([createdAt])
   @@map("dispute_audit_entries")
 }
+
+model Notification {
+  id            String   @id @default(uuid())
+  walletAddress String
+  message       String
+  orderId       String?
+  campaignId    String?
+  type          String
+  isRead        Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@index([walletAddress])
+  @@index([walletAddress, createdAt(sort: Desc)])
+  @@index([walletAddress, isRead])
+  @@index([orderId])
+  @@index([campaignId])
+  @@map("notifications")
+}
+
+model NotificationPreference {
+  walletAddress String   @id
+  preferences   Json
+  updatedAt     DateTime @updatedAt
+
+  @@map("notification_preferences")
+}

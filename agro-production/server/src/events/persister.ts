@@ -413,9 +413,17 @@ async function updateCampaignStatus(
     });
     if (!campaign) return;
 
+    let trancheReleased = campaign.trancheReleased;
+    if (status === "IN_PRODUCTION") {
+      const total = BigInt(campaign.totalRaised || "0");
+      trancheReleased = (total * 50n / 100n).toString();
+    } else if (status === "HARVESTED" || status === "SETTLED") {
+      trancheReleased = campaign.totalRaised;
+    }
+
     await tx.campaign.update({
       where: { onChainId: event.campaignId },
-      data: { status },
+      data: { status, trancheReleased },
     });
 
     await tx.transaction.create({
