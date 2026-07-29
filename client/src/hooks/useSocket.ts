@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { API_BASE_URL } from "@/lib/apiConfig";
+import { getAccessToken } from "@/lib/authToken";
 
 const RECONNECT_BASE_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 30_000;
@@ -30,6 +31,11 @@ export function useSocket() {
     socket.onopen = () => {
       setIsConnected(true);
       reconnectAttempt.current = 0;
+
+      const token = getAccessToken();
+      if (token) {
+        socket.send(JSON.stringify({ type: "auth", token }));
+      }
       
       // Flush queue
       while (messageQueue.current.length > 0) {

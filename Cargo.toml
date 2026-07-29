@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "contracts/escrow",
+    "contracts/weather-insurance",
     "agro-production/contract/registry",
     "agro-production/contract/production_escrow",
     "agro-production/contract/investment_basket",
@@ -11,7 +12,7 @@ members = [
 
 # ── Pinned workspace-wide dependencies (see docs/TOOLCHAIN.md) ──────────────
 [workspace.dependencies]
-soroban-sdk = { version = "22.1.1" }
+soroban-sdk = { version = "27.0.2" }
 
 [profile.release]
 opt-level = "z"

@@ -504,6 +504,41 @@ model ContractWatcherCheckpoint {
   @@map("contract_watcher_checkpoints")
 }
 
+model GovernanceProposal {
+  id             String   @id @default(uuid())
+  proposalId     String   @unique @map("proposal_id")
+  proposer       String?
+  targetContract String?  @map("target_contract")
+  functionName   String?  @map("function_name")
+  status         String
+  votesFor       String   @default("0") @map("votes_for")
+  votesAgainst   String   @default("0") @map("votes_against")
+  sourceEventId  String   @unique @map("source_event_id")
+  ledger         Int
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  votes          GovernanceVote[]
+
+  @@index([status])
+  @@map("governance_proposals")
+}
+
+model GovernanceVote {
+  id            String   @id @default(uuid())
+  proposalId    String   @map("proposal_id")
+  voter         String
+  support       Boolean
+  weight        String
+  sourceEventId String   @unique @map("source_event_id")
+  ledger        Int
+  createdAt     DateTime @default(now()) @map("created_at")
+  proposal      GovernanceProposal @relation(fields: [proposalId], references: [proposalId], onDelete: Cascade)
+
+  @@unique([proposalId, voter])
+  @@index([proposalId])
+  @@map("governance_votes")
+}
+
 model Dispute {
   id             String    @id @default(uuid())
   orderIdOnChain String    @unique

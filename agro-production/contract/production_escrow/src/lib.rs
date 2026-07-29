@@ -87,6 +87,13 @@ pub enum EscrowError {
     MilestoneNotConfigured = 82,
     MilestoneAlreadyAdvanced = 83,
     NotBuyerOrOracle = 84,
+    AlreadyTransferred = 85,
+    SameInvestor = 86,
+    ArbitrationNotConfigured = 90,
+    ArbitratorNotFound = 91,
+    QuorumNotReached = 92,
+    AlreadyVoted = 93,
+    InvestorNotInCampaign = 94,
 }
 
 // ---------------------------------------------------------------------------
@@ -204,6 +211,12 @@ pub enum DataKey {
     Order(u64),
     /// Per-campaign milestone release configuration (Vec<MilestoneConfig>).
     MilestoneConfigs(u64),
+    /// Arbitrator pool addresses.
+    Arbitrators,
+    /// Minimum number of arbitrator votes required to resolve.
+    Quorum,
+    /// Track per-arbitrator vote per-campaign-dispute resolution.
+    ArbitratorVote(u64, Address),
 }
 
 // ---------------------------------------------------------------------------
@@ -1119,7 +1132,8 @@ impl ProductionEscrowContract {
         Ok(())
     }
 
-    /// Admin-only resolution.
+    /// Admin-only resolution. Falls back to admin if no arbitrator pool is configured.
+    /// If arbitrator pool exists, admin can still resolve directly.
     pub fn resolve_dispute(
         env: Env,
         admin_caller: Address,
@@ -1132,55 +1146,12 @@ impl ProductionEscrowContract {
             return Err(EscrowError::NotAdmin);
         }
 
-        let mut campaign = load_campaign(&env, campaign_id)?;
+        let campaign = load_campaign(&env, campaign_id)?;
         if campaign.status != CampaignStatus::Disputed {
             return Err(EscrowError::CampaignNotDisputed);
         }
 
-        match resolution {
-            DisputeResolution::FullPayoutToInvestors => {
-                campaign.status = CampaignStatus::Settled;
-                save_campaign(&env, &campaign);
-                env.events().publish(
-                    (t_campaign(), symbol_short!("settled")),
-                    (campaign_id, campaign.total_revenue),
-                );
-            }
-            DisputeResolution::RefundInvestors => {
-                campaign.status = CampaignStatus::Failed;
-                save_campaign(&env, &campaign);
-                env.events()
-                    .publish((t_campaign(), symbol_short!("failed")), (campaign_id,));
-            }
-            DisputeResolution::Partial(farmer_bps) => {
-                if farmer_bps > BPS_DENOM as u32 {
-                    return Err(EscrowError::InvalidResolution);
-                }
-                let pool = checked_add(
-                    campaign.total_raised,
-                    checked_sub(campaign.total_revenue, campaign.tranche_released)?
-                )?;
-                if pool > 0 && farmer_bps > 0 {
-                    let farmer_cut = checked_mul(pool, farmer_bps as i128)? / BPS_DENOM;
-                    if farmer_cut > 0 {
-                        let token_client = token::Client::new(&env, &campaign.token);
-                        token_client.transfer(
-                            &env.current_contract_address(),
-                            &campaign.farmer,
-                            &farmer_cut,
-                        );
-                        campaign.tranche_released = checked_add(campaign.tranche_released, farmer_cut)?;
-                    }
-                }
-                campaign.status = CampaignStatus::Settled;
-                save_campaign(&env, &campaign);
-                env.events().publish(
-                    (t_campaign(), symbol_short!("settled")),
-                    (campaign_id, campaign.total_revenue),
-                );
-            }
-        }
-        Ok(())
+        resolve_dispute_internal(&env, campaign_id, resolution)
     }
 
     // -----------------------------------------------------------------------
@@ -1336,6 +1307,131 @@ impl ProductionEscrowContract {
     }
 
     // -----------------------------------------------------------------------
+    // Secondary Market — Transferable Investment
+    // -----------------------------------------------------------------------
+
+    pub fn transfer_investment(
+        env: Env,
+        from: Address,
+        to: Address,
+        campaign_id: u64,
+    ) -> Result<(), EscrowError> {
+        from.require_auth();
+        if from == to {
+            return Err(EscrowError::SameInvestor);
+        }
+
+        let campaign = load_campaign(&env, campaign_id)?;
+        if campaign.status == CampaignStatus::Settled || campaign.status == CampaignStatus::Failed {
+            return Err(EscrowError::CampaignAlreadyTerminal);
+        }
+
+        let contribution_key = DataKey::Contribution(campaign_id, from.clone());
+        let contribution = env.storage().persistent()
+            .get::<_, i128>(&contribution_key)
+            .ok_or(EscrowError::NotInvestor)?;
+        if contribution <= 0 {
+            return Err(EscrowError::NotInvestor);
+        }
+
+        let claim_key_from = DataKey::Claimed(campaign_id, from.clone());
+        if env.storage().persistent().has(&claim_key_from) {
+            return Err(EscrowError::AlreadyTransferred);
+        }
+
+        let to_contribution_key = DataKey::Contribution(campaign_id, to.clone());
+        let to_prev = env.storage().persistent()
+            .get::<_, i128>(&to_contribution_key)
+            .unwrap_or(0);
+
+        env.storage().persistent().set(&contribution_key, &0i128);
+        env.storage().persistent().set(&claim_key_from, &true);
+        env.storage().persistent().set(&to_contribution_key, &checked_add(to_prev, contribution)?);
+
+        env.events().publish(
+            (symbol_short!("invest"), symbol_short!("transfer")),
+            (campaign_id, from, to, contribution),
+        );
+
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Arbitrator Pool
+    // -----------------------------------------------------------------------
+
+    pub fn set_arbitrators(
+        env: Env,
+        admin_caller: Address,
+        arbitrators: Vec<Address>,
+        quorum: u32,
+    ) -> Result<(), EscrowError> {
+        admin_caller.require_auth();
+        let admin = admin(&env)?;
+        if admin_caller != admin {
+            return Err(EscrowError::NotAdmin);
+        }
+        if quorum == 0 || quorum > arbitrators.len() as u32 {
+            return Err(EscrowError::InvalidAmount);
+        }
+        env.storage().instance().set(&DataKey::Arbitrators, &arbitrators);
+        env.storage().instance().set(&DataKey::Quorum, &quorum);
+        Ok(())
+    }
+
+    pub fn get_arbitrators(env: Env) -> Vec<Address> {
+        env.storage().instance().get(&DataKey::Arbitrators).unwrap_or_else(|| Vec::new(&env))
+    }
+
+    pub fn get_quorum(env: Env) -> u32 {
+        env.storage().instance().get(&DataKey::Quorum).unwrap_or(0)
+    }
+
+    pub fn vote_to_resolve(
+        env: Env,
+        arbitrator: Address,
+        campaign_id: u64,
+        resolution: DisputeResolution,
+    ) -> Result<(), EscrowError> {
+        arbitrator.require_auth();
+
+        let arbitrators: Vec<Address> = env.storage().instance()
+            .get(&DataKey::Arbitrators)
+            .ok_or(EscrowError::ArbitrationNotConfigured)?;
+
+        let is_valid_arbitrator = arbitrators.iter().any(|a| a == arbitrator);
+        if !is_valid_arbitrator {
+            return Err(EscrowError::ArbitratorNotFound);
+        }
+
+        let campaign = load_campaign(&env, campaign_id)?;
+        if campaign.status != CampaignStatus::Disputed {
+            return Err(EscrowError::CampaignNotDisputed);
+        }
+
+        let vote_key = DataKey::ArbitratorVote(campaign_id, arbitrator.clone());
+        if env.storage().persistent().has(&vote_key) {
+            return Err(EscrowError::AlreadyVoted);
+        }
+
+        env.storage().persistent().set(&vote_key, &resolution);
+
+        let quorum: u32 = env.storage().instance().get(&DataKey::Quorum).unwrap_or(0);
+        let mut yes_votes: u32 = 0;
+        for a in arbitrators.iter() {
+            if env.storage().persistent().has(&DataKey::ArbitratorVote(campaign_id, a)) {
+                yes_votes += 1;
+            }
+        }
+
+        if yes_votes >= quorum {
+            resolve_dispute_internal(&env, campaign_id, resolution)?;
+        }
+
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
     // Views
     // -----------------------------------------------------------------------
 
@@ -1471,6 +1567,59 @@ fn save_campaign(env: &Env, c: &Campaign) {
 
 /// Check if a buyer has at least one confirmed order on a campaign.
 /// Used by advance_milestone to verify caller authorization.
+fn resolve_dispute_internal(
+    env: &Env,
+    campaign_id: u64,
+    resolution: DisputeResolution,
+) -> Result<(), EscrowError> {
+    let mut campaign = load_campaign(env, campaign_id)?;
+
+    match resolution {
+        DisputeResolution::FullPayoutToInvestors => {
+            campaign.status = CampaignStatus::Settled;
+            save_campaign(env, &campaign);
+            env.events().publish(
+                (t_campaign(), symbol_short!("settled")),
+                (campaign_id, campaign.total_revenue),
+            );
+        }
+        DisputeResolution::RefundInvestors => {
+            campaign.status = CampaignStatus::Failed;
+            save_campaign(env, &campaign);
+            env.events()
+                .publish((t_campaign(), symbol_short!("failed")), (campaign_id,));
+        }
+        DisputeResolution::Partial(farmer_bps) => {
+            if farmer_bps > BPS_DENOM as u32 {
+                return Err(EscrowError::InvalidResolution);
+            }
+            let pool = checked_add(
+                campaign.total_raised,
+                checked_sub(campaign.total_revenue, campaign.tranche_released)?
+            )?;
+            if pool > 0 && farmer_bps > 0 {
+                let farmer_cut = checked_mul(pool, farmer_bps as i128)? / BPS_DENOM;
+                if farmer_cut > 0 {
+                    let token_client = token::Client::new(env, &campaign.token);
+                    token_client.transfer(
+                        &env.current_contract_address(),
+                        &campaign.farmer,
+                        &farmer_cut,
+                    );
+                    campaign.tranche_released = checked_add(campaign.tranche_released, farmer_cut)?;
+                }
+            }
+            campaign.status = CampaignStatus::Settled;
+            save_campaign(env, &campaign);
+            env.events().publish(
+                (t_campaign(), symbol_short!("settled")),
+                (campaign_id, campaign.total_revenue),
+            );
+        }
+    }
+    Ok(())
+}
+
 fn has_confirmed_order(env: &Env, campaign_id: u64, buyer: &Address) -> bool {
     // Scan orders by checking up to order_count for confirmed orders by this buyer.
     let order_count: u64 = env
