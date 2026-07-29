@@ -17,6 +17,18 @@ vi.mock("../config/database.js", () => ({
   },
 }));
 
+vi.mock("../middleware/walletAuth.js", () => ({
+  requireWallet: (req: any, res: any, next: any) => {
+    const wallet = req.headers["x-wallet-address"];
+    if (!wallet) {
+      res.status(401).json({ message: "Missing wallet" });
+      return;
+    }
+    req.walletAddress = wallet;
+    next();
+  },
+}));
+
 describe("CropPlan routes (Issue #658)", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -41,8 +53,8 @@ describe("CropPlan routes (Issue #658)", () => {
 
     const res = await request(app)
       .post("/crop-plans")
+      .set("x-wallet-address", "G1234567890")
       .send({
-        farmerWallet: "G1234567890",
         cropName: "Cassava",
         plantedDate: "2026-01-01",
         expectedHarvestStart: "2026-06-01",
@@ -57,11 +69,50 @@ describe("CropPlan routes (Issue #658)", () => {
     expect(res.body.cropName).toBe("Cassava");
   });
 
-  it("POST /crop-plans returns 400 when plantedDate is after expectedHarvestStart", async () => {
+  it("POST /crop-plans rejects unauthenticated requests", async () => {
     const res = await request(app)
       .post("/crop-plans")
       .send({
-        farmerWallet: "G1234567890",
+        cropName: "Maize",
+        plantedDate: "2026-01-01",
+        expectedHarvestStart: "2026-06-01",
+        expectedHarvestEnd: "2026-06-30",
+      });
+
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /crop-plans rejects cross-wallet spoofing (farmerWallet in body ignored)", async () => {
+    vi.mocked(prisma.cropPlan.create).mockResolvedValue({} as any);
+
+    await request(app)
+      .post("/crop-plans")
+      .set("x-wallet-address", "G1234567890")
+      .send({
+        farmerWallet: "GEVILFARMER", // spoofed – must be ignored
+        cropName: "Maize",
+        plantedDate: "2026-01-01",
+        expectedHarvestStart: "2026-06-01",
+        expectedHarvestEnd: "2026-06-30",
+      });
+
+    expect(prisma.cropPlan.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ farmerWallet: "G1234567890" }),
+      }),
+    );
+    expect(prisma.cropPlan.create).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ farmerWallet: "GEVILFARMER" }),
+      }),
+    );
+  });
+
+  it("POST /crop-plans returns 400 when plantedDate is after expectedHarvestStart", async () => {
+    const res = await request(app)
+      .post("/crop-plans")
+      .set("x-wallet-address", "G1234567890")
+      .send({
         cropName: "Maize",
         plantedDate: "2026-07-01",
         expectedHarvestStart: "2026-06-01",

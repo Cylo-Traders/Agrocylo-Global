@@ -2,14 +2,16 @@ import { Router } from "express";
 import type { Request, Response, NextFunction } from "express";
 import { prisma } from "../config/database.js";
 import { ApiError } from "../http/errors.js";
+import { requireWallet, type WalletRequest } from "../middleware/walletAuth.js";
 
 const router = Router();
 
 // Create a new CropPlan
-router.post("/crop-plans", async (req: Request, res: Response, next: NextFunction) => {
+router.post("/crop-plans", requireWallet, async (req: WalletRequest, res: Response, next: NextFunction) => {
   try {
+    const farmerWallet = req.walletAddress;
+
     const {
-      farmerWallet,
       cropName,
       plantedDate,
       expectedHarvestStart,
@@ -22,7 +24,7 @@ router.post("/crop-plans", async (req: Request, res: Response, next: NextFunctio
     } = req.body;
 
     if (!farmerWallet || !cropName || !plantedDate || !expectedHarvestStart || !expectedHarvestEnd) {
-      throw new ApiError(400, "Validation Error", "farmerWallet, cropName, plantedDate, expectedHarvestStart, and expectedHarvestEnd are required");
+      throw new ApiError(400, "Validation Error", "cropName, plantedDate, expectedHarvestStart, and expectedHarvestEnd are required");
     }
 
     const pDate = new Date(plantedDate);

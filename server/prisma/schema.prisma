@@ -119,11 +119,12 @@ model Product {
   createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  farmer       Profile        @relation(fields: [farmerWallet], references: [wallet_address], onDelete: Cascade)
+  farmer       Profile             @relation(fields: [farmerWallet], references: [wallet_address], onDelete: Cascade)
   cartItems    CartItem[]
   orders       Order[]
   priceHistory PriceHistory[]
   groupOrders  GroupOrder[]
+  priceTiers   ProductPriceTier[]
 
   @@index([farmerWallet, isAvailable])
   @@map("products")

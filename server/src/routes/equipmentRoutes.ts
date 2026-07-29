@@ -2,14 +2,16 @@ import { Router } from "express";
 import type { Request, Response, NextFunction } from "express";
 import { prisma } from "../config/database.js";
 import { ApiError } from "../http/errors.js";
+import { requireWallet, type WalletRequest } from "../middleware/walletAuth.js";
 
 const router = Router();
 
 // Create new Equipment/Input/Tool listing
-router.post("/equipment/listings", async (req: Request, res: Response, next: NextFunction) => {
+router.post("/equipment/listings", requireWallet, async (req: WalletRequest, res: Response, next: NextFunction) => {
   try {
+    const ownerWallet = req.walletAddress;
+
     const {
-      ownerWallet,
       title,
       description,
       listingType,
@@ -21,7 +23,7 @@ router.post("/equipment/listings", async (req: Request, res: Response, next: Nex
     } = req.body;
 
     if (!ownerWallet || !title || !listingType || pricePerUnit === undefined || !currency || !unit) {
-      throw new ApiError(400, "Validation Error", "ownerWallet, title, listingType, pricePerUnit, currency, and unit are required");
+      throw new ApiError(400, "Validation Error", "title, listingType, pricePerUnit, currency, and unit are required");
     }
 
     if (!["SEED", "TOOL", "EQUIPMENT_RENTAL"].includes(listingType)) {
@@ -70,12 +72,13 @@ router.get("/equipment/listings", async (req: Request, res: Response, next: Next
 });
 
 // Rent equipment / tools with deposit
-router.post("/equipment/rent", async (req: Request, res: Response, next: NextFunction) => {
+router.post("/equipment/rent", requireWallet, async (req: WalletRequest, res: Response, next: NextFunction) => {
   try {
-    const { listingId, renterWallet, startDate, endDate } = req.body;
+    const renterWallet = req.walletAddress;
+    const { listingId, startDate, endDate } = req.body;
 
     if (!listingId || !renterWallet || !startDate || !endDate) {
-      throw new ApiError(400, "Validation Error", "listingId, renterWallet, startDate, and endDate are required");
+      throw new ApiError(400, "Validation Error", "listingId, startDate, and endDate are required");
     }
 
     const listing = await prisma.equipmentListing.findUnique({ where: { id: listingId } });
@@ -113,10 +116,11 @@ router.post("/equipment/rent", async (req: Request, res: Response, next: NextFun
 });
 
 // Return equipment and trigger deposit refund
-router.post("/equipment/rentals/:id/return", async (req: Request, res: Response, next: NextFunction) => {
+router.post("/equipment/rentals/:id/return", requireWallet, async (req: WalletRequest, res: Response, next: NextFunction) => {
   try {
+    const caller = req.walletAddress;
     const { id } = req.params;
-    const { confirmCondition = true } = req.body;
+    const { confirmCondition } = req.body;
 
     const rental = await prisma.equipmentRental.findUnique({
       where: { id },
@@ -131,19 +135,29 @@ router.post("/equipment/rentals/:id/return", async (req: Request, res: Response,
       throw new ApiError(400, "Already Returned", "This rental has already been returned");
     }
 
+    const isOwner = rental.listing.ownerWallet === caller;
+    const isRenter = rental.renterWallet === caller;
+
+    if (!isOwner && !isRenter) {
+      throw new ApiError(403, "Forbidden", "Only the renter or listing owner can confirm return");
+    }
+
+    // Only the listing owner can authorise a deposit refund
+    const depositRefunded = confirmCondition === true && isOwner;
+    const status = "RETURNED";
+
     const updatedRental = await prisma.equipmentRental.update({
       where: { id },
-      data: {
-        status: "RETURNED",
-        depositRefunded: confirmCondition,
-      },
+      data: { status, depositRefunded },
     });
 
     res.json({
       rental: updatedRental,
-      message: confirmCondition
+      message: depositRefunded
         ? `Equipment returned successfully. Deposit of ${rental.depositAmount} ${rental.listing.currency} refunded.`
-        : `Equipment returned. Deposit withheld pending damage inspection.`,
+        : isOwner
+          ? `Deposit withheld. Confirmed by owner.`
+          : `Equipment returned. Deposit withheld pending owner inspection.`,
     });
   } catch (err) {
     next(err);
