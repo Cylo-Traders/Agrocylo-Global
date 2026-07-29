@@ -2,6 +2,8 @@ import { Prisma } from '@prisma/client';
 import type { Product } from '@prisma/client';
 import { prisma } from '../config/database.js';
 import { ApiError } from '../http/errors.js';
+import { toClientProfile } from '../lib/profileDto.js';
+import { listReviewsForSubject } from './reviewService.js';
 import { wsManager } from './wsManager.js';
 
 export interface ProductWriteInput {
@@ -19,6 +21,31 @@ export interface ProductWriteInput {
 export type ProductDto = {
   id: string;
   [key: string]: unknown;
+};
+
+export type ProductGraphData = {
+  id: string;
+  farmer_wallet: string;
+  name: string;
+  description: string | null;
+  category: string | null;
+  price_per_unit: string;
+  currency: string;
+  unit: string;
+  stock_quantity: string | null;
+  location: string | null;
+  image_url: string | null;
+  is_available: boolean;
+  created_at: Date;
+  updated_at: Date;
+  farmer: ReturnType<typeof toClientProfile>;
+  price_history: Array<{
+    id: string;
+    price: string;
+    currency: string;
+    timestamp: Date;
+  }>;
+  reviews: Awaited<ReturnType<typeof listReviewsForSubject>>;
 };
 
 function parsePage(value: string | undefined, fallback: number): number {
@@ -120,6 +147,34 @@ export async function getProductById(productId: string): Promise<ProductDto> {
   const product = await prisma.product.findUnique({ where: { id: productId } });
   if (!product) throw new ApiError(404, 'Not Found', 'Product not found');
   return toProductDto(product);
+}
+
+export async function getProductGraphData(productId: string): Promise<ProductGraphData> {
+  const product = await prisma.product.findUnique({
+    where: { id: productId },
+    include: {
+      farmer: true,
+      priceHistory: {
+        orderBy: { timestamp: 'desc' },
+      },
+    },
+  });
+
+  if (!product) throw new ApiError(404, 'Not Found', 'Product not found');
+
+  const reviews = await listReviewsForSubject(product.farmerWallet);
+
+  return {
+    ...toProductDto(product),
+    farmer: toClientProfile(product.farmer),
+    price_history: product.priceHistory.map((entry) => ({
+      id: entry.id,
+      price: entry.price,
+      currency: entry.currency,
+      timestamp: entry.timestamp,
+    })),
+    reviews,
+  };
 }
 
 export async function createProduct(farmerWallet: string, input: ProductWriteInput): Promise<ProductDto> {

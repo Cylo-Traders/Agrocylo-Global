@@ -9,7 +9,7 @@
 // unbounded per-farmer Vec, reducing worst-case from O(n) to O(limit) = O(50) with pagination.
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, String, Vec,
 };
 
 #[contracterror]
@@ -23,6 +23,9 @@ pub enum RegistryError {
     CampaignAlreadyRegistered = 5,
     UnauthorizedContract = 6,
     InvalidFarmerAddress = 7,
+    BatchNotFound = 8,
+    OrderBatchLinkExists = 9,
+    CampaignNotHarvested = 10,
 }
 
 #[contracttype]
@@ -48,6 +51,14 @@ pub struct CampaignRecord {
 }
 
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReputationRecord {
+    pub score: i64,
+    pub completed_orders: u32,
+    pub disputed_orders: u32,
+}
+
+#[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
     Admin,
@@ -61,7 +72,11 @@ pub enum DataKey {
     CampaignAt(u64),
     FarmerCampaignCount(Address),
     FarmerCampaignAt(Address, u64),
+    Reputation(Address),
 }
+
+const COMPLETION_POINTS: i64 = 10;
+const DISPUTE_PENALTY_POINTS: i64 = 15;
 
 #[contract]
 pub struct RegistryContract;
@@ -321,6 +336,76 @@ impl RegistryContract {
         Ok(result)
     }
 
+    /// Records the outcome of an on-chain order and updates the farmer's reputation
+    /// score. Callable only by the registered escrow/production contracts — the caller
+    /// must be `source_contract` itself (contract-issued auth), and `source_contract`
+    /// must match one of the addresses configured at `initialize`. No end user can
+    /// invoke this directly to inflate or erase their own score.
+    ///
+    /// `disputed_buyer_share_bps`: `None` for a cleanly completed order (buyer
+    /// confirmed receipt); `Some(bps)` for a resolved dispute, mirroring the escrow's
+    /// own split — 0 = fully released to the farmer, 10_000 = fully refunded to the
+    /// buyer, values in between a proportional split.
+    pub fn record_order_outcome(
+        env: Env,
+        source_contract: Address,
+        farmer: Address,
+        disputed_buyer_share_bps: Option<u32>,
+    ) -> Result<ReputationRecord, RegistryError> {
+        let refs = read_contract_refs(&env)?;
+        source_contract.require_auth();
+
+        if !is_authorized_contract(&source_contract, &refs) {
+            return Err(RegistryError::UnauthorizedContract);
+        }
+
+        let key = DataKey::Reputation(farmer.clone());
+        let mut record: ReputationRecord =
+            env.storage().persistent().get(&key).unwrap_or(ReputationRecord {
+                score: 0,
+                completed_orders: 0,
+                disputed_orders: 0,
+            });
+
+        match disputed_buyer_share_bps {
+            None => {
+                record.score += COMPLETION_POINTS;
+                record.completed_orders += 1;
+            }
+            Some(buyer_share_bps) => {
+                let buyer_share_bps = i64::from(buyer_share_bps.min(10_000));
+                let reward = (10_000 - buyer_share_bps) * COMPLETION_POINTS / 10_000;
+                let penalty = buyer_share_bps * DISPUTE_PENALTY_POINTS / 10_000;
+                record.score += reward - penalty;
+                record.disputed_orders += 1;
+            }
+        }
+
+        env.storage().persistent().set(&key, &record);
+
+        env.events().publish(
+            (symbol_short!("reput"), symbol_short!("updated")),
+            (farmer, record.score),
+        );
+
+        Ok(record)
+    }
+
+    /// Read-only: current reputation of `farmer`. Farmers with no recorded orders
+    /// yet have a zeroed record rather than an error.
+    pub fn get_reputation(env: Env, farmer: Address) -> Result<ReputationRecord, RegistryError> {
+        require_initialized(&env)?;
+        Ok(env
+            .storage()
+            .persistent()
+            .get(&DataKey::Reputation(farmer))
+            .unwrap_or(ReputationRecord {
+                score: 0,
+                completed_orders: 0,
+                disputed_orders: 0,
+            }))
+    }
+
     pub fn get_farmer_campaigns(
         env: Env,
         farmer: Address,
@@ -352,6 +437,109 @@ impl RegistryContract {
                 {
                     result.push_back(campaign);
                 }
+            }
+        }
+        Ok(result)
+    }
+
+    // ── Provenance Registry (Harvest-to-Delivery) ───────────────────────────
+
+    pub fn mint_batch(
+        env: Env,
+        source_contract: Address,
+        campaign_id: u64,
+        farmer: Address,
+        crop: String,
+        harvest_date: u64,
+        quantity: i128,
+    ) -> Result<u64, RegistryError> {
+        require_initialized(&env)?;
+        let refs = read_contract_refs(&env)?;
+        source_contract.require_auth();
+        if !is_authorized_contract(&source_contract, &refs) {
+            return Err(RegistryError::UnauthorizedContract);
+        }
+        if !env.storage().persistent().has(&DataKey::Campaign(campaign_id)) {
+            return Err(RegistryError::CampaignAlreadyRegistered);
+        }
+
+        let batch_count: u64 = env.storage().persistent().get(&DataKey::BatchCount).unwrap_or(0);
+        let batch_id = batch_count + 1;
+
+        let batch = BatchRecord {
+            batch_id,
+            campaign_id,
+            farmer: farmer.clone(),
+            crop,
+            harvest_date,
+            quantity,
+            linked_order_ids: Vec::new(&env),
+        };
+
+        env.storage().persistent().set(&DataKey::Batch(batch_id), &batch);
+        env.storage().persistent().set(&DataKey::BatchCount, &batch_id);
+
+        env.events().publish(
+            (symbol_short!("batch"), symbol_short!("minted")),
+            (batch_id, campaign_id, farmer, quantity),
+        );
+
+        Ok(batch_id)
+    }
+
+    pub fn link_batch_to_order(
+        env: Env,
+        source_contract: Address,
+        batch_id: u64,
+        order_id: u64,
+    ) -> Result<(), RegistryError> {
+        require_initialized(&env)?;
+        let refs = read_contract_refs(&env)?;
+        source_contract.require_auth();
+        if !is_authorized_contract(&source_contract, &refs) {
+            return Err(RegistryError::UnauthorizedContract);
+        }
+
+        let mut batch: BatchRecord = env.storage().persistent().get(&DataKey::Batch(batch_id))
+            .ok_or(RegistryError::BatchNotFound)?;
+
+        let link_key = DataKey::BatchOrderLink(batch_id, order_id);
+        if env.storage().persistent().has(&link_key) {
+            return Err(RegistryError::OrderBatchLinkExists);
+        }
+
+        batch.linked_order_ids.push_back(order_id);
+        env.storage().persistent().set(&DataKey::Batch(batch_id), &batch);
+        env.storage().persistent().set(&link_key, &true);
+
+        let order_batch_key = DataKey::OrderBatch(order_id);
+        let mut order_batches: Vec<u64> = env.storage().persistent().get(&order_batch_key).unwrap_or_else(|| Vec::new(&env));
+        order_batches.push_back(batch_id);
+        env.storage().persistent().set(&order_batch_key, &order_batches);
+
+        env.events().publish(
+            (symbol_short!("batch"), symbol_short!("linked")),
+            (batch_id, order_id),
+        );
+
+        Ok(())
+    }
+
+    pub fn get_batch(env: Env, batch_id: u64) -> Result<Option<BatchRecord>, RegistryError> {
+        require_initialized(&env)?;
+        Ok(env.storage().persistent().get(&DataKey::Batch(batch_id)))
+    }
+
+    pub fn get_batch_history(env: Env, order_id: u64) -> Result<Vec<BatchRecord>, RegistryError> {
+        require_initialized(&env)?;
+        let batch_ids: Vec<u64> = env.storage().persistent()
+            .get(&DataKey::OrderBatch(order_id))
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let mut result = Vec::new(&env);
+        for id in batch_ids.iter() {
+            if let Some(batch) = env.storage().persistent().get::<_, BatchRecord>(&DataKey::Batch(id)) {
+                result.push_back(batch);
             }
         }
         Ok(result)

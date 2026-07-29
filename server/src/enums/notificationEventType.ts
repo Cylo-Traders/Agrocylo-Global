@@ -9,4 +9,7 @@ export enum NotificationEventType {
   NEW_INVESTMENT = "new_investment",
   CAMPAIGN_FUNDED = "campaign_funded",
   HARVEST_COMPLETED = "harvest_completed",
+  GROUP_ORDER_PROGRESS = "group_order_progress",
+  GROUP_ORDER_FUNDED = "group_order_funded",
+  GROUP_ORDER_EXPIRED = "group_order_expired",
 }

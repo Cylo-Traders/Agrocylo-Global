@@ -1,6 +1,8 @@
 import { prisma } from '../config/database.js';
 import { ApiError } from '../http/errors.js';
 import { z } from 'zod';
+import { getReputationSnapshot } from './reputationService.js';
+import { listReviewsForSubject } from './reviewService.js';
 import {
   pickProfileName,
   toClientProfile,
@@ -83,4 +85,31 @@ export async function updateProfile(
   });
 
   return toClientProfile(profile);
+}
+
+export async function getProfileReputation(wallet_address: string) {
+  const profile = await prisma.profile.findUnique({ where: { wallet_address } });
+  if (!profile) {
+    throw new ApiError(404, 'Not Found', 'Profile not found', 'https://cylos.io/errors/not-found');
+  }
+
+  return getReputationSnapshot(wallet_address);
+}
+
+export async function getProfileGraphData(wallet_address: string) {
+  const profile = await prisma.profile.findUnique({ where: { wallet_address } });
+  if (!profile) {
+    throw new ApiError(404, 'Not Found', 'Profile not found', 'https://cylos.io/errors/not-found');
+  }
+
+  const [reputation, reviews] = await Promise.all([
+    getReputationSnapshot(wallet_address),
+    listReviewsForSubject(wallet_address),
+  ]);
+
+  return {
+    profile: toClientProfile(profile),
+    reputation,
+    reviews,
+  };
 }

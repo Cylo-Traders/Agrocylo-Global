@@ -26,6 +26,7 @@ import {
 import {
   CampaignDetailSchema,
   CampaignListResponseSchema,
+  CampaignMilestonesSchema,
   CampaignSchema,
   InvestmentSchema,
 } from "../schemas/responses.js";
@@ -83,6 +84,108 @@ router.get(
     }
 
     jsonValidated(res, CampaignDetailSchema, 200, campaign);
+  },
+);
+
+// GET /campaigns/:id/milestones — campaign milestone/tranche state
+router.get(
+  "/campaigns/:id/milestones",
+  validateParams(CampaignIdParamSchema),
+  validateResponse(CampaignMilestonesSchema),
+  async (req: Request, res: Response) => {
+    const campaignId = req.params.id;
+    const campaign = await prisma.campaign.findFirst({
+      where: {
+        OR: [
+          { id: campaignId },
+          { onChainId: campaignId },
+        ],
+      },
+      include: {
+        transactions: {
+          where: {
+            eventType: {
+              in: ["campaign.produce", "campaign.harvest", "campaign.settled"],
+            },
+          },
+          orderBy: { ledger: "asc" },
+        },
+      },
+    });
+
+    if (!campaign) {
+      problemDetail(res, req, 404, "Campaign Not Found", `No campaign with id ${campaignId}`);
+      return;
+    }
+
+    const totalRaised = BigInt(campaign.totalRaised || "0");
+    const trancheReleased = BigInt(campaign.trancheReleased || "0");
+    const percentageReleased = totalRaised > 0n
+      ? Math.min(100, Math.round(Number((trancheReleased * 100n) / totalRaised)))
+      : (campaign.status === "IN_PRODUCTION" ? 50 : (["HARVESTED", "SETTLED"].includes(campaign.status) ? 100 : 0));
+
+    let currentMilestone = campaign.status.toString();
+    let nextExpectedMilestone: string | null = null;
+
+    switch (campaign.status) {
+      case "FUNDING":
+      case "FUNDED":
+        nextExpectedMilestone = "IN_PRODUCTION";
+        break;
+      case "IN_PRODUCTION":
+        nextExpectedMilestone = "HARVESTED";
+        break;
+      case "HARVESTED":
+        nextExpectedMilestone = "SETTLED";
+        break;
+      case "SETTLED":
+      case "FAILED":
+      case "DISPUTED":
+        nextExpectedMilestone = null;
+        break;
+    }
+
+    const produceTx = campaign.transactions.find((t) => t.eventType === "campaign.produce");
+    const harvestTx = campaign.transactions.find((t) => t.eventType === "campaign.harvest");
+    const settledTx = campaign.transactions.find((t) => t.eventType === "campaign.settled");
+
+    const milestoneState = {
+      campaignId: campaign.id,
+      onChainId: campaign.onChainId,
+      status: campaign.status,
+      percentageReleased,
+      trancheReleased: campaign.trancheReleased,
+      currentMilestone,
+      nextExpectedMilestone,
+      milestones: [
+        {
+          name: "FUNDING",
+          percentage: 0,
+          completed: true,
+          completedAt: campaign.createdAt.toISOString(),
+        },
+        {
+          name: "IN_PRODUCTION",
+          percentage: 50,
+          completed: ["IN_PRODUCTION", "HARVESTED", "SETTLED"].includes(campaign.status),
+          completedAt: produceTx ? produceTx.processedAt.toISOString() : null,
+        },
+        {
+          name: "HARVESTED",
+          percentage: 100,
+          completed: ["HARVESTED", "SETTLED"].includes(campaign.status),
+          completedAt: harvestTx ? harvestTx.processedAt.toISOString() : null,
+        },
+        {
+          name: "SETTLED",
+          percentage: 100,
+          completed: campaign.status === "SETTLED",
+          completedAt: settledTx ? settledTx.processedAt.toISOString() : null,
+        },
+      ],
+    };
+
+    jsonValidated(res, CampaignMilestonesSchema, 200, milestoneState);
   },
 );
 

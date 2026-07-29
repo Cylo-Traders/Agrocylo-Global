@@ -1,4 +1,5 @@
 import { API_BASE_URL } from "./apiConfig";
+import { getAccessToken } from "./authToken";
 
 export interface ApiError {
   code: string;
@@ -41,10 +42,12 @@ export async function apiRequest<T>(
   const timer = setTimeout(() => controller.abort(), timeout);
 
   try {
+    const accessToken = getAccessToken();
     const res = await fetch(url, {
       method,
       headers: {
         "Content-Type": "application/json",
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...headers,
       },
       body: body ? JSON.stringify(body) : undefined,

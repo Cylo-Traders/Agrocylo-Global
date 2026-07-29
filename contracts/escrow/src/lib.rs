@@ -1,7 +1,7 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, Map,
-    String, Vec,
+    contract, contractclient, contracterror, contractimpl, contracttype, symbol_short, token,
+    Address, Env, Map, String, Vec,
 };
 
 // Errors
@@ -161,6 +161,71 @@ fn write_dispute(env: &Env, order_id: u64, dispute: &Dispute) {
     );
 }
 
+fn resolve_escrow_dispute_internal(
+    env: &Env,
+    order_id: u64,
+    resolution: DisputeResolution,
+) -> Result<(), EscrowError> {
+    let mut order = read_order(env, order_id)?;
+    let mut dispute = read_dispute(env, order_id)?;
+    let token_client = token::Client::new(env, &order.token);
+
+    match resolution.clone() {
+        DisputeResolution::Refund => {
+            order.status = OrderStatus::Refunded;
+            token_client.transfer(&env.current_contract_address(), &order.buyer, &order.amount);
+        }
+        DisputeResolution::Release => {
+            order.status = OrderStatus::Completed;
+            token_client.transfer(
+                &env.current_contract_address(),
+                &order.farmer,
+                &order.amount,
+            );
+        }
+        DisputeResolution::Split(buyer_share_bps) => {
+            if buyer_share_bps > 10_000 {
+                return Err(EscrowError::InvalidSplitRatio);
+            }
+            let refund_amount = order
+                .amount
+                .checked_mul(buyer_share_bps as i128)
+                .ok_or(EscrowError::ArithmeticError)?
+                / 10_000;
+            let release_amount = order
+                .amount
+                .checked_sub(refund_amount)
+                .ok_or(EscrowError::ArithmeticError)?;
+            if refund_amount > 0 {
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &order.buyer,
+                    &refund_amount,
+                );
+            }
+            if release_amount > 0 {
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &order.farmer,
+                    &release_amount,
+                );
+            }
+            order.status = OrderStatus::Completed;
+        }
+    }
+
+    dispute.resolved = true;
+    write_order(env, order_id, &order);
+    write_dispute(env, order_id, &dispute);
+
+    env.events().publish(
+        (symbol_short!("order"), symbol_short!("resolved")),
+        (order_id, resolution, order.buyer, order.farmer),
+    );
+
+    Ok(())
+}
+
 fn read_admin(env: &Env) -> Result<Address, EscrowError> {
     env.storage()
         .instance()
@@ -273,52 +338,178 @@ impl EscrowContract {
         token_client.transfer(&buyer, &fee_collector, &fee);
         token_client.transfer(&buyer, &env.current_contract_address(), &net_amount);
 
-        let order_id: u64 = instance_storage.get(&DataKey::OrderCount).unwrap_or(0u64) + 1;
-        instance_storage.set(&DataKey::OrderCount, &order_id);
-
-        let timestamp = env.ledger().timestamp();
-
-        let persistent_storage = env.storage().persistent();
-        let order_key = DataKey::Order(order_id);
-        let order = Order {
-            buyer: buyer.clone(),
-            farmer: farmer.clone(),
-            token: token.clone(),
-            amount: net_amount,
-            timestamp,
-            delivery_timestamp: 0,
-            status: OrderStatus::Pending,
-        };
-
-        env.events().publish(
-            (symbol_short!("order"), symbol_short!("created")),
-            (
-                order_id,
-                buyer.clone(),
-                farmer.clone(),
-                amount,
-                token.clone(),
-            ),
-        );
-
-        persistent_storage.set(&order_key, &order);
-        persistent_storage.extend_ttl(&order_key, TTL_THRESHOLD, TTL_EXTEND_TO);
-
-        let buyer_key = DataKey::BuyerOrders(buyer.clone());
-        let mut buyer_orders: Vec<u64> = persistent_storage
-            .get(&buyer_key)
-            .unwrap_or_else(|| Vec::new(&env));
-        buyer_orders.push_back(order_id);
-        persistent_storage.set(&buyer_key, &buyer_orders);
-
-        let farmer_key = DataKey::FarmerOrders(farmer.clone());
-        let mut farmer_orders: Vec<u64> = persistent_storage
-            .get(&farmer_key)
-            .unwrap_or_else(|| Vec::new(&env));
-        farmer_orders.push_back(order_id);
-        persistent_storage.set(&farmer_key, &farmer_orders);
+        let order_id = record_new_order(&env, buyer, farmer, token, net_amount, amount);
 
         Ok(order_id)
+    }
+
+    /// Cross-token settlement (Issue #591): the buyer funds the order with any
+    /// `source_token` they hold. That amount is routed through Stellar's
+    /// path-payment-strict-send primitive (via the configured router contract) and
+    /// converted into `settlement_token`, which must be on the escrow's supported-token
+    /// allow-list. `min_dest_amount` is the buyer's own strict-send floor; the order is
+    /// also rejected if the router's actual output falls short of its own quoted price
+    /// by more than the contract-wide configurable slippage tolerance.
+    pub fn create_order_via_path_payment(
+        env: Env,
+        buyer: Address,
+        farmer: Address,
+        source_token: Address,
+        source_amount: i128,
+        settlement_token: Address,
+        min_dest_amount: i128,
+    ) -> Result<u64, EscrowError> {
+        buyer.require_auth();
+
+        if buyer == farmer {
+            return Err(EscrowError::BuyerCannotEqualFarmer);
+        }
+        if source_amount <= 0 {
+            return Err(EscrowError::AmountMustBePositive);
+        }
+        if min_dest_amount <= 0 {
+            return Err(EscrowError::AmountMustBePositive);
+        }
+
+        let instance_storage = env.storage().instance();
+
+        let supported_tokens: Vec<Address> = instance_storage
+            .get(&DataKey::SupportedTokens)
+            .ok_or(EscrowError::ContractNotInitialized)?;
+        if !supported_tokens.contains(&settlement_token) {
+            return Err(EscrowError::UnsupportedToken);
+        }
+
+        let router: Address = instance_storage
+            .get(&DataKey::PathPaymentRouter)
+            .ok_or(EscrowError::RouterNotConfigured)?;
+
+        let router_client = PathPaymentRouterClient::new(&env, &router);
+
+        // The contract's configurable slippage tolerance is enforced against the
+        // router's quoted price at execution time, independent of the buyer-supplied
+        // `min_dest_amount` floor. This guards against the buyer's floor being set too
+        // loose (or manipulated) — the stricter of the two bounds always wins.
+        let quoted_amount =
+            router_client.get_quote(&source_token, &settlement_token, &source_amount);
+        let max_slippage_bps = read_max_slippage_bps(&env);
+        let max_allowed_shortfall = quoted_amount
+            .checked_mul(max_slippage_bps as i128)
+            .ok_or(EscrowError::ArithmeticError)?
+            / 10_000;
+        let tolerance_floor = quoted_amount
+            .checked_sub(max_allowed_shortfall)
+            .ok_or(EscrowError::ArithmeticError)?;
+        let effective_min_dest = if min_dest_amount > tolerance_floor {
+            min_dest_amount
+        } else {
+            tolerance_floor
+        };
+
+        let dest_received = router_client.swap_exact_in(
+            &buyer,
+            &env.current_contract_address(),
+            &source_token,
+            &settlement_token,
+            &source_amount,
+            &effective_min_dest,
+        );
+
+        if dest_received < effective_min_dest {
+            return Err(EscrowError::SlippageToleranceExceeded);
+        }
+
+        let fee_collector: Address = instance_storage
+            .get(&DataKey::FeeCollector)
+            .ok_or(EscrowError::ContractNotInitialized)?;
+
+        let fee = dest_received
+            .checked_mul(3)
+            .ok_or(EscrowError::ArithmeticError)?
+            / 100;
+        let net_amount = dest_received
+            .checked_sub(fee)
+            .ok_or(EscrowError::ArithmeticError)?;
+
+        token::Client::new(&env, &settlement_token).transfer(
+            &env.current_contract_address(),
+            &fee_collector,
+            &fee,
+        );
+
+        let order_id = record_new_order(
+            &env,
+            buyer,
+            farmer,
+            settlement_token,
+            net_amount,
+            dest_received,
+        );
+
+        Ok(order_id)
+    }
+
+    pub fn set_path_payment_router(
+        env: Env,
+        admin: Address,
+        router: Address,
+    ) -> Result<(), EscrowError> {
+        admin.require_auth();
+        let stored_admin = read_admin(&env)?;
+        if admin != stored_admin {
+            return Err(EscrowError::NotAdmin);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::PathPaymentRouter, &router);
+        Ok(())
+    }
+
+    pub fn set_max_slippage_bps(
+        env: Env,
+        admin: Address,
+        max_slippage_bps: u32,
+    ) -> Result<(), EscrowError> {
+        admin.require_auth();
+        let stored_admin = read_admin(&env)?;
+        if admin != stored_admin {
+            return Err(EscrowError::NotAdmin);
+        }
+        if max_slippage_bps > 10_000 {
+            return Err(EscrowError::InvalidSlippageTolerance);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxSlippageBps, &max_slippage_bps);
+        Ok(())
+    }
+
+    pub fn get_max_slippage_bps(env: Env) -> u32 {
+        read_max_slippage_bps(&env)
+    }
+
+    /// Configures the on-chain reputation registry (Issue #592). Once set, every
+    /// `confirm_receipt` and `resolve_dispute` call reports its outcome to the
+    /// registry so the farmer's `reputation_score` there stays in sync. Optional:
+    /// if unset, the escrow behaves exactly as before and reputation is not tracked.
+    pub fn set_registry_contract(
+        env: Env,
+        admin: Address,
+        registry: Address,
+    ) -> Result<(), EscrowError> {
+        admin.require_auth();
+        let stored_admin = read_admin(&env)?;
+        if admin != stored_admin {
+            return Err(EscrowError::NotAdmin);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::RegistryContract, &registry);
+        Ok(())
+    }
+
+    pub fn get_registry_contract(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::RegistryContract)
     }
 
     pub fn mark_delivered(env: Env, farmer: Address, order_id: u64) -> Result<(), EscrowError> {
@@ -371,6 +562,8 @@ impl EscrowContract {
             (symbol_short!("order"), symbol_short!("confirmed")),
             (order_id, order.buyer, order.farmer),
         );
+
+        report_reputation_outcome(&env, &order.farmer, None);
 
         Ok(())
     }
@@ -504,22 +697,26 @@ impl EscrowContract {
             return Err(EscrowError::NotAdmin);
         }
 
-        let mut order = read_order(&env, order_id)?;
+        let order = read_order(&env, order_id)?;
         if order.status != OrderStatus::Disputed {
             return Err(EscrowError::OrderNotDisputed);
         }
 
-        let mut dispute = read_dispute(&env, order_id)?;
+        let dispute = read_dispute(&env, order_id)?;
         if dispute.resolved {
             return Err(EscrowError::OrderNotDisputed);
         }
 
-        let token_client = token::Client::new(&env, &order.token);
+        resolve_escrow_dispute_internal(&env, order_id, resolution)
+    }
+
+        let buyer_share_bps: u32;
 
         match resolution.clone() {
             DisputeResolution::Refund => {
                 order.status = OrderStatus::Refunded;
                 token_client.transfer(&env.current_contract_address(), &order.buyer, &order.amount);
+                buyer_share_bps = 10_000;
             }
             DisputeResolution::Release => {
                 order.status = OrderStatus::Completed;
@@ -528,11 +725,13 @@ impl EscrowContract {
                     &order.farmer,
                     &order.amount,
                 );
+                buyer_share_bps = 0;
             }
-            DisputeResolution::Split(buyer_share_bps) => {
-                if buyer_share_bps > 10_000 {
+            DisputeResolution::Split(split_bps) => {
+                if split_bps > 10_000 {
                     return Err(EscrowError::InvalidSplitRatio);
                 }
+                buyer_share_bps = split_bps;
 
                 let refund_amount = order
                     .amount
@@ -562,15 +761,61 @@ impl EscrowContract {
                 order.status = OrderStatus::Completed;
             }
         }
+        env.storage().instance().set(&DataKey::Arbitrators, &arbitrators);
+        env.storage().instance().set(&DataKey::Quorum, &quorum);
+        Ok(())
+    }
 
-        dispute.resolved = true;
-        write_order(&env, order_id, &order);
-        write_dispute(&env, order_id, &dispute);
+    pub fn get_arbitrators(env: Env) -> Vec<Address> {
+        env.storage().instance().get(&DataKey::Arbitrators).unwrap_or_else(|| Vec::new(&env))
+    }
 
-        env.events().publish(
-            (symbol_short!("order"), symbol_short!("resolved")),
-            (order_id, resolution, order.buyer, order.farmer),
-        );
+    pub fn get_quorum(env: Env) -> u32 {
+        env.storage().instance().get(&DataKey::Quorum).unwrap_or(0)
+    }
+
+    pub fn vote_to_resolve(
+        env: Env,
+        arbitrator: Address,
+        order_id: u64,
+        resolution: DisputeResolution,
+    ) -> Result<(), EscrowError> {
+        arbitrator.require_auth();
+
+        let arbitrators: Vec<Address> = env.storage().instance()
+            .get(&DataKey::Arbitrators)
+            .ok_or(EscrowError::ArbitrationNotConfigured)?;
+
+        let is_valid_arbitrator = arbitrators.iter().any(|a| a == arbitrator);
+        if !is_valid_arbitrator {
+            return Err(EscrowError::ArbitratorNotFound);
+        }
+
+        let order = read_order(&env, order_id)?;
+        if order.status != OrderStatus::Disputed {
+            return Err(EscrowError::OrderNotDisputed);
+        }
+
+        let vote_key = DataKey::ArbitratorVote(order_id, arbitrator.clone());
+        if env.storage().persistent().has(&vote_key) {
+            return Err(EscrowError::AlreadyVoted);
+        }
+
+        env.storage().persistent().set(&vote_key, &resolution);
+
+        let quorum: u32 = env.storage().instance().get(&DataKey::Quorum).unwrap_or(0);
+        let mut yes_votes: u32 = 0;
+        for a in arbitrators.iter() {
+            if env.storage().persistent().has(&DataKey::ArbitratorVote(order_id, a)) {
+                yes_votes += 1;
+            }
+        }
+
+        if yes_votes >= quorum {
+            resolve_escrow_dispute_internal(&env, order_id, resolution)?;
+        }
+
+        report_reputation_outcome(&env, &order.farmer, Some(buyer_share_bps));
 
         Ok(())
     }

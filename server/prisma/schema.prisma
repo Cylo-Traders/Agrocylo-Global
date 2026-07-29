@@ -123,7 +123,7 @@ model Product {
   cartItems    CartItem[]
   orders       Order[]
   priceHistory PriceHistory[]
-  priceTiers   ProductPriceTier[]
+  groupOrders  GroupOrder[]
 
   @@index([farmerWallet, isAvailable])
   @@map("products")
@@ -300,6 +300,7 @@ model Profile {
   location       Location?
   products       Product[]
   carts          Cart[]
+  reviews        Review[]
 
   @@map("profiles")
 }
@@ -314,6 +315,42 @@ model Location {
   profile        Profile? @relation(fields: [wallet_address], references: [wallet_address])
 
   @@map("locations")
+}
+
+model PriceIndex {
+  id            String   @id @default(uuid())
+  crop          String
+  region        String
+  currency      String
+  avgPrice      Float    @map("avg_price")
+  minPrice      Float    @map("min_price")
+  maxPrice      Float    @map("max_price")
+  sampleCount   Int      @map("sample_count")
+  sourceCounts  Json     @map("source_counts")
+  computedAt    DateTime @map("computed_at")
+
+  @@unique([crop, region, currency])
+  @@index([crop, region])
+  @@map("price_index")
+}
+
+model WeatherReading {
+  id              String    @id @default(uuid())
+  walletAddress   String    @map("wallet_address")
+  lat             Float
+  lng             Float
+  temperatureC    Float     @map("temperature_c")
+  precipitationMm Float     @map("precipitation_mm")
+  windSpeedKph    Float     @map("wind_speed_kph")
+  conditionCode   Int       @map("condition_code")
+  source          String
+  rawPayload      Json      @map("raw_payload")
+  recordedAt      DateTime  @map("recorded_at")
+  attestedAt      DateTime? @map("attested_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@index([walletAddress, recordedAt(sort: Desc)])
+  @@map("weather_readings")
 }
 
 model OrderMetadata {
@@ -420,6 +457,41 @@ model ContractWatcherCheckpoint {
   @@map("contract_watcher_checkpoints")
 }
 
+model GovernanceProposal {
+  id             String   @id @default(uuid())
+  proposalId     String   @unique @map("proposal_id")
+  proposer       String?
+  targetContract String?  @map("target_contract")
+  functionName   String?  @map("function_name")
+  status         String
+  votesFor       String   @default("0") @map("votes_for")
+  votesAgainst   String   @default("0") @map("votes_against")
+  sourceEventId  String   @unique @map("source_event_id")
+  ledger         Int
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  votes          GovernanceVote[]
+
+  @@index([status])
+  @@map("governance_proposals")
+}
+
+model GovernanceVote {
+  id            String   @id @default(uuid())
+  proposalId    String   @map("proposal_id")
+  voter         String
+  support       Boolean
+  weight        String
+  sourceEventId String   @unique @map("source_event_id")
+  ledger        Int
+  createdAt     DateTime @default(now()) @map("created_at")
+  proposal      GovernanceProposal @relation(fields: [proposalId], references: [proposalId], onDelete: Cascade)
+
+  @@unique([proposalId, voter])
+  @@index([proposalId])
+  @@map("governance_votes")
+}
+
 model Dispute {
   id             String    @id @default(uuid())
   orderIdOnChain String    @unique
@@ -433,4 +505,74 @@ model Dispute {
   order Order @relation(fields: [orderIdOnChain], references: [orderIdOnChain])
 
   @@map("disputes")
+}
+
+model Review {
+  id                String   @id @default(uuid()) @db.Uuid
+  subjectWallet     String   @map("subject_wallet")
+  reviewerWallet    String   @map("reviewer_wallet")
+  reviewerName      String   @map("reviewer_name")
+  reviewerRole      String   @map("reviewer_role")
+  rating            Int
+  title             String
+  body              String
+  transactionHash   String   @unique @map("transaction_hash")
+  verifiedTransaction Boolean @default(true) @map("verified_transaction")
+  helpfulVotes      Int      @default(0) @map("helpful_votes")
+  helpfulVoteWallets String[] @default([]) @map("helpful_vote_wallets")
+  evidence          String[] @default([])
+  responseMessage   String?  @map("response_message")
+  responderName     String?  @map("responder_name")
+  respondedAt       DateTime? @map("responded_at")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  profile Profile @relation(fields: [subjectWallet], references: [wallet_address], onDelete: Cascade)
+
+  @@index([subjectWallet, createdAt(sort: Desc)])
+  @@index([reviewerWallet])
+  @@map("reviews")
+}
+
+model GroupOrder {
+  id                String   @id @default(uuid()) @db.Uuid
+  productId         String   @map("product_id") @db.Uuid
+  farmerWallet      String   @map("farmer_wallet")
+  targetQuantity    Decimal  @map("target_quantity") @db.Decimal(10, 2)
+  committedQuantity Decimal  @default(0) @map("committed_quantity") @db.Decimal(10, 2)
+  currency          String
+  status            String   @default("PENDING")
+  windowEndsAt      DateTime @map("window_ends_at")
+  batchTxHash       String?  @map("batch_tx_hash")
+  fulfilledAt       DateTime? @map("fulfilled_at")
+  expiredAt         DateTime? @map("expired_at")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  product      Product                 @relation(fields: [productId], references: [id], onDelete: Cascade)
+  contributions GroupOrderContribution[]
+
+  @@index([productId, status])
+  @@index([farmerWallet, status])
+  @@index([windowEndsAt])
+  @@map("group_orders")
+}
+
+model GroupOrderContribution {
+  id            String   @id @default(uuid()) @db.Uuid
+  groupOrderId   String   @map("group_order_id") @db.Uuid
+  buyerWallet    String   @map("buyer_wallet")
+  quantity       Decimal  @db.Decimal(10, 2)
+  unitPrice      Decimal  @map("unit_price") @db.Decimal(18, 6)
+  currency       String
+  status         String   @default("RESERVED")
+  orderIdOnChain String?  @map("order_id_on_chain")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  groupOrder GroupOrder @relation(fields: [groupOrderId], references: [id], onDelete: Cascade)
+
+  @@index([groupOrderId, buyerWallet])
+  @@index([buyerWallet, status])
+  @@map("group_order_contributions")
 }
