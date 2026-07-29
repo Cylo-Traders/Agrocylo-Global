@@ -21,13 +21,12 @@ export default function OnboardingPage() {
   const { setProfile } = useProfile();
   const { trackFunnelStep, trackFeatureAdoption } = useAnalytics();
 
+  const referralFromUrl = searchParams?.get("ref") || "";
   const [step, setStep] = useState(1);
   const [role, setRole] = useState<"farmer" | "buyer" | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
-  const [referralCode, setReferralCode] = useState(
-    searchParams?.get("ref") || "",
-  );
+  const [referralCode, setReferralCode] = useState(referralFromUrl);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,6 +52,10 @@ export default function OnboardingPage() {
 
   async function handleReferralSubmit(code: string) {
     setReferralCode(code);
+    setStep(5);
+  }
+
+  function skipReferral() {
     setStep(5);
   }
 
@@ -185,7 +188,14 @@ export default function OnboardingPage() {
               setDisplayName(data.displayName);
               setBio(data.bio);
             }}
-            onNext={() => setStep(4)}
+            onNext={() => {
+              // Skip referral step if no ref param and go straight to location
+              if (!searchParams?.get("ref")) {
+                setStep(5);
+              } else {
+                setStep(4);
+              }
+            }}
             onBack={() => setStep(2)}
           />
         )}
@@ -193,7 +203,7 @@ export default function OnboardingPage() {
         {step === 4 && (
           <ReferralCodeInput
             onSubmit={handleReferralSubmit}
-            onSkip={() => setStep(5)}
+            onSkip={skipReferral}
             isSubmitting={false}
           />
         )}
@@ -201,7 +211,14 @@ export default function OnboardingPage() {
         {step === 5 && (
           <LocationConsent
             onComplete={handleLocationComplete}
-            onBack={() => setStep(4)}
+            onBack={() => {
+              // If we skipped referral step, go back to profile (step 3)
+              if (!referralFromUrl) {
+                setStep(3);
+              } else {
+                setStep(4);
+              }
+            }}
             isSubmitting={isSubmitting}
           />
         )}
