@@ -77,7 +77,7 @@ describe("aggregatePriceIndex", () => {
     ];
 
     const [entry] = aggregatePriceIndex(points);
-    expect(entry.region).toBe("UNKNOWN");
+    expect(entry!.region).toBe("UNKNOWN");
   });
 
   it("ignores non-finite prices without throwing", () => {

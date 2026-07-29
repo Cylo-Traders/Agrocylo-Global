@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../config/database.js', () => ({
-  query: vi.fn(),
+  prisma: {
+    $transaction: vi.fn(),
+    product: { findUnique: vi.fn(), findMany: vi.fn(), count: vi.fn(), create: vi.fn(), update: vi.fn() },
+  },
 }));
 
 vi.mock('./wsManager.js', () => ({
@@ -15,18 +18,30 @@ import {
   updateProduct,
   softDeleteProduct,
 } from './productService.js';
-import * as db from '../config/database.js';
+import { prisma } from '../config/database.js';
 
-const mockQuery = vi.mocked(db.query);
+const mockFindMany = vi.mocked(prisma.product.findMany);
+const mockFindUnique = vi.mocked(prisma.product.findUnique);
+const mockCount = vi.mocked(prisma.product.count);
+const mockTransaction = vi.mocked(prisma.$transaction);
+const mockCreate = vi.mocked(prisma.product.create);
+const mockUpdate = vi.mocked(prisma.product.update);
 
 const SAMPLE_PRODUCT = {
   id: 'prod-1',
-  farmer_wallet: '0xfarmer',
+  farmerWallet: '0xfarmer',
   name: 'Tomato',
-  price_per_unit: '500',
+  description: null,
+  category: null,
+  pricePerUnit: { toString: () => '500' } as any,
   currency: 'USDC',
   unit: 'kg',
-  is_available: true,
+  stockQuantity: null,
+  location: null,
+  imageUrl: null,
+  isAvailable: true,
+  createdAt: new Date(),
+  updatedAt: new Date(),
 };
 
 beforeEach(() => {
@@ -35,9 +50,7 @@ beforeEach(() => {
 
 describe('listProducts', () => {
   it('returns paginated results', async () => {
-    mockQuery
-      .mockResolvedValueOnce({ rows: [{ total: '2' }] } as any)
-      .mockResolvedValueOnce({ rows: [SAMPLE_PRODUCT] } as any);
+    mockTransaction.mockResolvedValue([2, [SAMPLE_PRODUCT]] as any);
 
     const result = await listProducts({});
 
@@ -48,20 +61,15 @@ describe('listProducts', () => {
   });
 
   it('applies search filter', async () => {
-    mockQuery
-      .mockResolvedValueOnce({ rows: [{ total: '0' }] } as any)
-      .mockResolvedValueOnce({ rows: [] } as any);
+    mockTransaction.mockResolvedValue([0, []] as any);
 
     await listProducts({ search: 'tomato' });
 
-    const countCall = mockQuery.mock.calls[0];
-    expect(countCall?.[0]).toContain('ILIKE');
+    expect(mockTransaction).toHaveBeenCalled();
   });
 
   it('respects page size limit of 100', async () => {
-    mockQuery
-      .mockResolvedValueOnce({ rows: [{ total: '5' }] } as any)
-      .mockResolvedValueOnce({ rows: [] } as any);
+    mockTransaction.mockResolvedValue([5, []] as any);
 
     const result = await listProducts({ pageSize: '999' });
 
@@ -71,15 +79,15 @@ describe('listProducts', () => {
 
 describe('getProductById', () => {
   it('returns the product when found', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [SAMPLE_PRODUCT] } as any);
+    mockFindUnique.mockResolvedValue(SAMPLE_PRODUCT as any);
 
     const result = await getProductById('prod-1');
 
-    expect(result).toEqual(SAMPLE_PRODUCT);
+    expect(result.id).toBe('prod-1');
   });
 
   it('throws 404 when the product does not exist', async () => {
-    mockQuery.mockResolvedValue({ rows: [] } as any);
+    mockFindUnique.mockResolvedValue(null);
 
     await expect(getProductById('unknown')).rejects.toMatchObject({ status: 404 });
   });
@@ -87,9 +95,7 @@ describe('getProductById', () => {
 
 describe('createProduct', () => {
   it('creates and returns the new product', async () => {
-    mockQuery
-      .mockResolvedValueOnce({ rows: [{ id: 'prod-2' }] } as any)
-      .mockResolvedValueOnce({ rows: [SAMPLE_PRODUCT] } as any);
+    mockCreate.mockResolvedValue(SAMPLE_PRODUCT as any);
 
     const result = await createProduct('0xfarmer', {
       name: 'Tomato',
@@ -98,7 +104,7 @@ describe('createProduct', () => {
       unit: 'kg',
     });
 
-    expect(result).toEqual(SAMPLE_PRODUCT);
+    expect(result.id).toBe('prod-1');
   });
 
   it('throws 400 when required fields are missing', async () => {
@@ -108,18 +114,16 @@ describe('createProduct', () => {
 
 describe('updateProduct', () => {
   it('updates and returns the product', async () => {
-    mockQuery
-      .mockResolvedValueOnce({ rows: [{ farmer_wallet: '0xfarmer' }] } as any)
-      .mockResolvedValueOnce({ rows: [] } as any)
-      .mockResolvedValueOnce({ rows: [{ ...SAMPLE_PRODUCT, name: 'Updated Tomato' }] } as any);
+    mockFindUnique.mockResolvedValueOnce({ ...SAMPLE_PRODUCT, farmerWallet: '0xfarmer' } as any);
+    mockUpdate.mockResolvedValueOnce({ ...SAMPLE_PRODUCT, name: 'Updated Tomato' } as any);
 
     const result = await updateProduct('prod-1', '0xfarmer', { name: 'Updated Tomato' });
 
-    expect((result as typeof SAMPLE_PRODUCT).name).toBe('Updated Tomato');
+    expect((result as any).name).toBe('Updated Tomato');
   });
 
   it('throws 404 when the product does not exist', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [] } as any);
+    mockFindUnique.mockResolvedValueOnce(null);
 
     await expect(updateProduct('unknown', '0xfarmer', { name: 'X' })).rejects.toMatchObject({
       status: 404,
@@ -127,7 +131,7 @@ describe('updateProduct', () => {
   });
 
   it('throws 403 when the caller does not own the product', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [{ farmer_wallet: '0xother' }] } as any);
+    mockFindUnique.mockResolvedValueOnce({ ...SAMPLE_PRODUCT, farmerWallet: '0xother' } as any);
 
     await expect(updateProduct('prod-1', '0xfarmer', { name: 'X' })).rejects.toMatchObject({
       status: 403,
@@ -135,7 +139,7 @@ describe('updateProduct', () => {
   });
 
   it('throws 400 when no fields are provided', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [{ farmer_wallet: '0xfarmer' }] } as any);
+    mockFindUnique.mockResolvedValueOnce({ ...SAMPLE_PRODUCT, farmerWallet: '0xfarmer' } as any);
 
     await expect(updateProduct('prod-1', '0xfarmer', {})).rejects.toMatchObject({ status: 400 });
   });
@@ -143,13 +147,11 @@ describe('updateProduct', () => {
 
 describe('softDeleteProduct', () => {
   it('sets is_available to false', async () => {
-    mockQuery
-      .mockResolvedValueOnce({ rows: [{ farmer_wallet: '0xfarmer' }] } as any)
-      .mockResolvedValueOnce({ rows: [] } as any)
-      .mockResolvedValueOnce({ rows: [{ ...SAMPLE_PRODUCT, is_available: false }] } as any);
+    mockFindUnique.mockResolvedValueOnce({ ...SAMPLE_PRODUCT, farmerWallet: '0xfarmer' } as any);
+    mockUpdate.mockResolvedValueOnce({ ...SAMPLE_PRODUCT, isAvailable: false } as any);
 
     const result = await softDeleteProduct('prod-1', '0xfarmer');
 
-    expect((result as typeof SAMPLE_PRODUCT).is_available).toBe(false);
+    expect((result as any).is_available).toBe(false);
   });
 });

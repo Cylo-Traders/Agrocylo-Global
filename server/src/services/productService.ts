@@ -174,7 +174,7 @@ export async function getProductGraphData(productId: string): Promise<ProductGra
       timestamp: entry.timestamp,
     })),
     reviews,
-  };
+  } as ProductGraphData;
 }
 
 export async function createProduct(farmerWallet: string, input: ProductWriteInput): Promise<ProductDto> {

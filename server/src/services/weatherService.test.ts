@@ -253,10 +253,10 @@ describe("weatherService.pollAllFarmerLocations", () => {
       { wallet_address: "GBAD" },
       { wallet_address: "GGOOD" },
     ] as never);
-    findUnique.mockImplementation(async ({ where }: { where: { wallet_address: string } }) => {
+    findUnique.mockImplementation((async ({ where }: any) => {
       if (where.wallet_address === "GBAD") throw new Error("boom");
-      return { wallet_address: "GGOOD", lat: 1, lng: 2 } as never;
-    });
+      return { wallet_address: "GGOOD", lat: 1, lng: 2 };
+    }) as any);
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
