@@ -169,17 +169,9 @@ fn test_mark_delivered_twice_succeeds() {
         .create_order(&buyer, &farmer, &token.address, &500);
 
     client.mock_all_auths().mark_delivered(&farmer, &order_id);
-    let order = client.get_order_details(&order_id);
-
-    client.mock_all_auths().mark_delivered(&farmer, &order_id);
-    let order_after = client.get_order_details(&order_id);
-    assert_eq!(order_after.delivery_timestamp, order.delivery_timestamp);
-
-    // delivery_timestamp stays 0 because ledger timestamp is 0 in soroban tests.
-    // The third call succeeds (idempotent) but doesn't change state.
-    client.mock_all_auths().mark_delivered(&farmer, &order_id);
-    let order_final = client.get_order_details(&order_id);
-    assert_eq!(order_final.delivery_timestamp, order.delivery_timestamp);
+    env.ledger().set_timestamp(1000);
+    let result = client.mock_all_auths().try_mark_delivered(&farmer, &order_id);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::OrderNotPending);
 }
 
 #[test]
