@@ -3,6 +3,7 @@
 extern crate std;
 
 use soroban_sdk::{
+    contract, contractimpl,
     testutils::{Address as _, Ledger, LedgerInfo},
     token::{Client as TokenClient, StellarAssetClient},
     Address, Env, Vec,
@@ -3230,10 +3231,23 @@ fn test_fee_config_admin_fallback_before_governance_set() {
     t.client.set_fee_config(&t.admin, &fee_collector, &500);
 }
 
+/// Stand-in for a real governance contract: exposes the `get_admin` view function
+/// `set_governance_contract` uses to verify a candidate address is a live deployed
+/// governance contract before accepting it (Issue #680).
+#[contract]
+struct MockGovernance;
+
+#[contractimpl]
+impl MockGovernance {
+    pub fn get_admin(env: Env) -> Address {
+        env.current_contract_address()
+    }
+}
+
 #[test]
 fn test_fee_config_rejects_admin_once_governance_set() {
     let t = setup();
-    let governance = Address::generate(&t.env);
+    let governance = t.env.register(MockGovernance, ());
     let fee_collector = Address::generate(&t.env);
 
     t.client.set_governance_contract(&t.admin, &governance);
@@ -3248,7 +3262,7 @@ fn test_fee_config_rejects_admin_once_governance_set() {
 #[test]
 fn test_registry_contract_rejects_admin_once_governance_set() {
     let t = setup();
-    let governance = Address::generate(&t.env);
+    let governance = t.env.register(MockGovernance, ());
     let registry = Address::generate(&t.env);
 
     t.client.set_governance_contract(&t.admin, &governance);
@@ -3262,7 +3276,7 @@ fn test_registry_contract_rejects_admin_once_governance_set() {
 #[test]
 fn test_update_supported_tokens_governance_gated() {
     let t = setup();
-    let governance = Address::generate(&t.env);
+    let governance = t.env.register(MockGovernance, ());
     t.client.set_governance_contract(&t.admin, &governance);
 
     let mut tokens = Vec::new(&t.env);
@@ -3273,4 +3287,36 @@ fn test_update_supported_tokens_governance_gated() {
 
     t.client.update_supported_tokens(&governance, &tokens);
     assert_eq!(t.client.get_supported_tokens().len(), 1);
+}
+
+#[test]
+fn test_set_governance_contract_rejects_non_contract_address() {
+    let t = setup();
+    // A plain generated address has no deployed code, so it fails the
+    // `get_admin` view-function check and is rejected outright.
+    let fake_governance = Address::generate(&t.env);
+    let result = t
+        .client
+        .try_set_governance_contract(&t.admin, &fake_governance);
+    assert_eq!(
+        result.unwrap_err().unwrap(),
+        EscrowError::InvalidGovernanceContract
+    );
+}
+
+#[test]
+fn test_admin_cannot_repoint_governance_once_set() {
+    let t = setup();
+    let governance = t.env.register(MockGovernance, ());
+    t.client.set_governance_contract(&t.admin, &governance);
+
+    // Admin tries to re-point governance to a second, self-controlled instance.
+    let attacker_governance = t.env.register(MockGovernance, ());
+    let result = t
+        .client
+        .try_set_governance_contract(&t.admin, &attacker_governance);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAdmin);
+
+    // The governance address on file is unchanged.
+    assert_eq!(t.client.get_governance_contract(), Some(governance));
 }
