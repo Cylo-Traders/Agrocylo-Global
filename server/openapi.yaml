@@ -156,3 +156,467 @@ paths:
         '401': { description: Unauthorized }
         '403': { description: Forbidden }
         '404': { description: Notification not found }
+  # ──────────────────────────────────────────────────────────────────────────
+  # Referral Program Endpoints
+  # ──────────────────────────────────────────────────────────────────────────
+  /referrals/me:
+    get:
+      summary: Get or create referral code for authenticated user
+      tags: [Referrals]
+      security:
+        - walletAuth: []
+      responses:
+        '200':
+          description: Referral code and fee credit balance
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    description: Alphanumeric referral code
+                  referrerWallet:
+                    type: string
+                    description: Wallet address of the referrer
+                  createdAt:
+                    type: string
+                    format: date-time
+                  feeCreditBalance:
+                    type: number
+                    description: Fee credits earned from referrals (XLM)
+        '401': { description: Unauthorized }
+
+  /referrals/me/cohort:
+    get:
+      summary: Get cohort performance for authenticated referrer
+      tags: [Referrals]
+      security:
+        - walletAuth: []
+      responses:
+        '200':
+          description: Cohort performance and referral list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  performance:
+                    type: object
+                    properties:
+                      onboardedCount:
+                        type: integer
+                      transactingCount:
+                        type: integer
+                      rewardVolume:
+                        type: string
+                  referrals:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        referredWallet:
+                          type: string
+                        referralCode:
+                          type: string
+                        signedUpAt:
+                          type: string
+                          format: date-time
+                        hasTransacted:
+                          type: boolean
+        '401': { description: Unauthorized }
+
+  /referrals/signup:
+    post:
+      summary: Link new wallet to referral code during onboarding
+      tags: [Referrals]
+      security:
+        - walletAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [referralCode]
+              properties:
+                referralCode:
+                  type: string
+                  description: Referral code to link
+      responses:
+        '201':
+          description: Referral link created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  linked:
+                    type: boolean
+                  referral:
+                    type: object
+        '200':
+          description: Self-referral detected (not linked)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  linked:
+                    type: boolean
+                    example: false
+        '400': { description: Missing referralCode }
+        '401': { description: Unauthorized }
+
+  /admin/referrals/cohort:
+    get:
+      summary: Get platform-wide or per-referrer cohort performance (admin)
+      tags: [Admin, Referrals]
+      security:
+        - adminAuth: []
+      parameters:
+        - in: query
+          name: referrerWallet
+          schema:
+            type: string
+          description: Optional wallet address to filter by specific referrer
+      responses:
+        '200':
+          description: Cohort performance metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  onboardedCount:
+                    type: integer
+                  transactingCount:
+                    type: integer
+                  rewardVolume:
+                    type: string
+        '401': { description: Unauthorized }
+        '403': { description: Admin access required }
+
+  /admin/referrals/{referrerWallet}:
+    get:
+      summary: Get referral list for specific referrer (admin)
+      tags: [Admin, Referrals]
+      security:
+        - adminAuth: []
+      parameters:
+        - in: path
+          name: referrerWallet
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Referral list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    referredWallet:
+                      type: string
+                    referralCode:
+                      type: string
+                    signedUpAt:
+                      type: string
+                      format: date-time
+                    hasTransacted:
+                      type: boolean
+        '401': { description: Unauthorized }
+        '403': { description: Admin access required }
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Integrator API Endpoints (NGO/Cooperative Data Access)
+  # ──────────────────────────────────────────────────────────────────────────
+  /integrator/v1/reports/farmers:
+    get:
+      summary: Get aggregated farmer report (scoped to key)
+      tags: [Integrator API]
+      description: |
+        Returns anonymized, aggregated farmer data within the scope defined by the API key.
+        Rate limited to 30 requests per minute.
+      security:
+        - integratorApiKey: []
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 100
+            maximum: 500
+          description: Maximum number of records to return
+        - in: query
+          name: format
+          schema:
+            type: string
+            enum: [json, csv]
+            default: json
+          description: Response format (json or csv)
+      responses:
+        '200':
+          description: Farmer report data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  count:
+                    type: integer
+            text/csv:
+              schema:
+                type: string
+        '401': { description: Invalid or missing API key }
+        '429': { description: Rate limit exceeded }
+
+  /integrator/v1/reports/orders:
+    get:
+      summary: Get aggregated order report (scoped to key)
+      tags: [Integrator API]
+      description: |
+        Returns anonymized order transaction data within the scope defined by the API key.
+        Rate limited to 30 requests per minute.
+      security:
+        - integratorApiKey: []
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 100
+            maximum: 500
+        - in: query
+          name: format
+          schema:
+            type: string
+            enum: [json, csv]
+            default: json
+      responses:
+        '200':
+          description: Order report data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  count:
+                    type: integer
+            text/csv:
+              schema:
+                type: string
+        '401': { description: Invalid or missing API key }
+        '429': { description: Rate limit exceeded }
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Admin: Integrator API Key Management
+  # ──────────────────────────────────────────────────────────────────────────
+  /admin/integrator/keys:
+    post:
+      summary: Issue new scoped API key for external organization
+      tags: [Admin, Integrator API]
+      security:
+        - adminAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [organizationName]
+              properties:
+                organizationName:
+                  type: string
+                  description: Name of the NGO, cooperative, or government program
+                scopedFarmerWallets:
+                  type: array
+                  items:
+                    type: string
+                  description: Optional list of farmer wallets to scope the key to
+                scopedRegion:
+                  type: string
+                  description: Optional geographic region to scope the key to
+      responses:
+        '201':
+          description: API key created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  organizationName:
+                    type: string
+                  apiKey:
+                    type: string
+                    description: Generated API key (only shown once)
+                  scopedFarmerWallets:
+                    type: array
+                    items:
+                      type: string
+                  scopedRegion:
+                    type: string
+                  createdAt:
+                    type: string
+                    format: date-time
+                  createdByAdmin:
+                    type: string
+        '400': { description: Missing organizationName }
+        '401': { description: Unauthorized }
+        '403': { description: Admin access required }
+
+    get:
+      summary: List integrator API keys (optionally filtered by organization)
+      tags: [Admin, Integrator API]
+      security:
+        - adminAuth: []
+      parameters:
+        - in: query
+          name: organizationName
+          schema:
+            type: string
+          description: Filter by organization name
+      responses:
+        '200':
+          description: List of API keys (sensitive key values not included)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    organizationName:
+                      type: string
+                    scopedFarmerWallets:
+                      type: array
+                      items:
+                        type: string
+                    scopedRegion:
+                      type: string
+                    createdAt:
+                      type: string
+                      format: date-time
+                    createdByAdmin:
+                      type: string
+                    revokedAt:
+                      type: string
+                      format: date-time
+                      nullable: true
+        '401': { description: Unauthorized }
+        '403': { description: Admin access required }
+
+  /admin/integrator/keys/{keyId}:
+    delete:
+      summary: Revoke an integrator API key
+      tags: [Admin, Integrator API]
+      security:
+        - adminAuth: []
+      parameters:
+        - in: path
+          name: keyId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Key revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  revokedAt:
+                    type: string
+                    format: date-time
+        '401': { description: Unauthorized }
+        '403': { description: Admin access required }
+        '404': { description: Key not found }
+
+  /admin/integrator/keys/{keyId}/usage:
+    get:
+      summary: Get usage audit log for specific API key
+      tags: [Admin, Integrator API]
+      security:
+        - adminAuth: []
+      parameters:
+        - in: path
+          name: keyId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Usage log entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    timestamp:
+                      type: string
+                      format: date-time
+                    endpoint:
+                      type: string
+                    statusCode:
+                      type: integer
+                    ipAddress:
+                      type: string
+        '401': { description: Unauthorized }
+        '403': { description: Admin access required }
+        '404': { description: Key not found }
+
+# Security schemes
+components:
+  securitySchemes:
+    walletAuth:
+      type: apiKey
+      in: header
+      name: x-wallet-address
+      description: Wallet address for authenticated endpoints
+    adminAuth:
+      type: apiKey
+      in: header
+      name: x-admin-wallet
+      description: Admin wallet address
+    integratorApiKey:
+      type: apiKey
+      in: header
+      name: x-integrator-api-key
+      description: Scoped API key for external integrators
+
+tags:
+  - name: Referrals
+    description: Referral program endpoints for users
+  - name: Admin
+    description: Admin-only management endpoints
+  - name: Integrator API
+    description: External data access for NGOs and cooperatives
