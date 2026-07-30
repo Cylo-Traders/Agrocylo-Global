@@ -335,21 +335,23 @@ impl ProductionEscrowContract {
         Ok(())
     }
 
-    /// Set (or update) the governance contract address. Only the original
-    /// admin can do this — a one-time (or migration-time) bootstrapping step
-    /// that hands control of fee/token-whitelist parameters to governance.
-    /// Once set, `set_fee_config`/`set_registry_contract`/`update_supported_tokens`
-    /// can only be called by this address, not by the raw admin key.
+    /// Set (or update) the governance contract address. Admin-only for the
+    /// initial bootstrap while no governance is configured (Issue #680); once
+    /// set, `set_fee_config`/`set_registry_contract`/`update_supported_tokens`/
+    /// this setter itself can only be called by the governance contract, not
+    /// the raw admin key — so admin can no longer unilaterally re-point
+    /// governance to a self-controlled address. `governance` must be a live
+    /// contract implementing the expected interface, checked via a known
+    /// view-function call before it's accepted.
     pub fn set_governance_contract(
         env: Env,
         admin_caller: Address,
         governance: Address,
     ) -> Result<(), EscrowError> {
         admin_caller.require_auth();
-        let admin = admin(&env)?;
-        if admin_caller != admin {
-            return Err(EscrowError::NotAdmin);
-        }
+        require_governed_caller(&env, &admin_caller)?;
+        governance_client::verify(&env, &governance)
+            .map_err(|_| EscrowError::InvalidGovernanceContract)?;
         env.storage()
             .instance()
             .set(&DataKey::GovernanceContract, &governance);
@@ -1495,6 +1497,24 @@ mod registry_client {
         args.push_back(linked_escrow_order_id.into_val(env));
         let _: () = env.invoke_contract(registry, &func, args);
         Ok(())
+    }
+}
+
+/// Verifies a candidate governance address is a real deployed governance contract
+/// (Issue #680), so `set_governance_contract` can't be pointed at an arbitrary
+/// admin-controlled address. Uses raw `try_invoke_contract` against a known
+/// view function (`get_admin`) rather than a typed client, returning an error
+/// instead of trapping so the caller gets a clean `InvalidGovernanceContract`.
+mod governance_client {
+    use soroban_sdk::{Address, Env, Error as HostError, Symbol, Val, Vec};
+
+    pub fn verify(env: &Env, governance: &Address) -> Result<(), ()> {
+        let func = Symbol::new(env, "get_admin");
+        let args: Vec<Val> = Vec::new(env);
+        match env.try_invoke_contract::<Val, HostError>(governance, &func, args) {
+            Ok(_) => Ok(()),
+            Err(_) => Err(()),
+        }
     }
 }
 

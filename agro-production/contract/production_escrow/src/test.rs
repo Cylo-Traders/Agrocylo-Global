@@ -3,6 +3,7 @@
 extern crate std;
 
 use soroban_sdk::{
+    contract, contractimpl,
     testutils::{Address as _, Ledger, LedgerInfo},
     token::{Client as TokenClient, StellarAssetClient},
     Address, Env, Vec,
@@ -3205,10 +3206,23 @@ fn test_fee_config_admin_fallback_before_governance_set() {
     t.client.set_fee_config(&t.admin, &fee_collector, &500);
 }
 
+/// Stand-in for a real governance contract: exposes the `get_admin` view function
+/// `set_governance_contract` uses to verify a candidate address is a live deployed
+/// governance contract before accepting it (Issue #680).
+#[contract]
+struct MockGovernance;
+
+#[contractimpl]
+impl MockGovernance {
+    pub fn get_admin(env: Env) -> Address {
+        env.current_contract_address()
+    }
+}
+
 #[test]
 fn test_fee_config_rejects_admin_once_governance_set() {
     let t = setup();
-    let governance = Address::generate(&t.env);
+    let governance = t.env.register(MockGovernance, ());
     let fee_collector = Address::generate(&t.env);
 
     t.client.set_governance_contract(&t.admin, &governance);
@@ -3223,7 +3237,7 @@ fn test_fee_config_rejects_admin_once_governance_set() {
 #[test]
 fn test_registry_contract_rejects_admin_once_governance_set() {
     let t = setup();
-    let governance = Address::generate(&t.env);
+    let governance = t.env.register(MockGovernance, ());
     let registry = Address::generate(&t.env);
 
     t.client.set_governance_contract(&t.admin, &governance);
@@ -3237,7 +3251,7 @@ fn test_registry_contract_rejects_admin_once_governance_set() {
 #[test]
 fn test_update_supported_tokens_governance_gated() {
     let t = setup();
-    let governance = Address::generate(&t.env);
+    let governance = t.env.register(MockGovernance, ());
     t.client.set_governance_contract(&t.admin, &governance);
 
     let mut tokens = Vec::new(&t.env);
