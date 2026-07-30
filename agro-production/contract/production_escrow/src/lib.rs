@@ -31,7 +31,7 @@
 // per call to prevent ledger thrashing.
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env,
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, Map,
     Symbol, Vec,
 };
 
@@ -74,6 +74,16 @@ pub enum EscrowError {
     NotFarmer = 51,
     NotBuyer = 52,
     NotInvestor = 53,
+    /// Issue #652: caller was not the configured governance contract, once
+    /// one is set via `set_governance_contract`. Was referenced by
+    /// `require_governed_caller` (added in commit 897a3cc) without ever
+    /// being added to this enum, leaving the crate uncompilable.
+    NotGoverned = 54,
+    /// Issue #652: `set_governance_contract` was pointed at an address that
+    /// doesn't answer the expected view-function probe (see
+    /// `governance_client::verify`). Same missing-enum-variant class of bug
+    /// as `NotGoverned` above.
+    InvalidGovernanceContract = 55,
 
     NothingToClaim = 60,
     AlreadyClaimed = 61,
@@ -94,6 +104,18 @@ pub enum EscrowError {
     QuorumNotReached = 92,
     AlreadyVoted = 93,
     InvestorNotInCampaign = 94,
+    CancelWindowClosed = 95,
+    /// Issue #654: multi-party split order errors.
+    SplitSharesMustSumToTotal = 100,
+    SplitOrderNotFullyFunded = 101,
+    NotCoBuyer = 102,
+    AlreadyContributed = 103,
+    AlreadyConfirmed = 104,
+    SplitOrderAlreadyFunded = 105,
+    EmptyCoBuyerList = 106,
+    SplitOrderNotFound = 107,
+    SplitOrderNotDisputed = 108,
+    SplitOrderAlreadyDisputed = 109,
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +206,46 @@ pub struct Order {
     pub status: OrderStatus,
 }
 
+/// Multi-party split order (Issue #654): several co-buyers pool
+/// independently-funded shares into a single order against one campaign,
+/// distinct from group-order aggregation (which pools separate orders
+/// toward a farmer's funding target rather than pooling contributions into
+/// one order record). Mirrors `contracts/escrow::SplitOrder`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SplitOrderStatus {
+    Funding,
+    Active,
+    Confirmed,
+    Refunded,
+    Disputed,
+}
+
+/// Admin resolution for a disputed split order.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SplitOrderResolution {
+    RefundCoBuyers,
+    ReleaseToFarmer,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SplitOrder {
+    pub campaign_id: u64,
+    pub total_amount: i128,
+    pub fee: i128,
+    pub co_buyers: Vec<Address>,
+    pub shares: Map<Address, i128>,
+    pub funded: Map<Address, bool>,
+    pub confirmed: Map<Address, bool>,
+    pub funded_count: u32,
+    pub confirmed_count: u32,
+    pub confirmed_value: i128,
+    pub created_at: u64,
+    pub status: SplitOrderStatus,
+}
+
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
@@ -217,6 +279,9 @@ pub enum DataKey {
     Quorum,
     /// Track per-arbitrator vote per-campaign-dispute resolution.
     ArbitratorVote(u64, Address),
+    /// Multi-party split order (Issue #654).
+    SplitOrder(u64),
+    SplitOrderCount,
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +302,12 @@ const TTL_EXTEND: u32 = 100_000;
 
 /// Orders expire and become refundable after 96 hours of inactivity.
 pub const ORDER_EXPIRY_SECS: u64 = 96 * 3600;
+
+/// Buyer-initiated order cooling-off window (Issue #653): a buyer may cancel
+/// a still-pending order for a full refund within this many seconds of
+/// `order.created_at`, rather than waiting out the full 96-hour
+/// `ORDER_EXPIRY_SECS` window.
+pub const CANCEL_WINDOW_SECS: u64 = 30 * 60;
 
 /// The ordered sequence of milestones. Index 1 = Planted, 2 = Growing, etc.
 /// A campaign starts at milestone 0 (no milestones advanced).
@@ -774,6 +845,340 @@ impl ProductionEscrowContract {
             (id, buyer, campaign_id, amount),
         );
         Ok(id)
+    }
+
+    /// Buyer-initiated order cooling-off window (Issue #653). Mirrors
+    /// `contracts/escrow::cancel_order`: lets a buyer undo an order within
+    /// `CANCEL_WINDOW_SECS` of creation instead of waiting the full
+    /// `ORDER_EXPIRY_SECS` window.
+    ///
+    /// Fee-refund semantics: refunds `amount + fee` (both are still held in
+    /// escrow — `fee` is only transferred out to the fee collector on
+    /// `confirm_order`), matching `batch_refund_orders`' existing refund
+    /// amount for the same not-yet-confirmed state.
+    pub fn cancel_order(env: Env, buyer: Address, order_id: u64) -> Result<(), EscrowError> {
+        buyer.require_auth();
+        let mut order: Order = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Order(order_id))
+            .ok_or(EscrowError::OrderNotFound)?;
+        if order.buyer != buyer {
+            return Err(EscrowError::NotBuyer);
+        }
+        if order.status != OrderStatus::Pending {
+            return Err(EscrowError::OrderNotPending);
+        }
+        if env.ledger().timestamp() > order.created_at + CANCEL_WINDOW_SECS {
+            return Err(EscrowError::CancelWindowClosed);
+        }
+
+        order.status = OrderStatus::Refunded;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Order(order_id), &order);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Order(order_id), TTL_THRESHOLD, TTL_EXTEND);
+
+        let campaign = load_campaign(&env, order.campaign_id)?;
+        let refund_amount = checked_add(order.amount, order.fee)?;
+        let token_client = token::Client::new(&env, &campaign.token);
+        token_client.transfer(
+            &env.current_contract_address(),
+            &order.buyer,
+            &refund_amount,
+        );
+
+        env.events().publish(
+            (t_order(), symbol_short!("cancelled")),
+            (order_id, buyer, refund_amount),
+        );
+        Ok(())
+    }
+
+    // ── Multi-party split orders (Issue #654) ─────────────────────────────
+    // Several co-buyers pool independently-funded shares into a single order
+    // against one campaign — e.g. three neighbors splitting one bulk sack of
+    // grain. Distinct from group-order aggregation, which pools separate
+    // orders toward a farmer's funding target rather than pooling
+    // contributions into one order record.
+
+    /// Registers a new split order. `initiator` must be one of the listed
+    /// `co_buyers`. No funds move yet — each co-buyer funds their own share
+    /// independently via `fund_split_order`.
+    pub fn create_split_order(
+        env: Env,
+        initiator: Address,
+        campaign_id: u64,
+        co_buyers: Vec<Address>,
+        shares: Vec<i128>,
+    ) -> Result<u64, EscrowError> {
+        initiator.require_auth();
+
+        if co_buyers.len() < 2 {
+            return Err(EscrowError::EmptyCoBuyerList);
+        }
+        if co_buyers.len() != shares.len() {
+            return Err(EscrowError::SplitSharesMustSumToTotal);
+        }
+
+        let campaign = load_campaign(&env, campaign_id)?;
+        if campaign.status != CampaignStatus::Harvested
+            && campaign.status != CampaignStatus::InProduction
+        {
+            return Err(EscrowError::CampaignNotHarvested);
+        }
+
+        let mut shares_map: Map<Address, i128> = Map::new(&env);
+        let mut total_amount: i128 = 0;
+        let mut initiator_included = false;
+        for i in 0..co_buyers.len() {
+            let co_buyer = co_buyers.get(i).unwrap();
+            let share = shares.get(i).unwrap();
+            if share <= 0 {
+                return Err(EscrowError::InvalidAmount);
+            }
+            if shares_map.contains_key(co_buyer.clone()) {
+                return Err(EscrowError::AlreadyContributed);
+            }
+            if co_buyer == initiator {
+                initiator_included = true;
+            }
+            shares_map.set(co_buyer.clone(), share);
+            total_amount = checked_add(total_amount, share)?;
+        }
+        if !initiator_included {
+            return Err(EscrowError::NotCoBuyer);
+        }
+
+        let fee_rate_bps: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::FeeRateBps)
+            .unwrap_or(0);
+        let fee = (total_amount * fee_rate_bps as i128) / 10_000;
+
+        let mut order_id: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::SplitOrderCount)
+            .unwrap_or(0);
+        order_id += 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::SplitOrderCount, &order_id);
+
+        let order = SplitOrder {
+            campaign_id,
+            total_amount,
+            fee,
+            co_buyers,
+            shares: shares_map,
+            funded: Map::new(&env),
+            confirmed: Map::new(&env),
+            funded_count: 0,
+            confirmed_count: 0,
+            confirmed_value: 0,
+            created_at: env.ledger().timestamp(),
+            status: SplitOrderStatus::Funding,
+        };
+        save_split_order(&env, order_id, &order);
+
+        env.events().publish(
+            (t_order(), symbol_short!("splitnew")),
+            (order_id, campaign_id, total_amount),
+        );
+
+        Ok(order_id)
+    }
+
+    /// A listed co-buyer funds their own pledged share. Once every co-buyer
+    /// has funded, the order becomes `Active`.
+    pub fn fund_split_order(env: Env, co_buyer: Address, order_id: u64) -> Result<(), EscrowError> {
+        co_buyer.require_auth();
+
+        let mut order = load_split_order(&env, order_id)?;
+        if order.status != SplitOrderStatus::Funding {
+            return Err(EscrowError::SplitOrderAlreadyFunded);
+        }
+        let share = order
+            .shares
+            .get(co_buyer.clone())
+            .ok_or(EscrowError::NotCoBuyer)?;
+        if order.funded.get(co_buyer.clone()).unwrap_or(false) {
+            return Err(EscrowError::AlreadyContributed);
+        }
+
+        let campaign = load_campaign(&env, order.campaign_id)?;
+        let token_client = token::Client::new(&env, &campaign.token);
+        token_client.transfer(&co_buyer, &env.current_contract_address(), &share);
+
+        order.funded.set(co_buyer.clone(), true);
+        order.funded_count += 1;
+        if order.funded_count == order.co_buyers.len() {
+            order.status = SplitOrderStatus::Active;
+            env.events().publish(
+                (t_order(), symbol_short!("splitact")),
+                (order_id, order.total_amount),
+            );
+        }
+        save_split_order(&env, order_id, &order);
+
+        env.events().publish(
+            (t_order(), symbol_short!("splitfnd")),
+            (order_id, co_buyer, share),
+        );
+
+        Ok(())
+    }
+
+    /// A co-buyer confirms receipt. Revenue is credited to the campaign and
+    /// the fee collected once either a strict majority-by-value of
+    /// co-buyers have confirmed, or every co-buyer has (unanimous) —
+    /// whichever threshold is reached first. Mirrors `confirm_order`'s fee
+    /// and revenue accounting.
+    pub fn confirm_split_receipt(
+        env: Env,
+        co_buyer: Address,
+        order_id: u64,
+    ) -> Result<(), EscrowError> {
+        co_buyer.require_auth();
+
+        let mut order = load_split_order(&env, order_id)?;
+        if order.status != SplitOrderStatus::Active {
+            return Err(EscrowError::SplitOrderNotFullyFunded);
+        }
+        let share = order
+            .shares
+            .get(co_buyer.clone())
+            .ok_or(EscrowError::NotCoBuyer)?;
+        if order.confirmed.get(co_buyer.clone()).unwrap_or(false) {
+            return Err(EscrowError::AlreadyConfirmed);
+        }
+
+        order.confirmed.set(co_buyer.clone(), true);
+        order.confirmed_count += 1;
+        order.confirmed_value = checked_add(order.confirmed_value, share)?;
+
+        let majority_by_value = order.confirmed_value.checked_mul(2).unwrap_or(i128::MAX)
+            > order.total_amount;
+        let unanimous = order.confirmed_count == order.co_buyers.len();
+
+        if majority_by_value || unanimous {
+            let mut campaign = load_campaign(&env, order.campaign_id)?;
+            if campaign.status != CampaignStatus::Settled {
+                campaign.total_revenue = checked_add(campaign.total_revenue, order.total_amount)?;
+                save_campaign(&env, &campaign);
+            }
+            if order.fee > 0 {
+                if let Some(fee_collector) = env
+                    .storage()
+                    .instance()
+                    .get::<_, Address>(&DataKey::FeeCollector)
+                {
+                    token::Client::new(&env, &campaign.token).transfer(
+                        &env.current_contract_address(),
+                        &fee_collector,
+                        &order.fee,
+                    );
+                }
+            }
+            order.status = SplitOrderStatus::Confirmed;
+            env.events().publish(
+                (t_order(), symbol_short!("splitcnf")),
+                (order_id, order.total_amount),
+            );
+        }
+
+        save_split_order(&env, order_id, &order);
+
+        Ok(())
+    }
+
+    pub fn open_split_dispute(env: Env, caller: Address, order_id: u64) -> Result<(), EscrowError> {
+        caller.require_auth();
+
+        let mut order = load_split_order(&env, order_id)?;
+        if order.status != SplitOrderStatus::Active {
+            return Err(EscrowError::SplitOrderNotFullyFunded);
+        }
+        let campaign = load_campaign(&env, order.campaign_id)?;
+        let is_co_buyer = order.shares.contains_key(caller.clone());
+        if !is_co_buyer && caller != campaign.farmer {
+            return Err(EscrowError::NotBuyer);
+        }
+
+        order.status = SplitOrderStatus::Disputed;
+        save_split_order(&env, order_id, &order);
+
+        env.events()
+            .publish((t_order(), symbol_short!("splitdsp")), (order_id, caller));
+        Ok(())
+    }
+
+    /// Admin resolves a disputed split order. `RefundCoBuyers` splits
+    /// `total_amount` pro-rata back to each contributor (by their original
+    /// share); `ReleaseToFarmer` credits the campaign's revenue and collects
+    /// the fee, same as a normal confirmation.
+    pub fn resolve_split_dispute(
+        env: Env,
+        admin_caller: Address,
+        order_id: u64,
+        resolution: SplitOrderResolution,
+    ) -> Result<(), EscrowError> {
+        admin_caller.require_auth();
+        let admin_addr = admin(&env)?;
+        if admin_caller != admin_addr {
+            return Err(EscrowError::NotAdmin);
+        }
+
+        let mut order = load_split_order(&env, order_id)?;
+        if order.status != SplitOrderStatus::Disputed {
+            return Err(EscrowError::SplitOrderNotDisputed);
+        }
+        let campaign = load_campaign(&env, order.campaign_id)?;
+
+        match resolution {
+            SplitOrderResolution::RefundCoBuyers => {
+                refund_split_order_pro_rata(&env, &order, &campaign.token, order.total_amount)?;
+                order.status = SplitOrderStatus::Refunded;
+            }
+            SplitOrderResolution::ReleaseToFarmer => {
+                let mut campaign = campaign.clone();
+                if campaign.status != CampaignStatus::Settled {
+                    campaign.total_revenue =
+                        checked_add(campaign.total_revenue, order.total_amount)?;
+                    save_campaign(&env, &campaign);
+                }
+                if order.fee > 0 {
+                    if let Some(fee_collector) = env
+                        .storage()
+                        .instance()
+                        .get::<_, Address>(&DataKey::FeeCollector)
+                    {
+                        token::Client::new(&env, &campaign.token).transfer(
+                            &env.current_contract_address(),
+                            &fee_collector,
+                            &order.fee,
+                        );
+                    }
+                }
+                order.status = SplitOrderStatus::Confirmed;
+            }
+        }
+
+        save_split_order(&env, order_id, &order);
+
+        env.events().publish(
+            (t_order(), symbol_short!("splitres")),
+            (order_id,),
+        );
+        Ok(())
+    }
+
+    pub fn get_split_order(env: Env, order_id: u64) -> Result<SplitOrder, EscrowError> {
+        load_split_order(&env, order_id)
     }
 
     /// Buyer confirms receipt. Payment counts toward campaign revenue and fee is collected.
@@ -1592,6 +1997,50 @@ fn save_campaign(env: &Env, c: &Campaign) {
     env.storage()
         .persistent()
         .extend_ttl(&DataKey::Campaign(c.id), TTL_THRESHOLD, TTL_EXTEND);
+}
+
+fn load_split_order(env: &Env, order_id: u64) -> Result<SplitOrder, EscrowError> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::SplitOrder(order_id))
+        .ok_or(EscrowError::SplitOrderNotFound)
+}
+
+fn save_split_order(env: &Env, order_id: u64, order: &SplitOrder) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::SplitOrder(order_id), order);
+    env.storage().persistent().extend_ttl(
+        &DataKey::SplitOrder(order_id),
+        TTL_THRESHOLD,
+        TTL_EXTEND,
+    );
+}
+
+/// Refunds each co-buyer their pro-rata share of `pool` (out of
+/// `order.total_amount`). Integer-division dust from rounding is left in the
+/// contract.
+fn refund_split_order_pro_rata(
+    env: &Env,
+    order: &SplitOrder,
+    token: &Address,
+    pool: i128,
+) -> Result<(), EscrowError> {
+    if pool <= 0 {
+        return Ok(());
+    }
+    let token_client = token::Client::new(env, token);
+    for co_buyer in order.co_buyers.iter() {
+        let share = order.shares.get(co_buyer.clone()).unwrap_or(0);
+        if share <= 0 {
+            continue;
+        }
+        let refund_amount = checked_mul(pool, share)? / order.total_amount;
+        if refund_amount > 0 {
+            token_client.transfer(&env.current_contract_address(), &co_buyer, &refund_amount);
+        }
+    }
+    Ok(())
 }
 
 /// Get the total confirmed order volume for a buyer on a campaign.

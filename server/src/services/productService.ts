@@ -233,3 +233,69 @@ export async function softDeleteProduct(productId: string, farmerWallet: string)
   emitProductEvent('product:deleted', result);
   return result;
 }
+
+// ── Farmer-owned sales-history price suggestion (Issue #655) ────────────────
+// Lightweight, per-farmer, own-history-only suggestion at the point of
+// listing — distinct from the market-wide price index (#594) or forecasting
+// dashboard (#603), which pool data across farmers.
+
+/** Below this many past sales, a suggestion would be too noisy to show. */
+export const MIN_SALES_FOR_SUGGESTION = 3;
+/** Caps how far back a suggestion looks, so old prices don't dominate. */
+const MAX_SALES_CONSIDERED = 20;
+
+export interface SuggestedPriceResult {
+  has_suggestion: boolean;
+  suggested_price: string | null;
+  currency: string | null;
+  sample_count: number;
+}
+
+/**
+ * Median of `prices`, robust to a single outlier sale skewing a plain
+ * average. Returns null below `MIN_SALES_FOR_SUGGESTION` samples.
+ */
+export function computeSuggestedPrice(prices: number[]): number | null {
+  if (prices.length < MIN_SALES_FOR_SUGGESTION) return null;
+  const sorted = [...prices].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
+}
+
+/**
+ * Suggests a listing price for `productId` based on the calling farmer's own
+ * past `PriceHistory` rows for the same category (falling back to the same
+ * product when it has no category), most recent first. Scoped strictly to
+ * `farmerWallet` — never reads another farmer's sales history.
+ */
+export async function getSuggestedPrice(
+  productId: string,
+  farmerWallet: string,
+): Promise<SuggestedPriceResult> {
+  const product = await prisma.product.findUnique({ where: { id: productId } });
+  if (!product) throw new ApiError(404, 'Not Found', 'Product not found');
+  if (product.farmerWallet.toLowerCase() !== farmerWallet.toLowerCase()) {
+    throw new ApiError(403, 'Forbidden', 'You do not own this product');
+  }
+
+  const history = await prisma.priceHistory.findMany({
+    where: {
+      product: product.category
+        ? { farmerWallet: farmerWallet.toLowerCase(), category: product.category }
+        : { id: product.id, farmerWallet: farmerWallet.toLowerCase() },
+    },
+    orderBy: { timestamp: 'desc' },
+    take: MAX_SALES_CONSIDERED,
+    select: { price: true, currency: true },
+  });
+
+  const prices = history.map((row) => Number(row.price)).filter((n) => Number.isFinite(n));
+  const suggested = computeSuggestedPrice(prices);
+
+  return {
+    has_suggestion: suggested !== null,
+    suggested_price: suggested !== null ? suggested.toString() : null,
+    currency: suggested !== null ? (history[0]?.currency ?? product.currency) : null,
+    sample_count: prices.length,
+  };
+}

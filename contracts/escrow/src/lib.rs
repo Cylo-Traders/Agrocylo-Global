@@ -1,7 +1,7 @@
 #![no_std]
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, symbol_short, token,
-    Address, Env, Map, String, Vec,
+    Address, Env, String, Vec,
 };
 
 // Errors
@@ -34,6 +34,23 @@ pub enum EscrowError {
     SlippageToleranceExceeded = 23,
     InvalidSlippageTolerance = 24,
     InvalidGovernanceContract = 25,
+    /// Issue #652: caller did not match the configured independent attester
+    /// for `mark_delivered`.
+    NotAttester = 26,
+    ArbitrationNotConfigured = 27,
+    ArbitratorNotFound = 28,
+    AlreadyVoted = 29,
+    CancelWindowClosed = 30,
+    /// Issue #654: multi-party split order errors.
+    SplitSharesMustSumToTotal = 31,
+    SplitOrderNotFullyFunded = 32,
+    NotCoBuyer = 33,
+    AlreadyContributed = 34,
+    AlreadyConfirmed = 35,
+    SplitOrderAlreadyFunded = 36,
+    EmptyCoBuyerList = 37,
+    SplitOrderNotDisputed = 38,
+    SplitOrderAlreadyDisputed = 39,
 }
 
 #[contracttype]
@@ -63,6 +80,48 @@ pub struct Order {
     pub timestamp: u64,
     pub delivery_timestamp: u64,
     pub status: OrderStatus,
+}
+
+/// Multi-party split order (Issue #654): several co-buyers pool
+/// independently-funded shares into a single escrow record for one delivery,
+/// distinct from group-order aggregation (which pools separate orders toward
+/// a farmer's target quantity rather than pooling contributions into one
+/// escrow record).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SplitOrderStatus {
+    /// Awaiting funding from one or more co-buyers.
+    Funding,
+    /// Fully funded; awaiting delivery + confirmation.
+    Active,
+    Completed,
+    Refunded,
+    Disputed,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SplitOrder {
+    pub farmer: Address,
+    pub token: Address,
+    /// Sum of all co-buyer shares (gross, before the platform fee).
+    pub total_amount: i128,
+    pub co_buyers: Vec<Address>,
+    /// Each co-buyer's pledged share of `total_amount`.
+    pub shares: Map<Address, i128>,
+    pub funded: Map<Address, bool>,
+    pub confirmed: Map<Address, bool>,
+    pub funded_count: u32,
+    pub confirmed_count: u32,
+    /// Sum of shares belonging to co-buyers who have confirmed receipt, used
+    /// for the majority-by-value release threshold.
+    pub confirmed_value: i128,
+    /// Net amount held in escrow once fully funded (`total_amount` minus the
+    /// platform fee, taken once at full-funding time).
+    pub net_amount: i128,
+    pub timestamp: u64,
+    pub delivery_timestamp: u64,
+    pub status: SplitOrderStatus,
 }
 
 #[contracttype]
@@ -128,6 +187,22 @@ pub enum DataKey {
     /// On-chain reputation registry (Issue #592). Optional: if unset,
     /// reputation reporting is skipped entirely.
     RegistryContract,
+    /// Independent attester role (Issue #652), ported from production_escrow's
+    /// `set_attester`/`mark_harvest` pattern. Required co-signer on
+    /// `mark_delivered` so the farmer can no longer unilaterally self-attest
+    /// delivery and cut off the buyer's automatic refund-on-expiry path.
+    Attester,
+    /// Arbitrator pool addresses (Issue #652 drift fix, ported from
+    /// production_escrow's arbitrator-voting dispute resolution).
+    Arbitrators,
+    /// Minimum number of arbitrator votes required to resolve a dispute.
+    Quorum,
+    /// Track per-arbitrator vote per-order dispute resolution.
+    ArbitratorVote(u64, Address),
+    /// Multi-party split order (Issue #654).
+    SplitOrder(u64),
+    SplitOrderCount,
+    SplitOrderDispute(u64),
 }
 
 /// Cross-contract interface for a Stellar path-payment router (e.g. a Soroswap-style
@@ -158,6 +233,12 @@ pub trait PathPaymentRouterTrait {
 }
 
 const NINETY_SIX_HOURS_IN_SECONDS: u64 = 96 * 60 * 60;
+
+/// Buyer-initiated cancellation window (Issue #653): a buyer may cancel a
+/// still-pending, not-yet-delivered order for a full refund within this many
+/// seconds of `order.timestamp`, rather than waiting out the full 96-hour
+/// expiry window.
+const CANCEL_WINDOW_SECONDS: u64 = 30 * 60;
 
 const TTL_THRESHOLD: u32 = 1000;
 const TTL_EXTEND_TO: u32 = 100_000;
@@ -316,6 +397,72 @@ fn write_dispute(env: &Env, order_id: u64, dispute: &Dispute) {
     );
 }
 
+fn read_split_order(env: &Env, order_id: u64) -> Result<SplitOrder, EscrowError> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::SplitOrder(order_id))
+        .ok_or(EscrowError::OrderDoesNotExist)
+}
+
+fn write_split_order(env: &Env, order_id: u64, order: &SplitOrder) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::SplitOrder(order_id), order);
+    env.storage().persistent().extend_ttl(
+        &DataKey::SplitOrder(order_id),
+        TTL_THRESHOLD,
+        TTL_EXTEND_TO,
+    );
+}
+
+fn read_split_dispute(env: &Env, order_id: u64) -> Result<Dispute, EscrowError> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::SplitOrderDispute(order_id))
+        .ok_or(EscrowError::OrderNotDisputed)
+}
+
+fn write_split_dispute(env: &Env, order_id: u64, dispute: &Dispute) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::SplitOrderDispute(order_id), dispute);
+    env.storage().persistent().extend_ttl(
+        &DataKey::SplitOrderDispute(order_id),
+        TTL_THRESHOLD,
+        TTL_EXTEND_TO,
+    );
+}
+
+/// Refunds each co-buyer their pro-rata share of `pool` (out of
+/// `order.total_amount`), used by both dispute-triggered refunds and
+/// dispute-triggered partial splits. Integer-division dust from rounding is
+/// left in the contract, matching this contract's existing `Split`
+/// dispute-resolution rounding convention.
+fn refund_split_order_pro_rata(
+    env: &Env,
+    order: &SplitOrder,
+    pool: i128,
+) -> Result<(), EscrowError> {
+    if pool <= 0 {
+        return Ok(());
+    }
+    let token_client = token::Client::new(env, &order.token);
+    for co_buyer in order.co_buyers.iter() {
+        let share = order.shares.get(co_buyer.clone()).unwrap_or(0);
+        if share <= 0 {
+            continue;
+        }
+        let refund_amount = pool
+            .checked_mul(share)
+            .ok_or(EscrowError::ArithmeticError)?
+            / order.total_amount;
+        if refund_amount > 0 {
+            token_client.transfer(&env.current_contract_address(), &co_buyer, &refund_amount);
+        }
+    }
+    Ok(())
+}
+
 fn resolve_escrow_dispute_internal(
     env: &Env,
     order_id: u64,
@@ -325,10 +472,17 @@ fn resolve_escrow_dispute_internal(
     let mut dispute = read_dispute(env, order_id)?;
     let token_client = token::Client::new(env, &order.token);
 
+    // Tracks what fraction of the escrowed amount the buyer ended up with, so
+    // the resolved outcome can be reported to the reputation registry below
+    // (Issue #652 drift fix: this was previously only wired up for
+    // `confirm_receipt`, never for dispute resolution).
+    let buyer_share_bps: u32;
+
     match resolution.clone() {
         DisputeResolution::Refund => {
             order.status = OrderStatus::Refunded;
             token_client.transfer(&env.current_contract_address(), &order.buyer, &order.amount);
+            buyer_share_bps = 10_000;
         }
         DisputeResolution::Release => {
             order.status = OrderStatus::Completed;
@@ -337,11 +491,13 @@ fn resolve_escrow_dispute_internal(
                 &order.farmer,
                 &order.amount,
             );
+            buyer_share_bps = 0;
         }
-        DisputeResolution::Split(buyer_share_bps) => {
-            if buyer_share_bps > 10_000 {
+        DisputeResolution::Split(split_bps) => {
+            if split_bps > 10_000 {
                 return Err(EscrowError::InvalidSplitRatio);
             }
+            buyer_share_bps = split_bps;
             let refund_amount = order
                 .amount
                 .checked_mul(buyer_share_bps as i128)
@@ -373,6 +529,8 @@ fn resolve_escrow_dispute_internal(
     write_order(env, order_id, &order);
     write_dispute(env, order_id, &dispute);
 
+    report_reputation_outcome(env, &order.farmer, Some(buyer_share_bps));
+
     env.events().publish(
         (symbol_short!("order"), symbol_short!("resolved")),
         (order_id, resolution, order.buyer, order.farmer),
@@ -386,6 +544,19 @@ fn read_admin(env: &Env) -> Result<Address, EscrowError> {
         .instance()
         .get(&DataKey::Admin)
         .ok_or(EscrowError::ContractNotInitialized)
+}
+
+/// Resolves the party authorized to co-sign `mark_delivered` (Issue #652).
+/// Falls back to the admin address while no dedicated attester has been
+/// configured via `set_attester`, mirroring the governance-fallback
+/// convention already used elsewhere in this contract so existing
+/// deployments/tests are not bricked by this fix. Once `set_attester` is
+/// called, only that address may co-sign.
+fn read_attester(env: &Env) -> Result<Address, EscrowError> {
+    if let Some(attester) = env.storage().instance().get::<_, Address>(&DataKey::Attester) {
+        return Ok(attester);
+    }
+    read_admin(env)
 }
 
 /// Enforces that `caller` is the authorized party for governance-gated
@@ -670,8 +841,43 @@ impl EscrowContract {
         env.storage().instance().get(&DataKey::RegistryContract)
     }
 
-    pub fn mark_delivered(env: Env, farmer: Address, order_id: u64) -> Result<(), EscrowError> {
+    /// Set (or update) the independent attester role (Issue #652). Admin-only.
+    /// The attester must co-sign `mark_delivered` so a farmer can no longer
+    /// unilaterally self-attest delivery and cut off the buyer's automatic
+    /// refund-on-expiry path (the same self-rug exploit class fixed in
+    /// `production_escrow` via `set_attester`/`mark_harvest`).
+    pub fn set_attester(env: Env, admin_caller: Address, attester: Address) -> Result<(), EscrowError> {
+        admin_caller.require_auth();
+        let stored_admin = read_admin(&env)?;
+        if admin_caller != stored_admin {
+            return Err(EscrowError::NotAdmin);
+        }
+        env.storage().instance().set(&DataKey::Attester, &attester);
+        Ok(())
+    }
+
+    pub fn get_attester(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Attester)
+    }
+
+    /// Requires independent attester co-signature (Issue #652) to prevent the
+    /// farmer self-attest exploit: previously `mark_delivered` needed only the
+    /// farmer's own signature, letting a farmer immediately cut off the
+    /// buyer's automatic `refund_expired_order` escape hatch for an order that
+    /// was never actually delivered.
+    pub fn mark_delivered(
+        env: Env,
+        farmer: Address,
+        attester_caller: Address,
+        order_id: u64,
+    ) -> Result<(), EscrowError> {
         farmer.require_auth();
+        attester_caller.require_auth();
+
+        let attester_addr = read_attester(&env)?;
+        if attester_caller != attester_addr {
+            return Err(EscrowError::NotAttester);
+        }
 
         let mut order = read_order(&env, order_id)?;
 
@@ -809,6 +1015,416 @@ impl EscrowContract {
         Ok(())
     }
 
+    /// Buyer-initiated order cooling-off window (Issue #653). Lets a buyer who
+    /// fat-fingered a quantity or changed their mind undo the transaction
+    /// within `CANCEL_WINDOW_SECONDS` of creation, instead of being locked in
+    /// for the full 96-hour `refund_expired_order` window.
+    ///
+    /// Fee-refund semantics: `order.amount` is the *net* amount held in
+    /// escrow (the platform fee was already transferred to the fee collector
+    /// atomically at `create_order` time). `cancel_order` refunds this net
+    /// amount only — the fee is not refunded, matching the existing
+    /// `refund_expired_order`/`refund_expired_orders` behavior for the same
+    /// reason (the fee has already left the contract).
+    pub fn cancel_order(env: Env, buyer: Address, order_id: u64) -> Result<(), EscrowError> {
+        buyer.require_auth();
+
+        let mut order = read_order(&env, order_id)?;
+        if order.buyer != buyer {
+            return Err(EscrowError::NotBuyer);
+        }
+        if order.status != OrderStatus::Pending {
+            return Err(EscrowError::OrderNotPending);
+        }
+        if order.delivery_timestamp != 0 {
+            return Err(EscrowError::OrderNotDelivered);
+        }
+        if env.ledger().timestamp() > order.timestamp + CANCEL_WINDOW_SECONDS {
+            return Err(EscrowError::CancelWindowClosed);
+        }
+
+        order.status = OrderStatus::Refunded;
+        write_order(&env, order_id, &order);
+
+        token::Client::new(&env, &order.token).transfer(
+            &env.current_contract_address(),
+            &order.buyer,
+            &order.amount,
+        );
+
+        env.events().publish(
+            (symbol_short!("order"), symbol_short!("cancelled")),
+            (order_id, order.buyer),
+        );
+
+        Ok(())
+    }
+
+    // ── Multi-party split orders (Issue #654) ─────────────────────────────
+    // Several co-buyers pool independently-funded shares into a single
+    // escrow record for one delivery — e.g. three neighbors splitting one
+    // bulk sack of grain. Distinct from group-order aggregation, which pools
+    // separate orders toward a farmer's target quantity rather than pooling
+    // contributions into one escrow record.
+
+    /// Registers a new split order. `initiator` must be one of the listed
+    /// `co_buyers` (whichever neighbor proposes the split); `shares[i]` is
+    /// `co_buyers[i]`'s pledged contribution. No funds move yet — each
+    /// co-buyer funds their own share independently via `fund_split_order`.
+    pub fn create_split_order(
+        env: Env,
+        initiator: Address,
+        farmer: Address,
+        token: Address,
+        co_buyers: Vec<Address>,
+        shares: Vec<i128>,
+    ) -> Result<u64, EscrowError> {
+        initiator.require_auth();
+
+        if co_buyers.len() < 2 {
+            return Err(EscrowError::EmptyCoBuyerList);
+        }
+        if co_buyers.len() != shares.len() {
+            return Err(EscrowError::SplitSharesMustSumToTotal);
+        }
+
+        let instance_storage = env.storage().instance();
+        let supported_tokens: Vec<Address> = instance_storage
+            .get(&DataKey::SupportedTokens)
+            .ok_or(EscrowError::ContractNotInitialized)?;
+        if !supported_tokens.contains(&token) {
+            return Err(EscrowError::UnsupportedToken);
+        }
+
+        let mut shares_map: Map<Address, i128> = Map::new(&env);
+        let mut total_amount: i128 = 0;
+        let mut initiator_included = false;
+        for i in 0..co_buyers.len() {
+            let co_buyer = co_buyers.get(i).unwrap();
+            let share = shares.get(i).unwrap();
+            if co_buyer == farmer {
+                return Err(EscrowError::BuyerCannotEqualFarmer);
+            }
+            if share <= 0 {
+                return Err(EscrowError::AmountMustBePositive);
+            }
+            if shares_map.contains_key(co_buyer.clone()) {
+                return Err(EscrowError::AlreadyContributed);
+            }
+            if co_buyer == initiator {
+                initiator_included = true;
+            }
+            shares_map.set(co_buyer.clone(), share);
+            total_amount = total_amount
+                .checked_add(share)
+                .ok_or(EscrowError::ArithmeticError)?;
+        }
+        if !initiator_included {
+            return Err(EscrowError::NotCoBuyer);
+        }
+
+        let order_id: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::SplitOrderCount)
+            .unwrap_or(0u64)
+            + 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::SplitOrderCount, &order_id);
+
+        let order = SplitOrder {
+            farmer: farmer.clone(),
+            token: token.clone(),
+            total_amount,
+            co_buyers: co_buyers.clone(),
+            shares: shares_map,
+            funded: Map::new(&env),
+            confirmed: Map::new(&env),
+            funded_count: 0,
+            confirmed_count: 0,
+            confirmed_value: 0,
+            net_amount: 0,
+            timestamp: env.ledger().timestamp(),
+            delivery_timestamp: 0,
+            status: SplitOrderStatus::Funding,
+        };
+        write_split_order(&env, order_id, &order);
+
+        env.events().publish(
+            (symbol_short!("split"), symbol_short!("created")),
+            (order_id, farmer, token, total_amount),
+        );
+
+        Ok(order_id)
+    }
+
+    /// A listed co-buyer funds their own pledged share. Once every co-buyer
+    /// has funded, the order becomes `Active`: the platform fee is taken
+    /// once from the full pool and the remainder stays escrowed for the
+    /// farmer's eventual payout.
+    pub fn fund_split_order(env: Env, co_buyer: Address, order_id: u64) -> Result<(), EscrowError> {
+        co_buyer.require_auth();
+
+        let mut order = read_split_order(&env, order_id)?;
+        if order.status != SplitOrderStatus::Funding {
+            return Err(EscrowError::SplitOrderAlreadyFunded);
+        }
+        let share = order
+            .shares
+            .get(co_buyer.clone())
+            .ok_or(EscrowError::NotCoBuyer)?;
+        if order.funded.get(co_buyer.clone()).unwrap_or(false) {
+            return Err(EscrowError::AlreadyContributed);
+        }
+
+        let token_client = token::Client::new(&env, &order.token);
+        token_client.transfer(&co_buyer, &env.current_contract_address(), &share);
+
+        order.funded.set(co_buyer.clone(), true);
+        order.funded_count += 1;
+
+        if order.funded_count == order.co_buyers.len() {
+            let fee_collector: Address = env
+                .storage()
+                .instance()
+                .get(&DataKey::FeeCollector)
+                .ok_or(EscrowError::ContractNotInitialized)?;
+            let fee_rate_bps: u32 = env
+                .storage()
+                .instance()
+                .get(&DataKey::FeeRateBps)
+                .unwrap_or(DEFAULT_FEE_RATE_BPS);
+            let fee = order
+                .total_amount
+                .checked_mul(fee_rate_bps as i128)
+                .ok_or(EscrowError::ArithmeticError)?
+                / 10_000;
+            let net_amount = order
+                .total_amount
+                .checked_sub(fee)
+                .ok_or(EscrowError::ArithmeticError)?;
+            if fee > 0 {
+                token_client.transfer(&env.current_contract_address(), &fee_collector, &fee);
+            }
+            order.net_amount = net_amount;
+            order.status = SplitOrderStatus::Active;
+
+            env.events().publish(
+                (symbol_short!("split"), symbol_short!("active")),
+                (order_id, net_amount),
+            );
+        }
+
+        write_split_order(&env, order_id, &order);
+
+        env.events().publish(
+            (symbol_short!("split"), symbol_short!("funded")),
+            (order_id, co_buyer, share),
+        );
+
+        Ok(())
+    }
+
+    pub fn mark_split_delivered(env: Env, farmer: Address, order_id: u64) -> Result<(), EscrowError> {
+        farmer.require_auth();
+
+        let mut order = read_split_order(&env, order_id)?;
+        if order.farmer != farmer {
+            return Err(EscrowError::NotFarmer);
+        }
+        if order.status != SplitOrderStatus::Active || order.delivery_timestamp > 0 {
+            return Err(EscrowError::SplitOrderNotFullyFunded);
+        }
+
+        order.delivery_timestamp = env.ledger().timestamp();
+        write_split_order(&env, order_id, &order);
+
+        env.events().publish(
+            (symbol_short!("split"), symbol_short!("delivrd")),
+            (order_id, farmer),
+        );
+
+        Ok(())
+    }
+
+    /// A co-buyer confirms receipt. Payout to the farmer fires once either a
+    /// strict majority-by-value of co-buyers have confirmed, or every
+    /// co-buyer has (unanimous) — whichever threshold is reached first.
+    pub fn confirm_split_receipt(env: Env, co_buyer: Address, order_id: u64) -> Result<(), EscrowError> {
+        co_buyer.require_auth();
+
+        let mut order = read_split_order(&env, order_id)?;
+        if order.status != SplitOrderStatus::Active {
+            return Err(EscrowError::SplitOrderNotFullyFunded);
+        }
+        let share = order
+            .shares
+            .get(co_buyer.clone())
+            .ok_or(EscrowError::NotCoBuyer)?;
+        if order.confirmed.get(co_buyer.clone()).unwrap_or(false) {
+            return Err(EscrowError::AlreadyConfirmed);
+        }
+
+        order.confirmed.set(co_buyer.clone(), true);
+        order.confirmed_count += 1;
+        order.confirmed_value = order
+            .confirmed_value
+            .checked_add(share)
+            .ok_or(EscrowError::ArithmeticError)?;
+
+        let majority_by_value = order.confirmed_value.checked_mul(2).unwrap_or(i128::MAX)
+            > order.total_amount;
+        let unanimous = order.confirmed_count == order.co_buyers.len();
+
+        if majority_by_value || unanimous {
+            order.status = SplitOrderStatus::Completed;
+            token::Client::new(&env, &order.token).transfer(
+                &env.current_contract_address(),
+                &order.farmer,
+                &order.net_amount,
+            );
+            env.events().publish(
+                (symbol_short!("split"), symbol_short!("complete")),
+                (order_id, order.farmer.clone(), order.net_amount),
+            );
+        }
+
+        write_split_order(&env, order_id, &order);
+
+        env.events().publish(
+            (symbol_short!("split"), symbol_short!("confirm")),
+            (order_id, co_buyer),
+        );
+
+        Ok(())
+    }
+
+    pub fn open_split_dispute(
+        env: Env,
+        opened_by: Address,
+        order_id: u64,
+        reason: String,
+        evidence_hash: String,
+    ) -> Result<(), EscrowError> {
+        opened_by.require_auth();
+
+        let mut order = read_split_order(&env, order_id)?;
+        if order.status != SplitOrderStatus::Active {
+            return Err(EscrowError::SplitOrderNotFullyFunded);
+        }
+        let is_co_buyer = order.shares.contains_key(opened_by.clone());
+        if !is_co_buyer && opened_by != order.farmer {
+            return Err(EscrowError::NotOrderParticipant);
+        }
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::SplitOrderDispute(order_id))
+        {
+            return Err(EscrowError::DisputeAlreadyExists);
+        }
+
+        order.status = SplitOrderStatus::Disputed;
+        write_split_order(&env, order_id, &order);
+
+        let dispute = Dispute {
+            order_id,
+            opened_by: opened_by.clone(),
+            reason,
+            evidence_hash,
+            timestamp: env.ledger().timestamp(),
+            resolved: false,
+        };
+        write_split_dispute(&env, order_id, &dispute);
+
+        env.events().publish(
+            (symbol_short!("split"), symbol_short!("disputed")),
+            (order_id, opened_by),
+        );
+
+        Ok(())
+    }
+
+    /// Admin resolves a disputed split order. `Refund` splits `net_amount`
+    /// pro-rata back to each contributor (by their original share of
+    /// `total_amount`); `Release` pays the farmer in full; `Split(bps)`
+    /// divides `net_amount` between a pro-rata refund pool and the farmer.
+    pub fn resolve_split_dispute(
+        env: Env,
+        admin_caller: Address,
+        order_id: u64,
+        resolution: DisputeResolution,
+    ) -> Result<(), EscrowError> {
+        admin_caller.require_auth();
+        let stored_admin = read_admin(&env)?;
+        if admin_caller != stored_admin {
+            return Err(EscrowError::NotAdmin);
+        }
+
+        let mut order = read_split_order(&env, order_id)?;
+        if order.status != SplitOrderStatus::Disputed {
+            return Err(EscrowError::SplitOrderNotDisputed);
+        }
+        let mut dispute = read_split_dispute(&env, order_id)?;
+        if dispute.resolved {
+            return Err(EscrowError::SplitOrderAlreadyDisputed);
+        }
+
+        match resolution.clone() {
+            DisputeResolution::Refund => {
+                refund_split_order_pro_rata(&env, &order, order.net_amount)?;
+                order.status = SplitOrderStatus::Refunded;
+            }
+            DisputeResolution::Release => {
+                token::Client::new(&env, &order.token).transfer(
+                    &env.current_contract_address(),
+                    &order.farmer,
+                    &order.net_amount,
+                );
+                order.status = SplitOrderStatus::Completed;
+            }
+            DisputeResolution::Split(buyer_share_bps) => {
+                if buyer_share_bps > 10_000 {
+                    return Err(EscrowError::InvalidSplitRatio);
+                }
+                let refund_pool = order
+                    .net_amount
+                    .checked_mul(buyer_share_bps as i128)
+                    .ok_or(EscrowError::ArithmeticError)?
+                    / 10_000;
+                let release_amount = order
+                    .net_amount
+                    .checked_sub(refund_pool)
+                    .ok_or(EscrowError::ArithmeticError)?;
+                refund_split_order_pro_rata(&env, &order, refund_pool)?;
+                if release_amount > 0 {
+                    token::Client::new(&env, &order.token).transfer(
+                        &env.current_contract_address(),
+                        &order.farmer,
+                        &release_amount,
+                    );
+                }
+                order.status = SplitOrderStatus::Completed;
+            }
+        }
+
+        dispute.resolved = true;
+        write_split_order(&env, order_id, &order);
+        write_split_dispute(&env, order_id, &dispute);
+
+        env.events().publish(
+            (symbol_short!("split"), symbol_short!("resolved")),
+            (order_id, resolution),
+        );
+
+        Ok(())
+    }
+
+    pub fn get_split_order(env: Env, order_id: u64) -> Result<SplitOrder, EscrowError> {
+        read_split_order(&env, order_id)
+    }
+
     pub fn open_dispute(
         env: Env,
         opened_by: Address,
@@ -876,56 +1492,25 @@ impl EscrowContract {
         resolve_escrow_dispute_internal(&env, order_id, resolution)
     }
 
-        let buyer_share_bps: u32;
+    // ── Arbitrator pool dispute resolution (Issue #652 drift fix) ────────────
+    // Ported from production_escrow's arbitrator-voting design so the two
+    // contracts no longer diverge on dispute-resolution capability: an
+    // admin-configured pool of arbitrators can vote to resolve a dispute once
+    // quorum is reached, as an alternative to single-admin `resolve_dispute`.
 
-        match resolution.clone() {
-            DisputeResolution::Refund => {
-                order.status = OrderStatus::Refunded;
-                token_client.transfer(&env.current_contract_address(), &order.buyer, &order.amount);
-                buyer_share_bps = 10_000;
-            }
-            DisputeResolution::Release => {
-                order.status = OrderStatus::Completed;
-                token_client.transfer(
-                    &env.current_contract_address(),
-                    &order.farmer,
-                    &order.amount,
-                );
-                buyer_share_bps = 0;
-            }
-            DisputeResolution::Split(split_bps) => {
-                if split_bps > 10_000 {
-                    return Err(EscrowError::InvalidSplitRatio);
-                }
-                buyer_share_bps = split_bps;
-
-                let refund_amount = order
-                    .amount
-                    .checked_mul(buyer_share_bps as i128)
-                    .ok_or(EscrowError::ArithmeticError)?
-                    / 10_000;
-                let release_amount = order
-                    .amount
-                    .checked_sub(refund_amount)
-                    .ok_or(EscrowError::ArithmeticError)?;
-
-                if refund_amount > 0 {
-                    token_client.transfer(
-                        &env.current_contract_address(),
-                        &order.buyer,
-                        &refund_amount,
-                    );
-                }
-                if release_amount > 0 {
-                    token_client.transfer(
-                        &env.current_contract_address(),
-                        &order.farmer,
-                        &release_amount,
-                    );
-                }
-
-                order.status = OrderStatus::Completed;
-            }
+    pub fn set_arbitrators(
+        env: Env,
+        admin_caller: Address,
+        arbitrators: Vec<Address>,
+        quorum: u32,
+    ) -> Result<(), EscrowError> {
+        admin_caller.require_auth();
+        let stored_admin = read_admin(&env)?;
+        if admin_caller != stored_admin {
+            return Err(EscrowError::NotAdmin);
+        }
+        if quorum == 0 || quorum > arbitrators.len() as u32 {
+            return Err(EscrowError::InvalidSplitRatio);
         }
         env.storage().instance().set(&DataKey::Arbitrators, &arbitrators);
         env.storage().instance().set(&DataKey::Quorum, &quorum);
