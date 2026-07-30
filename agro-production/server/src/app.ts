@@ -14,6 +14,7 @@ import orderRoutes from './routes/orders.js';
 import transactionRoutes from './routes/transactions.js';
 import productRoutes from './routes/products.js';
 import userRoutes from './routes/users.js';
+import conversationRoutes from './routes/conversations.js';
 import { globalErrorHandler } from './middleware/errors.js';
 import { HealthResponseSchema, LivezResponseSchema, ReadyzResponseSchema } from './schemas/health.js';
 import { serveOpenApiDocument } from './openapi/document.js';
@@ -64,6 +65,7 @@ app.use('/api/v1', orderRoutes);
 app.use('/api/v1', transactionRoutes);
 app.use('/api/v1', productRoutes);
 app.use('/api/v1', userRoutes);
+app.use('/api/v1', conversationRoutes);
 
 app.get('/health', (_req: Request, res: Response) => {
   logger.info('Health check endpoint hit');

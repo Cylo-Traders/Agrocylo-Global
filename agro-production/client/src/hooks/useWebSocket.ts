@@ -30,7 +30,8 @@ const BACKOFF_MAX_MS = 30_000;
 const MAX_QUEUE_SIZE = 100;
 
 export type WsMessage = {
-  event: string;
+  version: "1";
+  type: string;
   payload: unknown;
   timestamp: string;
 };
@@ -39,12 +40,16 @@ export type WsStatus = "connecting" | "open" | "closed" | "error";
 
 type Handler = (msg: WsMessage) => void;
 
+export interface UseWebSocketOptions {
+  token?: string;
+}
+
 export interface UseWebSocketReturn {
   send: (data: string) => void;
   status: WsStatus;
 }
 
-export function useWebSocket(onMessage: Handler): UseWebSocketReturn {
+export function useWebSocket(onMessage: Handler, options?: UseWebSocketOptions): UseWebSocketReturn {
   const socketRef = useRef<WebSocket | null>(null);
   const handlerRef = useRef<Handler>(onMessage);
   const attemptRef = useRef(0);
@@ -73,6 +78,15 @@ export function useWebSocket(onMessage: Handler): UseWebSocketReturn {
     ws.onopen = () => {
       attemptRef.current = 0;
       statusRef.current = "open";
+
+      if (options?.token) {
+        const authMsg = JSON.stringify({
+          type: "auth",
+          token: options.token,
+        });
+        ws.send(authMsg);
+      }
+
       flushQueue(ws);
     };
 

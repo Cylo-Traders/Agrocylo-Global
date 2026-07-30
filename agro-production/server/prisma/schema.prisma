@@ -40,12 +40,13 @@ model Campaign {
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
-  farmer       User         @relation("FarmerCampaigns", fields: [farmerAddress], references: [walletAddress], onDelete: Restrict)
-  investments  Investment[]
-  orders       Order[]
-  transactions Transaction[]
-  disputes     Dispute[]
-  products     Product[]
+  farmer        User           @relation("FarmerCampaigns", fields: [farmerAddress], references: [walletAddress], onDelete: Restrict)
+  investments   Investment[]
+  orders        Order[]
+  transactions  Transaction[]
+  disputes      Dispute[]
+  products      Product[]
+  conversations Conversation[]
 
   @@index([farmerAddress])
   @@index([status])
