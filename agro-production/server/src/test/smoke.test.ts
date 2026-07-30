@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+﻿import { describe, it, expect, vi, beforeEach } from "vitest";
 import request from "supertest";
 
 const { mockVerifySession } = vi.hoisted(() => ({
@@ -53,8 +53,8 @@ vi.mock("../services/wsServer.js", () => ({
   closeWebSocketServer: vi.fn(),
 }));
 
-vi.mock("../services/sorobanEventListener.js", () => ({
-  startSorobanEventListener: vi.fn().mockResolvedValue(null),
+vi.mock("../services/sorobanRpc.js", () => ({
+
   server: {
     getLatestLedger: vi.fn().mockResolvedValue({ sequence: 12345 }),
   },
@@ -78,7 +78,7 @@ const WALLET = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const UUID = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
 const FUTURE = "2030-01-01T00:00:00.000Z";
 
-describe("Smoke tests — all documented public endpoints", () => {
+describe("Smoke tests â€” all documented public endpoints", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });

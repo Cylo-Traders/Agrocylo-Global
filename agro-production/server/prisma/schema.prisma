@@ -40,13 +40,12 @@ model Campaign {
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
-  farmer        User         @relation("FarmerCampaigns", fields: [farmerAddress], references: [walletAddress], onDelete: Restrict)
-  investments   Investment[]
-  orders        Order[]
-  transactions  Transaction[]
-  disputes      Dispute[]
-  products      Product[]
-  conversations Conversation[]
+  farmer       User         @relation("FarmerCampaigns", fields: [farmerAddress], references: [walletAddress], onDelete: Restrict)
+  investments  Investment[]
+  orders       Order[]
+  transactions Transaction[]
+  disputes     Dispute[]
+  products     Product[]
 
   @@index([farmerAddress])
   @@index([status])
@@ -83,10 +82,9 @@ model Order {
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
-  campaign               Campaign                   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  buyer                  User                       @relation(fields: [buyerAddress], references: [walletAddress], onDelete: Restrict)
-  disputes               Dispute[]
-  marketplaceConversation MarketplaceConversation?
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  buyer    User     @relation(fields: [buyerAddress], references: [walletAddress], onDelete: Restrict)
+  disputes Dispute[]
 
   @@index([campaignId])
   @@index([buyerAddress])
@@ -253,71 +251,4 @@ model NotificationPreference {
   updatedAt     DateTime @updatedAt
 
   @@map("notification_preferences")
-}
-
-model Conversation {
-  id              String   @id @default(uuid())
-  campaignId      String
-  farmerAddress   String
-  investorAddress String
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  campaign Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  messages Message[]
-
-  @@unique([campaignId, investorAddress])
-  @@index([campaignId])
-  @@index([farmerAddress])
-  @@index([investorAddress])
-  @@map("conversations")
-}
-
-model Message {
-  id             String   @id @default(uuid())
-  conversationId String
-  senderAddress  String
-  content        String
-  createdAt      DateTime @default(now())
-  deletedAt      DateTime?
-
-  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-
-  @@index([conversationId])
-  @@index([conversationId, createdAt(sort: Desc)])
-  @@index([senderAddress])
-  @@map("messages")
-}
-
-model MarketplaceConversation {
-  id             String   @id @default(uuid())
-  orderId        String   @unique
-  buyerAddress   String
-  sellerAddress  String
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  order    Order                      @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  messages MarketplaceMessage[]
-
-  @@index([orderId])
-  @@index([buyerAddress])
-  @@index([sellerAddress])
-  @@map("marketplace_conversations")
-}
-
-model MarketplaceMessage {
-  id             String   @id @default(uuid())
-  conversationId String
-  senderAddress  String
-  content        String
-  createdAt      DateTime @default(now())
-  deletedAt      DateTime?
-
-  conversation MarketplaceConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-
-  @@index([conversationId])
-  @@index([conversationId, createdAt(sort: Desc)])
-  @@index([senderAddress])
-  @@map("marketplace_messages")
 }

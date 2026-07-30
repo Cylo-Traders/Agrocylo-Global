@@ -1,26 +1,32 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useWallet } from "@/hooks/useWallet";
 import { useProfile } from "@/context/ProfileContext";
 import { useAnalytics } from "@/hooks/useAnalytics";
 import { createProfile, registerLocation } from "@/services/profileService";
+import { submitReferralCode } from "@/services/referralService";
 import StepProgress from "@/components/onboarding/StepProgress";
 import ConnectWallet from "@/components/onboarding/ConnectWallet";
 import SelectRole from "@/components/onboarding/SelectRole";
 import ProfileForm from "@/components/onboarding/ProfileForm";
+import ReferralCodeInput from "@/components/onboarding/ReferralCodeInput";
 import LocationConsent from "@/components/onboarding/LocationConsent";
 import Complete from "@/components/onboarding/Complete";
 
 export default function OnboardingPage() {
+  const searchParams = useSearchParams();
   const { address } = useWallet();
   const { setProfile } = useProfile();
   const { trackFunnelStep, trackFeatureAdoption } = useAnalytics();
 
+  const referralFromUrl = searchParams?.get("ref") || "";
   const [step, setStep] = useState(1);
   const [role, setRole] = useState<"farmer" | "buyer" | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
+  const [referralCode, setReferralCode] = useState(referralFromUrl);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,6 +50,15 @@ export default function OnboardingPage() {
     });
   }, [step, trackFeatureAdoption]);
 
+  async function handleReferralSubmit(code: string) {
+    setReferralCode(code);
+    setStep(5);
+  }
+
+  function skipReferral() {
+    setStep(5);
+  }
+
   async function handleLocationComplete(
     location: {
       latitude: number;
@@ -51,7 +66,7 @@ export default function OnboardingPage() {
       city: string;
       country: string;
       isPublic: boolean;
-    } | null
+    } | null,
   ) {
     if (!address || !role) return;
     setIsSubmitting(true);
@@ -64,7 +79,7 @@ export default function OnboardingPage() {
           display_name: displayName.trim(),
           bio: bio.trim() || undefined,
         },
-        address
+        address,
       );
       // Seed the profile cache so AuthGuard sees the user as onboarded immediately,
       // without waiting for a refetch round-trip.
@@ -80,7 +95,7 @@ export default function OnboardingPage() {
               country: location.country || null,
               is_public: location.isPublic,
             },
-            address
+            address,
           );
         } catch (locationError) {
           console.error("Location registration failed", locationError);
@@ -93,11 +108,25 @@ export default function OnboardingPage() {
         }
       }
 
+      // Submit referral code if provided
+      if (referralCode.trim()) {
+        try {
+          await submitReferralCode(referralCode.trim(), address);
+          trackFunnelStep("onboarding_completion", "referral_code_submitted", {
+            hasReferral: true,
+          });
+        } catch (refError) {
+          console.error("Referral code submission failed", refError);
+          // Don't block completion on referral failure
+        }
+      }
+
       trackFunnelStep("onboarding_completion", "completed", {
         role,
         hasLocation: Boolean(location),
+        hasReferral: Boolean(referralCode.trim()),
       });
-      setStep(5);
+      setStep(6);
     } catch (err) {
       if (isNetworkFetchError(err)) {
         setProfile({
@@ -111,7 +140,7 @@ export default function OnboardingPage() {
           role,
           hasLocation: Boolean(location),
         });
-        setStep(5);
+        setStep(6);
         return;
       }
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -132,7 +161,7 @@ export default function OnboardingPage() {
           </p>
         </div>
 
-        <StepProgress currentStep={step} />
+        <StepProgress currentStep={step} hasReferralStep={!!referralFromUrl} />
 
         {error && (
           <div className="bg-destructive/10 text-destructive border-destructive/30 mx-auto mb-4 max-w-md rounded-lg border px-4 py-2 text-sm">
@@ -159,20 +188,42 @@ export default function OnboardingPage() {
               setDisplayName(data.displayName);
               setBio(data.bio);
             }}
-            onNext={() => setStep(4)}
+            onNext={() => {
+              // Skip referral step if no ref param and go straight to location
+              if (!searchParams?.get("ref")) {
+                setStep(5);
+              } else {
+                setStep(4);
+              }
+            }}
             onBack={() => setStep(2)}
           />
         )}
 
         {step === 4 && (
+          <ReferralCodeInput
+            onSubmit={handleReferralSubmit}
+            onSkip={skipReferral}
+            isSubmitting={false}
+          />
+        )}
+
+        {step === 5 && (
           <LocationConsent
             onComplete={handleLocationComplete}
-            onBack={() => setStep(3)}
+            onBack={() => {
+              // If we skipped referral step, go back to profile (step 3)
+              if (!referralFromUrl) {
+                setStep(3);
+              } else {
+                setStep(4);
+              }
+            }}
             isSubmitting={isSubmitting}
           />
         )}
 
-        {step === 5 && role && <Complete role={role} />}
+        {step === 6 && role && <Complete role={role} />}
       </div>
     </div>
   );

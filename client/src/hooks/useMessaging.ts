@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Message, Conversation, TypingIndicator } from '../types/messaging';
 import {
+  messagingSocket,
   fetchConversations,
   fetchMessages,
   sendMessage,
@@ -11,11 +12,10 @@ import {
   addReaction,
   markAsRead,
   searchMessages,
+  sendTypingIndicator,
 } from '../services/messagingService';
-import { useSocket } from './useSocket';
 
-export function useMessaging(conversationId?: string, currentUserId?: string) {
-  const { on } = useSocket();
+export function useMessaging(conversationId?: string) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -82,25 +82,40 @@ export function useMessaging(conversationId?: string, currentUserId?: string) {
     loadMessages();
     markAsRead(conversationId);
 
-    const unsubMessage = on('message:new', (data: unknown) => {
-      const payload = data as { conversationId?: string; message?: Message };
-      if (payload.conversationId === conversationId && payload.message) {
-        setMessages(prev => [...prev, payload.message]);
+    const unsubMessage = messagingSocket.on('new_message', (msg: Message) => {
+      if (msg.conversationId === conversationId) {
+        setMessages(prev => [...prev, msg]);
         markAsRead(conversationId);
       }
     });
 
-    const unsubEdit = on('message:edited', (data: unknown) => {
-      const payload = data as { conversationId?: string; message?: Message };
-      if (payload.conversationId === conversationId && payload.message) {
-        setMessages(prev => prev.map(m => m.id === payload.message!.id ? payload.message! : m));
+    const unsubEdit = messagingSocket.on('message_edited', (msg: Message) => {
+      if (msg.conversationId === conversationId) {
+        setMessages(prev => prev.map(m => m.id === msg.id ? msg : m));
       }
     });
 
-    const unsubDelete = on('message:deleted', (data: unknown) => {
-      const payload = data as { conversationId?: string; messageId?: string };
-      if (payload.conversationId === conversationId && payload.messageId) {
-        setMessages(prev => prev.filter(m => m.id !== payload.messageId));
+    const unsubDelete = messagingSocket.on('message_deleted', ({ messageId }: { messageId: string }) => {
+      setMessages(prev => prev.filter(m => m.id !== messageId));
+    });
+
+    const unsubReaction = messagingSocket.on('reaction_added', (msg: Message) => {
+      if (msg.conversationId === conversationId) {
+        setMessages(prev => prev.map(m => m.id === msg.id ? msg : m));
+      }
+    });
+
+    const unsubTyping = messagingSocket.on('typing', (indicator: TypingIndicator) => {
+      if (indicator.conversationId === conversationId) {
+        setTypingUsers(prev => {
+          const next = new Set(prev);
+          if (indicator.isTyping) {
+            next.add(indicator.userId);
+          } else {
+            next.delete(indicator.userId);
+          }
+          return next;
+        });
       }
     });
 
@@ -108,8 +123,10 @@ export function useMessaging(conversationId?: string, currentUserId?: string) {
       unsubMessage();
       unsubEdit();
       unsubDelete();
+      unsubReaction();
+      unsubTyping();
     };
-  }, [conversationId, loadMessages, on]);
+  }, [conversationId, loadMessages]);
 
   const loadMore = () => {
     if (hasMore && !isLoading) {
@@ -117,13 +134,18 @@ export function useMessaging(conversationId?: string, currentUserId?: string) {
     }
   };
 
-  //  Send Message
+  //  Send Message 
 
-  const handleSend = useCallback(async (content: string) => {
+  const handleSend = useCallback(async (content: string, file?: File) => {
     if (!conversationId) return;
-
+    
     try {
-      const msg = await sendMessage(conversationId, content);
+      const msg = await sendMessage(
+        conversationId,
+        content,
+        file ? 'file' : 'text',
+        file
+      );
       setMessages(prev => [...prev, msg]);
       return msg;
     } catch (err) {
@@ -197,12 +219,18 @@ export function useMessaging(conversationId?: string, currentUserId?: string) {
     }
   }, [conversationId]);
 
-  // Typing Indicator (placeholder - not yet implemented)
+  // Typing Indicator 
 
   const handleTyping = useCallback(() => {
-    // TODO: Implement typing indicator via WebSocket
-    // This requires the real WebSocket to support typing events
-  }, []);
+    if (!conversationId) return;
+    
+    sendTypingIndicator(conversationId, true);
+    
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = setTimeout(() => {
+      sendTypingIndicator(conversationId, false);
+    }, 3000);
+  }, [conversationId]);
 
   // Current Conversation 
 

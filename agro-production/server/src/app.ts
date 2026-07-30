@@ -1,4 +1,4 @@
-import express, { type Request, type Response } from 'express';
+﻿import express, { type Request, type Response } from 'express';
 import cors from 'cors';
 import logger from './config/logger.js';
 import { config } from './config/index.js';
@@ -14,15 +14,13 @@ import orderRoutes from './routes/orders.js';
 import transactionRoutes from './routes/transactions.js';
 import productRoutes from './routes/products.js';
 import userRoutes from './routes/users.js';
-import conversationRoutes from './routes/conversations.js';
-import campaignConversationRoutes from './routes/campaignConversations.js';
 import { globalErrorHandler } from './middleware/errors.js';
 import { HealthResponseSchema, LivezResponseSchema, ReadyzResponseSchema } from './schemas/health.js';
 import { serveOpenApiDocument } from './openapi/document.js';
 import { getRateLimitMetrics } from './middleware/rateLimitMetrics.js';
 import { getEventMetrics } from './events/metrics.js';
 import { prisma } from './db/client.js';
-import { server as sorobanRpcServer } from './services/sorobanEventListener.js';
+import { server as sorobanRpcServer } from './services/sorobanRpc.js';
 import { getWsClientCount } from './services/wsServer.js';
 
 const app = express();
@@ -66,8 +64,6 @@ app.use('/api/v1', orderRoutes);
 app.use('/api/v1', transactionRoutes);
 app.use('/api/v1', productRoutes);
 app.use('/api/v1', userRoutes);
-app.use('/api/v1', conversationRoutes);
-app.use('/api/v1', campaignConversationRoutes);
 
 app.get('/health', (_req: Request, res: Response) => {
   logger.info('Health check endpoint hit');

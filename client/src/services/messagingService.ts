@@ -1,35 +1,100 @@
 import type { Message, Conversation } from '../types/messaging';
 import { API_BASE_URL } from '../lib/apiConfig';
-import { getAccessToken } from '../lib/authToken';
 
 const API_BASE = API_BASE_URL;
 
-function getAuthHeader(): { 'Authorization': string } | null {
-  const token = getAccessToken();
-  if (!token) return null;
-  return { 'Authorization': `Bearer ${token}` };
+interface WebSocketPayload {
+  type: string;
+  payload: unknown;
 }
 
-//  REST API Methods
+type WebSocketListener<T = unknown> = (data: T) => void;
 
-export async function createOrderConversation(orderId: string): Promise<Conversation> {
-  const authHeader = getAuthHeader();
-  if (!authHeader) throw new Error('Not authenticated');
+//  WebSocket Connection
 
-  const res = await fetch(`${API_BASE}/api/v1/orders/${orderId}/conversation`, {
-    method: 'POST',
-    headers: authHeader,
-  });
-  if (!res.ok) throw new Error('Failed to create conversation');
-  return res.json();
+class MessagingWebSocket {
+  private ws: WebSocket | null = null;
+  private listeners: Map<string, Set<WebSocketListener<unknown>>> = new Map();
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 5;
+
+  connect(token: string) {
+    if (this.ws?.readyState === WebSocket.OPEN) return;
+
+    const wsUrl = `${API_BASE.replace('http', 'ws')}/messaging?token=${token}`;
+    this.ws = new WebSocket(wsUrl);
+
+    this.ws.onopen = () => {
+      this.reconnectAttempts = 0;
+      this.emit('connected', {});
+    };
+
+    this.ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        this.emit(data.type, data.payload);
+      } catch (err) {
+        console.error('Failed to parse WebSocket message:', err);
+      }
+    };
+
+    this.ws.onclose = () => {
+      this.attemptReconnect(token);
+    };
+
+    this.ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      this.emit('error', error);
+    };
+  }
+
+  private attemptReconnect(token: string) {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) return;
+    
+    this.reconnectAttempts++;
+    this.reconnectTimer = setTimeout(() => {
+      this.connect(token);
+    }, Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000));
+  }
+
+  on<T = unknown>(event: string, callback: WebSocketListener<T>) {
+    if (!this.listeners.has(event)) {
+      this.listeners.set(event, new Set());
+    }
+    this.listeners.get(event)!.add(callback as WebSocketListener<unknown>);
+
+    return () => this.off(event, callback);
+  }
+
+  off<T = unknown>(event: string, callback: WebSocketListener<T>) {
+    this.listeners.get(event)?.delete(callback as WebSocketListener<unknown>);
+  }
+
+  private emit<T = unknown>(event: string, data: T) {
+    this.listeners.get(event)?.forEach(cb => cb(data));
+  }
+
+  send(type: string, payload: unknown) {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type, payload }));
+    }
+  }
+
+  disconnect() {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.ws?.close();
+    this.ws = null;
+  }
 }
+
+export const messagingSocket = new MessagingWebSocket();
+
+//  REST API Methods 
 
 export async function fetchConversations(): Promise<Conversation[]> {
-  const authHeader = getAuthHeader();
-  if (!authHeader) throw new Error('Not authenticated');
-
-  const res = await fetch(`${API_BASE}/api/v1/conversations`, {
-    headers: authHeader,
+  const res = await fetch(`${API_BASE}/conversations`, {
+    credentials: 'include',
   });
   if (!res.ok) throw new Error('Failed to fetch conversations');
   return res.json();
@@ -40,15 +105,12 @@ export async function fetchMessages(
   cursor?: string,
   limit = 20
 ): Promise<{ messages: Message[]; nextCursor?: string }> {
-  const authHeader = getAuthHeader();
-  if (!authHeader) throw new Error('Not authenticated');
-
   const params = new URLSearchParams({ limit: String(limit) });
   if (cursor) params.append('cursor', cursor);
-
+  
   const res = await fetch(
-    `${API_BASE}/api/v1/conversations/${conversationId}/messages?${params}`,
-    { headers: authHeader }
+    `${API_BASE}/conversations/${conversationId}/messages?${params}`,
+    { credentials: 'include' }
   );
   if (!res.ok) throw new Error('Failed to fetch messages');
   return res.json();
@@ -56,18 +118,21 @@ export async function fetchMessages(
 
 export async function sendMessage(
   conversationId: string,
-  content: string
+  content: string,
+  type: Message['type'] = 'text',
+  file?: File,
+  replyTo?: string
 ): Promise<Message> {
-  const authHeader = getAuthHeader();
-  if (!authHeader) throw new Error('Not authenticated');
+  const formData = new FormData();
+  formData.append('content', content);
+  formData.append('type', type);
+  if (file) formData.append('file', file);
+  if (replyTo) formData.append('replyTo', replyTo);
 
-  const res = await fetch(`${API_BASE}/api/v1/conversations/${conversationId}/messages`, {
+  const res = await fetch(`${API_BASE}/conversations/${conversationId}/messages`, {
     method: 'POST',
-    headers: {
-      ...authHeader,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ content }),
+    body: formData,
+    credentials: 'include',
   });
   if (!res.ok) throw new Error('Failed to send message');
   return res.json();
@@ -78,18 +143,13 @@ export async function editMessage(
   messageId: string,
   newContent: string
 ): Promise<Message> {
-  const authHeader = getAuthHeader();
-  if (!authHeader) throw new Error('Not authenticated');
-
   const res = await fetch(
-    `${API_BASE}/api/v1/conversations/${conversationId}/messages/${messageId}`,
+    `${API_BASE}/conversations/${conversationId}/messages/${messageId}`,
     {
       method: 'PATCH',
-      headers: {
-        ...authHeader,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: newContent }),
+      credentials: 'include',
     }
   );
   if (!res.ok) throw new Error('Failed to edit message');
@@ -100,26 +160,37 @@ export async function deleteMessage(
   conversationId: string,
   messageId: string
 ): Promise<void> {
-  const authHeader = getAuthHeader();
-  if (!authHeader) throw new Error('Not authenticated');
-
   const res = await fetch(
-    `${API_BASE}/api/v1/conversations/${conversationId}/messages/${messageId}`,
+    `${API_BASE}/conversations/${conversationId}/messages/${messageId}`,
     {
       method: 'DELETE',
-      headers: authHeader,
+      credentials: 'include',
     }
   );
   if (!res.ok) throw new Error('Failed to delete message');
 }
 
-export async function markAsRead(conversationId: string): Promise<void> {
-  const authHeader = getAuthHeader();
-  if (!authHeader) throw new Error('Not authenticated');
+export async function addReaction(
+  conversationId: string,
+  messageId: string,
+  emoji: string
+): Promise<void> {
+  const res = await fetch(
+    `${API_BASE}/conversations/${conversationId}/messages/${messageId}/reactions`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ emoji }),
+      credentials: 'include',
+    }
+  );
+  if (!res.ok) throw new Error('Failed to add reaction');
+}
 
-  await fetch(`${API_BASE}/api/v1/conversations/${conversationId}/read`, {
+export async function markAsRead(conversationId: string): Promise<void> {
+  await fetch(`${API_BASE}/conversations/${conversationId}/read`, {
     method: 'POST',
-    headers: authHeader,
+    credentials: 'include',
   });
 }
 
@@ -127,42 +198,53 @@ export async function searchMessages(
   conversationId: string,
   query: string
 ): Promise<Message[]> {
-  const authHeader = getAuthHeader();
-  if (!authHeader) throw new Error('Not authenticated');
-
   const res = await fetch(
-    `${API_BASE}/api/v1/conversations/${conversationId}/messages/search?q=${encodeURIComponent(query)}`,
-    { headers: authHeader }
+    `${API_BASE}/conversations/${conversationId}/messages/search?q=${encodeURIComponent(query)}`,
+    { credentials: 'include' }
   );
   if (!res.ok) throw new Error('Search failed');
   return res.json();
 }
 
-// Admin Actions (placeholders - backend implementation needed)
+// Admin Actions 
 
 export async function blockUser(conversationId: string, userId: string): Promise<void> {
-  // TODO: Implement block user endpoint
-  console.warn('blockUser not yet implemented');
+  await fetch(`${API_BASE}/conversations/${conversationId}/block`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId }),
+    credentials: 'include',
+  });
 }
 
 export async function unblockUser(conversationId: string, userId: string): Promise<void> {
-  // TODO: Implement unblock user endpoint
-  console.warn('unblockUser not yet implemented');
+  await fetch(`${API_BASE}/conversations/${conversationId}/unblock`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId }),
+    credentials: 'include',
+  });
 }
 
 export async function muteConversation(conversationId: string): Promise<void> {
-  // TODO: Implement mute conversation endpoint
-  console.warn('muteConversation not yet implemented');
+  await fetch(`${API_BASE}/conversations/${conversationId}/mute`, {
+    method: 'POST',
+    credentials: 'include',
+  });
 }
 
 export async function unmuteConversation(conversationId: string): Promise<void> {
-  // TODO: Implement unmute conversation endpoint
-  console.warn('unmuteConversation not yet implemented');
+  await fetch(`${API_BASE}/conversations/${conversationId}/unmute`, {
+    method: 'POST',
+    credentials: 'include',
+  });
 }
 
 export async function archiveConversation(conversationId: string): Promise<void> {
-  // TODO: Implement archive conversation endpoint
-  console.warn('archiveConversation not yet implemented');
+  await fetch(`${API_BASE}/conversations/${conversationId}/archive`, {
+    method: 'POST',
+    credentials: 'include',
+  });
 }
 
 export async function reportMessage(
@@ -170,15 +252,25 @@ export async function reportMessage(
   messageId: string,
   reason: string
 ): Promise<void> {
-  // TODO: Implement report message endpoint
-  console.warn('reportMessage not yet implemented');
+  await fetch(`${API_BASE}/conversations/${conversationId}/report`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messageId, reason }),
+    credentials: 'include',
+  });
 }
 
-// Push Notifications
+// Typing Indicators 
+
+export function sendTypingIndicator(conversationId: string, isTyping: boolean) {
+  messagingSocket.send('typing', { conversationId, isTyping });
+}
+
+// Push Notifications 
 
 export async function requestNotificationPermission(): Promise<boolean> {
   if (!('Notification' in window)) return false;
-
+  
   const permission = await Notification.requestPermission();
   return permission === 'granted';
 }
