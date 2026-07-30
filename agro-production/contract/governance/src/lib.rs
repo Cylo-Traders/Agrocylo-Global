@@ -313,7 +313,7 @@ impl GovernanceContract {
                 (t_governance(), symbol_short!("rejected")),
                 (proposal_id,),
             );
-            return Err(GovernanceError::QuorumNotMet);
+            return Ok(());
         }
 
         proposal.status = ProposalStatus::Queued;
