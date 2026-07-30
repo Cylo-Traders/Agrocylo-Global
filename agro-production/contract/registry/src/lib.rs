@@ -59,6 +59,18 @@ pub struct ReputationRecord {
 }
 
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BatchRecord {
+    pub batch_id: u64,
+    pub campaign_id: u64,
+    pub farmer: Address,
+    pub crop: String,
+    pub harvest_date: u64,
+    pub quantity: i128,
+    pub linked_order_ids: Vec<u64>,
+}
+
+#[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
     Admin,
@@ -73,6 +85,10 @@ pub enum DataKey {
     FarmerCampaignCount(Address),
     FarmerCampaignAt(Address, u64),
     Reputation(Address),
+    BatchCount,
+    Batch(u64),
+    BatchOrderLink(u64, u64),
+    OrderBatch(u64),
 }
 
 const COMPLETION_POINTS: i64 = 10;

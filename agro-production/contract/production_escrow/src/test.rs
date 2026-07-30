@@ -3363,7 +3363,7 @@ fn test_registry_wired_campaign_creation() {
     t.client.set_registry_contract(&t.admin, &registry_id);
 
     // Register farmer in registry contract
-    registry_client.register_farmer(&t.admin, &t.farmer);
+    registry_client.register_farmer(&t.farmer);
 
     // Create campaign in production escrow
     let deadline = future_deadline(&t);

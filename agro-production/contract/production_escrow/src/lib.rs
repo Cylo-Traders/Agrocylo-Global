@@ -94,6 +94,7 @@ pub enum EscrowError {
     QuorumNotReached = 92,
     AlreadyVoted = 93,
     InvestorNotInCampaign = 94,
+    InvalidGovernanceContract = 95,
 }
 
 // ---------------------------------------------------------------------------

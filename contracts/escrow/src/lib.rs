@@ -1,7 +1,7 @@
 #![no_std]
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, symbol_short, token,
-    Address, Env, Map, String, Vec,
+    Address, Env, String, Vec,
 };
 
 // Errors
@@ -34,6 +34,9 @@ pub enum EscrowError {
     SlippageToleranceExceeded = 23,
     InvalidSlippageTolerance = 24,
     InvalidGovernanceContract = 25,
+    ArbitrationNotConfigured = 26,
+    ArbitratorNotFound = 27,
+    AlreadyVoted = 28,
 }
 
 #[contracttype]
@@ -128,6 +131,9 @@ pub enum DataKey {
     /// On-chain reputation registry (Issue #592). Optional: if unset,
     /// reputation reporting is skipped entirely.
     RegistryContract,
+    Arbitrators,
+    Quorum,
+    ArbitratorVote(u64, Address),
 }
 
 /// Cross-contract interface for a Stellar path-payment router (e.g. a Soroswap-style
@@ -372,6 +378,14 @@ fn resolve_escrow_dispute_internal(
     dispute.resolved = true;
     write_order(env, order_id, &order);
     write_dispute(env, order_id, &dispute);
+
+    let buyer_share_bps = match &resolution {
+        DisputeResolution::Refund => 10_000,
+        DisputeResolution::Release => 0,
+        DisputeResolution::Split(bps) => *bps,
+    };
+
+    report_reputation_outcome(env, &order.farmer, Some(buyer_share_bps));
 
     env.events().publish(
         (symbol_short!("order"), symbol_short!("resolved")),
@@ -866,62 +880,6 @@ impl EscrowContract {
         }
 
         resolve_escrow_dispute_internal(&env, order_id, resolution)
-    }
-
-        let buyer_share_bps: u32;
-
-        match resolution.clone() {
-            DisputeResolution::Refund => {
-                order.status = OrderStatus::Refunded;
-                token_client.transfer(&env.current_contract_address(), &order.buyer, &order.amount);
-                buyer_share_bps = 10_000;
-            }
-            DisputeResolution::Release => {
-                order.status = OrderStatus::Completed;
-                token_client.transfer(
-                    &env.current_contract_address(),
-                    &order.farmer,
-                    &order.amount,
-                );
-                buyer_share_bps = 0;
-            }
-            DisputeResolution::Split(split_bps) => {
-                if split_bps > 10_000 {
-                    return Err(EscrowError::InvalidSplitRatio);
-                }
-                buyer_share_bps = split_bps;
-
-                let refund_amount = order
-                    .amount
-                    .checked_mul(buyer_share_bps as i128)
-                    .ok_or(EscrowError::ArithmeticError)?
-                    / 10_000;
-                let release_amount = order
-                    .amount
-                    .checked_sub(refund_amount)
-                    .ok_or(EscrowError::ArithmeticError)?;
-
-                if refund_amount > 0 {
-                    token_client.transfer(
-                        &env.current_contract_address(),
-                        &order.buyer,
-                        &refund_amount,
-                    );
-                }
-                if release_amount > 0 {
-                    token_client.transfer(
-                        &env.current_contract_address(),
-                        &order.farmer,
-                        &release_amount,
-                    );
-                }
-
-                order.status = OrderStatus::Completed;
-            }
-        }
-        env.storage().instance().set(&DataKey::Arbitrators, &arbitrators);
-        env.storage().instance().set(&DataKey::Quorum, &quorum);
-        Ok(())
     }
 
     pub fn get_arbitrators(env: Env) -> Vec<Address> {
