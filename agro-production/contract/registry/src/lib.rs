@@ -58,6 +58,22 @@ pub struct ReputationRecord {
     pub disputed_orders: u32,
 }
 
+/// Provenance record for a harvest batch (Issue #652 drift fix: this type
+/// was referenced by `mint_batch`/`link_batch_to_order`/`get_batch`/
+/// `get_batch_history` without ever being defined, leaving the crate — and
+/// its dependents' test suites — uncompilable).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BatchRecord {
+    pub batch_id: u64,
+    pub campaign_id: u64,
+    pub farmer: Address,
+    pub crop: String,
+    pub harvest_date: u64,
+    pub quantity: i128,
+    pub linked_order_ids: Vec<u64>,
+}
+
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
@@ -73,6 +89,14 @@ pub enum DataKey {
     FarmerCampaignCount(Address),
     FarmerCampaignAt(Address, u64),
     Reputation(Address),
+    /// Provenance batch record, keyed by batch id.
+    Batch(u64),
+    BatchCount,
+    /// Marks that `order_id` has already been linked to `batch_id`, guarding
+    /// against a duplicate `link_batch_to_order` call.
+    BatchOrderLink(u64, u64),
+    /// Batch ids linked to a given order, for `get_batch_history`.
+    OrderBatch(u64),
 }
 
 const COMPLETION_POINTS: i64 = 10;
