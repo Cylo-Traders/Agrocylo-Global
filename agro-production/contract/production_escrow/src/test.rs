@@ -2584,17 +2584,7 @@ fn test_batch_refund_orders_count_and_total_are_correct() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_reject_confirm_order_after_settlement() {}
-// ===========================================================================
-// Issue #462 — Formal Failure & Dispute Model
-// ===========================================================================
-
-// ---------------------------------------------------------------------------
-// 25. mark_campaign_failed Tests
-// ---------------------------------------------------------------------------
-
-#[test]
-fn test_mark_campaign_failed_from_funded_state_full_refund() {
+fn test_reject_confirm_order_after_settlement() {
     let t = setup();
     let deadline = future_deadline(&t);
     let id = t
@@ -2617,6 +2607,59 @@ fn test_mark_campaign_failed_from_funded_state_full_refund() {
         .unwrap_err()
         .unwrap();
     assert_eq!(err, EscrowError::CampaignNotHarvested);
+}
+
+#[test]
+fn test_confirm_order_before_settlement_allowed() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &t.attester, &id);
+
+    // Create and confirm order before settlement
+    let order_id = t.client.create_order(&t.buyer, &id, &2_000);
+    t.client.confirm_order(&t.buyer, &order_id);
+
+    // Should transition to Harvested with revenue recorded
+    let campaign = t.client.get_campaign(&id);
+    assert_eq!(campaign.status, CampaignStatus::Harvested);
+    assert_eq!(campaign.total_revenue, 2_000);
+
+    // Now settle
+    t.client.settle(&t.farmer, &id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Settled);
+}
+
+// ===========================================================================
+// Issue #462 — Formal Failure & Dispute Model
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// 25. mark_campaign_failed Tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_mark_campaign_failed_from_funded_state_full_refund() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &t.attester, &id);
+
+    // Mark campaign as failed after harvest
+    t.client.mark_campaign_failed(&t.admin, &id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+
+    // All investors should be refunded their full investment
+    let investor1_balance_after = t.token_contract.balance(&t.investor1);
+    assert_eq!(investor1_balance_after, 10_000 + 10_000); // initial + refund
 }
 
 #[test]
