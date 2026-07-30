@@ -3011,7 +3011,7 @@ fn test_advance_milestone_planted_ok() {
     t.client.confirm_order(&t.buyer, &order_id);
 
     let farmer_before = balance(&t, &t.farmer);
-    t.client.advance_milestone(&t.buyer, &id);
+    t.client.advance_milestone(&t.buyer, &t.attester, &id);
     // 10% of 10_000 = 1_000
     assert_eq!(balance(&t, &t.farmer), farmer_before + 1_000);
 
@@ -3033,9 +3033,9 @@ fn test_advance_milestone_growing_ok() {
     let order_id = t.client.create_order(&t.buyer, &id, &1_000);
     t.client.confirm_order(&t.buyer, &order_id);
 
-    t.client.advance_milestone(&t.buyer, &id); // Planted: 1_000
+    t.client.advance_milestone(&t.buyer, &t.attester, &id); // Planted: 1_000
     let farmer_before = balance(&t, &t.farmer);
-    t.client.advance_milestone(&t.buyer, &id); // Growing: 1_000
+    t.client.advance_milestone(&t.buyer, &t.attester, &id); // Growing: 1_000
     assert_eq!(balance(&t, &t.farmer), farmer_before + 1_000);
 
     let c = t.client.get_campaign(&id);
@@ -3058,7 +3058,7 @@ fn test_advance_milestone_all_five_ok() {
 
     let farmer_before = balance(&t, &t.farmer);
     for _ in 0..5 {
-        t.client.advance_milestone(&t.buyer, &id);
+        t.client.advance_milestone(&t.buyer, &t.attester, &id);
     }
     // 5 x 800 = 4_000 (40% of 10_000)
     assert_eq!(balance(&t, &t.farmer), farmer_before + 4_000);
@@ -3077,7 +3077,7 @@ fn test_advance_milestone_rejects_farmer() {
     t.client.set_milestone_configs(&t.admin, &id, &configs);
 
     // Farmer cannot advance milestones (not a buyer).
-    let err = t.client.try_advance_milestone(&t.farmer, &id)
+    let err = t.client.try_advance_milestone(&t.farmer, &t.attester, &id)
         .unwrap_err().unwrap();
     assert_eq!(err, EscrowError::NotBuyerOrOracle);
 }
@@ -3093,7 +3093,7 @@ fn test_advance_milestone_admin_as_oracle_ok() {
 
     // Admin acts as oracle — no order needed.
     let farmer_before = balance(&t, &t.farmer);
-    t.client.advance_milestone(&t.admin, &id);
+    t.client.advance_milestone(&t.admin, &t.attester, &id);
     assert_eq!(balance(&t, &t.farmer), farmer_before + 1_000);
 }
 
@@ -3108,7 +3108,7 @@ fn test_advance_milestone_rejects_no_config() {
     let order_id = t.client.create_order(&t.buyer, &id, &1_000);
     t.client.confirm_order(&t.buyer, &order_id);
 
-    let err = t.client.try_advance_milestone(&t.buyer, &id)
+    let err = t.client.try_advance_milestone(&t.buyer, &t.attester, &id)
         .unwrap_err().unwrap();
     assert_eq!(err, EscrowError::MilestoneNotConfigured);
 }
@@ -3127,10 +3127,10 @@ fn test_advance_milestone_rejects_past_end() {
     t.client.confirm_order(&t.buyer, &order_id);
 
     for _ in 0..5 {
-        t.client.advance_milestone(&t.buyer, &id);
+        t.client.advance_milestone(&t.buyer, &t.attester, &id);
     }
     // 6th advance should fail — no more milestones.
-    let err = t.client.try_advance_milestone(&t.buyer, &id)
+    let err = t.client.try_advance_milestone(&t.buyer, &t.attester, &id)
         .unwrap_err().unwrap();
     assert_eq!(err, EscrowError::InvalidMilestone);
 }
@@ -3164,8 +3164,8 @@ fn test_advance_milestone_over_release_prevented() {
     let order_id = t.client.create_order(&t.buyer, &id, &1_000);
     t.client.confirm_order(&t.buyer, &order_id);
 
-    t.client.advance_milestone(&t.buyer, &id); // 30% = 3_000 (total 6_000)
-    let err = t.client.try_advance_milestone(&t.buyer, &id)
+    t.client.advance_milestone(&t.buyer, &t.attester, &id); // 30% = 3_000 (total 6_000)
+    let err = t.client.try_advance_milestone(&t.buyer, &t.attester, &id)
         .unwrap_err().unwrap();
     // 2nd milestone would push to 9_000 > 7_000 max.
     assert_eq!(err, EscrowError::InvalidTranche);
@@ -3184,14 +3184,97 @@ fn test_advance_milestone_refund_after_partial_release() {
     t.client.start_production(&t.farmer, &id);
 
     // Admin advances milestones as oracle (no buyer/order needed).
-    t.client.advance_milestone(&t.admin, &id); // 800
-    t.client.advance_milestone(&t.admin, &id); // 800
+    t.client.advance_milestone(&t.admin, &t.attester, &id); // 800
+    t.client.advance_milestone(&t.admin, &t.attester, &id); // 800
 
     // Campaign fails. Only admin can fail after production started.
     t.client.mark_campaign_failed(&t.admin, &id);
     let refund = t.client.refund(&t.investor1, &id);
     // Remaining pool = 10_000 - (3_000 start + 1_600 milestones) = 5_400.
     assert_eq!(refund, 5_400);
+}
+
+// Test for Issue #640: trivial buyer exploit prevention
+#[test]
+fn test_advance_milestone_rejects_trivial_buyer_without_attester() {
+    // Farmer creates campaign, accomplice creates trivial 1-token order and confirms it.
+    // Attempt to advance milestone without attester co-signature should fail.
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t.client.create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    let configs = milestone_configs_50pct(&t);
+    t.client.set_milestone_configs(&t.admin, &id, &configs);
+    t.client.start_production(&t.farmer, &id);
+
+    // Accomplice creates trivial order (amount=1, well below 1% minimum of 10_000)
+    let trivial_order_id = t.client.create_order(&t.buyer, &id, &1);
+    t.client.confirm_order(&t.buyer, &trivial_order_id);
+
+    // Try to advance milestone as trivial buyer without attester — should fail.
+    let err = t.client.try_advance_milestone(&t.buyer, &t.attester, &id)
+        .unwrap_err().unwrap();
+    // Minimum order required is 1% of 10_000 = 100, but only has 1 token.
+    assert_eq!(err, EscrowError::NotBuyerOrOracle);
+}
+
+#[test]
+fn test_advance_milestone_requires_attester_cosignature() {
+    // Even with a sufficient order amount, advance_milestone requires attester co-signature.
+    // This test verifies the attester is mandatory.
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let attester = Address::generate(&env);
+    let farmer = Address::generate(&env);
+    let investor1 = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let non_attester = Address::generate(&env);
+
+    // Deploy and setup
+    let token_admin = Address::generate(&env);
+    let token_id = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+    let sac = StellarAssetClient::new(&env, &token_id);
+    sac.mint(&investor1, &1_000_000);
+    sac.mint(&buyer, &1_000_000);
+
+    let contract_id = env.register(ProductionEscrowContract, ());
+    let client = ProductionEscrowContractClient::new(&env, &contract_id);
+
+    let mut tokens = Vec::new(&env);
+    tokens.push_back(token_id.clone());
+    let fee_collector = Address::generate(&env);
+    client.initialize(&admin, &tokens, &fee_collector, &300);
+    client.set_attester(&admin, &attester);
+
+    let deadline = env.ledger().timestamp() + 7 * 24 * 3600;
+    let id = client.create_campaign(&farmer, &token_id, &10_000, &deadline);
+    client.invest(&investor1, &id, &10_000);
+
+    let mut configs = Vec::new(&env);
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Planted,
+        release_bps: 1000,
+    });
+    client.set_milestone_configs(&admin, &id, &configs);
+    client.start_production(&farmer, &id);
+
+    // Create sufficient order (2_000 > 1% of 10_000)
+    let order_id = client.create_order(&buyer, &id, &2_000);
+    client.confirm_order(&buyer, &order_id);
+
+    // Try with wrong attester (not the configured attester) — should fail.
+    let err = client.try_advance_milestone(&buyer, &non_attester, &id)
+        .unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::NotAdmin);
+
+    // Now succeed with correct attester.
+    client.advance_milestone(&buyer, &attester, &id);
+    let c = client.get_campaign(&id);
+    assert_eq!(c.current_milestone, 1);
 }
 
 // ---------------------------------------------------------------------------
