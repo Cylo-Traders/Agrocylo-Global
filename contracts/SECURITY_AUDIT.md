@@ -1,6 +1,6 @@
 # Security Audit Checklist
 
-> **Scope:** Escrow (`contracts/escrow/src/lib.rs`), Registry (`agro-production/contract/registry/src/lib.rs`), Campaign (`agro-production/contract/src/lib.rs`), ProductionEscrow (`agro-production/contract/production_escrow/src/lib.rs`)
+> **Scope:** Escrow (`contracts/escrow/src/lib.rs`), Registry (`agro-production/contract/registry/src/lib.rs`), ProductionEscrow (`agro-production/contract/production_escrow/src/lib.rs`)
 >
 > **Date:** 2026-05-29
 > **Status:** Review Complete

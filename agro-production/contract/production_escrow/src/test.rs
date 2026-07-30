@@ -3311,7 +3311,7 @@ fn test_fee_config_rejects_admin_once_governance_set() {
     t.client.set_governance_contract(&t.admin, &governance);
 
     let result = t.client.try_set_fee_config(&t.admin, &fee_collector, &500);
-    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAdmin);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotGoverned);
 
     // The governance contract address is now the sole authorized caller.
     t.client.set_fee_config(&governance, &fee_collector, &500);
@@ -3326,7 +3326,7 @@ fn test_registry_contract_rejects_admin_once_governance_set() {
     t.client.set_governance_contract(&t.admin, &governance);
 
     let result = t.client.try_set_registry_contract(&t.admin, &registry);
-    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAdmin);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotGoverned);
 
     t.client.set_registry_contract(&governance, &registry);
 }
@@ -3341,7 +3341,7 @@ fn test_update_supported_tokens_governance_gated() {
     tokens.push_back(t.token_id.clone());
 
     let result = t.client.try_update_supported_tokens(&t.admin, &tokens);
-    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAdmin);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotGoverned);
 
     t.client.update_supported_tokens(&governance, &tokens);
     assert_eq!(t.client.get_supported_tokens().len(), 1);

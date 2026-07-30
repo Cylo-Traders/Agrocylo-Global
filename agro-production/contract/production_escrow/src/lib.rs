@@ -1569,7 +1569,7 @@ fn require_governed_caller(env: &Env, caller: &Address) -> Result<(), EscrowErro
         .get::<_, Address>(&DataKey::GovernanceContract)
     {
         if *caller != governance {
-            return Err(EscrowError::NotAdmin);
+            return Err(EscrowError::NotGoverned);
         }
         return Ok(());
     }
