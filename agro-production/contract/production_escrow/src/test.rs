@@ -11,7 +11,8 @@ use soroban_sdk::{
 
 use crate::{
     CampaignStatus, DisputeResolution, EscrowError, OrderStatus, ProductionEscrowContract,
-    ProductionEscrowContractClient, ORDER_EXPIRY_SECS,
+    ProductionEscrowContractClient, SplitOrderResolution, SplitOrderStatus, CANCEL_WINDOW_SECS,
+    ORDER_EXPIRY_SECS,
 };
 
 // ---------------------------------------------------------------------------
@@ -1608,6 +1609,73 @@ fn test_order_not_refunded_before_96h() {
     assert_eq!(total, 0);
     // Buyer balance unchanged
     assert_eq!(balance(&t, &t.buyer), buyer_before);
+}
+
+#[test]
+fn test_cancel_order_within_window_refunds_amount_plus_fee() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &t.attester, &id);
+
+    let order_id = t.client.create_order(&t.buyer, &id, &500);
+    let buyer_before = balance(&t, &t.buyer);
+
+    advance_ledger(&t.env, 60);
+    t.client.cancel_order(&t.buyer, &order_id);
+
+    let order = t.client.get_order(&order_id);
+    assert_eq!(order.status, OrderStatus::Refunded);
+    // Mirrors batch_refund_orders: refunds amount + fee.
+    assert_eq!(balance(&t, &t.buyer), buyer_before + 515);
+}
+
+#[test]
+fn test_cancel_order_fails_after_window_closes() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &t.attester, &id);
+
+    let order_id = t.client.create_order(&t.buyer, &id, &500);
+    advance_ledger(&t.env, CANCEL_WINDOW_SECS + 1);
+
+    let err = t
+        .client
+        .try_cancel_order(&t.buyer, &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CancelWindowClosed);
+}
+
+#[test]
+fn test_cancel_order_fails_after_confirmation() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &t.attester, &id);
+
+    let order_id = t.client.create_order(&t.buyer, &id, &500);
+    t.client.confirm_order(&t.buyer, &order_id);
+
+    let err = t
+        .client
+        .try_cancel_order(&t.buyer, &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::OrderNotPending);
 }
 
 #[test]
@@ -3363,7 +3431,7 @@ fn test_registry_wired_campaign_creation() {
     t.client.set_registry_contract(&t.admin, &registry_id);
 
     // Register farmer in registry contract
-    registry_client.register_farmer(&t.admin, &t.farmer);
+    registry_client.register_farmer(&t.farmer);
 
     // Create campaign in production escrow
     let deadline = future_deadline(&t);
@@ -3381,4 +3449,217 @@ fn test_registry_wired_campaign_creation() {
     assert_eq!(record.campaign_id, campaign_id);
     assert_eq!(record.farmer, t.farmer);
     assert_eq!(record.source_contract, t.client.address);
+}
+
+// ---------------------------------------------------------------------------
+// Multi-party split orders (Issue #654)
+// ---------------------------------------------------------------------------
+
+fn setup_split_ready(co_buyer_count: u32) -> (TestEnv<'static>, u64, Vec<Address>) {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let campaign_id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &campaign_id, &10_000);
+    t.client.start_production(&t.farmer, &campaign_id);
+    t.client
+        .mark_harvest(&t.farmer, &t.attester, &campaign_id);
+
+    let sac = StellarAssetClient::new(&t.env, &t.token_id);
+    let mut co_buyers = Vec::new(&t.env);
+    for _ in 0..co_buyer_count {
+        let co_buyer = Address::generate(&t.env);
+        sac.mint(&co_buyer, &1_000);
+        co_buyers.push_back(co_buyer);
+    }
+
+    (t, campaign_id, co_buyers)
+}
+
+#[test]
+fn test_create_split_order_validates_share_count() {
+    let (t, campaign_id, co_buyers) = setup_split_ready(3);
+    let mut shares = Vec::new(&t.env);
+    shares.push_back(300i128);
+    shares.push_back(400i128);
+
+    let result = t.client.try_create_split_order(
+        &co_buyers.get(0).unwrap(),
+        &campaign_id,
+        &co_buyers,
+        &shares,
+    );
+    assert_eq!(
+        result.unwrap_err().unwrap(),
+        EscrowError::SplitSharesMustSumToTotal
+    );
+}
+
+#[test]
+fn test_split_order_partial_funding_stays_in_funding_state() {
+    let (t, campaign_id, co_buyers) = setup_split_ready(3);
+    let mut shares = Vec::new(&t.env);
+    shares.push_back(300i128);
+    shares.push_back(300i128);
+    shares.push_back(400i128);
+
+    let contract_balance_before = balance(&t, &t.client.address);
+
+    let order_id =
+        t.client
+            .create_split_order(&co_buyers.get(0).unwrap(), &campaign_id, &co_buyers, &shares);
+    t.client
+        .fund_split_order(&co_buyers.get(0).unwrap(), &order_id);
+
+    let order = t.client.get_split_order(&order_id);
+    assert_eq!(order.status, SplitOrderStatus::Funding);
+    assert_eq!(order.funded_count, 1);
+    assert_eq!(
+        balance(&t, &t.client.address),
+        contract_balance_before + 300
+    );
+}
+
+#[test]
+fn test_split_order_becomes_active_once_fully_funded() {
+    let (t, campaign_id, co_buyers) = setup_split_ready(2);
+    let mut shares = Vec::new(&t.env);
+    shares.push_back(500i128);
+    shares.push_back(500i128);
+
+    let order_id =
+        t.client
+            .create_split_order(&co_buyers.get(0).unwrap(), &campaign_id, &co_buyers, &shares);
+    t.client
+        .fund_split_order(&co_buyers.get(0).unwrap(), &order_id);
+    let mid = t.client.get_split_order(&order_id);
+    assert_eq!(mid.status, SplitOrderStatus::Funding);
+
+    t.client
+        .fund_split_order(&co_buyers.get(1).unwrap(), &order_id);
+    let order = t.client.get_split_order(&order_id);
+    assert_eq!(order.status, SplitOrderStatus::Active);
+    assert_eq!(order.fee, 30); // 3% of 1000
+}
+
+#[test]
+fn test_split_order_fund_twice_fails() {
+    let (t, campaign_id, co_buyers) = setup_split_ready(2);
+    let mut shares = Vec::new(&t.env);
+    shares.push_back(500i128);
+    shares.push_back(500i128);
+
+    let order_id =
+        t.client
+            .create_split_order(&co_buyers.get(0).unwrap(), &campaign_id, &co_buyers, &shares);
+    t.client
+        .fund_split_order(&co_buyers.get(0).unwrap(), &order_id);
+    let result = t
+        .client
+        .try_fund_split_order(&co_buyers.get(0).unwrap(), &order_id);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::AlreadyContributed);
+}
+
+#[test]
+fn test_split_order_majority_by_value_releases_despite_non_confirming_contributor() {
+    // Shares: 600 / 200 / 200. The 600-share co-buyer alone is a strict
+    // majority by value, so the order confirms even though the other two
+    // co-buyers never confirm.
+    let (t, campaign_id, co_buyers) = setup_split_ready(3);
+    let mut shares = Vec::new(&t.env);
+    shares.push_back(600i128);
+    shares.push_back(200i128);
+    shares.push_back(200i128);
+
+    let order_id =
+        t.client
+            .create_split_order(&co_buyers.get(0).unwrap(), &campaign_id, &co_buyers, &shares);
+    for co_buyer in co_buyers.iter() {
+        t.client.fund_split_order(&co_buyer, &order_id);
+    }
+
+    let revenue_before = t.client.get_campaign(&campaign_id).total_revenue;
+    t.client
+        .confirm_split_receipt(&co_buyers.get(0).unwrap(), &order_id);
+
+    let order = t.client.get_split_order(&order_id);
+    assert_eq!(order.status, SplitOrderStatus::Confirmed);
+    let campaign = t.client.get_campaign(&campaign_id);
+    assert_eq!(campaign.total_revenue, revenue_before + 1_000);
+}
+
+#[test]
+fn test_split_order_even_split_requires_unanimous_confirmation() {
+    let (t, campaign_id, co_buyers) = setup_split_ready(2);
+    let mut shares = Vec::new(&t.env);
+    shares.push_back(500i128);
+    shares.push_back(500i128);
+
+    let order_id =
+        t.client
+            .create_split_order(&co_buyers.get(0).unwrap(), &campaign_id, &co_buyers, &shares);
+    for co_buyer in co_buyers.iter() {
+        t.client.fund_split_order(&co_buyer, &order_id);
+    }
+
+    t.client
+        .confirm_split_receipt(&co_buyers.get(0).unwrap(), &order_id);
+    let mid = t.client.get_split_order(&order_id);
+    assert_eq!(mid.status, SplitOrderStatus::Active);
+
+    t.client
+        .confirm_split_receipt(&co_buyers.get(1).unwrap(), &order_id);
+    let order = t.client.get_split_order(&order_id);
+    assert_eq!(order.status, SplitOrderStatus::Confirmed);
+}
+
+#[test]
+fn test_split_order_dispute_refund_is_pro_rata_across_all_contributors() {
+    let (t, campaign_id, co_buyers) = setup_split_ready(3);
+    let mut shares = Vec::new(&t.env);
+    shares.push_back(500i128);
+    shares.push_back(300i128);
+    shares.push_back(200i128);
+
+    let contract_balance_before = balance(&t, &t.client.address);
+
+    let order_id =
+        t.client
+            .create_split_order(&co_buyers.get(0).unwrap(), &campaign_id, &co_buyers, &shares);
+    for co_buyer in co_buyers.iter() {
+        t.client.fund_split_order(&co_buyer, &order_id);
+    }
+
+    t.client
+        .open_split_dispute(&co_buyers.get(2).unwrap(), &order_id);
+    t.client.resolve_split_dispute(
+        &t.admin,
+        &order_id,
+        &SplitOrderResolution::RefundCoBuyers,
+    );
+
+    let order = t.client.get_split_order(&order_id);
+    assert_eq!(order.status, SplitOrderStatus::Refunded);
+    // Pro-rata over shares 500/300/200 out of total_amount 1000 (no fee
+    // deducted on refund — the fee was never collected, only computed).
+    assert_eq!(balance(&t, &co_buyers.get(0).unwrap()), 1_000 - 500 + 500);
+    assert_eq!(balance(&t, &co_buyers.get(1).unwrap()), 1_000 - 300 + 300);
+    assert_eq!(balance(&t, &co_buyers.get(2).unwrap()), 1_000 - 200 + 200);
+    assert_eq!(balance(&t, &t.client.address), contract_balance_before);
+}
+
+#[test]
+fn test_fund_split_order_non_co_buyer_fails() {
+    let (t, campaign_id, co_buyers) = setup_split_ready(2);
+    let mut shares = Vec::new(&t.env);
+    shares.push_back(500i128);
+    shares.push_back(500i128);
+    let order_id =
+        t.client
+            .create_split_order(&co_buyers.get(0).unwrap(), &campaign_id, &co_buyers, &shares);
+
+    let stranger = Address::generate(&t.env);
+    let result = t.client.try_fund_split_order(&stranger, &order_id);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotCoBuyer);
 }
