@@ -9,7 +9,7 @@ Single source of truth for Rust, Soroban SDK, and `stellar-cli` versions.
 |-------------|-----------------|------------------------------------------|
 | Rust        | 1.81.0          | `rust-toolchain.toml`                    |
 | WASM target | `wasm32v1-none` | `rust-toolchain.toml`                    |
-| soroban-sdk | 22.1.1          | root `Cargo.toml` `[workspace.dependencies]` |
+| soroban-sdk | 22.0.11         | root `Cargo.toml` `[workspace.dependencies]` |
 | stellar-cli | 22.8.1          | install command below                    |
 
 ### Why 22.x?
@@ -21,7 +21,7 @@ requiring a re-audit before adoption. Upgrading is tracked separately.
 
 | soroban-sdk | Rust min | stellar-cli | Protocol |
 |-------------|----------|-------------|----------|
-| 22.1.1      | 1.81.0   | 22.x        | 22       |
+| 22.0.11     | 1.81.0   | 22.x        | 22       |
 | 25.x        | 1.84.0+  | 25.x        | 22       |
 
 ## Installation
