@@ -2,8 +2,8 @@
 
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Ledger},
-    token, Address, Env, String,
+    testutils::{Address as _, Events, Ledger},
+    token, Address, Env, IntoVal, String,
 };
 
 fn setup_test() -> (
@@ -20,6 +20,15 @@ fn setup_test() -> (
 ) {
     let env = Env::default();
     env.mock_all_auths();
+    // Issue #652 shared test-fixture fix: a fresh Env defaults to ledger
+    // timestamp 0, which collides with `delivery_timestamp == 0` used
+    // throughout this contract as the "not yet delivered" sentinel. Tests
+    // that don't explicitly advance the clock before `mark_delivered` would
+    // otherwise silently record a delivery_timestamp of 0, defeating the
+    // "already delivered" guard. A live Stellar ledger never has timestamp
+    // 0, so this is a test-fixture gap, not a contract bug — fixed here once
+    // for every test built on this shared fixture instead of per-test.
+    env.ledger().set_timestamp(1_000_000);
 
     let admin = Address::generate(&env);
     let farmer = Address::generate(&env);
@@ -74,6 +83,15 @@ fn create_test_with_tokens() -> (
 ) {
     let env = Env::default();
     env.mock_all_auths();
+    // Issue #652 shared test-fixture fix: a fresh Env defaults to ledger
+    // timestamp 0, which collides with `delivery_timestamp == 0` used
+    // throughout this contract as the "not yet delivered" sentinel. Tests
+    // that don't explicitly advance the clock before `mark_delivered` would
+    // otherwise silently record a delivery_timestamp of 0, defeating the
+    // "already delivered" guard. A live Stellar ledger never has timestamp
+    // 0, so this is a test-fixture gap, not a contract bug — fixed here once
+    // for every test built on this shared fixture instead of per-test.
+    env.ledger().set_timestamp(1_000_000);
 
     let admin = Address::generate(&env);
     let buyer = Address::generate(&env);
@@ -126,14 +144,14 @@ fn test_create_and_confirm_order() {
 
 #[test]
 fn test_mark_delivered_then_confirm() {
-    let (env, client, buyer, farmer, _collector, token, _, _, _, _) = setup_test();
+    let (env, client, buyer, farmer, _collector, token, _, admin, _, _) = setup_test();
 
     let order_id = client
         .mock_all_auths()
         .create_order(&buyer, &farmer, &token.address, &500);
 
     env.ledger().set_timestamp(1000);
-    client.mock_all_auths().mark_delivered(&farmer, &order_id);
+    client.mock_all_auths().mark_delivered(&farmer, &admin, &order_id);
 
     let order = client.get_order_details(&order_id);
     assert_eq!(order.status, OrderStatus::Pending);
@@ -147,7 +165,7 @@ fn test_mark_delivered_then_confirm() {
 
 #[test]
 fn test_mark_delivered_wrong_farmer_fails() {
-    let (env, client, buyer, farmer, _, token, _, _, _, _) = setup_test();
+    let (env, client, buyer, farmer, _, token, _, admin, _, _) = setup_test();
     let fake_farmer = Address::generate(&env);
 
     let order_id = client
@@ -156,30 +174,78 @@ fn test_mark_delivered_wrong_farmer_fails() {
 
     let result = client
         .mock_all_auths()
-        .try_mark_delivered(&fake_farmer, &order_id);
+        .try_mark_delivered(&fake_farmer, &admin, &order_id);
     assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotFarmer);
 }
 
 #[test]
 fn test_mark_delivered_twice_succeeds() {
-    let (env, client, buyer, farmer, _, token, _, _, _, _) = setup_test();
+    let (env, client, buyer, farmer, _, token, _, admin, _, _) = setup_test();
 
     let order_id = client
         .mock_all_auths()
         .create_order(&buyer, &farmer, &token.address, &500);
 
-    client.mock_all_auths().mark_delivered(&farmer, &order_id);
+    client.mock_all_auths().mark_delivered(&farmer, &admin, &order_id);
+    env.ledger().set_timestamp(1000);
+    let result = client
+        .mock_all_auths()
+        .try_mark_delivered(&farmer, &admin, &order_id);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::OrderNotPending);
+}
+
+#[test]
+fn test_mark_delivered_wrong_attester_fails() {
+    let (env, client, buyer, farmer, _, token, _, admin, _, _) = setup_test();
+    let fake_attester = Address::generate(&env);
+    client.mock_all_auths().set_attester(&admin, &admin);
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    let result = client
+        .mock_all_auths()
+        .try_mark_delivered(&farmer, &fake_attester, &order_id);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAttester);
+}
+
+#[test]
+fn test_mark_delivered_falls_back_to_admin_before_attester_configured() {
+    let (_env, client, buyer, farmer, _, token, _, admin, _, _) = setup_test();
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    // No set_attester call: admin is the fallback attester.
+    client.mock_all_auths().mark_delivered(&farmer, &admin, &order_id);
     let order = client.get_order_details(&order_id);
+    assert!(order.delivery_timestamp > 0);
+}
 
-    client.mock_all_auths().mark_delivered(&farmer, &order_id);
-    let order_after = client.get_order_details(&order_id);
-    assert_eq!(order_after.delivery_timestamp, order.delivery_timestamp);
+#[test]
+fn test_mark_delivered_uses_configured_attester() {
+    let (env, client, buyer, farmer, _, token, _, admin, _, _) = setup_test();
+    let attester = Address::generate(&env);
+    client.mock_all_auths().set_attester(&admin, &attester);
 
-    // delivery_timestamp stays 0 because ledger timestamp is 0 in soroban tests.
-    // The third call succeeds (idempotent) but doesn't change state.
-    client.mock_all_auths().mark_delivered(&farmer, &order_id);
-    let order_final = client.get_order_details(&order_id);
-    assert_eq!(order_final.delivery_timestamp, order.delivery_timestamp);
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    // Admin (the pre-attester fallback) can no longer co-sign once a
+    // dedicated attester is configured.
+    let result = client
+        .mock_all_auths()
+        .try_mark_delivered(&farmer, &admin, &order_id);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAttester);
+
+    client
+        .mock_all_auths()
+        .mark_delivered(&farmer, &attester, &order_id);
+    let order = client.get_order_details(&order_id);
+    assert!(order.delivery_timestamp > 0);
 }
 
 #[test]
@@ -252,6 +318,96 @@ fn test_refund_unexpired_order_fails() {
 
     let result = client.mock_all_auths().try_refund_expired_order(&buyer, &order_id);
     assert_eq!(result.unwrap_err().unwrap(), EscrowError::OrderNotExpired);
+}
+
+#[test]
+fn test_cancel_order_within_window_refunds_buyer() {
+    let (env, client, buyer, farmer, collector, token, _, _, _, contract_id) = setup_test();
+    let amount = 500i128;
+    let fee = amount * 3 / 100;
+    let net_amount = amount - fee;
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &amount);
+
+    env.ledger().set_timestamp(env.ledger().timestamp() + 60);
+    client.mock_all_auths().cancel_order(&buyer, &order_id);
+
+    let order = client.get_order_details(&order_id);
+    assert_eq!(order.status, OrderStatus::Refunded);
+
+    assert_eq!(token.balance(&buyer), 1000 - amount + net_amount);
+    assert_eq!(token.balance(&collector), fee);
+    assert_eq!(token.balance(&contract_id), 0);
+}
+
+#[test]
+fn test_cancel_order_fails_after_window_closes() {
+    let (env, client, buyer, farmer, _, token, _, _, _, _) = setup_test();
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp() + CANCEL_WINDOW_SECONDS + 1);
+
+    let result = client.mock_all_auths().try_cancel_order(&buyer, &order_id);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::CancelWindowClosed);
+}
+
+#[test]
+fn test_cancel_order_fails_after_delivery() {
+    let (_env, client, buyer, farmer, _, token, _, admin, _, _) = setup_test();
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    client
+        .mock_all_auths()
+        .mark_delivered(&farmer, &admin, &order_id);
+
+    let result = client.mock_all_auths().try_cancel_order(&buyer, &order_id);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::OrderNotDelivered);
+}
+
+#[test]
+fn test_cancel_order_wrong_buyer_fails() {
+    let (env, client, buyer, farmer, _, token, _, _, _, _) = setup_test();
+    let stranger = Address::generate(&env);
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+
+    let result = client.mock_all_auths().try_cancel_order(&stranger, &order_id);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotBuyer);
+}
+
+#[test]
+fn test_cancel_order_emits_distinct_event() {
+    let (env, client, buyer, farmer, _, token, _, _, _, contract_id) = setup_test();
+    let amount = 500i128;
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &amount);
+
+    client.mock_all_auths().cancel_order(&buyer, &order_id);
+
+    // The test env's event log only retains the most recent top-level
+    // invocation's events, so filtering to the escrow contract after
+    // `cancel_order` isolates exactly the event it emitted. Confirms it's
+    // the distinct `order:cancelled` topic, not a reused `order:refunded`.
+    let escrow_events = env.events().all().filter_by_contract(&contract_id);
+    let expected: soroban_sdk::Vec<(Address, soroban_sdk::Vec<soroban_sdk::Val>, soroban_sdk::Val)> =
+        soroban_sdk::vec![
+            &env,
+            (
+                contract_id,
+                (symbol_short!("order"), symbol_short!("cancelled")).into_val(&env),
+                (order_id, buyer).into_val(&env),
+            ),
+        ];
+    assert_eq!(escrow_events, expected);
 }
 
 #[test]
@@ -653,6 +809,8 @@ fn test_get_orders_by_farmer() {
 fn test_initialize_with_only_one_token_fails() {
     let env = Env::default();
     env.mock_all_auths();
+    // Non-zero baseline ledger timestamp (Issue #652 fixture fix, see setup_test).
+    env.ledger().set_timestamp(1_000_000);
 
     let admin = Address::generate(&env);
     let fee_collector = Address::generate(&env);
@@ -675,6 +833,8 @@ fn test_initialize_with_only_one_token_fails() {
 fn test_initialize_duplicate_fails() {
     let env = Env::default();
     env.mock_all_auths();
+    // Non-zero baseline ledger timestamp (Issue #652 fixture fix, see setup_test).
+    env.ledger().set_timestamp(1_000_000);
 
     let admin = Address::generate(&env);
     let fee_collector = Address::generate(&env);
@@ -838,6 +998,8 @@ fn setup_path_payment_test(
 ) {
     let env = Env::default();
     env.mock_all_auths();
+    // Non-zero baseline ledger timestamp (Issue #652 fixture fix, see setup_test).
+    env.ledger().set_timestamp(1_000_000);
 
     let admin = Address::generate(&env);
     let buyer = Address::generate(&env);
@@ -954,6 +1116,8 @@ fn test_create_order_via_path_payment_unsupported_settlement_token_fails() {
 fn test_create_order_via_path_payment_no_router_configured_fails() {
     let env = Env::default();
     env.mock_all_auths();
+    // Non-zero baseline ledger timestamp (Issue #652 fixture fix, see setup_test).
+    env.ledger().set_timestamp(1_000_000);
 
     let admin = Address::generate(&env);
     let buyer = Address::generate(&env);
@@ -1085,4 +1249,270 @@ fn test_confirm_receipt_without_registry_configured_still_succeeds() {
 
     let order = client.get_order_details(&order_id);
     assert_eq!(order.status, OrderStatus::Completed);
+}
+
+// ── Multi-party split orders (Issue #654) ──────────────────────────────────
+
+fn setup_split_test(
+    co_buyer_count: u32,
+) -> (
+    Env,
+    EscrowContractClient<'static>,
+    Address,
+    Vec<Address>,
+    token::Client<'static>,
+    Address,
+    Address,
+) {
+    let (env, client, _buyer, farmer, _collector, token, _, admin, _, contract_id) = setup_test();
+
+    let sac = token::StellarAssetClient::new(&env, &token.address);
+    let mut co_buyers = Vec::new(&env);
+    for _ in 0..co_buyer_count {
+        let co_buyer = Address::generate(&env);
+        sac.mint(&co_buyer, &1_000);
+        co_buyers.push_back(co_buyer);
+    }
+
+    (env, client, farmer, co_buyers, token, contract_id, admin)
+}
+
+#[test]
+fn test_create_split_order_validates_shares() {
+    let (env, client, farmer, co_buyers, token, _, _admin) = setup_split_test(3);
+    let initiator = co_buyers.get(0).unwrap();
+
+    let mut shares = Vec::new(&env);
+    shares.push_back(300i128);
+    shares.push_back(400i128);
+    // Missing third share: length mismatch.
+    let result = client.mock_all_auths().try_create_split_order(
+        &initiator,
+        &farmer,
+        &token.address,
+        &co_buyers,
+        &shares,
+    );
+    assert_eq!(
+        result.unwrap_err().unwrap(),
+        EscrowError::SplitSharesMustSumToTotal
+    );
+}
+
+#[test]
+fn test_split_order_partial_funding_stays_in_funding_state() {
+    let (env, client, farmer, co_buyers, token, contract_id, _admin) = setup_split_test(3);
+    let mut shares = Vec::new(&env);
+    shares.push_back(300i128);
+    shares.push_back(300i128);
+    shares.push_back(400i128);
+
+    let order_id = client.mock_all_auths().create_split_order(
+        &co_buyers.get(0).unwrap(),
+        &farmer,
+        &token.address,
+        &co_buyers,
+        &shares,
+    );
+
+    // Only the first co-buyer funds their share.
+    client
+        .mock_all_auths()
+        .fund_split_order(&co_buyers.get(0).unwrap(), &order_id);
+
+    let order = client.get_split_order(&order_id);
+    assert_eq!(order.status, SplitOrderStatus::Funding);
+    assert_eq!(order.funded_count, 1);
+    // Farmer has not been paid — funds are held, not disbursed.
+    assert_eq!(token.balance(&farmer), 0);
+    assert_eq!(token.balance(&contract_id), 300);
+}
+
+#[test]
+fn test_split_order_becomes_active_once_fully_funded() {
+    let (env, client, farmer, co_buyers, token, _, _admin) = setup_split_test(2);
+    let mut shares = Vec::new(&env);
+    shares.push_back(500i128);
+    shares.push_back(500i128);
+
+    let order_id = client.mock_all_auths().create_split_order(
+        &co_buyers.get(0).unwrap(),
+        &farmer,
+        &token.address,
+        &co_buyers,
+        &shares,
+    );
+    client
+        .mock_all_auths()
+        .fund_split_order(&co_buyers.get(0).unwrap(), &order_id);
+    let mid = client.get_split_order(&order_id);
+    assert_eq!(mid.status, SplitOrderStatus::Funding);
+
+    client
+        .mock_all_auths()
+        .fund_split_order(&co_buyers.get(1).unwrap(), &order_id);
+    let order = client.get_split_order(&order_id);
+    assert_eq!(order.status, SplitOrderStatus::Active);
+    // 3% platform fee taken once on full funding: 1000 - 30 = 970.
+    assert_eq!(order.net_amount, 970);
+}
+
+#[test]
+fn test_split_order_fund_twice_fails() {
+    let (env, client, farmer, co_buyers, token, _, _admin) = setup_split_test(2);
+    let mut shares = Vec::new(&env);
+    shares.push_back(500i128);
+    shares.push_back(500i128);
+
+    let order_id = client.mock_all_auths().create_split_order(
+        &co_buyers.get(0).unwrap(),
+        &farmer,
+        &token.address,
+        &co_buyers,
+        &shares,
+    );
+    client
+        .mock_all_auths()
+        .fund_split_order(&co_buyers.get(0).unwrap(), &order_id);
+    let result = client
+        .mock_all_auths()
+        .try_fund_split_order(&co_buyers.get(0).unwrap(), &order_id);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::AlreadyContributed);
+}
+
+#[test]
+fn test_split_order_majority_by_value_releases_despite_non_confirming_contributor() {
+    // Shares: 600 / 200 / 200. The 600-share co-buyer alone is a strict
+    // majority by value, so the order completes even though the other two
+    // co-buyers never confirm.
+    let (env, client, farmer, co_buyers, token, contract_id, _admin) = setup_split_test(3);
+    let mut shares = Vec::new(&env);
+    shares.push_back(600i128);
+    shares.push_back(200i128);
+    shares.push_back(200i128);
+
+    let order_id = client.mock_all_auths().create_split_order(
+        &co_buyers.get(0).unwrap(),
+        &farmer,
+        &token.address,
+        &co_buyers,
+        &shares,
+    );
+    for co_buyer in co_buyers.iter() {
+        client.mock_all_auths().fund_split_order(&co_buyer, &order_id);
+    }
+    client
+        .mock_all_auths()
+        .mark_split_delivered(&farmer, &order_id);
+
+    // Only the majority-share (non-confirming-others) co-buyer confirms.
+    client
+        .mock_all_auths()
+        .confirm_split_receipt(&co_buyers.get(0).unwrap(), &order_id);
+
+    let order = client.get_split_order(&order_id);
+    assert_eq!(order.status, SplitOrderStatus::Completed);
+    assert_eq!(token.balance(&farmer), 970);
+    assert_eq!(token.balance(&contract_id), 0);
+}
+
+#[test]
+fn test_split_order_even_split_requires_unanimous_confirmation() {
+    // Shares: 500 / 500. Neither co-buyer alone is a strict majority, so
+    // both must confirm before the farmer is paid.
+    let (env, client, farmer, co_buyers, token, _, _admin) = setup_split_test(2);
+    let mut shares = Vec::new(&env);
+    shares.push_back(500i128);
+    shares.push_back(500i128);
+
+    let order_id = client.mock_all_auths().create_split_order(
+        &co_buyers.get(0).unwrap(),
+        &farmer,
+        &token.address,
+        &co_buyers,
+        &shares,
+    );
+    for co_buyer in co_buyers.iter() {
+        client.mock_all_auths().fund_split_order(&co_buyer, &order_id);
+    }
+    client
+        .mock_all_auths()
+        .mark_split_delivered(&farmer, &order_id);
+
+    client
+        .mock_all_auths()
+        .confirm_split_receipt(&co_buyers.get(0).unwrap(), &order_id);
+    let mid = client.get_split_order(&order_id);
+    assert_eq!(mid.status, SplitOrderStatus::Active);
+    assert_eq!(token.balance(&farmer), 0);
+
+    client
+        .mock_all_auths()
+        .confirm_split_receipt(&co_buyers.get(1).unwrap(), &order_id);
+    let order = client.get_split_order(&order_id);
+    assert_eq!(order.status, SplitOrderStatus::Completed);
+    assert_eq!(token.balance(&farmer), 970);
+}
+
+#[test]
+fn test_split_order_dispute_refund_is_pro_rata_across_all_contributors() {
+    let (env, client, farmer, co_buyers, token, contract_id, admin) = setup_split_test(3);
+    let mut shares = Vec::new(&env);
+    shares.push_back(500i128);
+    shares.push_back(300i128);
+    shares.push_back(200i128);
+
+    let order_id = client.mock_all_auths().create_split_order(
+        &co_buyers.get(0).unwrap(),
+        &farmer,
+        &token.address,
+        &co_buyers,
+        &shares,
+    );
+    for co_buyer in co_buyers.iter() {
+        client.mock_all_auths().fund_split_order(&co_buyer, &order_id);
+    }
+
+    let reason = String::from_str(&env, "produce never arrived");
+    let evidence_hash = String::from_str(&env, "hash");
+    client.mock_all_auths().open_split_dispute(
+        &co_buyers.get(2).unwrap(),
+        &order_id,
+        &reason,
+        &evidence_hash,
+    );
+
+    client
+        .mock_all_auths()
+        .resolve_split_dispute(&admin, &order_id, &DisputeResolution::Refund);
+
+    let order = client.get_split_order(&order_id);
+    assert_eq!(order.status, SplitOrderStatus::Refunded);
+    // net_amount = 1000 - 3% fee = 970, pro-rata over shares 500/300/200.
+    assert_eq!(token.balance(&co_buyers.get(0).unwrap()), 1_000 - 500 + 485);
+    assert_eq!(token.balance(&co_buyers.get(1).unwrap()), 1_000 - 300 + 291);
+    assert_eq!(token.balance(&co_buyers.get(2).unwrap()), 1_000 - 200 + 194);
+    assert_eq!(token.balance(&contract_id), 0);
+    assert_eq!(token.balance(&farmer), 0);
+}
+
+#[test]
+fn test_fund_split_order_non_co_buyer_fails() {
+    let (env, client, farmer, co_buyers, token, _, _admin) = setup_split_test(2);
+    let mut shares = Vec::new(&env);
+    shares.push_back(500i128);
+    shares.push_back(500i128);
+    let order_id = client.mock_all_auths().create_split_order(
+        &co_buyers.get(0).unwrap(),
+        &farmer,
+        &token.address,
+        &co_buyers,
+        &shares,
+    );
+
+    let stranger = Address::generate(&env);
+    let result = client
+        .mock_all_auths()
+        .try_fund_split_order(&stranger, &order_id);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotCoBuyer);
 }

@@ -111,11 +111,6 @@ These constants ensure:
 
 ---
 
-### `agro-production/contract/src/lib.rs`
-
-| Key | Storage Type | TTL Extension Points |
-|-----|--------------|----------------------|
-| (Check individual contracts for their persistent keys) | Persistent | (Document all keys here when implementing) |
 
 ---
 
