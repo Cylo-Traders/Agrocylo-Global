@@ -31,6 +31,7 @@ import {
   InvestmentSchema,
 } from "../schemas/responses.js";
 import { broadcast } from "../services/wsServer.js";
+import { getCachedResponse, setCachedResponse } from "../middleware/idempotency.js";
 
 const router = Router();
 
@@ -195,11 +196,19 @@ router.post(
   "/campaigns",
   requireWallet,
   writeLimiter,
+  requireIdempotencyKey,
   validateBody(CreateCampaignSchema.omit({ farmerAddress: true })),
   validateResponse(CampaignSchema),
   async (req: WalletRequest, res: Response) => {
     const farmerAddress = req.walletAddress!;
+    const idempotencyKey = (req as any).idempotencyKey as string;
     const { tokenAddress, targetAmount, deadline } = req.body as Omit<CreateCampaignInput, "farmerAddress">;
+
+    const cached = getCachedResponse(idempotencyKey);
+    if (cached) {
+      res.status(cached.status).json(cached.body);
+      return;
+    }
 
     await prisma.user.upsert({
       where: { walletAddress: farmerAddress },
@@ -221,15 +230,15 @@ router.post(
       data: {
         campaignId: campaign.id,
         eventType: "campaign.created_intent",
-        payload: { transactionHash, intent: true },
+        payload: { idempotencyKey, intent: true },
         ledger: 0,
         eventIndex: 0,
-        txHash: transactionHash,
+        txHash: null,
       },
     });
 
     const response = campaign;
-    setCachedResponse(key, 201, response);
+    setCachedResponse(idempotencyKey, 201, response);
     jsonValidated(res, CampaignSchema, 201, response);
   },
 );
@@ -292,7 +301,14 @@ router.post(
   validateResponse(InvestmentSchema),
   async (req: WalletRequest, res: Response) => {
     const investorAddress = req.walletAddress!;
+    const idempotencyKey = (req as any).idempotencyKey as string;
     const { amount } = req.body as Omit<InvestInput, "investorAddress">;
+
+    const cached = getCachedResponse(idempotencyKey);
+    if (cached) {
+      res.status(cached.status).json(cached.body);
+      return;
+    }
 
     const campaign = await prisma.campaign.findUnique({ where: { id: req.params.id } });
     if (!campaign) {
@@ -322,7 +338,7 @@ router.post(
         investorAddress,
         amount,
         ledger: 0,
-        txHash: transactionHash,
+        txHash: null,
       },
     });
 
@@ -330,15 +346,15 @@ router.post(
       data: {
         campaignId: campaign.id,
         eventType: "campaign.invested_intent",
-        payload: { transactionHash, intent: true },
+        payload: { idempotencyKey, intent: true },
         ledger: 0,
         eventIndex: 0,
-        txHash: transactionHash,
+        txHash: null,
       },
     });
 
     const response = investment;
-    setCachedResponse(key, 201, response);
+    setCachedResponse(idempotencyKey, 201, response);
     jsonValidated(res, InvestmentSchema, 201, response);
   },
 );

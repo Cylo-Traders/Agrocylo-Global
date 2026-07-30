@@ -13,6 +13,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { ReferralCodeDisplay } from "@/components/ReferralCodeDisplay";
 import { useWallet } from "@/hooks/useWallet";
 import { useUserProfile } from "@/hooks/useUserProfile";
 import type { SocialLink } from "@/services/profileService";
@@ -84,7 +85,9 @@ export default function ProfileSettingsPage() {
       setNotice("Profile saved successfully.");
     } catch (saveError) {
       setError(
-        saveError instanceof Error ? saveError.message : "Failed to save profile.",
+        saveError instanceof Error
+          ? saveError.message
+          : "Failed to save profile.",
       );
     }
   }
@@ -111,7 +114,14 @@ export default function ProfileSettingsPage() {
           </Card>
         ) : null}
 
-        <form onSubmit={(event) => void handleSave(event)} className="space-y-6">
+        <form
+          onSubmit={(event) => void handleSave(event)}
+          className="space-y-6"
+        >
+          {connected && userId && (
+            <ReferralCodeDisplay walletAddress={userId} />
+          )}
+
           <Card className="rounded-3xl p-5 sm:p-6">
             <div className="flex items-center gap-2">
               <UserRoundCog className="text-primary size-5" />
@@ -227,7 +237,8 @@ export default function ProfileSettingsPage() {
 
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-muted-foreground text-sm">
-              Changes save locally for now and can later sync to your backend profile.
+              Changes save locally for now and can later sync to your backend
+              profile.
             </p>
             <Button type="submit" isLoading={isLoading || isSavingProfile}>
               Save changes

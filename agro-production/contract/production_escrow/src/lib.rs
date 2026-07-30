@@ -335,21 +335,23 @@ impl ProductionEscrowContract {
         Ok(())
     }
 
-    /// Set (or update) the governance contract address. Only the original
-    /// admin can do this — a one-time (or migration-time) bootstrapping step
-    /// that hands control of fee/token-whitelist parameters to governance.
-    /// Once set, `set_fee_config`/`set_registry_contract`/`update_supported_tokens`
-    /// can only be called by this address, not by the raw admin key.
+    /// Set (or update) the governance contract address. Admin-only for the
+    /// initial bootstrap while no governance is configured (Issue #680); once
+    /// set, `set_fee_config`/`set_registry_contract`/`update_supported_tokens`/
+    /// this setter itself can only be called by the governance contract, not
+    /// the raw admin key — so admin can no longer unilaterally re-point
+    /// governance to a self-controlled address. `governance` must be a live
+    /// contract implementing the expected interface, checked via a known
+    /// view-function call before it's accepted.
     pub fn set_governance_contract(
         env: Env,
         admin_caller: Address,
         governance: Address,
     ) -> Result<(), EscrowError> {
         admin_caller.require_auth();
-        let admin = admin(&env)?;
-        if admin_caller != admin {
-            return Err(EscrowError::NotAdmin);
-        }
+        require_governed_caller(&env, &admin_caller)?;
+        governance_client::verify(&env, &governance)
+            .map_err(|_| EscrowError::InvalidGovernanceContract)?;
         env.storage()
             .instance()
             .set(&DataKey::GovernanceContract, &governance);
@@ -647,12 +649,20 @@ impl ProductionEscrowContract {
     ///
     /// The caller must be a buyer (has a confirmed order on this campaign)
     /// or an oracle (admin address acting as oracle).
+    /// Requires independent attester co-signature to prevent self-attest exploits.
     pub fn advance_milestone(
         env: Env,
         caller: Address,
+        attester_caller: Address,
         campaign_id: u64,
     ) -> Result<(), EscrowError> {
         caller.require_auth();
+        attester_caller.require_auth();
+        let attester_addr = attester(&env)?;
+        if attester_caller != attester_addr {
+            return Err(EscrowError::NotAdmin);
+        }
+
         let mut campaign = load_campaign(&env, campaign_id)?;
 
         // Only allow milestone advances during active production.
@@ -667,9 +677,10 @@ impl ProductionEscrowContract {
         let admin_addr = admin(&env)?;
         let is_oracle = caller == admin_addr;
         if !is_oracle {
-            // Check if caller is a buyer (has any confirmed order on this campaign).
-            let is_buyer = has_confirmed_order(&env, campaign_id, &caller);
-            if !is_buyer {
+            // Check if caller is a buyer (has a confirmed order with minimum volume).
+            let buyer_order_volume = get_buyer_order_volume(&env, campaign_id, &caller);
+            let min_order_required = campaign.target_amount / 100; // At least 1% of target
+            if buyer_order_volume < min_order_required {
                 return Err(EscrowError::NotBuyerOrOracle);
             }
         }
@@ -1498,6 +1509,24 @@ mod registry_client {
     }
 }
 
+/// Verifies a candidate governance address is a real deployed governance contract
+/// (Issue #680), so `set_governance_contract` can't be pointed at an arbitrary
+/// admin-controlled address. Uses raw `try_invoke_contract` against a known
+/// view function (`get_admin`) rather than a typed client, returning an error
+/// instead of trapping so the caller gets a clean `InvalidGovernanceContract`.
+mod governance_client {
+    use soroban_sdk::{Address, Env, Error as HostError, Symbol, Val, Vec};
+
+    pub fn verify(env: &Env, governance: &Address) -> Result<(), ()> {
+        let func = Symbol::new(env, "get_admin");
+        let args: Vec<Val> = Vec::new(env);
+        match env.try_invoke_contract::<Val, HostError>(governance, &func, args) {
+            Ok(_) => Ok(()),
+            Err(_) => Err(()),
+        }
+    }
+}
+
 // Checked arithmetic for monetary values (Issue #457).
 fn checked_add(a: i128, b: i128) -> Result<i128, EscrowError> {
     a.checked_add(b)
@@ -1565,8 +1594,29 @@ fn save_campaign(env: &Env, c: &Campaign) {
         .extend_ttl(&DataKey::Campaign(c.id), TTL_THRESHOLD, TTL_EXTEND);
 }
 
-/// Check if a buyer has at least one confirmed order on a campaign.
-/// Used by advance_milestone to verify caller authorization.
+/// Get the total confirmed order volume for a buyer on a campaign.
+/// Used by advance_milestone to enforce minimum order volume requirement.
+fn get_buyer_order_volume(env: &Env, campaign_id: u64, buyer: &Address) -> i128 {
+    let order_count: u64 = env
+        .storage()
+        .instance()
+        .get(&DataKey::OrderCount)
+        .unwrap_or(0);
+    let mut total = 0i128;
+    for i in 1..=order_count {
+        if let Some(order) = env
+            .storage()
+            .persistent()
+            .get::<_, Order>(&DataKey::Order(i))
+        {
+            if order.campaign_id == campaign_id && order.buyer == *buyer && order.status == OrderStatus::Confirmed {
+                total = total.saturating_add(order.amount);
+            }
+        }
+    }
+    total
+}
+
 fn resolve_dispute_internal(
     env: &Env,
     campaign_id: u64,

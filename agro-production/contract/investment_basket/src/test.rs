@@ -145,13 +145,75 @@ fn test_mixed_outcome_basket_partial_failure_does_not_block_settled_payout() {
     assert!(cc1.swept);
     assert!(cc2.swept);
 
-    // Second claim attempt must fail — already claimed.
+    // Second claim attempt must fail — nothing new to collect, full fair
+    // share was already paid out on the first call.
     let err = t
         .basket
         .try_claim_basket_returns(&t.depositor, &basket_id)
         .unwrap_err()
         .unwrap();
-    assert_eq!(err, BasketError::AlreadyClaimed);
+    assert_eq!(err, BasketError::NothingToClaim);
+}
+
+#[test]
+fn test_staggered_settlement_across_multiple_claims_pays_full_fair_share() {
+    let t = setup();
+    let now = t.env.ledger().timestamp();
+    let deadline = now + 100_000;
+
+    // Two depositors, 50/50. Three constituent campaigns, settling one at a time.
+    let depositor_b = Address::generate(&t.env);
+    let sac = StellarAssetClient::new(&t.env, &t.token_id);
+    sac.mint(&depositor_b, &10_000_000);
+
+    let c1 = t.escrow.create_campaign(&t.farmer, &t.token_id, &3_000, &deadline);
+    let c2 = t.escrow.create_campaign(&t.farmer, &t.token_id, &2_000, &deadline);
+    let c3 = t.escrow.create_campaign(&t.farmer, &t.token_id, &2_000, &deadline);
+
+    let constituents = vec![&t.env, (c1, 3_400u32), (c2, 3_300u32), (c3, 3_300u32)];
+    let basket_id = t.basket.create_basket(&t.admin, &t.token_id, &constituents);
+
+    t.basket.deposit(&t.depositor, &basket_id, &1_000);
+    t.basket.deposit(&depositor_b, &basket_id, &1_000);
+    t.basket.fund_basket(&t.depositor, &basket_id);
+
+    // Settle campaign A only, then depositor A claims promptly.
+    t.escrow.start_production(&t.farmer, &c1);
+    t.escrow.mark_harvest(&t.farmer, &t.attester, &c1);
+    t.escrow.settle(&t.farmer, &c1);
+
+    let payout_a1 = t.basket.claim_basket_returns(&t.depositor, &basket_id);
+    assert!(payout_a1 > 0);
+
+    // A tries again immediately: nothing new yet.
+    let err = t
+        .basket
+        .try_claim_basket_returns(&t.depositor, &basket_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, BasketError::NothingToClaim);
+
+    // Now settle campaigns B and C too.
+    t.escrow.start_production(&t.farmer, &c2);
+    t.escrow.mark_harvest(&t.farmer, &t.attester, &c2);
+    t.escrow.settle(&t.farmer, &c2);
+
+    t.escrow.start_production(&t.farmer, &c3);
+    t.escrow.mark_harvest(&t.farmer, &t.attester, &c3);
+    t.escrow.settle(&t.farmer, &c3);
+
+    // Depositor B claims once, after everything has settled.
+    let payout_b = t.basket.claim_basket_returns(&depositor_b, &basket_id);
+
+    // Depositor A claims their remaining delta from B and C settling later.
+    let payout_a2 = t.basket.claim_basket_returns(&t.depositor, &basket_id);
+
+    // Both depositors are 50/50, so each one's total across all claims must
+    // be equal, and the early claimer (A) must not have forfeited anything.
+    assert_eq!(payout_a1 + payout_a2, payout_b);
+
+    let basket = t.basket.get_basket(&basket_id);
+    assert_eq!(basket.total_collected, payout_a1 + payout_a2 + payout_b);
 }
 
 #[test]
@@ -188,4 +250,116 @@ fn test_too_many_constituents_rejected() {
         .unwrap_err()
         .unwrap();
     assert_eq!(err, BasketError::TooManyConstituents);
+}
+
+#[test]
+fn test_fund_basket_skips_uninvestable_constituent_and_depositor_recovers_funds() {
+    let t = setup();
+    let now = t.env.ledger().timestamp();
+
+    // c1 stays investable. c2's deadline will already have passed by the
+    // time fund_basket runs, so its `invest` call fails.
+    let c1 = t.escrow.create_campaign(&t.farmer, &t.token_id, &1_000_000, &(now + 100_000));
+    let c2 = t.escrow.create_campaign(&t.farmer, &t.token_id, &1_000_000, &(now + 10));
+
+    let constituents = vec![&t.env, (c1, 6_000u32), (c2, 4_000u32)];
+    let basket_id = t.basket.create_basket(&t.admin, &t.token_id, &constituents);
+
+    t.basket.deposit(&t.depositor, &basket_id, &1_000_000);
+
+    // Advance past c2's deadline only.
+    t.env.ledger().set(LedgerInfo {
+        timestamp: now + 20,
+        protocol_version: 22,
+        sequence_number: t.env.ledger().sequence(),
+        network_id: Default::default(),
+        base_reserve: 10,
+        min_temp_entry_ttl: 16 * 60 * 60 * 24,
+        min_persistent_entry_ttl: 30 * 24 * 60 * 60,
+        max_entry_ttl: 365 * 24 * 60 * 60,
+    });
+
+    // Previously this panicked and left the basket permanently Open.
+    t.basket.fund_basket(&t.depositor, &basket_id);
+
+    let basket = t.basket.get_basket(&basket_id);
+    assert_eq!(basket.status, BasketStatus::Funded);
+
+    let cc1 = basket.constituents.get(0).unwrap();
+    let cc2 = basket.constituents.get(1).unwrap();
+    assert_eq!(cc1.invested_amount, 600_000);
+    assert!(!cc1.swept);
+
+    // c2 was skipped: never invested, its share kept as already-collected.
+    assert_eq!(cc2.invested_amount, 0);
+    assert_eq!(cc2.collected_amount, 400_000);
+    assert!(cc2.swept);
+    assert_eq!(basket.total_collected, 400_000);
+
+    // The depositor is not stuck: they can claim c2's untouched share right
+    // away, without waiting for c1 to ever settle.
+    let payout = t.basket.claim_basket_returns(&t.depositor, &basket_id);
+    assert_eq!(payout, 400_000);
+}
+
+#[test]
+fn test_withdraw_basket_before_deadline_rejected() {
+    let t = setup();
+    let now = t.env.ledger().timestamp();
+    let deadline = now + 100_000;
+    let c1 = t.escrow.create_campaign(&t.farmer, &t.token_id, &1_000_000, &deadline);
+
+    let constituents = vec![&t.env, (c1, 10_000u32)];
+    let basket_id = t.basket.create_basket(&t.admin, &t.token_id, &constituents);
+    t.basket.deposit(&t.depositor, &basket_id, &500_000);
+
+    let err = t
+        .basket
+        .try_withdraw_basket(&t.depositor, &basket_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, BasketError::WithdrawTooEarly);
+}
+
+#[test]
+fn test_withdraw_basket_after_deadline_recovers_principal() {
+    let t = setup();
+    let now = t.env.ledger().timestamp();
+    let deadline = now + 100_000;
+    let c1 = t.escrow.create_campaign(&t.farmer, &t.token_id, &1_000_000, &deadline);
+
+    let constituents = vec![&t.env, (c1, 10_000u32)];
+    let basket_id = t.basket.create_basket(&t.admin, &t.token_id, &constituents);
+    t.basket.deposit(&t.depositor, &basket_id, &500_000);
+
+    let balance_before = TokenClient::new(&t.env, &t.token_id).balance(&t.depositor);
+
+    t.env.ledger().set(LedgerInfo {
+        timestamp: now + 7 * 24 * 60 * 60 + 1,
+        protocol_version: 22,
+        sequence_number: t.env.ledger().sequence(),
+        network_id: Default::default(),
+        base_reserve: 10,
+        min_temp_entry_ttl: 16 * 60 * 60 * 24,
+        min_persistent_entry_ttl: 30 * 24 * 60 * 60,
+        max_entry_ttl: 365 * 24 * 60 * 60,
+    });
+
+    let withdrawn = t.basket.withdraw_basket(&t.depositor, &basket_id);
+    assert_eq!(withdrawn, 500_000);
+
+    let balance_after = TokenClient::new(&t.env, &t.token_id).balance(&t.depositor);
+    assert_eq!(balance_after, balance_before + 500_000);
+
+    let basket = t.basket.get_basket(&basket_id);
+    assert_eq!(basket.total_deposit, 0);
+    assert_eq!(t.basket.get_deposit(&basket_id, &t.depositor), 0);
+
+    // Can't withdraw twice.
+    let err = t
+        .basket
+        .try_withdraw_basket(&t.depositor, &basket_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, BasketError::NothingToWithdraw);
 }

@@ -1,4 +1,4 @@
-import express, { type Request, type Response } from 'express';
+﻿import express, { type Request, type Response } from 'express';
 import cors from 'cors';
 import logger from './config/logger.js';
 import { config } from './config/index.js';
@@ -21,7 +21,7 @@ import { serveOpenApiDocument } from './openapi/document.js';
 import { getRateLimitMetrics } from './middleware/rateLimitMetrics.js';
 import { getEventMetrics } from './events/metrics.js';
 import { prisma } from './db/client.js';
-import { server as sorobanRpcServer } from './services/sorobanEventListener.js';
+import { server as sorobanRpcServer } from './services/sorobanRpc.js';
 import { getWsClientCount } from './services/wsServer.js';
 
 const app = express();

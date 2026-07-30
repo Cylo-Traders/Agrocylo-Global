@@ -30,6 +30,10 @@ pub enum EscrowError {
     TokenWhitelistEmpty = 19,
     FeeRateTooHigh = 20,
     NotGoverned = 21,
+    RouterNotConfigured = 22,
+    SlippageToleranceExceeded = 23,
+    InvalidSlippageTolerance = 24,
+    InvalidGovernanceContract = 25,
 }
 
 #[contracttype]
@@ -116,6 +120,41 @@ pub enum DataKey {
     /// Governance contract authorized to change fee/token-whitelist
     /// parameters (Issue #660). Falls back to admin-only while unset.
     GovernanceContract,
+    /// Router contract used for cross-token settlement (Issue #591).
+    PathPaymentRouter,
+    /// Configurable slippage tolerance in basis points for path-payment
+    /// settlement (Issue #591). Defaults to 100 (1%) when unset.
+    MaxSlippageBps,
+    /// On-chain reputation registry (Issue #592). Optional: if unset,
+    /// reputation reporting is skipped entirely.
+    RegistryContract,
+}
+
+/// Cross-contract interface for a Stellar path-payment router (e.g. a Soroswap-style
+/// AMM/DEX contract). Soroban contracts cannot invoke the classic
+/// `PathPaymentStrictSend` ledger operation directly, so conversion is delegated to a
+/// router contract implementing this interface, which performs the strict-send path
+/// payment and delivers `dest_token` to `to`.
+#[contractclient(name = "PathPaymentRouterClient")]
+pub trait PathPaymentRouterTrait {
+    /// Sends exactly `send_amount` of `send_token` from `from`, routes it through
+    /// Stellar's path-payment-strict-send primitive, and delivers at least
+    /// `dest_min` of `dest_token` to `to`. Returns the actual amount of `dest_token`
+    /// delivered.
+    fn swap_exact_in(
+        env: Env,
+        from: Address,
+        to: Address,
+        send_token: Address,
+        dest_token: Address,
+        send_amount: i128,
+        dest_min: i128,
+    ) -> i128;
+
+    /// Returns the router's current expected `dest_token` output for converting
+    /// `send_amount` of `send_token`, without moving funds. Used as the reference
+    /// price against which the contract's configurable slippage tolerance is applied.
+    fn get_quote(env: Env, send_token: Address, dest_token: Address, send_amount: i128) -> i128;
 }
 
 const NINETY_SIX_HOURS_IN_SECONDS: u64 = 96 * 60 * 60;
@@ -126,6 +165,122 @@ const TTL_EXTEND_TO: u32 = 100_000;
 /// Fee rate used before `set_fee_config` has ever been called, matching the
 /// previously-hardcoded 3% fee in `create_order`.
 const DEFAULT_FEE_RATE_BPS: u32 = 300;
+
+/// Slippage tolerance used before `set_max_slippage_bps` has ever been called.
+const DEFAULT_MAX_SLIPPAGE_BPS: u32 = 100; // 1%
+
+fn read_max_slippage_bps(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::MaxSlippageBps)
+        .unwrap_or(DEFAULT_MAX_SLIPPAGE_BPS)
+}
+
+/// Records bookkeeping (order id, storage, indices, event) for a newly funded order
+/// whose settlement-token `net_amount` is already held in escrow.
+fn record_new_order(
+    env: &Env,
+    buyer: Address,
+    farmer: Address,
+    token: Address,
+    net_amount: i128,
+    gross_amount: i128,
+) -> u64 {
+    let instance_storage = env.storage().instance();
+    let order_id: u64 = instance_storage.get(&DataKey::OrderCount).unwrap_or(0u64) + 1;
+    instance_storage.set(&DataKey::OrderCount, &order_id);
+
+    let timestamp = env.ledger().timestamp();
+
+    let persistent_storage = env.storage().persistent();
+    let order_key = DataKey::Order(order_id);
+    let order = Order {
+        buyer: buyer.clone(),
+        farmer: farmer.clone(),
+        token: token.clone(),
+        amount: net_amount,
+        timestamp,
+        delivery_timestamp: 0,
+        status: OrderStatus::Pending,
+    };
+
+    env.events().publish(
+        (symbol_short!("order"), symbol_short!("created")),
+        (order_id, buyer.clone(), farmer.clone(), gross_amount, token),
+    );
+
+    persistent_storage.set(&order_key, &order);
+    persistent_storage.extend_ttl(&order_key, TTL_THRESHOLD, TTL_EXTEND_TO);
+
+    let buyer_key = DataKey::BuyerOrders(buyer.clone());
+    let mut buyer_orders: Vec<u64> = persistent_storage
+        .get(&buyer_key)
+        .unwrap_or_else(|| Vec::new(env));
+    buyer_orders.push_back(order_id);
+    persistent_storage.set(&buyer_key, &buyer_orders);
+
+    let farmer_key = DataKey::FarmerOrders(farmer);
+    let mut farmer_orders: Vec<u64> = persistent_storage
+        .get(&farmer_key)
+        .unwrap_or_else(|| Vec::new(env));
+    farmer_orders.push_back(order_id);
+    persistent_storage.set(&farmer_key, &farmer_orders);
+
+    order_id
+}
+
+/// Reports an order outcome to the configured reputation registry, if any. Best
+/// effort by design: an unconfigured registry (the common case for deployments that
+/// don't opt into on-chain reputation) is a no-op, not an error. `disputed_buyer_share_bps`
+/// is `None` for a clean `confirm_receipt`, `Some(bps)` for a resolved dispute.
+fn report_reputation_outcome(env: &Env, farmer: &Address, disputed_buyer_share_bps: Option<u32>) {
+    if let Some(registry) = env
+        .storage()
+        .instance()
+        .get::<_, Address>(&DataKey::RegistryContract)
+    {
+        registry_client::record_order_outcome(env, &registry, farmer, disputed_buyer_share_bps);
+    }
+}
+
+/// Minimal registry contract client for the reputation cross-contract call (Issue #592).
+/// Uses raw `invoke_contract` rather than a typed client so this crate does not need to
+/// depend on the registry crate directly.
+mod registry_client {
+    use soroban_sdk::{Address, Env, IntoVal, Symbol, Val, Vec};
+
+    pub fn record_order_outcome(
+        env: &Env,
+        registry: &Address,
+        farmer: &Address,
+        disputed_buyer_share_bps: Option<u32>,
+    ) {
+        let func = Symbol::new(env, "record_order_outcome");
+        let mut args: Vec<Val> = Vec::new(env);
+        args.push_back(env.current_contract_address().into_val(env));
+        args.push_back(farmer.clone().into_val(env));
+        args.push_back(disputed_buyer_share_bps.into_val(env));
+        let _: Val = env.invoke_contract(registry, &func, args);
+    }
+}
+
+/// Verifies a candidate governance address is a real deployed governance contract
+/// (Issue #680), so `set_governance_contract` can't be pointed at an arbitrary
+/// admin-controlled address. Uses raw `try_invoke_contract` against a known
+/// view function (`get_admin`) rather than a typed client, returning an error
+/// instead of trapping so the caller gets a clean `InvalidGovernanceContract`.
+mod governance_client {
+    use soroban_sdk::{Address, Env, Error as HostError, Symbol, Val, Vec};
+
+    pub fn verify(env: &Env, governance: &Address) -> Result<(), ()> {
+        let func = Symbol::new(env, "get_admin");
+        let args: Vec<Val> = Vec::new(env);
+        match env.try_invoke_contract::<Val, HostError>(governance, &func, args) {
+            Ok(_) => Ok(()),
+            Err(_) => Err(()),
+        }
+    }
+}
 
 fn read_order(env: &Env, order_id: u64) -> Result<Order, EscrowError> {
     env.storage()
@@ -423,10 +578,13 @@ impl EscrowContract {
             .get(&DataKey::FeeCollector)
             .ok_or(EscrowError::ContractNotInitialized)?;
 
+        let fee_rate_bps: u32 = instance_storage
+            .get(&DataKey::FeeRateBps)
+            .unwrap_or(DEFAULT_FEE_RATE_BPS);
         let fee = dest_received
-            .checked_mul(3)
+            .checked_mul(fee_rate_bps as i128)
             .ok_or(EscrowError::ArithmeticError)?
-            / 100;
+            / 10_000;
         let net_amount = dest_received
             .checked_sub(fee)
             .ok_or(EscrowError::ArithmeticError)?;
@@ -558,12 +716,12 @@ impl EscrowContract {
             &order.amount,
         );
 
+        report_reputation_outcome(&env, &order.farmer, None);
+
         env.events().publish(
             (symbol_short!("order"), symbol_short!("confirmed")),
             (order_id, order.buyer, order.farmer),
         );
-
-        report_reputation_outcome(&env, &order.farmer, None);
 
         Ok(())
     }
@@ -815,8 +973,6 @@ impl EscrowContract {
             resolve_escrow_dispute_internal(&env, order_id, resolution)?;
         }
 
-        report_reputation_outcome(&env, &order.farmer, Some(buyer_share_bps));
-
         Ok(())
     }
 
@@ -827,18 +983,21 @@ impl EscrowContract {
     // production_escrow: the governance contract once configured, admin-only
     // fallback until then.
 
-    /// Set (or update) the governance contract address. Only the original
-    /// admin can do this — a one-time (or migration-time) bootstrapping step.
+    /// Set (or update) the governance contract address. Admin-only for the
+    /// initial bootstrap while no governance is configured (Issue #680); once
+    /// set, only the governance contract itself can re-point this, so the raw
+    /// admin key can no longer unilaterally seize control back. `governance`
+    /// must be a live contract implementing the expected interface — this is
+    /// checked via a known view-function call before it's accepted.
     pub fn set_governance_contract(
         env: Env,
         admin_caller: Address,
         governance: Address,
     ) -> Result<(), EscrowError> {
         admin_caller.require_auth();
-        let admin = read_admin(&env)?;
-        if admin_caller != admin {
-            return Err(EscrowError::NotAdmin);
-        }
+        require_governed_caller(&env, &admin_caller)?;
+        governance_client::verify(&env, &governance)
+            .map_err(|_| EscrowError::InvalidGovernanceContract)?;
         env.storage()
             .instance()
             .set(&DataKey::GovernanceContract, &governance);

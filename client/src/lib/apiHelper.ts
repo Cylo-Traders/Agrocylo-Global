@@ -35,7 +35,12 @@ export async function apiRequest<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
-  const { method = "GET", headers = {}, body, timeout = DEFAULT_TIMEOUT } = options;
+  const {
+    method = "GET",
+    headers = {},
+    body,
+    timeout = DEFAULT_TIMEOUT,
+  } = options;
 
   const url = `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
   const controller = new AbortController();
@@ -55,15 +60,20 @@ export async function apiRequest<T>(
     });
 
     if (!res.ok) {
-      let parsed: { message?: string; title?: string; code?: string } | null = null;
+      let parsed: { message?: string; title?: string; code?: string } | null =
+        null;
       try {
         parsed = await res.json();
       } catch {
         // ignore
       }
       throw new ApiRequestError({
-        code: parsed?.code ?? res.status === 404 ? "NOT_FOUND" : "SERVER_ERROR",
-        message: parsed?.message || parsed?.title || `Request failed with status ${res.status}`,
+        code:
+          (parsed?.code ?? res.status === 404) ? "NOT_FOUND" : "SERVER_ERROR",
+        message:
+          parsed?.message ||
+          parsed?.title ||
+          `Request failed with status ${res.status}`,
         status: res.status,
         details: parsed,
       });
@@ -89,4 +99,61 @@ export async function apiRequest<T>(
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Convenience helper functions for common API operations
+export async function apiGet<T>(
+  path: string,
+  walletAddress?: string,
+): Promise<T> {
+  return apiRequest<T>(path, {
+    method: "GET",
+    headers: walletAddress ? { "x-wallet-address": walletAddress } : {},
+  });
+}
+
+export async function apiPost<T>(
+  path: string,
+  body: unknown,
+  walletAddress?: string,
+): Promise<T> {
+  return apiRequest<T>(path, {
+    method: "POST",
+    body,
+    headers: walletAddress ? { "x-wallet-address": walletAddress } : {},
+  });
+}
+
+export async function apiPut<T>(
+  path: string,
+  body: unknown,
+  walletAddress?: string,
+): Promise<T> {
+  return apiRequest<T>(path, {
+    method: "PUT",
+    body,
+    headers: walletAddress ? { "x-wallet-address": walletAddress } : {},
+  });
+}
+
+export async function apiPatch<T>(
+  path: string,
+  body: unknown,
+  walletAddress?: string,
+): Promise<T> {
+  return apiRequest<T>(path, {
+    method: "PATCH",
+    body,
+    headers: walletAddress ? { "x-wallet-address": walletAddress } : {},
+  });
+}
+
+export async function apiDelete<T = void>(
+  path: string,
+  walletAddress?: string,
+): Promise<T> {
+  return apiRequest<T>(path, {
+    method: "DELETE",
+    headers: walletAddress ? { "x-wallet-address": walletAddress } : {},
+  });
 }

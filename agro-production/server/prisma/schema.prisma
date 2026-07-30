@@ -255,68 +255,58 @@ model NotificationPreference {
 }
 
 model Conversation {
-  id              String   @id @default(uuid())
-  campaignId      String
-  investorAddress String  // participant A
-  farmerAddress   String  // participant B
-  lastMessageAt   DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id            String   @id @default(uuid())
+  orderId       String   @unique
+  buyerAddress  String
+  sellerAddress String
+  isArchived    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  messages Message[]
+  order        Order                   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  messages     Message[]
+  participants ConversationParticipant[]
 
-  @@unique([campaignId, investorAddress, farmerAddress])
-  @@index([campaignId])
-  @@index([investorAddress])
-  @@index([farmerAddress])
+  @@index([buyerAddress])
+  @@index([sellerAddress])
   @@map("conversations")
 }
 
 model Message {
-  id             String   @id @default(uuid())
+  id             String    @id @default(uuid())
   conversationId String
   senderAddress  String
-  content        String   @db.VarChar(5000)
-  isRead         Boolean  @default(false)
-  readAt         DateTime?
-  createdAt      DateTime @default(now())
+  content        String    @db.VarChar(4000)
+  type           MessageType @default(TEXT)
+  fileUrl        String?
+  createdAt      DateTime  @default(now())
+  editedAt       DateTime?
+  deletedAt      DateTime?
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  reports      MessageReport[]
 
-  @@index([conversationId])
+  @@index([conversationId, createdAt(sort: Desc)])
   @@index([senderAddress])
-  @@index([createdAt])
   @@map("messages")
 }
 
-model BlockedUser {
-  id                String   @id @default(uuid())
-  conversationId    String
-  blockerAddress    String  // who blocked
-  blockedAddress    String  // who is blocked
-  reason            String?
-  createdAt         DateTime @default(now())
+model ConversationParticipant {
+  id                 String    @id @default(uuid())
+  conversationId     String
+  walletAddress      String
+  lastReadMessageId  String?
+  updatedAt          DateTime  @updatedAt
 
-  @@unique([conversationId, blockerAddress, blockedAddress])
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, walletAddress])
   @@index([conversationId])
-  @@index([blockerAddress])
-  @@index([blockedAddress])
-  @@map("blocked_users")
+  @@index([walletAddress])
+  @@map("conversation_participants")
 }
 
-model MessageReport {
-  id              String   @id @default(uuid())
-  messageId       String
-  reporterAddress String
-  reason          String
-  createdAt       DateTime @default(now())
-
-  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
-
-  @@index([messageId])
-  @@index([reporterAddress])
-  @@index([createdAt])
-  @@map("message_reports")
+enum MessageType {
+  TEXT
+  FILE
+  SYSTEM
 }

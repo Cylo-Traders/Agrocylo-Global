@@ -17,13 +17,13 @@ import { config } from "../config/index.js";
 
 const router = Router();
 
-// Marketplace conversation schemas
+// Campaign conversation schemas
 const ConversationIdParamSchema = z.object({
   id: z.string().uuid(),
 });
 
-const OrderIdParamSchema = z.object({
-  orderId: z.string().uuid(),
+const CampaignIdParamSchema = z.object({
+  campaignId: z.string().uuid(),
 });
 
 const MessagePaginationSchema = z.object({
@@ -40,7 +40,7 @@ const EditMessageSchema = z.object({
 });
 
 // Response schemas
-const MarketplaceMessageResponseSchema = z.object({
+const MessageResponseSchema = z.object({
   id: z.string().uuid(),
   conversationId: z.string().uuid(),
   senderAddress: z.string(),
@@ -49,21 +49,21 @@ const MarketplaceMessageResponseSchema = z.object({
   deletedAt: z.string().datetime().nullable().optional(),
 });
 
-const MarketplaceConversationResponseSchema = z.object({
+const ConversationResponseSchema = z.object({
   id: z.string().uuid(),
-  orderId: z.string().uuid(),
-  buyerAddress: z.string(),
-  sellerAddress: z.string(),
+  campaignId: z.string().uuid(),
+  farmerAddress: z.string(),
+  investorAddress: z.string(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
 
 const MessageListResponseSchema = z.object({
-  messages: z.array(MarketplaceMessageResponseSchema),
+  messages: z.array(MessageResponseSchema),
   nextCursor: z.string().optional(),
 });
 
-// Message rate limiter per wallet (stricter than default)
+// Message rate limiter per wallet
 const messageRateLimiter = rateLimit({
   windowMs: config.rateLimitWindowMs,
   max: Math.max(1, config.rateLimitWriteMaxRequests),
@@ -84,91 +84,160 @@ async function checkParticipant(
   conversationId: string,
   walletAddress: string,
 ): Promise<boolean> {
-  const conversation = await prisma.marketplaceConversation.findUnique({
+  const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
   });
   return (
     conversation &&
-    (conversation.buyerAddress === walletAddress || conversation.sellerAddress === walletAddress)
+    (conversation.farmerAddress === walletAddress || conversation.investorAddress === walletAddress)
   );
 }
 
-// GET /conversations — list user's conversations
+// Helper: Check if wallet can access campaign conversation
+async function canAccessCampaignConversation(
+  campaignId: string,
+  walletAddress: string,
+): Promise<boolean> {
+  const campaign = await prisma.campaign.findUnique({
+    where: { id: campaignId },
+  });
+
+  if (!campaign) return false;
+
+  const isFarmer = campaign.farmerAddress === walletAddress;
+  if (isFarmer) return true;
+
+  // Check if investor has an investment in this campaign
+  const investment = await prisma.investment.findFirst({
+    where: {
+      campaignId,
+      investorAddress: walletAddress,
+    },
+  });
+
+  return !!investment;
+}
+
+// GET /campaigns/:campaignId/conversation — get or list conversation for campaign
 router.get(
-  "/conversations",
+  "/campaigns/:campaignId/conversation",
   requireWallet,
-  validateResponse(z.array(MarketplaceConversationResponseSchema)),
+  validateParams(CampaignIdParamSchema),
+  validateResponse(ConversationResponseSchema.or(z.null())),
   async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
+    const { campaignId } = req.params;
 
-    const conversations = await prisma.marketplaceConversation.findMany({
-      where: {
-        OR: [{ buyerAddress: walletAddress }, { sellerAddress: walletAddress }],
-      },
-      orderBy: { updatedAt: "desc" },
-    });
-
-    jsonValidated(res, z.array(MarketplaceConversationResponseSchema), 200, conversations);
-  },
-);
-
-// POST /orders/:orderId/conversation — create/return conversation for order
-router.post(
-  "/orders/:orderId/conversation",
-  requireWallet,
-  writeLimiter,
-  validateParams(OrderIdParamSchema),
-  validateResponse(MarketplaceConversationResponseSchema),
-  async (req: WalletRequest, res: Response) => {
-    const walletAddress = req.walletAddress!;
-    const { orderId } = req.params;
-
-    // Fetch order and validate participants
-    const order = await prisma.order.findUnique({
-      where: { id: orderId },
-      include: { campaign: true },
-    });
-
-    if (!order) {
-      problemDetail(res, req, 404, "Order Not Found", `No order with id ${orderId}`);
-      return;
-    }
-
-    // Only buyer or seller (farmer) can create/access conversation
-    const isBuyer = walletAddress === order.buyerAddress;
-    const isSeller = walletAddress === order.campaign.farmerAddress;
-
-    if (!isBuyer && !isSeller) {
+    // Check access to campaign
+    const canAccess = await canAccessCampaignConversation(campaignId, walletAddress);
+    if (!canAccess) {
       problemDetail(
         res,
         req,
         403,
         "Forbidden",
-        "Only order participants can access this conversation",
+        "Only farmer or investors can access campaign conversations",
       );
       return;
     }
 
-    // Find or create conversation
-    let conversation = await prisma.marketplaceConversation.findUnique({
-      where: { orderId },
+    const conversation = await prisma.conversation.findFirst({
+      where: {
+        campaignId,
+        OR: [
+          { investorAddress: walletAddress },
+          { farmerAddress: walletAddress },
+        ],
+      },
+    });
+
+    jsonValidated(res, ConversationResponseSchema.or(z.null()), 200, conversation || null);
+  },
+);
+
+// POST /campaigns/:campaignId/conversation — create conversation for campaign
+router.post(
+  "/campaigns/:campaignId/conversation",
+  requireWallet,
+  writeLimiter,
+  validateParams(CampaignIdParamSchema),
+  validateResponse(ConversationResponseSchema),
+  async (req: WalletRequest, res: Response) => {
+    const walletAddress = req.walletAddress!;
+    const { campaignId } = req.params;
+
+    // Fetch campaign
+    const campaign = await prisma.campaign.findUnique({
+      where: { id: campaignId },
+    });
+
+    if (!campaign) {
+      problemDetail(res, req, 404, "Campaign Not Found", `No campaign with id ${campaignId}`);
+      return;
+    }
+
+    const isFarmer = walletAddress === campaign.farmerAddress;
+
+    // Investor: must have an investment
+    if (!isFarmer) {
+      const investment = await prisma.investment.findFirst({
+        where: {
+          campaignId,
+          investorAddress: walletAddress,
+        },
+      });
+
+      if (!investment) {
+        problemDetail(
+          res,
+          req,
+          403,
+          "Forbidden",
+          "Only campaign investors and farmer can create conversations",
+        );
+        return;
+      }
+    }
+
+    // Determine roles
+    const farmerAddress = campaign.farmerAddress;
+    const investorAddress = isFarmer ? "unknown" : walletAddress;
+
+    // For farmer: find or create with requesting investor (will be set in body or error)
+    if (isFarmer) {
+      problemDetail(
+        res,
+        req,
+        400,
+        "Bad Request",
+        "Farmer cannot initiate conversation; investors initiate by investing",
+      );
+      return;
+    }
+
+    // Find or create conversation (unique on campaignId + investorAddress)
+    let conversation = await prisma.conversation.findFirst({
+      where: {
+        campaignId,
+        investorAddress: walletAddress,
+      },
     });
 
     if (!conversation) {
-      conversation = await prisma.marketplaceConversation.create({
+      conversation = await prisma.conversation.create({
         data: {
-          orderId,
-          buyerAddress: order.buyerAddress,
-          sellerAddress: order.campaign.farmerAddress,
+          campaignId,
+          farmerAddress,
+          investorAddress: walletAddress,
         },
       });
     }
 
-    jsonValidated(res, MarketplaceConversationResponseSchema, 200, conversation);
+    jsonValidated(res, ConversationResponseSchema, 200, conversation);
   },
 );
 
-// GET /conversations/:id/messages — paginated message history with cursor
+// GET /conversations/:id/messages — paginated message history
 router.get(
   "/conversations/:id/messages",
   requireWallet,
@@ -204,7 +273,7 @@ router.get(
     // Apply cursor if provided
     let skip = 0;
     if (cursor) {
-      const cursorMessage = await prisma.marketplaceMessage.findUnique({
+      const cursorMessage = await prisma.message.findUnique({
         where: { id: cursor },
       });
       if (cursorMessage) {
@@ -216,7 +285,7 @@ router.get(
     }
 
     // Fetch limit + 1 to determine if there's a next cursor
-    const messages = await prisma.marketplaceMessage.findMany({
+    const messages = await prisma.message.findMany({
       where,
       orderBy,
       skip,
@@ -246,7 +315,7 @@ router.post(
   messageRateLimiter,
   validateParams(ConversationIdParamSchema),
   validateBody(SendMessageSchema),
-  validateResponse(MarketplaceMessageResponseSchema),
+  validateResponse(MessageResponseSchema),
   async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
     const { id } = req.params;
@@ -266,7 +335,7 @@ router.post(
     }
 
     // Fetch conversation to get other participant
-    const conversation = await prisma.marketplaceConversation.findUnique({
+    const conversation = await prisma.conversation.findUnique({
       where: { id },
     });
 
@@ -275,7 +344,7 @@ router.post(
       return;
     }
 
-    const message = await prisma.marketplaceMessage.create({
+    const message = await prisma.message.create({
       data: {
         conversationId: id,
         senderAddress: walletAddress,
@@ -284,21 +353,21 @@ router.post(
     });
 
     // Update conversation updatedAt
-    await prisma.marketplaceConversation.update({
+    await prisma.conversation.update({
       where: { id },
       data: { updatedAt: new Date() },
     });
 
     // Broadcast to other participant
-    const recipientWallet = walletAddress === conversation.buyerAddress
-      ? conversation.sellerAddress
-      : conversation.buyerAddress;
+    const recipientWallet = walletAddress === conversation.farmerAddress
+      ? conversation.investorAddress
+      : conversation.farmerAddress;
     broadcastTo(recipientWallet, "message:new", {
       conversationId: id,
       message,
     });
 
-    jsonValidated(res, MarketplaceMessageResponseSchema, 201, message);
+    jsonValidated(res, MessageResponseSchema, 201, message);
   },
 );
 
@@ -314,7 +383,7 @@ router.patch(
     }),
   ),
   validateBody(EditMessageSchema),
-  validateResponse(MarketplaceMessageResponseSchema),
+  validateResponse(MessageResponseSchema),
   async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
     const { id, messageId } = req.params;
@@ -334,7 +403,7 @@ router.patch(
     }
 
     // Fetch message and verify sender
-    const message = await prisma.marketplaceMessage.findUnique({
+    const message = await prisma.message.findUnique({
       where: { id: messageId },
     });
 
@@ -359,27 +428,27 @@ router.patch(
       return;
     }
 
-    const updated = await prisma.marketplaceMessage.update({
+    const updated = await prisma.message.update({
       where: { id: messageId },
       data: { content },
     });
 
     // Fetch conversation to broadcast to other participant
-    const conversation = await prisma.marketplaceConversation.findUnique({
+    const conversation = await prisma.conversation.findUnique({
       where: { id },
     });
 
     if (conversation) {
-      const recipientWallet = walletAddress === conversation.buyerAddress
-        ? conversation.sellerAddress
-        : conversation.buyerAddress;
+      const recipientWallet = walletAddress === conversation.farmerAddress
+        ? conversation.investorAddress
+        : conversation.farmerAddress;
       broadcastTo(recipientWallet, "message:edited", {
         conversationId: id,
         message: updated,
       });
     }
 
-    jsonValidated(res, MarketplaceMessageResponseSchema, 200, updated);
+    jsonValidated(res, MessageResponseSchema, 200, updated);
   },
 );
 
@@ -412,7 +481,7 @@ router.delete(
     }
 
     // Fetch message and verify sender
-    const message = await prisma.marketplaceMessage.findUnique({
+    const message = await prisma.message.findUnique({
       where: { id: messageId },
     });
 
@@ -437,20 +506,20 @@ router.delete(
       return;
     }
 
-    const deletedMessage = await prisma.marketplaceMessage.update({
+    await prisma.message.update({
       where: { id: messageId },
       data: { deletedAt: new Date() },
     });
 
     // Fetch conversation to broadcast to other participant
-    const conversation = await prisma.marketplaceConversation.findUnique({
+    const conversation = await prisma.conversation.findUnique({
       where: { id },
     });
 
     if (conversation) {
-      const recipientWallet = walletAddress === conversation.buyerAddress
-        ? conversation.sellerAddress
-        : conversation.buyerAddress;
+      const recipientWallet = walletAddress === conversation.farmerAddress
+        ? conversation.investorAddress
+        : conversation.farmerAddress;
       broadcastTo(recipientWallet, "message:deleted", {
         conversationId: id,
         messageId,
@@ -461,7 +530,7 @@ router.delete(
   },
 );
 
-// POST /conversations/:id/read — mark conversation as read (update high-water-mark)
+// POST /conversations/:id/read — mark conversation as read
 router.post(
   "/conversations/:id/read",
   requireWallet,
@@ -483,13 +552,13 @@ router.post(
       return;
     }
 
-    // Update conversation's updatedAt to track read state
-    const conversation = await prisma.marketplaceConversation.update({
+    // Update conversation's updatedAt
+    const conversation = await prisma.conversation.update({
       where: { id },
       data: { updatedAt: new Date() },
     });
 
-    jsonValidated(res, MarketplaceConversationResponseSchema, 200, conversation);
+    jsonValidated(res, ConversationResponseSchema, 200, conversation);
   },
 );
 

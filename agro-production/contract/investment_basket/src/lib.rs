@@ -46,7 +46,9 @@ pub enum BasketError {
 
     NotDepositor = 30,
     NothingToClaim = 31,
-    AlreadyClaimed = 32,
+
+    WithdrawTooEarly = 40,
+    NothingToWithdraw = 41,
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +89,10 @@ pub struct Basket {
     pub total_collected: i128,
     pub status: BasketStatus,
     pub constituents: Vec<BasketConstituent>,
+    /// Ledger timestamp the basket was created (Issue #682). Used to gate
+    /// `withdraw_basket`, the escape hatch for a basket stuck `Open` because
+    /// no one has (or can) call `fund_basket` successfully.
+    pub created_at: u64,
 }
 
 #[contracttype]
@@ -100,6 +106,11 @@ pub enum DataKey {
     /// a single depositor stream per basket_id; multiple depositors are
     /// tracked individually so partial claims remain correct).
     Deposit(u64, Address),
+    /// Cumulative amount already paid out to this depositor for this basket
+    /// (Issue #681). Since constituent campaigns settle at different times,
+    /// `claim_basket_returns` is repeatable: each call pays the depositor's
+    /// fair share of the *current* `total_collected` minus whatever they've
+    /// already been paid, rather than a one-shot all-or-nothing flag.
     Claimed(u64, Address),
 }
 
@@ -115,6 +126,10 @@ pub const MAX_BASKET_SIZE: u32 = 20;
 
 const TTL_THRESHOLD: u32 = 1_000;
 const TTL_EXTEND: u32 = 100_000;
+
+/// A basket stuck `Open` (nobody has successfully called `fund_basket`) for
+/// this long becomes withdrawable by its depositors (Issue #682).
+const OPEN_BASKET_WITHDRAW_DELAY_SECONDS: u64 = 7 * 24 * 60 * 60;
 
 fn t_basket() -> Symbol {
     symbol_short!("basket")
@@ -212,6 +227,7 @@ impl InvestmentBasketContract {
             total_collected: 0,
             status: BasketStatus::Open,
             constituents: entries,
+            created_at: env.ledger().timestamp(),
         };
         env.storage().persistent().set(&DataKey::Basket(id), &basket);
         env.storage()
@@ -280,6 +296,14 @@ impl InvestmentBasketContract {
     /// split of the pooled deposit across constituent campaigns. Separated
     /// from `deposit` so multiple depositors can contribute before the
     /// basket is funded in a single batch of cross-contract `invest` calls.
+    ///
+    /// Uses `try_invoke_contract` per constituent (Issue #682): a constituent
+    /// that's no longer investable (deadline passed, overfunded, wrong
+    /// status, ...) is skipped rather than aborting the whole call. Its share
+    /// never leaves the basket's own balance, so it's recorded as already
+    /// "collected" and immediately claimable via `claim_basket_returns` —
+    /// depositors get that portion of their principal back dollar-for-dollar
+    /// instead of it being stuck behind a permanently-Open basket.
     pub fn fund_basket(env: Env, caller: Address, basket_id: u64) -> Result<(), BasketError> {
         caller.require_auth();
         let mut basket = load_basket(&env, basket_id)?;
@@ -304,8 +328,16 @@ impl InvestmentBasketContract {
                 (basket.total_deposit * c.weight_bps as i128) / BPS_DENOM as i128
             };
             if share > 0 {
-                escrow_client::invest(&env, &basket.escrow_contract, c.campaign_id, share);
-                c.invested_amount = share;
+                if escrow_client::try_invest(&env, &basket.escrow_contract, c.campaign_id, share) {
+                    c.invested_amount = share;
+                } else {
+                    c.collected_amount = share;
+                    c.swept = true;
+                    basket.total_collected = basket
+                        .total_collected
+                        .checked_add(share)
+                        .unwrap_or(basket.total_collected);
+                }
                 allocated = allocated
                     .checked_add(share)
                     .ok_or(BasketError::InvalidAmount)?;
@@ -323,12 +355,69 @@ impl InvestmentBasketContract {
         Ok(())
     }
 
+    /// Escape hatch for a basket stuck `Open` because `fund_basket` was never
+    /// (successfully) called — e.g. every constituent became uninvestable
+    /// before anyone triggered funding (Issue #682). Once
+    /// `OPEN_BASKET_WITHDRAW_DELAY_SECONDS` has elapsed since creation, any
+    /// depositor can withdraw their own principal directly; no admin action
+    /// required. Not available once the basket has transitioned to `Funded`
+    /// — `claim_basket_returns` covers recovery from that point on,
+    /// including the never-invested share of any constituent skipped above.
+    pub fn withdraw_basket(
+        env: Env,
+        depositor: Address,
+        basket_id: u64,
+    ) -> Result<i128, BasketError> {
+        depositor.require_auth();
+        let mut basket = load_basket(&env, basket_id)?;
+        if basket.status != BasketStatus::Open {
+            return Err(BasketError::BasketNotOpen);
+        }
+        if env.ledger().timestamp() < basket.created_at + OPEN_BASKET_WITHDRAW_DELAY_SECONDS {
+            return Err(BasketError::WithdrawTooEarly);
+        }
+
+        let deposit_key = DataKey::Deposit(basket_id, depositor.clone());
+        let deposit_amount: i128 = env.storage().persistent().get(&deposit_key).unwrap_or(0);
+        if deposit_amount <= 0 {
+            return Err(BasketError::NothingToWithdraw);
+        }
+
+        env.storage().persistent().set(&deposit_key, &0i128);
+        env.storage()
+            .persistent()
+            .extend_ttl(&deposit_key, TTL_THRESHOLD, TTL_EXTEND);
+
+        basket.total_deposit = basket
+            .total_deposit
+            .checked_sub(deposit_amount)
+            .ok_or(BasketError::NothingToWithdraw)?;
+        save_basket(&env, &basket);
+
+        let token_client = token::Client::new(&env, &basket.token);
+        token_client.transfer(&env.current_contract_address(), &depositor, &deposit_amount);
+
+        env.events().publish(
+            (t_basket(), symbol_short!("withdrawn")),
+            (basket_id, depositor, deposit_amount),
+        );
+        Ok(deposit_amount)
+    }
+
     /// Sweep claim_returns/refund across every constituent campaign and pay
     /// the depositor their proportional share of whatever was collectible.
     /// Handles partial failure gracefully: a constituent still in-progress
     /// (not Settled/Failed) or already swept by a previous call is skipped
     /// rather than aborting the whole sweep, so successful constituents
     /// still pay out.
+    ///
+    /// Repeatable by design (Issue #681): constituent campaigns settle at
+    /// different times, so a depositor's fair share of `total_collected`
+    /// grows across multiple calls. Each call pays out
+    /// `fair_share(total_collected) - already_paid`, so claiming early never
+    /// forfeits a later constituent's payout — the depositor (or anyone
+    /// prompting the sweep) can just call this again once more constituents
+    /// settle.
     pub fn claim_basket_returns(
         env: Env,
         depositor: Address,
@@ -348,11 +437,6 @@ impl InvestmentBasketContract {
             .ok_or(BasketError::NotDepositor)?;
         if deposit_amount <= 0 {
             return Err(BasketError::NotDepositor);
-        }
-
-        let claim_key = DataKey::Claimed(basket_id, depositor.clone());
-        if env.storage().persistent().has(&claim_key) {
-            return Err(BasketError::AlreadyClaimed);
         }
 
         // Sweep every unswept constituent; failures on individual campaigns
@@ -383,12 +467,21 @@ impl InvestmentBasketContract {
             return Err(BasketError::NothingToClaim);
         }
 
-        let payout = (basket.total_collected * deposit_amount) / basket.total_deposit;
+        let claim_key = DataKey::Claimed(basket_id, depositor.clone());
+        let already_paid: i128 = env.storage().persistent().get(&claim_key).unwrap_or(0);
+
+        let fair_share = (basket.total_collected * deposit_amount) / basket.total_deposit;
+        let payout = fair_share
+            .checked_sub(already_paid)
+            .ok_or(BasketError::NothingToClaim)?;
         if payout <= 0 {
             return Err(BasketError::NothingToClaim);
         }
+        let new_paid = already_paid
+            .checked_add(payout)
+            .ok_or(BasketError::NothingToClaim)?;
 
-        env.storage().persistent().set(&claim_key, &true);
+        env.storage().persistent().set(&claim_key, &new_paid);
         env.storage()
             .persistent()
             .extend_ttl(&claim_key, TTL_THRESHOLD, TTL_EXTEND);
@@ -479,13 +572,20 @@ fn sweep_constituent(
 mod escrow_client {
     use super::*;
 
-    pub fn invest(env: &Env, escrow: &Address, campaign_id: u64, amount: i128) {
+    /// Returns `true` if the constituent accepted the investment, `false` if
+    /// the call failed for any reason (deadline passed, overfunded, wrong
+    /// status, ...) — callers skip a `false` constituent rather than
+    /// aborting the whole `fund_basket` call (Issue #682).
+    pub fn try_invest(env: &Env, escrow: &Address, campaign_id: u64, amount: i128) -> bool {
         let func = Symbol::new(env, "invest");
         let mut args: Vec<Val> = Vec::new(env);
         args.push_back(env.current_contract_address().into_val(env));
         args.push_back(campaign_id.into_val(env));
         args.push_back(amount.into_val(env));
-        let _: () = env.invoke_contract(escrow, &func, args);
+        env.try_invoke_contract::<(), soroban_sdk::Error>(escrow, &func, args)
+            .ok()
+            .and_then(|r| r.ok())
+            .is_some()
     }
 
     pub fn try_claim_returns(env: &Env, escrow: &Address, campaign_id: u64) -> Option<i128> {

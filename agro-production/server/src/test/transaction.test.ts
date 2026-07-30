@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+﻿import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 
 const { mockVerifySession } = vi.hoisted(() => ({
@@ -21,8 +21,8 @@ vi.mock('../services/wsServer.js', () => ({
   getWsClientCount: vi.fn(() => 0),
 }));
 
-vi.mock('../services/sorobanEventListener.js', () => ({
-  startSorobanEventListener: vi.fn().mockResolvedValue(null),
+vi.mock('../services/sorobanRpc.js', () => ({
+
   server: {
     getLatestLedger: vi.fn().mockResolvedValue({ sequence: 12345 }),
   },
