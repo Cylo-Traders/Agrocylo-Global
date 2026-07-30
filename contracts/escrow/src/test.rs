@@ -247,6 +247,47 @@ fn test_refund_unexpired_order_fails() {
 }
 
 #[test]
+fn test_batch_refund_expired_orders_mixed_expiry() {
+    let (env, client, buyer, farmer, collector, token, _, _, _, contract_id) = setup_test();
+    let amount = 500i128;
+    let fee = amount * 3 / 100;
+    let net_amount = amount - fee;
+
+    let order_id_1 = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &amount);
+    let order_id_2 = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &amount);
+    let order_id_3 = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &amount);
+
+    assert_eq!(token.balance(&contract_id), net_amount * 3);
+
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp() + 345_601);
+
+    let mut order_ids = soroban_sdk::vec![&env];
+    order_ids.push_back(order_id_1);
+    order_ids.push_back(order_id_2);
+    order_ids.push_back(order_id_3);
+
+    client.mock_all_auths().refund_expired_orders(&buyer, &order_ids);
+
+    let order1 = client.get_order_details(&order_id_1);
+    let order2 = client.get_order_details(&order_id_2);
+    let order3 = client.get_order_details(&order_id_3);
+
+    assert_eq!(order1.status, OrderStatus::Refunded);
+    assert_eq!(order2.status, OrderStatus::Refunded);
+    assert_eq!(order3.status, OrderStatus::Refunded);
+
+    assert_eq!(token.balance(&buyer), 1000 - (amount * 3) + (net_amount * 3));
+    assert_eq!(token.balance(&contract_id), 0);
+}
+
+#[test]
 fn test_create_order_unsupported_token_fails() {
     let (env, client, buyer, farmer, _, _, _, _, _, _) = setup_test();
     let unsupported_token_admin = Address::generate(&env);

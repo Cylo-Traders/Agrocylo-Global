@@ -762,24 +762,32 @@ impl EscrowContract {
         Ok(())
     }
 
-    pub fn refund_expired_orders(env: Env, order_ids: Vec<u64>) -> Result<(), EscrowError> {
+    pub fn refund_expired_orders(env: Env, caller: Address, order_ids: Vec<u64>) -> Result<(), EscrowError> {
+        caller.require_auth();
         let storage = env.storage().persistent();
         let current_time = env.ledger().timestamp();
 
         for order_id in order_ids.iter() {
             let key = DataKey::Order(order_id);
-            let mut order: Order = storage.get(&key).ok_or(EscrowError::OrderDoesNotExist)?;
+            let mut order: Order = match storage.get(&key) {
+                Some(o) => o,
+                None => continue,
+            };
+
+            if order.buyer != caller {
+                continue;
+            }
 
             if order.status != OrderStatus::Pending {
-                return Err(EscrowError::OrderNotPending);
+                continue;
             }
 
             if order.delivery_timestamp != 0 {
-                return Err(EscrowError::OrderNotDelivered);
+                continue;
             }
 
             if current_time <= order.timestamp + NINETY_SIX_HOURS_IN_SECONDS {
-                return Err(EscrowError::OrderNotExpired);
+                continue;
             }
 
             order.status = OrderStatus::Refunded;
