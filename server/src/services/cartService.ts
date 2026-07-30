@@ -51,7 +51,7 @@ async function ensureCartActive(tx: Tx, cartId: string, buyerWallet: string): Pr
 /**
  * Convert a decimal string to minor units (7 decimal places) as a BigInt,
  * avoiding floating-point precision loss.
- * e.g. "1.25" → 12_500_000n
+ * e.g. "1.25" â†’ 12_500_000n
  */
 function toMinorUnits(value: string): bigint {
   const DECIMALS = 7;
@@ -266,7 +266,6 @@ export async function checkout(buyerWallet: string) {
         farmer_wallet: group.farmer_wallet,
         farmer_name: group.farmer_name,
         token: group.currency,
-        token_address: group.currency === 'STRK' ? '0x04718f5a...' : '0x053c9125...',
         gross_amount: gross.toString(),
         fee_amount: feeAmount.toString(),
         net_amount: net.toString(),

@@ -275,7 +275,6 @@ describe('Product and cart API endpoints', () => {
           farmer_wallet: '0x1111111111111111111111111111111111111111',
           farmer_name: 'Farm',
           token: 'STRK',
-          token_address: '0x04718f5a...',
           gross_amount: '700',
           fee_amount: '21',
           net_amount: '679',
