@@ -12,6 +12,11 @@ const JWT_SECRET: string = config.jwtSecret;
 const JWT_EXPIRES_IN = "15m";
 const NONCE_TTL_MS = 5 * 60 * 1000;
 const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+// Cross-app SSO handoff (Issue #686): short-lived, single-use, signed token
+// minted for an already-authenticated wallet so the agro-production app can
+// verify it and establish its own session without re-signing a nonce.
+export const HANDOFF_AUDIENCE = "agrocylo-sso-handoff";
+const HANDOFF_EXPIRES_IN = "60s";
 
 function isStellarAddress(address: string): boolean {
   try {
@@ -106,4 +111,12 @@ export async function refreshAccessToken(
 
 export async function logout(refreshToken: string): Promise<void> {
   await prisma.refreshToken.deleteMany({ where: { token: refreshToken } });
+}
+
+export function generateHandoffToken(walletAddress: string): string {
+  return jwt.sign({ walletAddress }, JWT_SECRET, {
+    expiresIn: HANDOFF_EXPIRES_IN,
+    audience: HANDOFF_AUDIENCE,
+    jwtid: crypto.randomUUID(),
+  });
 }

@@ -92,6 +92,42 @@ model Order {
   @@map("orders")
 }
 
+model Basket {
+  id                String       @id @default(uuid())
+  onChainId         String       @unique // u64 basket id from contract, as string
+  constituentsCount Int
+  totalDeposited    String       @default("0") // i128 as string
+  status            BasketStatus @default(OPEN)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  deposits BasketDeposit[]
+
+  @@index([status])
+  @@map("baskets")
+}
+
+model BasketDeposit {
+  id               String   @id @default(uuid())
+  basketId         String
+  depositorAddress String
+  amount           String   @default("0") // i128 as string, current outstanding deposit
+  claimed          Boolean  @default(false)
+  payoutAmount     String? // i128 as string, set once claim_basket_returns is indexed
+  withdrawn        Boolean  @default(false)
+  ledger           Int // ledger of the most recently indexed event for this position
+  txHash           String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  basket Basket @relation(fields: [basketId], references: [id], onDelete: Cascade)
+
+  @@unique([basketId, depositorAddress])
+  @@index([basketId])
+  @@index([depositorAddress])
+  @@map("basket_deposits")
+}
+
 model Transaction {
   id            String            @id @default(uuid())
   campaignId    String?
@@ -168,6 +204,11 @@ enum DisputeStatus {
   EvidenceSubmitted
   Resolved
   Dismissed
+}
+
+enum BasketStatus {
+  OPEN
+  FUNDED
 }
 
 model Dispute {

@@ -3,11 +3,13 @@ import { Router } from 'express';
 import logger from '../config/logger.js';
 import { ApiError, sendProblem } from '../http/errors.js';
 import { authRateLimiter } from '../middleware/rateLimiter.js';
+import { requireWallet, type WalletRequest } from '../middleware/walletAuth.js';
 import {
   generateNonce,
   verifySignature,
   refreshAccessToken,
   logout,
+  generateHandoffToken,
 } from '../services/authService.js';
 
 const router = Router();
@@ -60,6 +62,19 @@ router.post('/refresh', async (req: Request, res: Response) => {
   } catch (err) {
     if (err instanceof ApiError) return sendProblem(res, req, err);
     logger.error('Token refresh failed', err);
+    return sendProblem(res, req, new ApiError(500, 'Internal Server Error', 'Unexpected error'));
+  }
+});
+
+// POST /auth/handoff — mint a short-lived, single-use signed token so the
+// agro-production app can verify it and establish a session for this wallet
+// (cross-app SSO handoff, Issue #686). Requires the caller's own valid session.
+router.post('/handoff', requireWallet, async (req: WalletRequest, res: Response) => {
+  try {
+    const token = generateHandoffToken(req.walletAddress!);
+    return res.status(200).json({ token });
+  } catch (err) {
+    logger.error('Handoff token generation failed', err);
     return sendProblem(res, req, new ApiError(500, 'Internal Server Error', 'Unexpected error'));
   }
 });

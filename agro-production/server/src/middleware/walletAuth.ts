@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import { verifySession, AuthError } from '../services/walletAuthService.js';
+import { verifySession, AuthError, HANDOFF_AUDIENCE } from '../services/walletAuthService.js';
 import { config } from '../config/index.js';
 
 export interface WalletRequest extends Request {
@@ -11,6 +11,7 @@ export interface WalletRequest extends Request {
 interface JWTPayload {
   walletAddress: string;
   role?: string;
+  aud?: string;
 }
 
 export function requireWallet(
@@ -38,6 +39,13 @@ export function requireWallet(
     const decoded = jwt.verify(token, config.jwtSecret) as JWTPayload;
     if (!decoded.walletAddress) {
       res.status(401).json({ message: 'Invalid token: missing walletAddress.' });
+      return;
+    }
+    // A cross-app SSO handoff token (Issue #686) is single-purpose: it may
+    // only be redeemed via POST /auth/handoff, never used directly as a
+    // general session credential.
+    if (decoded.aud === HANDOFF_AUDIENCE) {
+      res.status(401).json({ message: 'Invalid token: not a session token.' });
       return;
     }
     req.walletAddress = decoded.walletAddress;

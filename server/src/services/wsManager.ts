@@ -3,6 +3,7 @@ import type { Server } from "node:http";
 import jwt from "jsonwebtoken";
 import logger from "../config/logger.js";
 import { config } from "../config/index.js";
+import { HANDOFF_AUDIENCE } from "./authService.js";
 
 interface AuthMessage {
   type: "auth";
@@ -72,7 +73,13 @@ export class WsManager {
         if (msg.type !== "auth" || !msg.token) return;
 
         try {
-          const payload = jwt.verify(msg.token, String(config.jwtSecret)) as { walletAddress: string };
+          const payload = jwt.verify(msg.token, String(config.jwtSecret)) as {
+            walletAddress: string;
+            aud?: string;
+          };
+          // A cross-app SSO handoff token (Issue #686) may only be redeemed
+          // via POST /auth/handoff, never used directly as a session credential.
+          if (payload.aud === HANDOFF_AUDIENCE) throw new Error("handoff token");
           client.wallet = payload.walletAddress;
           logger.info(`WebSocket client authenticated: ${client.wallet}`);
         } catch {

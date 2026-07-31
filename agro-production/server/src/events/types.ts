@@ -14,7 +14,12 @@ export type EventAction =
   | "dispute.opened"
   | "dispute.evidence_submitted"
   | "dispute.resolved"
-  | "dispute.dismissed";
+  | "dispute.dismissed"
+  | "basket.created"
+  | "basket.deposit"
+  | "basket.funded"
+  | "basket.withdrawn"
+  | "basket.claimed";
 
 export interface RawSorobanEvent {
   id: string;
@@ -119,6 +124,39 @@ export interface DisputeDismissedEvent extends BaseEvent {
   dismissalReason?: string;
 }
 
+export interface BasketCreatedEvent extends BaseEvent {
+  action: "basket.created";
+  basketId: string;
+  constituentsCount: number;
+}
+
+export interface BasketDepositEvent extends BaseEvent {
+  action: "basket.deposit";
+  basketId: string;
+  depositor: string;
+  amount: string;
+}
+
+export interface BasketFundedEvent extends BaseEvent {
+  action: "basket.funded";
+  basketId: string;
+  totalDeposit: string;
+}
+
+export interface BasketWithdrawnEvent extends BaseEvent {
+  action: "basket.withdrawn";
+  basketId: string;
+  depositor: string;
+  depositAmount: string;
+}
+
+export interface BasketClaimedEvent extends BaseEvent {
+  action: "basket.claimed";
+  basketId: string;
+  depositor: string;
+  payout: string;
+}
+
 export type ParsedEvent =
   | CampaignCreatedEvent
   | CampaignInvestedEvent
@@ -129,4 +167,9 @@ export type ParsedEvent =
   | DisputeOpenedEvent
   | DisputeEvidenceSubmittedEvent
   | DisputeResolvedEvent
-  | DisputeDismissedEvent;
+  | DisputeDismissedEvent
+  | BasketCreatedEvent
+  | BasketDepositEvent
+  | BasketFundedEvent
+  | BasketWithdrawnEvent
+  | BasketClaimedEvent;

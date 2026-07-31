@@ -7,6 +7,11 @@ import type {
   GenericCampaignEvent,
   OrderConfirmedEvent,
   OrderCreatedEvent,
+  BasketCreatedEvent,
+  BasketDepositEvent,
+  BasketFundedEvent,
+  BasketWithdrawnEvent,
+  BasketClaimedEvent,
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -34,6 +39,26 @@ vi.mock("../db/client.js", () => {
         id: "order-uuid",
         onChainId: "10",
         campaignId: "camp-uuid",
+        amount: "500",
+      }),
+      update: vi.fn().mockResolvedValue({}),
+    },
+    basket: {
+      upsert: vi.fn().mockResolvedValue({ id: "basket-uuid" }),
+      findUnique: vi.fn().mockResolvedValue({
+        id: "basket-uuid",
+        onChainId: "1",
+        totalDeposited: "1000",
+        status: "OPEN",
+      }),
+      update: vi.fn().mockResolvedValue({}),
+    },
+    basketDeposit: {
+      upsert: vi.fn().mockResolvedValue({}),
+      findUnique: vi.fn().mockResolvedValue({
+        id: "deposit-uuid",
+        basketId: "basket-uuid",
+        depositorAddress: "GDEPOSITOR",
         amount: "500",
       }),
       update: vi.fn().mockResolvedValue({}),
@@ -131,6 +156,59 @@ function makeOrderConfirmed(overrides?: Partial<OrderConfirmedEvent>): OrderConf
     orderId: "10",
     buyer: "GBUYER000000000000000000000000000000000000000000000000AA",
     campaignId: "1",
+    ...overrides,
+  };
+}
+
+function makeBasketCreated(overrides?: Partial<BasketCreatedEvent>): BasketCreatedEvent {
+  return {
+    ...baseEvent,
+    action: "basket.created",
+    basketId: "1",
+    constituentsCount: 3,
+    ...overrides,
+  };
+}
+
+function makeBasketDeposit(overrides?: Partial<BasketDepositEvent>): BasketDepositEvent {
+  return {
+    ...baseEvent,
+    action: "basket.deposit",
+    basketId: "1",
+    depositor: "GDEPOSITOR",
+    amount: "500",
+    ...overrides,
+  };
+}
+
+function makeBasketFunded(overrides?: Partial<BasketFundedEvent>): BasketFundedEvent {
+  return {
+    ...baseEvent,
+    action: "basket.funded",
+    basketId: "1",
+    totalDeposit: "1500",
+    ...overrides,
+  };
+}
+
+function makeBasketWithdrawn(overrides?: Partial<BasketWithdrawnEvent>): BasketWithdrawnEvent {
+  return {
+    ...baseEvent,
+    action: "basket.withdrawn",
+    basketId: "1",
+    depositor: "GDEPOSITOR",
+    depositAmount: "500",
+    ...overrides,
+  };
+}
+
+function makeBasketClaimed(overrides?: Partial<BasketClaimedEvent>): BasketClaimedEvent {
+  return {
+    ...baseEvent,
+    action: "basket.claimed",
+    basketId: "1",
+    depositor: "GDEPOSITOR",
+    payout: "620",
     ...overrides,
   };
 }
@@ -314,6 +392,81 @@ describe("EventPersister", () => {
       const { prisma } = await import("../db/client.js");
 
       await EventPersister.persist(makeOrderConfirmed());
+
+      expect(prisma.$transaction).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe("basket.created", () => {
+    it("persists a basket.created event", async () => {
+      const { prisma } = await import("../db/client.js");
+
+      await EventPersister.persist(makeBasketCreated());
+
+      expect(prisma.$transaction).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe("basket.deposit", () => {
+    it("persists a basket.deposit event", async () => {
+      const { prisma } = await import("../db/client.js");
+
+      await EventPersister.persist(makeBasketDeposit());
+
+      expect(prisma.$transaction).toHaveBeenCalledOnce();
+    });
+
+    it("warns and skips when basket is unknown", async () => {
+      const logger = (await import("../config/logger.js")).default;
+      const { prisma } = await import("../db/client.js");
+
+      vi.mocked(prisma.$transaction).mockImplementationOnce(
+        async (fn: (tx: unknown) => Promise<unknown>) => {
+          await fn({
+            user: { upsert: vi.fn().mockResolvedValue({}) },
+            basket: { findUnique: vi.fn().mockResolvedValue(null) },
+            transaction: {
+              findUnique: vi.fn().mockResolvedValue(null),
+              create: vi.fn().mockResolvedValue({}),
+            },
+          });
+        },
+      );
+
+      await EventPersister.persist(makeBasketDeposit({ basketId: "unknown" }));
+
+      expect(vi.mocked(logger.warn)).toHaveBeenCalledWith(
+        "EventPersister: deposit for unknown basket",
+        expect.objectContaining({ basketId: "unknown" }),
+      );
+    });
+  });
+
+  describe("basket.funded", () => {
+    it("persists a basket.funded event", async () => {
+      const { prisma } = await import("../db/client.js");
+
+      await EventPersister.persist(makeBasketFunded());
+
+      expect(prisma.$transaction).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe("basket.withdrawn", () => {
+    it("persists a basket.withdrawn event", async () => {
+      const { prisma } = await import("../db/client.js");
+
+      await EventPersister.persist(makeBasketWithdrawn());
+
+      expect(prisma.$transaction).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe("basket.claimed", () => {
+    it("persists a basket.claimed event", async () => {
+      const { prisma } = await import("../db/client.js");
+
+      await EventPersister.persist(makeBasketClaimed());
 
       expect(prisma.$transaction).toHaveBeenCalledOnce();
     });

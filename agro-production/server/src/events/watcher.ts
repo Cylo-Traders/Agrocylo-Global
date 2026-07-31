@@ -13,8 +13,11 @@ const MAX_BACKFILL_BATCH = 100;
 const CAMPAIGN_TOPIC = "AAAADwAAAAhjYW1wYWlnbg==";
 const ORDER_TOPIC = "AAAADwAAAAVvcmRlcg==";
 const DISPUTE_TOPIC = "AAAADwAAAAdkaXNwdXRl";
+// base64 encoding of the "basket" short symbol
+const BASKET_TOPIC = "AAAADwAAAAZiYXNrZXQAAA==";
 
 const CONTRACT_ID = config.contractId;
+const BASKET_CONTRACT_ID = config.basketContractId;
 
 /**
  * Loads the last persisted event cursor from the EventCursor table.
@@ -147,21 +150,31 @@ async function pollEvents(
     latestLedger,
   );
 
-  const response = await server.getEvents({
-    startLedger,
-    filters: [
-      {
-        type: "contract",
-        contractIds: [CONTRACT_ID],
-        topics: [[CAMPAIGN_TOPIC, "*"]],
-      },
-      {
-        type: "contract",
-        contractIds: [CONTRACT_ID],
-        topics: [[ORDER_TOPIC, "*"]],
-      },
-    ],
-  });
+  const filters: Parameters<typeof server.getEvents>[0]["filters"] = [
+    {
+      type: "contract",
+      contractIds: [CONTRACT_ID],
+      topics: [[CAMPAIGN_TOPIC, "*"]],
+    },
+    {
+      type: "contract",
+      contractIds: [CONTRACT_ID],
+      topics: [[ORDER_TOPIC, "*"]],
+    },
+  ];
+
+  // Issue #692: the investment basket contract is deployed separately from
+  // the production escrow contract, so its events are only polled once an
+  // operator configures BASKET_CONTRACT_ID.
+  if (BASKET_CONTRACT_ID) {
+    filters.push({
+      type: "contract",
+      contractIds: [BASKET_CONTRACT_ID],
+      topics: [[BASKET_TOPIC, "*"]],
+    });
+  }
+
+  const response = await server.getEvents({ startLedger, filters });
 
   return { events: response.events, latestLedger };
 }

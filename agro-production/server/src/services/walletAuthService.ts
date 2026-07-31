@@ -6,6 +6,11 @@ import { prisma } from '../db/client.js';
 
 const NONCE_EXPIRY_SECS = 300;
 const SESSION_EXPIRY_SECS = 900;
+// Cross-app SSO handoff (Issue #686): audience claim the root server signs
+// its handoff tokens with, and the `AuthNonce.audience` used to record a
+// consumed handoff token's jti so it can never be replayed.
+export const HANDOFF_AUDIENCE = 'agrocylo-sso-handoff';
+const HANDOFF_NONCE_AUDIENCE = 'sso-handoff';
 
 export class AuthError extends Error {
   constructor(
@@ -120,6 +125,71 @@ export async function verifySignatureAndCreateSession(
   });
 
   // Issue JWT access token for consistency with root server
+  const accessToken = jwt.sign(
+    { walletAddress, role: 'USER' },
+    config.jwtSecret,
+    { expiresIn: '15m' },
+  );
+
+  return {
+    accessToken,
+    sessionToken,
+    walletAddress,
+    expiresAt: expiresAt.toISOString(),
+  };
+}
+
+export async function verifyHandoffAndCreateSession(
+  handoffToken: string,
+): Promise<SessionResult> {
+  let walletAddress: string;
+  let jti: string;
+  try {
+    const decoded = jwt.verify(handoffToken, config.jwtSecret, {
+      audience: HANDOFF_AUDIENCE,
+    }) as jwt.JwtPayload;
+    if (typeof decoded.walletAddress !== 'string' || typeof decoded.jti !== 'string') {
+      throw new Error('Malformed handoff token payload.');
+    }
+    walletAddress = decoded.walletAddress;
+    jti = decoded.jti;
+  } catch {
+    throw new AuthError(401, 'Invalid or expired handoff token.');
+  }
+
+  // Single-use: `nonce` is unique, so a replayed jti fails this insert with
+  // Prisma error P2002. Any other failure (e.g. a transient DB error) is not
+  // a replay and should surface as a server error instead of masquerading
+  // as one.
+  try {
+    await prisma.authNonce.create({
+      data: {
+        walletAddress,
+        nonce: jti,
+        audience: HANDOFF_NONCE_AUDIENCE,
+        expiresAt: new Date(Date.now() + 60_000),
+        usedAt: new Date(),
+      },
+    });
+  } catch (err) {
+    if ((err as { code?: string } | null)?.code === 'P2002') {
+      throw new AuthError(401, 'Handoff token already used — replay detected.');
+    }
+    throw err;
+  }
+
+  const sessionToken = randomUUID();
+  const expiresAt = new Date(Date.now() + SESSION_EXPIRY_SECS * 1000);
+
+  await prisma.authNonce.create({
+    data: {
+      walletAddress,
+      nonce: sessionToken,
+      audience: 'session',
+      expiresAt,
+    },
+  });
+
   const accessToken = jwt.sign(
     { walletAddress, role: 'USER' },
     config.jwtSecret,
