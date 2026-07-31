@@ -91,6 +91,49 @@ export class ProductionEventParser {
           campaignId: String(data[2]),
         };
 
+      case "basket.created":
+        return {
+          ...base,
+          action,
+          basketId: String(data[0]),
+          constituentsCount: Number(data[1]),
+        };
+
+      case "basket.deposit":
+        return {
+          ...base,
+          action,
+          basketId: String(data[0]),
+          depositor: String(data[1]),
+          amount: String(data[2]),
+        };
+
+      case "basket.funded":
+        return {
+          ...base,
+          action,
+          basketId: String(data[0]),
+          totalDeposit: String(data[1]),
+        };
+
+      case "basket.withdrawn":
+        return {
+          ...base,
+          action,
+          basketId: String(data[0]),
+          depositor: String(data[1]),
+          depositAmount: String(data[2]),
+        };
+
+      case "basket.claimed":
+        return {
+          ...base,
+          action,
+          basketId: String(data[0]),
+          depositor: String(data[1]),
+          payout: String(data[2]),
+        };
+
       case "campaign.produce":
       case "campaign.harvest":
       case "campaign.failed":

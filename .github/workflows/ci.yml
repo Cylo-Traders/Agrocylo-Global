@@ -110,6 +110,57 @@ jobs:
       - name: Test with coverage
         run: npm run test:coverage
 
+  server-integration:
+    name: Server · Prisma schema/migration integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: server
+    env:
+      DATABASE_URL: postgresql://agrocylo:agrocylo123@localhost:5432/agrocylo_test
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: agrocylo
+          POSTGRES_PASSWORD: agrocylo123
+          POSTGRES_DB: agrocylo_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      # The full `prisma migrate deploy` history predates this repo tracking
+      # a from-scratch baseline migration, so a clean CI database can't
+      # replay it end-to-end. Apply just the migration under test directly,
+      # which is sufficient to prove schema.prisma and the migration agree.
+      - name: Apply crop plan / equipment marketplace migration
+        run: psql "$DATABASE_URL" -f prisma/migrations/20260731000000_add_crop_plan_equipment_marketplace/migration.sql
+
+      - name: Run integration tests against real Prisma client
+        run: npm run test:integration
+
   contracts:
     name: Contracts · Rust (Soroban)
     runs-on: ubuntu-latest

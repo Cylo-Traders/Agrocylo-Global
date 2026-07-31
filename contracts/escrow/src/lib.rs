@@ -1,7 +1,7 @@
 #![no_std]
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, symbol_short, token,
-    Address, Env, String, Vec,
+    Address, Env, Map, String, Vec,
 };
 
 // Errors
@@ -732,14 +732,28 @@ impl EscrowContract {
             tolerance_floor
         };
 
-        let dest_received = router_client.swap_exact_in(
+        let settlement_token_client = token::Client::new(&env, &settlement_token);
+        let contract_address = env.current_contract_address();
+        let balance_before = settlement_token_client.balance(&contract_address);
+
+        router_client.swap_exact_in(
             &buyer,
-            &env.current_contract_address(),
+            &contract_address,
             &source_token,
             &settlement_token,
             &source_amount,
             &effective_min_dest,
         );
+
+        // Never trust the router's self-reported return value: verify the
+        // escrow contract's own settlement-token balance actually increased
+        // by the amount it claims, so a misconfigured or malicious router
+        // can't inflate the recorded order amount against the shared escrow
+        // balance.
+        let balance_after = settlement_token_client.balance(&contract_address);
+        let dest_received = balance_after
+            .checked_sub(balance_before)
+            .ok_or(EscrowError::ArithmeticError)?;
 
         if dest_received < effective_min_dest {
             return Err(EscrowError::SlippageToleranceExceeded);
@@ -784,10 +798,7 @@ impl EscrowContract {
         router: Address,
     ) -> Result<(), EscrowError> {
         admin.require_auth();
-        let stored_admin = read_admin(&env)?;
-        if admin != stored_admin {
-            return Err(EscrowError::NotAdmin);
-        }
+        require_governed_caller(&env, &admin)?;
         env.storage()
             .instance()
             .set(&DataKey::PathPaymentRouter, &router);

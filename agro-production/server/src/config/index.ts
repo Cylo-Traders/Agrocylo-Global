@@ -66,6 +66,8 @@ export const config = {
 
   registryContractId: getEnv('REGISTRY_CONTRACT_ID') ?? '',
 
+  basketContractId: getEnv('BASKET_CONTRACT_ID') ?? '',
+
   rateLimitWindowMs: parseInt(getEnv('RATE_LIMIT_WINDOW_MS') ?? '60000', 10),
   rateLimitMaxRequests: parseInt(getEnv('RATE_LIMIT_MAX_REQUESTS') ?? '100', 10),
   rateLimitWriteMaxRequests: parseInt(getEnv('RATE_LIMIT_WRITE_MAX_REQUESTS') ?? '10', 10),

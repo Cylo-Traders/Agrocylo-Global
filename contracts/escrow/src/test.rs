@@ -933,6 +933,33 @@ fn test_admin_cannot_repoint_governance_once_set() {
 }
 
 #[test]
+fn test_path_payment_router_admin_fallback_before_governance_set() {
+    let (env, client, _buyer, _farmer, _fee_collector, _xlm, _usdc, admin, _investor1, _id) =
+        setup_test();
+
+    // No governance contract configured yet: admin can still set the router.
+    let router = Address::generate(&env);
+    client.set_path_payment_router(&admin, &router);
+}
+
+#[test]
+fn test_path_payment_router_rejects_admin_once_governance_set() {
+    let (env, client, _buyer, _farmer, _fee_collector, _xlm, _usdc, admin, _investor1, _id) =
+        setup_test();
+
+    let governance = env.register(MockGovernance, ());
+    client.set_governance_contract(&admin, &governance);
+
+    // Raw admin can no longer call set_path_payment_router once governance is set.
+    let router = Address::generate(&env);
+    let result = client.try_set_path_payment_router(&admin, &router);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotGoverned);
+
+    // The governance contract address can.
+    client.set_path_payment_router(&governance, &router);
+}
+
+#[test]
 fn test_create_order_uses_configured_fee_rate() {
     let (_env, client, buyer, farmer, fee_collector, xlm, _usdc, admin, _investor1, _id) =
         setup_test();
@@ -963,6 +990,13 @@ impl MockRouter {
             .set(&symbol_short!("actual"), &actual_out);
     }
 
+    /// Issue #683: makes `swap_exact_in` return `reported` instead of the
+    /// `actual_out` it really pays out, simulating a compromised or
+    /// malicious router that misreports its own fill.
+    pub fn set_misreport(env: Env, reported: i128) {
+        env.storage().instance().set(&symbol_short!("report"), &reported);
+    }
+
     pub fn get_quote(env: Env, _send_token: Address, _dest_token: Address, _send_amount: i128) -> i128 {
         env.storage().instance().get(&symbol_short!("quote")).unwrap()
     }
@@ -979,7 +1013,10 @@ impl MockRouter {
         let actual_out: i128 = env.storage().instance().get(&symbol_short!("actual")).unwrap();
         token::Client::new(&env, &send_token).transfer(&from, &env.current_contract_address(), &send_amount);
         token::Client::new(&env, &dest_token).transfer(&env.current_contract_address(), &to, &actual_out);
-        actual_out
+        env.storage()
+            .instance()
+            .get(&symbol_short!("report"))
+            .unwrap_or(actual_out)
     }
 }
 
@@ -1148,6 +1185,63 @@ fn test_create_order_via_path_payment_no_router_configured_fails() {
         &900,
     );
     assert_eq!(result.unwrap_err().unwrap(), EscrowError::RouterNotConfigured);
+}
+
+#[test]
+fn test_create_order_via_path_payment_rejects_router_misreporting_dest_received() {
+    // The router claims (via its swap return value) that it delivered 990,
+    // well within tolerance of a 1000 quote, but only actually transfers 100
+    // of the settlement token to the escrow — simulating a compromised or
+    // malicious router (Issue #683).
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_000_000);
+
+    let admin = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let farmer = Address::generate(&env);
+    let fee_collector = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let source_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let source_client = token::Client::new(&env, &source_contract.address());
+    token::StellarAssetClient::new(&env, &source_contract.address()).mint(&buyer, &10_000);
+
+    let settlement_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let xlm_address = env.register_stellar_asset_contract_v2(token_admin).address();
+
+    let router_id = env.register(MockRouter, ());
+    let router_client_setup = MockRouterClient::new(&env, &router_id);
+    router_client_setup.configure(&1_000, &100);
+    router_client_setup.set_misreport(&990);
+    token::StellarAssetClient::new(&env, &settlement_contract.address()).mint(&router_id, &100);
+
+    let contract_id = env.register(EscrowContract, ());
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    let mut supported_tokens = Vec::new(&env);
+    supported_tokens.push_back(settlement_contract.address());
+    supported_tokens.push_back(xlm_address);
+    client.initialize(&admin, &fee_collector, &supported_tokens);
+    client.set_path_payment_router(&admin, &router_id);
+
+    let result = client.try_create_order_via_path_payment(
+        &buyer,
+        &farmer,
+        &source_client.address,
+        &1_000,
+        &settlement_contract.address(),
+        &1, // buyer's own floor is not the binding constraint here
+    );
+
+    // Rejected because the escrow's measured settlement-token balance only
+    // increased by 100, not the 990 the router falsely reported.
+    assert_eq!(
+        result.unwrap_err().unwrap(),
+        EscrowError::SlippageToleranceExceeded
+    );
+    // The whole invocation reverts on error, so no funds actually moved.
+    assert_eq!(source_client.balance(&buyer), 10_000);
 }
 
 // ---------------------------------------------------------------------------

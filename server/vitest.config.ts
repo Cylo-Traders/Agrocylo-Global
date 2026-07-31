@@ -2,6 +2,16 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
+    // Runs against a real, migrated database in a dedicated CI job — excluded
+    // here so the regular (mocked, infra-free) unit test suite stays fast.
+    exclude: [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/cypress/**",
+      "**/.{idea,git,cache,output,temp}/**",
+      "**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build}.config.*",
+      "src/prisma.integration.test.ts",
+    ],
     env: {
       DATABASE_URL: "postgresql://test:test@localhost:5432/test",
       SUPABASE_URL: "https://test.supabase.co",

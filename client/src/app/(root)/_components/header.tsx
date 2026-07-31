@@ -21,6 +21,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import { buildHandoffUrl, generateHandoffToken } from "@/utils/authHandoff";
 
 const navItems = [
   { title: "Home", href: "/" },
@@ -35,6 +36,24 @@ const navItems = [
 export default function Header() {
   const { itemCount, setDrawerOpen } = useCart();
   const pathname = usePathname();
+
+  const handleAgroProductionNav = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    const baseUrl = process.env.NEXT_PUBLIC_AGRO_PRODUCTION_URL;
+    if (!baseUrl) return;
+    e.preventDefault();
+    // Open the tab synchronously (in direct response to the click) so
+    // Safari/Firefox don't treat it as an unrequested popup once the async
+    // token fetch below resolves; navigate it once the token is ready.
+    const newTab = window.open("", "_blank");
+    generateHandoffToken().then((token) => {
+      const url = buildHandoffUrl(baseUrl, token);
+      if (newTab) {
+        newTab.location.href = url;
+      } else {
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+    });
+  };
 
   return (
     <header className="fixed top-0 left-0 z-50 flex h-16 w-full flex-col justify-end border-b border-border/60 bg-background/80 backdrop-blur-3xl transition-colors duration-300 ease-in-out md:h-28">
@@ -86,6 +105,7 @@ export default function Header() {
                 href={process.env.NEXT_PUBLIC_AGRO_PRODUCTION_URL}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={handleAgroProductionNav}
                 className="text-sm font-normal transition-colors hover:text-primary lg:text-lg"
               >
                 Agro Production
@@ -161,6 +181,7 @@ export default function Header() {
                       href={process.env.NEXT_PUBLIC_AGRO_PRODUCTION_URL}
                       target="_blank"
                       rel="noopener noreferrer"
+                      onClick={handleAgroProductionNav}
                       className="flex min-h-11 items-center rounded-2xl px-4 py-3 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
                     >
                       Agro Production

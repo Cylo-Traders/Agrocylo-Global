@@ -23,6 +23,8 @@ export const campaignStatusEnum = z.enum([
 
 export const orderStatusEnum = z.enum(["PENDING", "CONFIRMED"]);
 
+export const basketStatusEnum = z.enum(["OPEN", "FUNDED"]);
+
 export const uuidParam = z.string().uuid();
 
 export const paginationQuery = {
