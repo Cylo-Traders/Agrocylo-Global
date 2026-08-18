@@ -120,6 +120,27 @@ export default function PortfolioPage() {
         <PriceChart data={chartData} />
       </div>
 
+      {/* Investment basket positions (#693) */}
+      <div className="bg-white border rounded-lg p-6 shadow-sm mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-semibold">Investment Basket</h2>
+          <a
+            href="/basket"
+            className="text-sm text-primary-600 hover:underline"
+            aria-label="Manage investment basket"
+          >
+            Manage basket →
+          </a>
+        </div>
+        <p className="text-sm text-gray-500">
+          View and manage your diversified basket investments from the{" "}
+          <a href="/basket" className="text-primary-600 hover:underline">
+            Investment Basket
+          </a>{" "}
+          page.
+        </p>
+      </div>
+
       <div className="bg-white border rounded-lg p-6 shadow-sm">
         <h2 className="text-xl font-semibold mb-4">Campaign Investments</h2>
         <div className="space-y-4">

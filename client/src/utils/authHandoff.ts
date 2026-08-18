@@ -1,27 +1,28 @@
+import { apiPost } from "@/lib/apiHelper";
+
 /**
- * Utility for generating signed/timestamped SSO handoff tokens
- * for cross-app navigation between root client and agro-production client (Issue #648)
+ * Cross-app SSO handoff (Issue #648, hardened per #686). The token is minted
+ * server-side (HMAC-signed via the shared JWT secret, 60s TTL, single-use) by
+ * POST /auth/handoff and verified server-side by the agro-production app —
+ * this module never signs or trusts an unsigned client-side token.
  */
-export function generateHandoffToken(walletAddress: string): string {
-  const payload = {
-    wallet: walletAddress,
-    ts: Date.now(),
-    app: "agrocylo-root",
-  };
-  return btoa(JSON.stringify(payload));
+export async function generateHandoffToken(): Promise<string | null> {
+  try {
+    const { token } = await apiPost<{ token: string }>("/auth/handoff", {});
+    return token;
+  } catch {
+    return null;
+  }
 }
 
-export function parseHandoffToken(token: string): { wallet: string; ts: number } | null {
+/** Appends the handoff token to a cross-app URL as a query param. */
+export function buildHandoffUrl(baseUrl: string, token: string | null): string {
+  if (!token) return baseUrl;
   try {
-    const decoded = JSON.parse(atob(token));
-    if (decoded && decoded.wallet && typeof decoded.ts === "number") {
-      // Token valid for 10 minutes
-      if (Date.now() - decoded.ts < 10 * 60 * 1000) {
-        return decoded;
-      }
-    }
+    const url = new URL(baseUrl);
+    url.searchParams.set("handoff", token);
+    return url.toString();
   } catch {
-    // Invalid token
+    return baseUrl;
   }
-  return null;
 }

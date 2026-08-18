@@ -1,6 +1,7 @@
 import 'dotenv/config';
 
 const REQUIRED_IN_PRODUCTION = [
+  'JWT_SECRET',
   'RPC_URL',
   'PRODUCTION_CONTRACT_ID',
   'ESCROW_CONTRACT_ID',
@@ -40,6 +41,10 @@ export const config = {
   nodeEnv: getEnv('NODE_ENV') ?? 'development',
   logLevel: getEnv('LOG_LEVEL') ?? 'debug',
 
+  jwtSecret: isProduction
+    ? requireEnv('JWT_SECRET')
+    : (getEnv('JWT_SECRET') ?? 'dev-secret-key-do-not-use-in-production'),
+
   databaseUrl: requireEnv('DATABASE_URL'),
 
   rpcUrl: isProduction
@@ -58,6 +63,10 @@ export const config = {
     getEnv('PRODUCTION_ESCROW_CONTRACT_ID') ??
     getEnv('PRODUCTION_CONTRACT_ID') ??
     '',
+
+  registryContractId: getEnv('REGISTRY_CONTRACT_ID') ?? '',
+
+  basketContractId: getEnv('BASKET_CONTRACT_ID') ?? '',
 
   rateLimitWindowMs: parseInt(getEnv('RATE_LIMIT_WINDOW_MS') ?? '60000', 10),
   rateLimitMaxRequests: parseInt(getEnv('RATE_LIMIT_MAX_REQUESTS') ?? '100', 10),

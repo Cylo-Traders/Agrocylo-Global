@@ -1,4 +1,4 @@
-import express, { type Request, type Response } from 'express';
+﻿import express, { type Request, type Response } from 'express';
 import cors from 'cors';
 import logger from './config/logger.js';
 import { config } from './config/index.js';
@@ -7,18 +7,22 @@ import { jsonValidated } from './middleware/validate.js';
 import { requireMetricsAuth } from './middleware/metricsAuth.js';
 import { isGracefullyShuttingDown, getShutdownPhase, getShutdownSignal } from './services/lifecycle.js';
 import authRoutes from './routes/auth.js';
+import notificationRoutes from './routes/notifications.js';
 import campaignImageRoutes from './routes/campaignImageRoutes.js';
 import campaignRoutes from './routes/campaigns.js';
+import basketRoutes from './routes/baskets.js';
 import orderRoutes from './routes/orders.js';
 import transactionRoutes from './routes/transactions.js';
 import productRoutes from './routes/products.js';
+import userRoutes from './routes/users.js';
+import conversationRoutes from './routes/conversations.js';
 import { globalErrorHandler } from './middleware/errors.js';
 import { HealthResponseSchema, LivezResponseSchema, ReadyzResponseSchema } from './schemas/health.js';
 import { serveOpenApiDocument } from './openapi/document.js';
 import { getRateLimitMetrics } from './middleware/rateLimitMetrics.js';
 import { getEventMetrics } from './events/metrics.js';
 import { prisma } from './db/client.js';
-import { server as sorobanRpcServer } from './services/sorobanEventListener.js';
+import { server as sorobanRpcServer } from './services/sorobanRpc.js';
 import { getWsClientCount } from './services/wsServer.js';
 
 const app = express();
@@ -55,11 +59,15 @@ app.use((req: Request, _res: Response, next: express.NextFunction) => {
 });
 
 app.use(authRoutes);
+app.use(notificationRoutes);
 app.use(campaignImageRoutes);
 app.use('/api/v1', campaignRoutes);
+app.use('/api/v1', basketRoutes);
 app.use('/api/v1', orderRoutes);
 app.use('/api/v1', transactionRoutes);
 app.use('/api/v1', productRoutes);
+app.use('/api/v1', userRoutes);
+app.use('/api/v1', conversationRoutes);
 
 app.get('/health', (_req: Request, res: Response) => {
   logger.info('Health check endpoint hit');
@@ -114,7 +122,17 @@ app.get('/readyz', async (_req: Request, res: Response) => {
     };
   }
 
-  const ready = Object.values(checks).every((c) => c.status === 'UP');
+  if (config.registryContractId) {
+    checks.registry = { status: 'UP' };
+  } else {
+    logger.warn('[HealthCheck] WARNING: production_escrow has no REGISTRY_CONTRACT_ID configured');
+    checks.registry = {
+      status: 'WARN',
+      message: 'REGISTRY_CONTRACT_ID not set',
+    };
+  }
+
+  const ready = Object.values(checks).every((c) => c.status === 'UP' || c.status === 'WARN');
   const statusCode = ready ? 200 : 503;
 
   jsonValidated(res, ReadyzResponseSchema, statusCode, {

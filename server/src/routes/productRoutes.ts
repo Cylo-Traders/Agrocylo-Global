@@ -1,7 +1,14 @@
 import express from 'express';
 import { requireWallet, type WalletRequest } from '../middleware/walletAuth.js';
 import { ApiError, sendProblem } from '../http/errors.js';
-import { createProduct, getProductById, listProducts, softDeleteProduct, updateProduct } from '../services/productService.js';
+import {
+  createProduct,
+  getProductById,
+  getSuggestedPrice,
+  listProducts,
+  softDeleteProduct,
+  updateProduct,
+} from '../services/productService.js';
 
 const router = express.Router();
 
@@ -27,6 +34,16 @@ router.get('/products', async (req, res) => {
 router.get('/products/:id', async (req, res, next) => {
   try {
     const data = await getProductById(String(req.params['id']));
+    res.status(200).json(data);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/products/:id/suggested-price', requireWallet, async (req: WalletRequest, res, next) => {
+  try {
+    if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet');
+    const data = await getSuggestedPrice(String(req.params['id']), req.walletAddress);
     res.status(200).json(data);
   } catch (error) {
     next(error);

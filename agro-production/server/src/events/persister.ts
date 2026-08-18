@@ -15,6 +15,11 @@ import type {
   OrderConfirmedEvent,
   OrderCreatedEvent,
   ParsedEvent,
+  BasketCreatedEvent,
+  BasketDepositEvent,
+  BasketFundedEvent,
+  BasketWithdrawnEvent,
+  BasketClaimedEvent,
 } from "./types.js";
 
 /**
@@ -69,6 +74,21 @@ export class EventPersister {
         break;
       case "dispute.dismissed":
         await handleDisputeDismissed(event as DisputeDismissedEvent);
+        break;
+      case "basket.created":
+        await handleBasketCreated(event as BasketCreatedEvent);
+        break;
+      case "basket.deposit":
+        await handleBasketDeposit(event as BasketDepositEvent);
+        break;
+      case "basket.funded":
+        await handleBasketFunded(event as BasketFundedEvent);
+        break;
+      case "basket.withdrawn":
+        await handleBasketWithdrawn(event as BasketWithdrawnEvent);
+        break;
+      case "basket.claimed":
+        await handleBasketClaimed(event as BasketClaimedEvent);
         break;
       default:
         // Record the raw transaction but don't update domain models.
@@ -413,9 +433,17 @@ async function updateCampaignStatus(
     });
     if (!campaign) return;
 
+    let trancheReleased = campaign.trancheReleased;
+    if (status === "IN_PRODUCTION") {
+      const total = BigInt(campaign.totalRaised || "0");
+      trancheReleased = (total * 50n / 100n).toString();
+    } else if (status === "HARVESTED" || status === "SETTLED") {
+      trancheReleased = campaign.totalRaised;
+    }
+
     await tx.campaign.update({
       where: { onChainId: event.campaignId },
-      data: { status },
+      data: { status, trancheReleased },
     });
 
     await tx.transaction.create({
@@ -689,6 +717,237 @@ async function handleDisputeDismissed(event: DisputeDismissedEvent) {
     await tx.transaction.create({
       data: {
         campaignId: currentDispute.campaignId,
+        eventType: event.action,
+        payload: toEventPayload(event),
+        ledger: event.ledger,
+        eventIndex: event.eventIndex,
+        txHash: event.txHash,
+      },
+    });
+  });
+}
+
+async function handleBasketCreated(event: BasketCreatedEvent) {
+  // Idempotency: basket upsert by onChainId makes duplicate create events safe.
+  await prisma.$transaction(async (tx) => {
+    if (await skipDuplicateInTransaction(tx, event)) return;
+
+    await tx.basket.upsert({
+      where: { onChainId: event.basketId },
+      create: {
+        onChainId: event.basketId,
+        constituentsCount: event.constituentsCount,
+        status: "OPEN",
+      },
+      update: {},
+    });
+
+    await tx.transaction.create({
+      data: {
+        eventType: event.action,
+        payload: toEventPayload(event),
+        ledger: event.ledger,
+        eventIndex: event.eventIndex,
+        txHash: event.txHash,
+      },
+    });
+  });
+}
+
+async function handleBasketDeposit(event: BasketDepositEvent) {
+  // Idempotency: per-depositor position is upserted and accumulated only
+  // once per (basket, depositor), guarded by the ledger/eventIndex dedupe.
+  await prisma.$transaction(async (tx) => {
+    if (await skipDuplicateInTransaction(tx, event)) return;
+    await upsertUser(tx, event.depositor, "INVESTOR");
+
+    const basket = await tx.basket.findUnique({ where: { onChainId: event.basketId } });
+    if (!basket) {
+      logger.warn("EventPersister: deposit for unknown basket", { basketId: event.basketId });
+      return;
+    }
+
+    const position = await tx.basketDeposit.findUnique({
+      where: {
+        basketId_depositorAddress: { basketId: basket.id, depositorAddress: event.depositor },
+      },
+    });
+    const updatedAmount = (BigInt(position?.amount ?? "0") + BigInt(event.amount)).toString();
+
+    await tx.basketDeposit.upsert({
+      where: {
+        basketId_depositorAddress: { basketId: basket.id, depositorAddress: event.depositor },
+      },
+      create: {
+        basketId: basket.id,
+        depositorAddress: event.depositor,
+        amount: event.amount,
+        ledger: event.ledger,
+        txHash: event.txHash,
+      },
+      update: {
+        amount: updatedAmount,
+        ledger: event.ledger,
+        txHash: event.txHash,
+      },
+    });
+
+    const updatedTotal = (BigInt(basket.totalDeposited) + BigInt(event.amount)).toString();
+    await tx.basket.update({
+      where: { onChainId: event.basketId },
+      data: { totalDeposited: updatedTotal },
+    });
+
+    broadcast("basket.deposit", {
+      basketId: basket.id,
+      depositorAddress: event.depositor,
+      amount: event.amount,
+      totalDeposited: updatedTotal,
+      txHash: event.txHash,
+    });
+
+    await tx.transaction.create({
+      data: {
+        eventType: event.action,
+        payload: toEventPayload(event),
+        ledger: event.ledger,
+        eventIndex: event.eventIndex,
+        txHash: event.txHash,
+      },
+    });
+  });
+}
+
+async function handleBasketFunded(event: BasketFundedEvent) {
+  // Idempotency: status/total overwrite plus transaction uniqueness prevents duplication.
+  await prisma.$transaction(async (tx) => {
+    if (await skipDuplicateInTransaction(tx, event)) return;
+
+    const basket = await tx.basket.findUnique({ where: { onChainId: event.basketId } });
+    if (!basket) {
+      logger.warn("EventPersister: funded event for unknown basket", { basketId: event.basketId });
+      return;
+    }
+
+    await tx.basket.update({
+      where: { onChainId: event.basketId },
+      data: { totalDeposited: event.totalDeposit, status: "FUNDED" },
+    });
+
+    broadcast("basket.funded", {
+      basketId: basket.id,
+      totalDeposited: event.totalDeposit,
+    });
+
+    await tx.transaction.create({
+      data: {
+        eventType: event.action,
+        payload: toEventPayload(event),
+        ledger: event.ledger,
+        eventIndex: event.eventIndex,
+        txHash: event.txHash,
+      },
+    });
+  });
+}
+
+async function handleBasketWithdrawn(event: BasketWithdrawnEvent) {
+  // Idempotency: position update is deterministic for replayed withdraw events.
+  await prisma.$transaction(async (tx) => {
+    if (await skipDuplicateInTransaction(tx, event)) return;
+
+    const basket = await tx.basket.findUnique({ where: { onChainId: event.basketId } });
+    if (!basket) {
+      logger.warn("EventPersister: withdrawal for unknown basket", { basketId: event.basketId });
+      return;
+    }
+
+    const position = await tx.basketDeposit.findUnique({
+      where: {
+        basketId_depositorAddress: { basketId: basket.id, depositorAddress: event.depositor },
+      },
+    });
+    if (!position) {
+      logger.warn("EventPersister: withdrawal for unknown basket position", {
+        basketId: event.basketId,
+        depositor: event.depositor,
+      });
+      return;
+    }
+
+    await tx.basketDeposit.update({
+      where: { id: position.id },
+      data: { amount: "0", withdrawn: true, ledger: event.ledger, txHash: event.txHash },
+    });
+
+    const updatedTotal = (BigInt(basket.totalDeposited) - BigInt(event.depositAmount)).toString();
+    await tx.basket.update({
+      where: { onChainId: event.basketId },
+      data: { totalDeposited: updatedTotal },
+    });
+
+    broadcast("basket.withdrawn", {
+      basketId: basket.id,
+      depositorAddress: event.depositor,
+      depositAmount: event.depositAmount,
+      txHash: event.txHash,
+    });
+
+    await tx.transaction.create({
+      data: {
+        eventType: event.action,
+        payload: toEventPayload(event),
+        ledger: event.ledger,
+        eventIndex: event.eventIndex,
+        txHash: event.txHash,
+      },
+    });
+  });
+}
+
+async function handleBasketClaimed(event: BasketClaimedEvent) {
+  // Idempotency: position update is deterministic for replayed claim events.
+  await prisma.$transaction(async (tx) => {
+    if (await skipDuplicateInTransaction(tx, event)) return;
+
+    const basket = await tx.basket.findUnique({ where: { onChainId: event.basketId } });
+    if (!basket) {
+      logger.warn("EventPersister: claim for unknown basket", { basketId: event.basketId });
+      return;
+    }
+
+    const position = await tx.basketDeposit.findUnique({
+      where: {
+        basketId_depositorAddress: { basketId: basket.id, depositorAddress: event.depositor },
+      },
+    });
+    if (!position) {
+      logger.warn("EventPersister: claim for unknown basket position", {
+        basketId: event.basketId,
+        depositor: event.depositor,
+      });
+      return;
+    }
+
+    await tx.basketDeposit.update({
+      where: { id: position.id },
+      data: {
+        claimed: true,
+        payoutAmount: event.payout,
+        ledger: event.ledger,
+        txHash: event.txHash,
+      },
+    });
+
+    broadcast("basket.claimed", {
+      basketId: basket.id,
+      depositorAddress: event.depositor,
+      payout: event.payout,
+      txHash: event.txHash,
+    });
+
+    await tx.transaction.create({
+      data: {
         eventType: event.action,
         payload: toEventPayload(event),
         ledger: event.ledger,

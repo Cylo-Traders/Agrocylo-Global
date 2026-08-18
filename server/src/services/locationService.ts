@@ -62,7 +62,7 @@ export async function getFarmerLocations(query: unknown) {
   const skip = (page - 1) * limit;
   let locations = await prisma.location.findMany({
     where: { is_public: true },
-    include: { profile: { select: { name: true, role: true, avatar_url: true } } },
+    include: { profile: { select: { name: true, role: true, avatar_url: true, bio: true } } },
   });
   if (lat !== undefined && lng !== undefined && radius !== undefined) {
     locations = locations.filter((l) => haversine(lat, lng, l.lat, l.lng) <= radius);

@@ -30,12 +30,18 @@ const router = Router();
 // GET /orders?buyerAddress=... or ?farmerAddress=...
 router.get(
   "/orders",
+  requireWallet,
   validateQuery(ListOrdersQuerySchema),
   validateResponse(z.array(OrderSchema)),
-  async (req: Request, res: Response) => {
+  async (req: WalletRequest, res: Response) => {
+    const walletAddress = req.walletAddress!;
     const { buyerAddress, farmerAddress } = req.query as unknown as ListOrdersQuery;
 
     if (buyerAddress) {
+      if (buyerAddress !== walletAddress) {
+        problemDetail(res, req, 403, "Forbidden", "Cannot view another wallet's orders");
+        return;
+      }
       const orders = await prisma.order.findMany({
         where: { buyerAddress },
         orderBy: { createdAt: "desc" },
@@ -47,19 +53,28 @@ router.get(
       return;
     }
 
-    const campaigns = await prisma.campaign.findMany({
-      where: { farmerAddress: farmerAddress! },
-      select: { id: true },
-    });
-    const campaignIds = campaigns.map((c) => c.id);
-    const orders = await prisma.order.findMany({
-      where: { campaignId: { in: campaignIds } },
-      orderBy: { createdAt: "desc" },
-      include: {
-        campaign: { select: { farmerAddress: true, tokenAddress: true, onChainId: true } },
-      },
-    });
-    jsonValidated(res, z.array(OrderSchema), 200, orders);
+    if (farmerAddress) {
+      if (farmerAddress !== walletAddress) {
+        problemDetail(res, req, 403, "Forbidden", "Cannot view another wallet's orders");
+        return;
+      }
+      const campaigns = await prisma.campaign.findMany({
+        where: { farmerAddress: farmerAddress! },
+        select: { id: true },
+      });
+      const campaignIds = campaigns.map((c) => c.id);
+      const orders = await prisma.order.findMany({
+        where: { campaignId: { in: campaignIds } },
+        orderBy: { createdAt: "desc" },
+        include: {
+          campaign: { select: { farmerAddress: true, tokenAddress: true, onChainId: true } },
+        },
+      });
+      jsonValidated(res, z.array(OrderSchema), 200, orders);
+      return;
+    }
+
+    problemDetail(res, req, 400, "Bad Request", "Either buyerAddress or farmerAddress is required");
   },
 );
 
@@ -140,12 +155,18 @@ router.post(
 // GET /orders/:id
 router.get(
   "/orders/:id",
+  requireWallet,
   validateParams(OrderIdParamSchema),
   validateResponse(OrderSchema),
-  async (req: Request, res: Response) => {
+  async (req: WalletRequest, res: Response) => {
+    const walletAddress = req.walletAddress!;
     const order = await prisma.order.findUnique({ where: { id: req.params.id } });
     if (!order) {
       problemDetail(res, req, 404, "Order Not Found", `No order with id ${req.params.id}`);
+      return;
+    }
+    if (order.buyerAddress !== walletAddress) {
+      problemDetail(res, req, 403, "Forbidden", "Not the buyer for this order");
       return;
     }
     jsonValidated(res, OrderSchema, 200, order);
@@ -155,14 +176,20 @@ router.get(
 // PUT /orders/:id — update txHash after on-chain confirmation
 router.put(
   "/orders/:id",
+  requireWallet,
   writeLimiter,
   validateParams(OrderIdParamSchema),
   validateBody(z.object({ txHash: z.string() })),
   validateResponse(OrderSchema),
-  async (req: Request, res: Response) => {
+  async (req: WalletRequest, res: Response) => {
+    const walletAddress = req.walletAddress!;
     const order = await prisma.order.findUnique({ where: { id: req.params.id } });
     if (!order) {
       problemDetail(res, req, 404, "Order Not Found", `No order with id ${req.params.id}`);
+      return;
+    }
+    if (order.buyerAddress !== walletAddress) {
+      problemDetail(res, req, 403, "Forbidden", "Not the buyer for this order");
       return;
     }
 

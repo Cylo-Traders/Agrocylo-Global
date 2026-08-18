@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  basketStatusEnum,
   campaignStatusEnum,
   orderStatusEnum,
   stellarAddress,
@@ -91,9 +92,63 @@ export const OrderSchema = z.object({
   campaign: OrderCampaignRefSchema.optional(),
 });
 
+export const MilestoneItemSchema = z.object({
+  name: z.string(),
+  percentage: z.number(),
+  completed: z.boolean(),
+  completedAt: z.string().nullable(),
+});
+
+export const CampaignMilestonesSchema = z.object({
+  campaignId: z.string(),
+  onChainId: z.string(),
+  status: campaignStatusEnum,
+  percentageReleased: z.number(),
+  trancheReleased: z.string(),
+  currentMilestone: z.string(),
+  nextExpectedMilestone: z.string().nullable(),
+  milestones: z.array(MilestoneItemSchema),
+});
+
 export const CampaignDetailSchema = CampaignSchema.extend({
   investments: z.array(InvestmentSchema).optional(),
   orders: z.array(OrderSchema).optional(),
+});
+
+export const BasketDepositSchema = z.object({
+  id: uuidParam,
+  basketId: uuidParam,
+  depositorAddress: stellarAddress,
+  amount: z.string(),
+  claimed: z.boolean(),
+  payoutAmount: z.string().nullable().optional(),
+  withdrawn: z.boolean(),
+  ledger: z.number().int(),
+  txHash: z.string().nullable().optional(),
+  createdAt: dateField,
+  updatedAt: dateField,
+});
+
+export const BasketSchema = z.object({
+  id: uuidParam,
+  onChainId: z.string(),
+  constituentsCount: z.number().int(),
+  totalDeposited: z.string(),
+  status: basketStatusEnum,
+  ...timestamps,
+});
+
+export const BasketListResponseSchema = z.object({
+  data: z.array(BasketSchema),
+  meta: z.object({
+    total: z.number().int(),
+    page: z.number().int(),
+    limit: z.number().int(),
+  }),
+});
+
+export const BasketDetailSchema = BasketSchema.extend({
+  deposits: z.array(BasketDepositSchema).optional(),
 });
 
 export const ValidationErrorSchema = z.object({

@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+use soroban_sdk::{testutils::Address as _, Address, Env, String, Vec};
 
 fn setup_test() -> (
     Env,
@@ -66,7 +66,7 @@ fn test_registry_cannot_initialize_twice() {
 
 #[test]
 fn test_register_new_farmer() {
-    let (_env, client, _, _, _, _, farmer_one, _) = setup_test();
+    let (env, client, _, _, _, _, farmer_one, _) = setup_test();
 
     client.register_farmer(&farmer_one);
 
@@ -81,7 +81,7 @@ fn test_register_new_farmer() {
 
 #[test]
 fn test_duplicate_farmer_registration_fails() {
-    let (_env, client, _, _, _, _, farmer_one, _) = setup_test();
+    let (env, client, _, _, _, _, farmer_one, _) = setup_test();
 
     client.register_farmer(&farmer_one);
 
@@ -116,7 +116,7 @@ fn test_register_campaign_from_authorized_production_contract() {
 
 #[test]
 fn test_register_campaign_from_authorized_escrow_contract() {
-    let (_env, client, _, escrow_contract, _, _, farmer_one, _) = setup_test();
+    let (env, client, _, escrow_contract, _, _, farmer_one, _) = setup_test();
     client.register_farmer(&farmer_one);
 
     client.register_campaign(&escrow_contract, &101, &farmer_one, &Some(88));
@@ -128,7 +128,7 @@ fn test_register_campaign_from_authorized_escrow_contract() {
 
 #[test]
 fn test_unauthorized_campaign_registration_is_rejected() {
-    let (_env, client, _, _, _, unauthorized_contract, farmer_one, _) = setup_test();
+    let (env, client, _, _, _, unauthorized_contract, farmer_one, _) = setup_test();
     client.register_farmer(&farmer_one);
 
     let result = client.try_register_campaign(&unauthorized_contract, &200, &farmer_one, &None);
@@ -143,7 +143,7 @@ fn test_unauthorized_campaign_registration_is_rejected() {
 
 #[test]
 fn test_multiple_campaigns_are_indexed_per_farmer() {
-    let (_env, client, _, escrow_contract, production_contract, _, farmer_one, farmer_two) =
+    let (env, client, _, escrow_contract, production_contract, _, farmer_one, farmer_two) =
         setup_test();
     client.register_farmer(&farmer_one);
     client.register_farmer(&farmer_two);
@@ -164,7 +164,7 @@ fn test_multiple_campaigns_are_indexed_per_farmer() {
 
 #[test]
 fn test_get_all_campaigns_returns_complete_results() {
-    let (_env, client, _, _, production_contract, _, farmer_one, farmer_two) = setup_test();
+    let (env, client, _, _, production_contract, _, farmer_one, farmer_two) = setup_test();
     client.register_farmer(&farmer_one);
     client.register_farmer(&farmer_two);
 
@@ -191,7 +191,7 @@ fn test_empty_campaign_lists_are_handled_safely() {
 
 #[test]
 fn test_campaign_registration_requires_registered_farmer() {
-    let (_env, client, _, _, production_contract, _, farmer_one, _) = setup_test();
+    let (env, client, _, _, production_contract, _, farmer_one, _) = setup_test();
 
     let result = client.try_register_campaign(&production_contract, &500, &farmer_one, &None);
     assert_eq!(
@@ -216,7 +216,7 @@ fn test_invalid_farmer_addresses_are_rejected() {
 
 #[test]
 fn test_repeated_campaign_entries_do_not_corrupt_state() {
-    let (_env, client, _, _, production_contract, _, farmer_one, _) = setup_test();
+    let (env, client, _, _, production_contract, _, farmer_one, _) = setup_test();
     client.register_farmer(&farmer_one);
 
     client.register_campaign(&production_contract, &700, &farmer_one, &Some(99));

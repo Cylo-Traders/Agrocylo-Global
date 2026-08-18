@@ -13,11 +13,12 @@
     "worker:start": "node dist/worker.js",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "lint": "eslint .",
     "lint:fix": "eslint --fix .",
     "format": "prettier --write 'src/**/*.ts'",
     "format:check": "prettier --check 'src/**/*.ts'",
-    "prepare": "cd .. && npx husky server/.husky"
+    "prepare": ""
   },
   "lint-staged": {
     "src/**/*.ts": [

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import {
   fetchUserInvestments,
   claimableReturn,
@@ -215,6 +216,12 @@ function InvestmentRow({ investment, onInvestmentUpdated }: { investment: Invest
       </div>
 
       <div className="flex items-center gap-2">
+        <Link
+          href={`/campaigns/${campaign.id}/messages`}
+          className="whitespace-nowrap bg-primary text-primary-foreground px-3 py-1.5 rounded text-xs font-medium hover:opacity-90 transition-opacity"
+        >
+          Message
+        </Link>
         {canClaim && (
           <button
             onClick={handleClaim}

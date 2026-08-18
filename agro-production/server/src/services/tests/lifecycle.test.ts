@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+﻿import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 
 const { mockIsShuttingDown, mockGetShutdownPhase } = vi.hoisted(() => ({
@@ -47,7 +47,7 @@ vi.mock('../wsServer.js', () => ({
   getWsClientCount: vi.fn(() => 0),
 }));
 
-vi.mock('../sorobanEventListener.js', () => ({
+vi.mock('../sorobanRpc.js', () => ({
   server: {
     getLatestLedger: vi.fn().mockResolvedValue({ sequence: 12345 }),
   },
@@ -88,7 +88,7 @@ describe('Graceful lifecycle & readiness', () => {
   describe('GET /readyz', () => {
     it('returns ready when all checks pass', async () => {
       const { prisma } = await import('../../db/client.js');
-      const { server: rpcServer } = await import('../sorobanEventListener.js');
+      const { server: rpcServer } = await import('../sorobanRpc.js');
       (prisma.$queryRaw as ReturnType<typeof vi.fn>).mockResolvedValue([{ 1: 1 }]);
       (rpcServer.getLatestLedger as ReturnType<typeof vi.fn>).mockResolvedValue({ sequence: 99999 });
 
@@ -102,7 +102,7 @@ describe('Graceful lifecycle & readiness', () => {
 
     it('returns not_ready when database is unreachable', async () => {
       const { prisma } = await import('../../db/client.js');
-      const { server: rpcServer } = await import('../sorobanEventListener.js');
+      const { server: rpcServer } = await import('../sorobanRpc.js');
       (prisma.$queryRaw as ReturnType<typeof vi.fn>).mockRejectedValue(
         new Error('connect ECONNREFUSED 127.0.0.1:5432'),
       );
@@ -116,7 +116,7 @@ describe('Graceful lifecycle & readiness', () => {
 
     it('returns not_ready when RPC is unreachable', async () => {
       const { prisma } = await import('../../db/client.js');
-      const { server: rpcServer } = await import('../sorobanEventListener.js');
+      const { server: rpcServer } = await import('../sorobanRpc.js');
       (prisma.$queryRaw as ReturnType<typeof vi.fn>).mockResolvedValue([{ 1: 1 }]);
       (rpcServer.getLatestLedger as ReturnType<typeof vi.fn>).mockRejectedValue(
         new Error('ENOTFOUND rpc.example.com'),
@@ -130,7 +130,7 @@ describe('Graceful lifecycle & readiness', () => {
 
     it('does not leak connection details in error messages', async () => {
       const { prisma } = await import('../../db/client.js');
-      const { server: rpcServer } = await import('../sorobanEventListener.js');
+      const { server: rpcServer } = await import('../sorobanRpc.js');
       (prisma.$queryRaw as ReturnType<typeof vi.fn>).mockRejectedValue(
         new Error('password authentication failed for user "admin" at postgres://admin:secret@db.example.com:5432/db'),
       );

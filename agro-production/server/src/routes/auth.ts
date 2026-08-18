@@ -6,6 +6,7 @@ import { problemDetail } from '../middleware/errors.js';
 import {
   createChallenge,
   verifySignatureAndCreateSession,
+  verifyHandoffAndCreateSession,
   revokeSession,
   AuthError,
 } from '../services/walletAuthService.js';
@@ -28,6 +29,7 @@ const SessionRequestSchema = z.object({
 });
 
 const SessionResponseSchema = z.object({
+  accessToken: z.string(),
   sessionToken: z.string(),
   walletAddress: z.string(),
   expiresAt: z.string(),
@@ -35,6 +37,10 @@ const SessionResponseSchema = z.object({
 
 const RevokeSessionBodySchema = z.object({
   sessionToken: z.string(),
+});
+
+const HandoffRequestSchema = z.object({
+  token: z.string().min(1, 'Handoff token is required'),
 });
 
 // GET /auth/nonce?walletAddress=G...
@@ -77,6 +83,27 @@ router.post(
         return;
       }
       problemDetail(res, req, 500, 'Internal Server Error', 'Failed to create session');
+    }
+  },
+);
+
+// POST /auth/handoff — verify a cross-app SSO handoff token minted by the
+// root server and establish a session for the same wallet (Issue #686).
+router.post(
+  '/auth/handoff',
+  authLimiter,
+  validateBody(HandoffRequestSchema),
+  async (req: Request, res: Response) => {
+    try {
+      const { token } = req.body as { token: string };
+      const result = await verifyHandoffAndCreateSession(token);
+      jsonValidated(res, SessionResponseSchema, 200, result);
+    } catch (err) {
+      if (err instanceof AuthError) {
+        problemDetail(res, req, err.status, err.message);
+        return;
+      }
+      problemDetail(res, req, 500, 'Internal Server Error', 'Failed to verify handoff token');
     }
   },
 );

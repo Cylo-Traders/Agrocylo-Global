@@ -104,6 +104,69 @@ describe("ProductionEventParser", () => {
     });
   });
 
+  describe("basket.created", () => {
+    it("parses correctly", () => {
+      const raw = makeRaw("basket", "created", [1n, 3]);
+      const event = ProductionEventParser.parse(raw);
+      expect(event.action).toBe("basket.created");
+      if (event.action === "basket.created") {
+        expect(event.basketId).toBe("1");
+        expect(event.constituentsCount).toBe(3);
+      }
+    });
+  });
+
+  describe("basket.deposit", () => {
+    it("parses correctly", () => {
+      const raw = makeRaw("basket", "deposit", [1n, "GDEPOSITOR", 500n]);
+      const event = ProductionEventParser.parse(raw);
+      expect(event.action).toBe("basket.deposit");
+      if (event.action === "basket.deposit") {
+        expect(event.basketId).toBe("1");
+        expect(event.depositor).toBe("GDEPOSITOR");
+        expect(event.amount).toBe("500");
+      }
+    });
+  });
+
+  describe("basket.funded", () => {
+    it("parses correctly", () => {
+      const raw = makeRaw("basket", "funded", [1n, 1500n]);
+      const event = ProductionEventParser.parse(raw);
+      expect(event.action).toBe("basket.funded");
+      if (event.action === "basket.funded") {
+        expect(event.basketId).toBe("1");
+        expect(event.totalDeposit).toBe("1500");
+      }
+    });
+  });
+
+  describe("basket.withdrawn", () => {
+    it("parses correctly", () => {
+      const raw = makeRaw("basket", "withdrawn", [1n, "GDEPOSITOR", 500n]);
+      const event = ProductionEventParser.parse(raw);
+      expect(event.action).toBe("basket.withdrawn");
+      if (event.action === "basket.withdrawn") {
+        expect(event.basketId).toBe("1");
+        expect(event.depositor).toBe("GDEPOSITOR");
+        expect(event.depositAmount).toBe("500");
+      }
+    });
+  });
+
+  describe("basket.claimed", () => {
+    it("parses correctly", () => {
+      const raw = makeRaw("basket", "claimed", [1n, "GDEPOSITOR", 620n]);
+      const event = ProductionEventParser.parse(raw);
+      expect(event.action).toBe("basket.claimed");
+      if (event.action === "basket.claimed") {
+        expect(event.basketId).toBe("1");
+        expect(event.depositor).toBe("GDEPOSITOR");
+        expect(event.payout).toBe("620");
+      }
+    });
+  });
+
   describe("generic campaign events", () => {
     it.each(["produce", "harvest", "failed", "disputed", "claimed", "refunded", "tranche"])(
       "parses campaign.%s",

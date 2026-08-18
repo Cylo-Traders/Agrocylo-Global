@@ -38,7 +38,9 @@ import equipmentRoutes from "./routes/equipmentRoutes.js";
 import groupOrderRoutes, { groupOrderErrorHandler } from "./routes/groupOrderRoutes.js";
 import referralRoutes, { referralErrorHandler } from "./routes/referralRoutes.js";
 import integratorRoutes, { integratorErrorHandler } from "./routes/integratorRoutes.js";
+import analyticsRoutes from "./routes/analyticsRoutes.js";
 import governanceRoutes from "./routes/governanceRoutes.js";
+import ussdRoutes from "./routes/ussdRoutes.js";
 
 const app = express();
 
@@ -86,6 +88,7 @@ app.use("/admin", adminRoutes);
 app.use(referralRoutes);
 app.use(integratorRoutes);
 app.use(governanceRoutes);
+app.use(ussdRoutes);
 
 app.get("/health", async (_req: Request, res: Response) => {
   logger.info("Health check endpoint hit");

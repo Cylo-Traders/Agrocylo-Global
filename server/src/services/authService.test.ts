@@ -7,7 +7,10 @@ vi.mock('../config/index.js', () => ({
 }));
 
 vi.mock('../config/database.js', () => ({
-  query: vi.fn(),
+  prisma: {
+    nonce: { upsert: vi.fn(), findUnique: vi.fn(), delete: vi.fn() },
+    refreshToken: { create: vi.fn(), findUnique: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
+  },
 }));
 
 vi.mock('@stellar/stellar-sdk', () => ({
@@ -17,15 +20,21 @@ vi.mock('@stellar/stellar-sdk', () => ({
 }));
 
 import { generateNonce, verifySignature, refreshAccessToken, logout } from './authService.js';
-import * as db from '../config/database.js';
+import { prisma } from '../config/database.js';
 import { Keypair } from '@stellar/stellar-sdk';
 
-const mockQuery = vi.mocked(db.query);
+const mockNonceUpsert = vi.mocked(prisma.nonce.upsert);
+const mockNonceFindUnique = vi.mocked(prisma.nonce.findUnique);
+const mockNonceDelete = vi.mocked(prisma.nonce.delete);
+const mockRefreshTokenCreate = vi.mocked(prisma.refreshToken.create);
+const mockRefreshTokenFindUnique = vi.mocked(prisma.refreshToken.findUnique);
+const mockRefreshTokenDelete = vi.mocked(prisma.refreshToken.delete);
+const mockRefreshTokenDeleteMany = vi.mocked(prisma.refreshToken.deleteMany);
 const mockFromPublicKey = vi.mocked(Keypair.fromPublicKey);
 
 const VALID_WALLET = 'GBSOMEWALLET123456';
-const FUTURE_DATE = new Date(Date.now() + 60_000).toISOString();
-const PAST_DATE = new Date(Date.now() - 60_000).toISOString();
+const FUTURE_DATE_OBJ = new Date(Date.now() + 60_000);
+const PAST_DATE_OBJ = new Date(Date.now() - 60_000);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -34,14 +43,14 @@ beforeEach(() => {
 
 describe('generateNonce', () => {
   it('returns a nonce for a valid Stellar address', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [] } as any);
+    mockNonceUpsert.mockResolvedValueOnce({} as any);
 
     const result = await generateNonce(VALID_WALLET);
 
     expect(result.nonce).toBeDefined();
     expect(typeof result.nonce).toBe('string');
     expect(result.nonce).toHaveLength(64);
-    expect(mockQuery).toHaveBeenCalledOnce();
+    expect(mockNonceUpsert).toHaveBeenCalledOnce();
   });
 
   it('throws 400 for an invalid Stellar address', async () => {
@@ -55,16 +64,17 @@ describe('generateNonce', () => {
 
 describe('verifySignature', () => {
   it('returns access and refresh tokens on valid signature', async () => {
-    mockQuery
-      .mockResolvedValueOnce({ rows: [{ nonce: 'some-nonce', expiresAt: FUTURE_DATE }] } as any)
-      .mockResolvedValueOnce({ rows: [] } as any)
-      .mockResolvedValueOnce({ rows: [] } as any);
+    mockNonceFindUnique.mockResolvedValueOnce({ nonce: 'some-nonce', expiresAt: FUTURE_DATE_OBJ } as any);
+    mockNonceDelete.mockResolvedValueOnce({} as any);
+    mockRefreshTokenCreate.mockResolvedValueOnce({} as any);
 
     const result = await verifySignature(VALID_WALLET, 'dGVzdA==');
 
     expect(result.accessToken).toBeDefined();
     expect(result.refreshToken).toBeDefined();
-    expect(mockQuery).toHaveBeenCalledTimes(3);
+    expect(mockNonceFindUnique).toHaveBeenCalledTimes(1);
+    expect(mockNonceDelete).toHaveBeenCalledTimes(1);
+    expect(mockRefreshTokenCreate).toHaveBeenCalledTimes(1);
   });
 
   it('throws 400 for an invalid Stellar address', async () => {
@@ -76,25 +86,25 @@ describe('verifySignature', () => {
   });
 
   it('throws 401 when no nonce exists for the wallet', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [] } as any);
+    mockNonceFindUnique.mockResolvedValueOnce(null);
 
     await expect(verifySignature(VALID_WALLET, 'sig')).rejects.toMatchObject({ status: 401 });
   });
 
   it('throws 401 when the nonce has expired', async () => {
-    mockQuery.mockResolvedValueOnce({
-      rows: [{ nonce: 'old-nonce', expiresAt: PAST_DATE }],
+    mockNonceFindUnique.mockResolvedValueOnce({
+      nonce: 'old-nonce',
+      expiresAt: PAST_DATE_OBJ,
     } as any);
 
     await expect(verifySignature(VALID_WALLET, 'sig')).rejects.toMatchObject({ status: 401 });
   });
 
   it('throws 401 when the signature is invalid', async () => {
-    mockQuery.mockResolvedValueOnce({
-      rows: [{ nonce: 'some-nonce', expiresAt: FUTURE_DATE }],
+    mockNonceFindUnique.mockResolvedValueOnce({
+      nonce: 'some-nonce',
+      expiresAt: FUTURE_DATE_OBJ,
     } as any);
-    // verifySignature calls fromPublicKey twice: once in isStellarAddress (validation),
-    // once for the actual keypair used to verify the signature.
     mockFromPublicKey
       .mockReturnValueOnce({ verify: vi.fn().mockReturnValue(true) } as any)
       .mockReturnValueOnce({ verify: vi.fn().mockReturnValue(false) } as any);
@@ -105,47 +115,49 @@ describe('verifySignature', () => {
 
 describe('refreshAccessToken', () => {
   it('returns new tokens for a valid refresh token', async () => {
-    mockQuery
-      .mockResolvedValueOnce({
-        rows: [{ walletAddress: VALID_WALLET, expiresAt: FUTURE_DATE }],
-      } as any)
-      .mockResolvedValueOnce({ rows: [] } as any)
-      .mockResolvedValueOnce({ rows: [] } as any);
+    mockRefreshTokenFindUnique.mockResolvedValueOnce({
+      walletAddress: VALID_WALLET,
+      expiresAt: FUTURE_DATE_OBJ,
+    } as any);
+    mockRefreshTokenDelete.mockResolvedValueOnce({} as any);
+    mockRefreshTokenCreate.mockResolvedValueOnce({} as any);
 
     const result = await refreshAccessToken('valid-refresh-token');
 
     expect(result.accessToken).toBeDefined();
     expect(result.refreshToken).toBeDefined();
-    expect(mockQuery).toHaveBeenCalledTimes(3);
+    expect(mockRefreshTokenFindUnique).toHaveBeenCalledTimes(1);
+    expect(mockRefreshTokenDelete).toHaveBeenCalledTimes(1);
+    expect(mockRefreshTokenCreate).toHaveBeenCalledTimes(1);
   });
 
   it('throws 401 for an unknown refresh token', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [] } as any);
+    mockRefreshTokenFindUnique.mockResolvedValueOnce(null);
 
     await expect(refreshAccessToken('bad-token')).rejects.toMatchObject({ status: 401 });
   });
 
   it('throws 401 and deletes the token when it has expired', async () => {
-    mockQuery
-      .mockResolvedValueOnce({
-        rows: [{ walletAddress: VALID_WALLET, expiresAt: PAST_DATE }],
-      } as any)
-      .mockResolvedValueOnce({ rows: [] } as any);
+    mockRefreshTokenFindUnique.mockResolvedValueOnce({
+      walletAddress: VALID_WALLET,
+      expiresAt: PAST_DATE_OBJ,
+    } as any);
+    mockRefreshTokenDelete.mockResolvedValueOnce({} as any);
 
     await expect(refreshAccessToken('expired-token')).rejects.toMatchObject({ status: 401 });
-    expect(mockQuery).toHaveBeenCalledTimes(2);
+    expect(mockRefreshTokenDelete).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('logout', () => {
   it('deletes the refresh token from the database', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [] } as any);
+    mockRefreshTokenDeleteMany.mockResolvedValueOnce({ count: 1 } as any);
 
     await logout('some-refresh-token');
 
-    expect(mockQuery).toHaveBeenCalledOnce();
-    expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('delete'), [
-      'some-refresh-token',
-    ]);
+    expect(mockRefreshTokenDeleteMany).toHaveBeenCalledOnce();
+    expect(mockRefreshTokenDeleteMany).toHaveBeenCalledWith({
+      where: { token: 'some-refresh-token' },
+    });
   });
 });

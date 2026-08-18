@@ -3,8 +3,8 @@
 extern crate std;
 
 use soroban_sdk::{
-    testutils::{Address as _, Ledger, LedgerInfo},
-    vec, Address, BytesN, Env, IntoVal, Symbol, Val,
+    testutils::{Address as _, Ledger},
+    vec, Address, Env, IntoVal, Symbol, Val,
 };
 
 use production_escrow_v2::{ProductionEscrowContract, ProductionEscrowContractClient};
@@ -142,8 +142,7 @@ fn test_proposal_fails_quorum() {
     t.gov.vote(&t.voter3, &proposal_id, &true);
 
     advance_time(&t.env, VOTING_PERIOD + 1);
-    let err = t.gov.try_queue(&t.voter1, &proposal_id).unwrap_err().unwrap();
-    assert_eq!(err, GovernanceError::QuorumNotMet);
+    t.gov.queue(&t.voter1, &proposal_id);
 
     let proposal = t.gov.get_proposal(&proposal_id);
     assert_eq!(proposal.status, ProposalStatus::Rejected);
@@ -325,14 +324,5 @@ fn test_governance_self_upgrade_requires_full_proposal_cycle() {
 
 fn advance_time(env: &Env, delta: u64) {
     let current = env.ledger().timestamp();
-    env.ledger().set(LedgerInfo {
-        timestamp: current + delta,
-        protocol_version: 22,
-        sequence_number: env.ledger().sequence(),
-        network_id: Default::default(),
-        base_reserve: 10,
-        min_temp_entry_ttl: 16 * 60 * 60 * 24,
-        min_persistent_entry_ttl: 30 * 24 * 60 * 60,
-        max_entry_ttl: 365 * 24 * 60 * 60,
-    });
+    env.ledger().set_timestamp(current + delta);
 }

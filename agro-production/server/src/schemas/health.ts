@@ -20,7 +20,7 @@ export type LivezResponse = z.infer<typeof LivezResponseSchema>;
 export const ReadyzResponseSchema = z.object({
   status: z.enum(["ready", "not_ready"]),
   checks: z.record(z.object({
-    status: z.enum(["UP", "DOWN"]),
+    status: z.enum(["UP", "DOWN", "WARN"]),
     message: z.string().optional(),
   })),
   lastLedger: z.number().optional(),

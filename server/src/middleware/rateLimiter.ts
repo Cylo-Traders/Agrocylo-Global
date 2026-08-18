@@ -4,6 +4,7 @@ import logger from '../config/logger.js';
 import { ApiError, sendProblem } from '../http/errors.js';
 
 const isTest = process.env['NODE_ENV'] === 'test';
+const shouldSkipInTest = () => isTest && process.env['ENABLE_TEST_RATE_LIMIT'] !== 'true';
 
 function rateLimitHandler(req: Request, res: Response): void {
   logger.warn('[RateLimit] Request throttled', {
@@ -26,7 +27,7 @@ export const authRateLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   handler: rateLimitHandler,
-  skip: () => isTest,
+  skip: shouldSkipInTest,
 });
 
 // 5 uploads per minute per IP
@@ -36,5 +37,17 @@ export const uploadRateLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   handler: rateLimitHandler,
-  skip: () => isTest,
+  skip: shouldSkipInTest,
 });
+
+// 10 requests per minute per IP for mutating endpoints (checkout, metadata creation, etc.)
+export const writeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  handler: rateLimitHandler,
+  skip: shouldSkipInTest,
+});
+
+export const writeRateLimiter = writeLimiter;

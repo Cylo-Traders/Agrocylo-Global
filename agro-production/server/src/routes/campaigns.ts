@@ -26,10 +26,12 @@ import {
 import {
   CampaignDetailSchema,
   CampaignListResponseSchema,
+  CampaignMilestonesSchema,
   CampaignSchema,
   InvestmentSchema,
 } from "../schemas/responses.js";
 import { broadcast } from "../services/wsServer.js";
+import { getCachedResponse, setCachedResponse } from "../middleware/idempotency.js";
 
 const router = Router();
 
@@ -86,17 +88,127 @@ router.get(
   },
 );
 
+// GET /campaigns/:id/milestones — campaign milestone/tranche state
+router.get(
+  "/campaigns/:id/milestones",
+  validateParams(CampaignIdParamSchema),
+  validateResponse(CampaignMilestonesSchema),
+  async (req: Request, res: Response) => {
+    const campaignId = req.params.id;
+    const campaign = await prisma.campaign.findFirst({
+      where: {
+        OR: [
+          { id: campaignId },
+          { onChainId: campaignId },
+        ],
+      },
+      include: {
+        transactions: {
+          where: {
+            eventType: {
+              in: ["campaign.produce", "campaign.harvest", "campaign.settled"],
+            },
+          },
+          orderBy: { ledger: "asc" },
+        },
+      },
+    });
+
+    if (!campaign) {
+      problemDetail(res, req, 404, "Campaign Not Found", `No campaign with id ${campaignId}`);
+      return;
+    }
+
+    const totalRaised = BigInt(campaign.totalRaised || "0");
+    const trancheReleased = BigInt(campaign.trancheReleased || "0");
+    const percentageReleased = totalRaised > 0n
+      ? Math.min(100, Math.round(Number((trancheReleased * 100n) / totalRaised)))
+      : (campaign.status === "IN_PRODUCTION" ? 50 : (["HARVESTED", "SETTLED"].includes(campaign.status) ? 100 : 0));
+
+    let currentMilestone = campaign.status.toString();
+    let nextExpectedMilestone: string | null = null;
+
+    switch (campaign.status) {
+      case "FUNDING":
+      case "FUNDED":
+        nextExpectedMilestone = "IN_PRODUCTION";
+        break;
+      case "IN_PRODUCTION":
+        nextExpectedMilestone = "HARVESTED";
+        break;
+      case "HARVESTED":
+        nextExpectedMilestone = "SETTLED";
+        break;
+      case "SETTLED":
+      case "FAILED":
+      case "DISPUTED":
+        nextExpectedMilestone = null;
+        break;
+    }
+
+    const produceTx = campaign.transactions.find((t) => t.eventType === "campaign.produce");
+    const harvestTx = campaign.transactions.find((t) => t.eventType === "campaign.harvest");
+    const settledTx = campaign.transactions.find((t) => t.eventType === "campaign.settled");
+
+    const milestoneState = {
+      campaignId: campaign.id,
+      onChainId: campaign.onChainId,
+      status: campaign.status,
+      percentageReleased,
+      trancheReleased: campaign.trancheReleased,
+      currentMilestone,
+      nextExpectedMilestone,
+      milestones: [
+        {
+          name: "FUNDING",
+          percentage: 0,
+          completed: true,
+          completedAt: campaign.createdAt.toISOString(),
+        },
+        {
+          name: "IN_PRODUCTION",
+          percentage: 50,
+          completed: ["IN_PRODUCTION", "HARVESTED", "SETTLED"].includes(campaign.status),
+          completedAt: produceTx ? produceTx.processedAt.toISOString() : null,
+        },
+        {
+          name: "HARVESTED",
+          percentage: 100,
+          completed: ["HARVESTED", "SETTLED"].includes(campaign.status),
+          completedAt: harvestTx ? harvestTx.processedAt.toISOString() : null,
+        },
+        {
+          name: "SETTLED",
+          percentage: 100,
+          completed: campaign.status === "SETTLED",
+          completedAt: settledTx ? settledTx.processedAt.toISOString() : null,
+        },
+      ],
+    };
+
+    jsonValidated(res, CampaignMilestonesSchema, 200, milestoneState);
+  },
+);
+
 // POST /campaigns — register a newly-created campaign (off-chain metadata)
 // Requires authenticated session; farmerAddress is derived from session, not body
 router.post(
   "/campaigns",
   requireWallet,
   writeLimiter,
+  requireIdempotencyKey,
   validateBody(CreateCampaignSchema.omit({ farmerAddress: true })),
   validateResponse(CampaignSchema),
   async (req: WalletRequest, res: Response) => {
     const farmerAddress = req.walletAddress!;
+    const idempotencyKey = (req as any).idempotencyKey as string;
     const { tokenAddress, targetAmount, deadline } = req.body as Omit<CreateCampaignInput, "farmerAddress">;
+
+    const cached = getCachedResponse(idempotencyKey);
+    if (cached) {
+      res.status(cached.status).json(cached.body);
+      return;
+    }
 
     await prisma.user.upsert({
       where: { walletAddress: farmerAddress },
@@ -118,15 +230,15 @@ router.post(
       data: {
         campaignId: campaign.id,
         eventType: "campaign.created_intent",
-        payload: { transactionHash, intent: true },
+        payload: { idempotencyKey, intent: true },
         ledger: 0,
         eventIndex: 0,
-        txHash: transactionHash,
+        txHash: null,
       },
     });
 
     const response = campaign;
-    setCachedResponse(key, 201, response);
+    setCachedResponse(idempotencyKey, 201, response);
     jsonValidated(res, CampaignSchema, 201, response);
   },
 );
@@ -189,7 +301,14 @@ router.post(
   validateResponse(InvestmentSchema),
   async (req: WalletRequest, res: Response) => {
     const investorAddress = req.walletAddress!;
+    const idempotencyKey = (req as any).idempotencyKey as string;
     const { amount } = req.body as Omit<InvestInput, "investorAddress">;
+
+    const cached = getCachedResponse(idempotencyKey);
+    if (cached) {
+      res.status(cached.status).json(cached.body);
+      return;
+    }
 
     const campaign = await prisma.campaign.findUnique({ where: { id: req.params.id } });
     if (!campaign) {
@@ -219,7 +338,7 @@ router.post(
         investorAddress,
         amount,
         ledger: 0,
-        txHash: transactionHash,
+        txHash: null,
       },
     });
 
@@ -227,15 +346,15 @@ router.post(
       data: {
         campaignId: campaign.id,
         eventType: "campaign.invested_intent",
-        payload: { transactionHash, intent: true },
+        payload: { idempotencyKey, intent: true },
         ledger: 0,
         eventIndex: 0,
-        txHash: transactionHash,
+        txHash: null,
       },
     });
 
     const response = investment;
-    setCachedResponse(key, 201, response);
+    setCachedResponse(idempotencyKey, 201, response);
     jsonValidated(res, InvestmentSchema, 201, response);
   },
 );

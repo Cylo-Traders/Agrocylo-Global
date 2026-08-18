@@ -214,7 +214,7 @@ export async function startContractWatcher(): Promise<void> {
         }
 
         const isGovernanceEvent =
-          Boolean(governanceContractId) && event.contractId === governanceContractId;
+          Boolean(governanceContractId) && String(event.contractId) === governanceContractId;
         const decoded = isGovernanceEvent ? decodeEvent(event) : null;
         const ingestionResults = await Promise.allSettled(
           isGovernanceEvent && decoded
@@ -223,7 +223,7 @@ export async function startContractWatcher(): Promise<void> {
                   decoded.action,
                   decoded.data,
                   event.ledger,
-                  event.eventIndex,
+                  event.transactionIndex,
                 ),
               ]
             : [
@@ -238,7 +238,6 @@ export async function startContractWatcher(): Promise<void> {
             logger.error("[ContractWatcher] Ingestion failed for event", {
               error: f.status === "rejected" ? f.reason : undefined,
               ledger: event.ledger,
-              eventIndex: event.eventIndex,
             });
           }
           logger.error(

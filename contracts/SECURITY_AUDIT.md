@@ -1,6 +1,6 @@
 # Security Audit Checklist
 
-> **Scope:** Escrow (`contracts/escrow/src/lib.rs`), Registry (`agro-production/contract/registry/src/lib.rs`), Campaign (`agro-production/contract/src/lib.rs`), ProductionEscrow (`agro-production/contract/production_escrow/src/lib.rs`)
+> **Scope:** Escrow (`contracts/escrow/src/lib.rs`), Registry (`agro-production/contract/registry/src/lib.rs`), ProductionEscrow (`agro-production/contract/production_escrow/src/lib.rs`)
 >
 > **Date:** 2026-05-29
 > **Status:** Review Complete
@@ -22,6 +22,7 @@
 11. [Error Handling](#11-error-handling)
 12. [Event Monitoring](#12-event-monitoring)
 13. [Findings Summary](#13-findings-summary)
+14. [Issue #652 Follow-up: Legacy/Production Escrow Drift Re-audit](#14-issue-652-follow-up-legacyproduction-escrow-drift-re-audit)
 
 ---
 
@@ -428,3 +429,65 @@ All contracts define comprehensive error enums with descriptive variant names. E
 
 4. **Variable fee rate** — Consider making the fee rate configurable via admin function (with upper bound)
 5. **Typo fix** — Correct `registerd` → `registered` (affects indexer compatibility)
+
+---
+
+## 14. Issue #652 Follow-up: Legacy/Production Escrow Drift Re-audit
+
+> **Date:** 2026-07-30
+> **Trigger:** Commit `240c652` ("fix: implement independent attester role to prevent farmer self-rug exploit") was applied only to `production_escrow`, never re-checked against `contracts/escrow`.
+
+### 14.1 Self-attestation re-audit result: vulnerability confirmed and fixed
+
+`contracts/escrow::mark_delivered` required only `farmer.require_auth()`. Once called, `delivery_timestamp` is set to a non-zero value, which permanently disables the buyer's automatic `refund_expired_order` escape hatch (`refund_expired_order`/`refund_expired_orders` both reject once `delivery_timestamp != 0`) — regardless of whether the farmer actually delivered anything. This is the same self-rug pattern `240c652` fixed in `production_escrow::mark_harvest`/`advance_milestone` via an independent attester co-signature, and it had not been ported.
+
+**Fix applied** (this PR): ported the identical pattern —
+- `DataKey::Attester` + `set_attester(admin, attester)` (admin-only setter)
+- `mark_delivered(farmer, attester_caller, order_id)` now also requires `attester_caller.require_auth()`, checked against the configured attester
+- While no attester is configured, falls back to requiring the admin's co-signature (mirrors this file's existing governance-fallback convention for `set_fee_config`/`set_supported_tokens`, so a deployment that never calls `set_attester` isn't bricked, but a farmer alone can no longer self-attest either way)
+
+New error: `EscrowError::NotAttester`. New tests: `test_mark_delivered_wrong_attester_fails`, `test_mark_delivered_falls_back_to_admin_before_attester_configured`, `test_mark_delivered_uses_configured_attester`.
+
+### 14.2 Both contracts were uncompilable — this audit could not have been "re-checked" until now
+
+While investigating, both crates were found in a **currently uncompilable state on `main`**, each due to an unrelated botched merge — meaning neither had actually been exercised by `cargo test`/CI in this state, and any "re-check" of one against the other was structurally impossible until fixed:
+
+| Crate | Break | Cause |
+|---|---|---|
+| `contracts/escrow` | Syntax error: ~50 lines of dead, duplicate dispute-resolution logic spliced into the middle of `set_arbitrators` with no function signature, referencing `DataKey::Arbitrators`/`Quorum`/`ArbitratorVote` and `EscrowError::ArbitrationNotConfigured`/`ArbitratorNotFound`/`AlreadyVoted`, none of which existed on their enums | Bad merge resolution (commit `850ea13`) |
+| `production_escrow` | `EscrowError::NotGoverned` referenced by `require_governed_caller` but never added to the enum; same for `InvalidGovernanceContract` in `set_governance_contract`'s verification path | commit `897a3cc` added the reference without the variant |
+| `registry` (dev-dependency of `production_escrow`'s test suite) | `mint_batch`/`link_batch_to_order`/`get_batch`/`get_batch_history` referenced an undefined `BatchRecord` type and `DataKey::Batch`/`BatchCount`/`BatchOrderLink`/`OrderBatch` | Provenance/batch-tracking feature merged without its type definitions |
+| `production_escrow/src/test.rs` | Called `registry_client.register_farmer(&admin, &farmer)` against a signature that only takes `farmer` | Stale test call site after a `registry` API change |
+
+All four are fixed in this PR (types/variants restored, dead code removed, call site updated) — each fix is additive/restorative (no behavior removed), verified by getting every existing test in all three crates passing again (`escrow`: 56/56, `production_escrow`: 191/191, `registry`: 20/21 — see §14.4).
+
+### 14.3 Additional drift found during the re-audit: dispute resolution wasn't reporting to the reputation registry
+
+`contracts/escrow::resolve_escrow_dispute_internal` (shared by `resolve_dispute` and `vote_to_resolve`) never called `report_reputation_outcome`, even though `confirm_receipt` does, and an existing test (`test_resolve_dispute_reports_split_outcome_to_registry`) asserted it should — the assertion had simply never been able to run before the compile fix in §14.2. Fixed by computing `buyer_share_bps` per resolution branch (matching the exact logic that was stranded in the dead code from §14.2) and reporting it, same as `confirm_receipt`.
+
+### 14.4 Test-fixture gap (not a contract bug): ledger timestamp 0 defeats the delivery guard
+
+`mark_delivered`'s "already delivered" guard is `order.delivery_timestamp > 0`. A fresh Soroban test `Env` defaults its ledger timestamp to `0`; a test that calls `mark_delivered` without first advancing the clock records `delivery_timestamp == 0`, silently defeating the guard and letting `mark_delivered` be called twice (`test_mark_delivered_twice_succeeds` was actually asserting this broken idempotent behavior before this PR, see the code comment removed by commit `897a3cc`'s incomplete "stabilize escrow delivery guard" fix, which changed the test's assertion without fixing the underlying baseline-timestamp gap). A live Stellar ledger is never at timestamp 0, so this is a **test-fixture gap, not a contract vulnerability**. Fixed by giving the shared test fixtures a non-zero baseline ledger timestamp once, rather than requiring every future test author to remember to advance the clock.
+
+### 14.5 Decision: which contract is "the production one"?
+
+**Correction to the issue's framing:** `contracts/escrow` and `production_escrow` are not duplicate/competing implementations of the same feature — they back two different product surfaces with different domain models, both live:
+
+- `contracts/escrow` — direct buyer↔farmer marketplace order escrow (`create_order`/`mark_delivered`/`confirm_receipt`). Wired up by the root `client/` app via `client/src/services/stellar/contractService.ts`, configured through `NEXT_PUBLIC_CONTRACT_ID`/`NEXT_PUBLIC_ESCROW_CONTRACT_ID`.
+- `production_escrow` — crowdfunded production campaigns (`create_campaign`/`invest`/`start_production`/`mark_harvest`/`claim_returns`). Wired up by `agro-production/client/` via its own `agro-production/client/src/lib/contractService.ts`.
+
+Neither should be deprecated — they are both in active use by distinct, currently-shipping frontends. **Decision: both are production contracts**, and both must independently carry any security-relevant fix (like the attester pattern) rather than treating one as canonical. This makes the checklist in §14.6 load-bearing, not optional.
+
+### 14.6 Shared checklist: cross-checking future contract security fixes
+
+Because `contracts/escrow` and `production_escrow` intentionally duplicate several security-critical patterns (independent attester, governance-gated params, admin/arbitrator dispute resolution, fee collection) without sharing code, any fix to one of the patterns below **must** be checked against the other contract before merging:
+
+- [ ] **Self-attestation / independent-attester requirement** on any action that gates fund release on the interested party's own claim (`mark_delivered` / `mark_harvest` / `advance_milestone`)
+- [ ] **Governance-gating fallback** on admin-controlled parameter setters (`set_fee_config`, `set_supported_tokens`/`update_supported_tokens`, `set_governance_contract` itself)
+- [ ] **Dispute resolution → reputation reporting** — every code path that resolves a dispute (admin-direct or arbitrator-quorum) reports the outcome to the registry, matching the "clean confirmation" path
+- [ ] **Arbitrator pool / quorum voting** — `set_arbitrators`, `get_arbitrators`, `get_quorum`, `vote_to_resolve` present and type-complete (this class of bug — a feature referencing types/variants that were never defined — caused §14.2's compile breaks; a `cargo check --workspace` in CI would catch this immediately and is the single highest-leverage fix here)
+- [ ] **Cancellation / cooling-off window** (`cancel_order`) — window duration, fee-refund semantics, and the guard against cancelling after delivery/confirmation
+- [ ] **Multi-party split orders** — co-buyer funding, majority-by-value vs. unanimous confirmation threshold, pro-rata dispute refund
+- [ ] Run the full workspace test suite (`cargo test` from the workspace root, or per-crate — see caveat below) before merging any change to either contract
+
+**Caveat on `cargo test` at the workspace root:** as of this audit, the `registry` crate has one pre-existing, unrelated failing test (`test_reputation_is_tracked_independently_per_farmer`, a reputation-scoring assertion mismatch), and the `governance` and `investment_basket` crates each have several pre-existing failures (`HostError: ... "ledger protocol version too old for host"` — looks like a test-harness `LedgerInfo` setup gap, the same class of issue as §14.4, not a contract bug). None of these are touched by this PR and all are out of scope for issues #652–#655 — noted here rather than fixed silently so they aren't lost. Similarly, `server/src/services/reputationService.ts` has 3 pre-existing TypeScript errors and several server test files (`contractWatcher`, `groupOrderService`, `orderService`, `reputationService`, `wsManager`) have pre-existing failing tests unrelated to this PR's changes — also flagged here rather than silently worked around, since fixing them was outside the scope of issues #652–#655.
