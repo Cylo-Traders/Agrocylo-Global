@@ -4,7 +4,7 @@ extern crate std;
 
 use soroban_sdk::{
     testutils::{Address as _, Ledger, LedgerInfo},
-    vec, Address, Env, IntoVal, Symbol, Val,
+    vec, Address, BytesN, Env, IntoVal, Symbol, Val,
 };
 
 use production_escrow_v2::{ProductionEscrowContract, ProductionEscrowContractClient};
@@ -13,6 +13,7 @@ use crate::{GovernanceContract, GovernanceContractClient, GovernanceError, Propo
 
 const VOTING_PERIOD: u64 = 7 * 24 * 60 * 60; // 7 days
 const TIMELOCK_DELAY: u64 = 2 * 24 * 60 * 60; // 2 days
+const UPGRADE_TIMELOCK_DELAY: u64 = 14 * 24 * 60 * 60; // 14 days
 const QUORUM: u64 = 100;
 
 struct TestEnv<'a> {
@@ -36,7 +37,13 @@ fn setup() -> TestEnv<'static> {
 
     let gov_id = env.register(GovernanceContract, ());
     let gov = GovernanceContractClient::new(&env, &gov_id);
-    gov.initialize(&admin, &VOTING_PERIOD, &TIMELOCK_DELAY, &QUORUM);
+    gov.initialize(
+        &admin,
+        &VOTING_PERIOD,
+        &TIMELOCK_DELAY,
+        &UPGRADE_TIMELOCK_DELAY,
+        &QUORUM,
+    );
     gov.set_voter_weight(&admin, &voter1, &60);
     gov.set_voter_weight(&admin, &voter2, &50);
     gov.set_voter_weight(&admin, &voter3, &10);
@@ -193,6 +200,127 @@ fn test_non_voter_cannot_propose_or_vote() {
         .unwrap_err()
         .unwrap();
     assert_eq!(err, GovernanceError::NotVoter);
+}
+
+// ---------------------------------------------------------------------------
+// Contract upgrades (Issue #757)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_upgrade_proposal_uses_longer_timelock() {
+    let t = setup();
+    let dummy_wasm_hash = BytesN::from_array(&t.env, &[7u8; 32]);
+
+    let proposal_id = t
+        .gov
+        .propose_upgrade(&t.voter1, &t.escrow.address, &dummy_wasm_hash);
+
+    let proposal = t.gov.get_proposal(&proposal_id);
+    assert_eq!(proposal.kind, crate::ProposalKind::ContractUpgrade);
+
+    t.gov.vote(&t.voter1, &proposal_id, &true);
+    t.gov.vote(&t.voter2, &proposal_id, &true);
+
+    advance_time(&t.env, VOTING_PERIOD + 1);
+    t.gov.queue(&t.voter1, &proposal_id);
+
+    // The ordinary (short) parameter-change timelock has now fully elapsed,
+    // but the proposal is a ContractUpgrade, so it must still be rejected —
+    // proves execute() is actually selecting the longer upgrade timelock,
+    // not just reusing the parameter-change one.
+    advance_time(&t.env, TIMELOCK_DELAY + 1);
+    let err = t.gov.try_execute(&t.voter1, &proposal_id).unwrap_err().unwrap();
+    assert_eq!(err, GovernanceError::TimelockNotElapsed);
+
+    // Once the full (longer) upgrade timelock has elapsed, execute is at
+    // least allowed to proceed past the timelock check. (It will go on to
+    // attempt the real `update_current_contract_wasm` call inside escrow's
+    // `upgrade`, which needs a genuinely-uploaded wasm hash to succeed —
+    // out of scope for this unit-test environment, see
+    // docs/CONTRACT_UPGRADES.md. The property under test here — the longer
+    // delay being enforced — is already fully proven above.)
+    advance_time(
+        &t.env,
+        UPGRADE_TIMELOCK_DELAY - TIMELOCK_DELAY,
+    );
+    // (Not calling execute again here — see comment above.)
+    let still_queued = t.gov.get_proposal(&proposal_id);
+    assert_eq!(still_queued.status, ProposalStatus::Queued);
+}
+
+#[test]
+fn test_governance_self_upgrade_requires_full_proposal_cycle() {
+    let t = setup();
+    let gov_id = t.gov.address.clone();
+    let guardian = Address::generate(&t.env);
+
+    // There is no public `set_guardian`/`unpause`/`upgrade` entrypoint on
+    // governance to attempt a "direct call bypass" against in the first
+    // place — Soroban disallows a contract invoking itself via
+    // `invoke_contract` ("Contract re-entry is not allowed"), so these are
+    // only reachable through `execute`'s internal self-action dispatch,
+    // itself only reachable after a proposal clears the full
+    // propose -> vote -> queue -> timelock gate. That's the property this
+    // test exercises end-to-end below.
+
+    // Routed through governance's own propose -> vote -> queue -> execute
+    // cycle (target_contract == governance's own address), it succeeds —
+    // proving the self-governance pattern `upgrade`/`set_guardian`/
+    // `unpause` all rely on actually works end-to-end.
+    let args: soroban_sdk::Vec<Val> = vec![
+        &t.env,
+        gov_id.into_val(&t.env),
+        guardian.into_val(&t.env),
+    ];
+    let proposal_id = t.gov.propose(
+        &t.voter1,
+        &gov_id,
+        &Symbol::new(&t.env, "set_guardian"),
+        &args,
+    );
+    t.gov.vote(&t.voter1, &proposal_id, &true);
+    t.gov.vote(&t.voter2, &proposal_id, &true);
+    advance_time(&t.env, VOTING_PERIOD + 1);
+    t.gov.queue(&t.voter1, &proposal_id);
+    advance_time(&t.env, TIMELOCK_DELAY + 1);
+    t.gov.execute(&t.voter1, &proposal_id);
+
+    assert_eq!(t.gov.get_guardian(), Some(guardian.clone()));
+
+    // The guardian can now pause instantly, with no proposal at all.
+    t.gov.pause(&guardian);
+    assert!(t.gov.is_paused());
+
+    // ...but cannot unpause — there is no `unpause` entrypoint the guardian
+    // (or anyone) can call directly; it only exists inside `execute`'s
+    // self-action dispatch, reachable solely via a second full proposal
+    // cycle, driven below.
+
+    // Drive `unpause` through a *real* second proposal cycle rather than a
+    // bare direct call — under `mock_all_auths()`, a direct call passing
+    // `gov_id` as the caller argument would trivially satisfy
+    // `caller.require_auth()` regardless of how it was reached, since the
+    // test harness approves every address's auth unconditionally. A real
+    // deployment can only ever produce a valid auth for governance's own
+    // address via this exact self-invoke-through-execute path — contract
+    // addresses have no signing key of their own — so routing through the
+    // full cycle here actually exercises that property instead of relying
+    // on the mock's looseness.
+    let unpause_args: soroban_sdk::Vec<Val> = vec![&t.env, gov_id.into_val(&t.env)];
+    let unpause_proposal_id = t.gov.propose(
+        &t.voter1,
+        &gov_id,
+        &Symbol::new(&t.env, "unpause"),
+        &unpause_args,
+    );
+    t.gov.vote(&t.voter1, &unpause_proposal_id, &true);
+    t.gov.vote(&t.voter2, &unpause_proposal_id, &true);
+    advance_time(&t.env, VOTING_PERIOD + 1);
+    t.gov.queue(&t.voter1, &unpause_proposal_id);
+    advance_time(&t.env, TIMELOCK_DELAY + 1);
+    t.gov.execute(&t.voter1, &unpause_proposal_id);
+
+    assert!(!t.gov.is_paused());
 }
 
 fn advance_time(env: &Env, delta: u64) {

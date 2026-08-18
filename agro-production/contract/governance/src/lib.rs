@@ -20,10 +20,25 @@
 //! `production_escrow::set_fee_config`, `set_registry_contract`, or the
 //! legacy `contracts/escrow` fee/token-whitelist setters once those contracts
 //! are updated to accept this contract's address as `admin_caller`.
+//!
+//! ## Contract upgrades (Issue #757)
+//!
+//! `propose_upgrade` is a dedicated entrypoint (rather than requiring callers
+//! to hand-encode `upgrade` args via the generic `propose`) that tags the
+//! resulting proposal `ProposalKind::ContractUpgrade`. `queue`/`execute` use
+//! `upgrade_timelock_delay_secs` instead of `timelock_delay_secs` for that
+//! kind — deliberately longer, since a bad contract upgrade has materially
+//! higher blast radius than a parameter change. Everything else (propose,
+//! vote, quorum, queue mechanics) is shared, unmodified machinery — an
+//! upgrade is not a second privileged pathway, just a different-shaped
+//! proposal flowing through the same propose -> vote -> queue -> execute
+//! pipeline. See `docs/CONTRACT_UPGRADES.md` for the full strategy,
+//! including the pause/upgrade/migrate/unpause sequencing every target
+//! contract's `upgrade` and `migrate` entrypoints are designed around.
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Symbol, Val,
-    Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
+    IntoVal, Symbol, Val, Vec,
 };
 
 // ---------------------------------------------------------------------------
@@ -51,6 +66,10 @@ pub enum GovernanceError {
     AlreadyQueued = 27,
 
     InvalidConfig = 30,
+
+    NotSelfGoverned = 40,
+    AlreadyPaused = 41,
+    NotPaused = 42,
 }
 
 // ---------------------------------------------------------------------------
@@ -67,6 +86,16 @@ pub enum ProposalStatus {
     Rejected,
 }
 
+/// Distinguishes an ordinary parameter-change proposal from a contract
+/// upgrade (Issue #757). Only affects which timelock delay `execute` applies
+/// — `ContractUpgrade` proposals use the longer `UpgradeTimelockDelaySecs`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProposalKind {
+    ParameterChange,
+    ContractUpgrade,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Proposal {
@@ -81,6 +110,7 @@ pub struct Proposal {
     /// (the `admin_caller`/authorized-caller position) on both escrow
     /// contracts, so callee-side auth checks pass once wired.
     pub args: Vec<Val>,
+    pub kind: ProposalKind,
     pub created_at: u64,
     pub voting_ends_at: u64,
     /// Set once the proposal is queued; execution allowed at queued_at + timelock.
@@ -96,6 +126,10 @@ pub enum DataKey {
     Admin,
     VotingPeriodSecs,
     TimelockDelaySecs,
+    /// Timelock applied to `ProposalKind::ContractUpgrade` proposals instead
+    /// of `TimelockDelaySecs` (Issue #757). Deliberately longer, given the
+    /// blast radius of a bad upgrade vs. an ordinary parameter change.
+    UpgradeTimelockDelaySecs,
     QuorumWeight,
     /// Voting weight assigned to a given address. Zero/absent = not a voter.
     VoterWeight(Address),
@@ -103,7 +137,20 @@ pub enum DataKey {
     ProposalCount,
     Proposal(u64),
     Vote(u64, Address),
+    /// Address allowed to instantly `pause` this contract's own operations
+    /// (Issue #757) without going through the full proposal flow. Set only
+    /// via governance's own propose -> vote -> queue -> execute cycle
+    /// (targeting this contract itself) — never by a raw admin call, so a
+    /// compromised admin key can't hand emergency powers to itself.
+    Guardian,
+    Paused,
+    SchemaVersion,
 }
+
+/// Current on-chain storage layout version. Bump when a stored `#[contracttype]`
+/// gains/loses/reshapes a field, and extend `migrate` to translate existing
+/// entries — see `docs/CONTRACT_UPGRADES.md`.
+const CURRENT_SCHEMA_VERSION: u32 = 1;
 
 // ---------------------------------------------------------------------------
 // Events
@@ -134,6 +181,7 @@ impl GovernanceContract {
         admin: Address,
         voting_period_secs: u64,
         timelock_delay_secs: u64,
+        upgrade_timelock_delay_secs: u64,
         quorum_weight: u64,
     ) -> Result<(), GovernanceError> {
         if env.storage().instance().has(&DataKey::Admin) {
@@ -143,6 +191,11 @@ impl GovernanceContract {
         if voting_period_secs == 0 || quorum_weight == 0 {
             return Err(GovernanceError::InvalidConfig);
         }
+        // Upgrades must never be *faster* to execute than an ordinary
+        // parameter change — the whole point is a wider safety margin.
+        if upgrade_timelock_delay_secs < timelock_delay_secs {
+            return Err(GovernanceError::InvalidConfig);
+        }
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage()
             .instance()
@@ -150,10 +203,17 @@ impl GovernanceContract {
         env.storage()
             .instance()
             .set(&DataKey::TimelockDelaySecs, &timelock_delay_secs);
+        env.storage().instance().set(
+            &DataKey::UpgradeTimelockDelaySecs,
+            &upgrade_timelock_delay_secs,
+        );
         env.storage()
             .instance()
             .set(&DataKey::QuorumWeight, &quorum_weight);
         env.storage().instance().set(&DataKey::TotalWeight, &0u64);
+        env.storage()
+            .instance()
+            .set(&DataKey::SchemaVersion, &CURRENT_SCHEMA_VERSION);
         Ok(())
     }
 
@@ -201,8 +261,54 @@ impl GovernanceContract {
         function_name: Symbol,
         args: Vec<Val>,
     ) -> Result<u64, GovernanceError> {
+        Self::create_proposal(
+            &env,
+            proposer,
+            target_contract,
+            function_name,
+            args,
+            ProposalKind::ParameterChange,
+        )
+    }
+
+    /// Propose a governance-gated contract upgrade (Issue #757):
+    /// `target_contract::upgrade(governance_address, new_wasm_hash)`. Tagged
+    /// `ProposalKind::ContractUpgrade` so `execute` applies
+    /// `upgrade_timelock_delay_secs` instead of the ordinary parameter-change
+    /// delay. `target_contract` must implement an `upgrade(caller: Address,
+    /// new_wasm_hash: BytesN<32>)` entrypoint gated the same way as this
+    /// contract's own governed setters (admin-only bootstrap, this contract's
+    /// address only once configured) — see `docs/CONTRACT_UPGRADES.md`.
+    pub fn propose_upgrade(
+        env: Env,
+        proposer: Address,
+        target_contract: Address,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<u64, GovernanceError> {
+        let func = Symbol::new(&env, "upgrade");
+        let mut args: Vec<Val> = Vec::new(&env);
+        args.push_back(env.current_contract_address().into_val(&env));
+        args.push_back(new_wasm_hash.into_val(&env));
+        Self::create_proposal(
+            &env,
+            proposer,
+            target_contract,
+            func,
+            args,
+            ProposalKind::ContractUpgrade,
+        )
+    }
+
+    fn create_proposal(
+        env: &Env,
+        proposer: Address,
+        target_contract: Address,
+        function_name: Symbol,
+        args: Vec<Val>,
+        kind: ProposalKind,
+    ) -> Result<u64, GovernanceError> {
         proposer.require_auth();
-        let weight = voter_weight(&env, &proposer);
+        let weight = voter_weight(env, &proposer);
         if weight == 0 {
             return Err(GovernanceError::NotVoter);
         }
@@ -228,6 +334,7 @@ impl GovernanceContract {
             target_contract: target_contract.clone(),
             function_name: function_name.clone(),
             args,
+            kind,
             created_at: now,
             voting_ends_at: now + voting_period_secs,
             queued_at: 0,
@@ -235,7 +342,7 @@ impl GovernanceContract {
             votes_against: 0,
             status: ProposalStatus::Voting,
         };
-        save_proposal(&env, &proposal);
+        save_proposal(env, &proposal);
 
         env.events().publish(
             (t_governance(), symbol_short!("proposed")),
@@ -338,20 +445,36 @@ impl GovernanceContract {
             return Err(GovernanceError::NotQueued);
         }
 
+        let timelock_key = match proposal.kind {
+            ProposalKind::ParameterChange => DataKey::TimelockDelaySecs,
+            ProposalKind::ContractUpgrade => DataKey::UpgradeTimelockDelaySecs,
+        };
         let timelock_delay_secs: u64 = env
             .storage()
             .instance()
-            .get(&DataKey::TimelockDelaySecs)
+            .get(&timelock_key)
             .ok_or(GovernanceError::NotInitialized)?;
         if env.ledger().timestamp() < proposal.queued_at + timelock_delay_secs {
             return Err(GovernanceError::TimelockNotElapsed);
         }
 
-        let _: Val = env.invoke_contract(
-            &proposal.target_contract,
-            &proposal.function_name,
-            proposal.args.clone(),
-        );
+        if proposal.target_contract == env.current_contract_address() {
+            // Soroban disallows a contract invoking itself via
+            // `invoke_contract` ("Contract re-entry is not allowed"), so a
+            // self-targeted proposal (governance upgrading/pausing/
+            // reconfiguring itself) is dispatched as a direct internal call
+            // instead of a cross-contract one. Reaching this point already
+            // means the full propose -> vote -> queue -> timelock gate
+            // passed, so no separate caller-identity check is needed here —
+            // that's what distinguishes this from a raw admin bypass.
+            Self::execute_self_action(&env, &proposal.function_name, &proposal.args)?;
+        } else {
+            let _: Val = env.invoke_contract(
+                &proposal.target_contract,
+                &proposal.function_name,
+                proposal.args.clone(),
+            );
+        }
 
         proposal.status = ProposalStatus::Executed;
         save_proposal(&env, &proposal);
@@ -361,6 +484,137 @@ impl GovernanceContract {
             (proposal_id, proposal.target_contract, proposal.function_name),
         );
         Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Self-upgrade, guardian, pause (Issue #757)
+    // -----------------------------------------------------------------------
+    //
+    // Governance is the root of authority for every other contract's
+    // upgrade path, so *its own* upgrade/guardian/unpause changes can't fall
+    // back to a raw admin key the way target contracts' bootstrap does —
+    // that would just relocate the single-key risk #680 closed elsewhere
+    // back into governance itself. They're only reachable by governance
+    // executing a proposal against itself (`propose_upgrade`/`propose` with
+    // `target_contract` == `env.current_contract_address()`).
+    //
+    // Unlike the cross-contract case, that can't be wired via `execute`'s
+    // normal `env.invoke_contract` — Soroban disallows a contract invoking
+    // itself ("Contract re-entry is not allowed"), independent of auth.
+    // `execute` special-cases a self-targeted proposal and dispatches to
+    // `execute_self_action` below as a direct internal call instead; there
+    // is deliberately no public `#[contractimpl]` entrypoint for
+    // `upgrade`/`set_guardian`/`unpause`/`migrate` on governance itself; the
+    // only way to reach them is a proposal that has already cleared the
+    // full propose -> vote -> queue -> timelock gate.
+
+    fn execute_self_action(
+        env: &Env,
+        function_name: &Symbol,
+        args: &Vec<Val>,
+    ) -> Result<(), GovernanceError> {
+        // Payload args are `(governance_address, ...)` — the leading address
+        // keeps the encoding uniform with the cross-contract case (where
+        // it's the callee's expected `admin_caller`/authorized-caller
+        // position) even though it's redundant here.
+        if *function_name == Symbol::new(env, "upgrade") {
+            let new_wasm_hash: BytesN<32> = args
+                .get(1)
+                .ok_or(GovernanceError::InvalidConfig)?
+                .into_val(env);
+            env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+            env.events()
+                .publish((t_governance(), symbol_short!("upgraded")), (new_wasm_hash,));
+            Ok(())
+        } else if *function_name == Symbol::new(env, "set_guardian") {
+            let guardian: Address = args
+                .get(1)
+                .ok_or(GovernanceError::InvalidConfig)?
+                .into_val(env);
+            env.storage().instance().set(&DataKey::Guardian, &guardian);
+            Ok(())
+        } else if *function_name == Symbol::new(env, "unpause") {
+            if !env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
+                return Err(GovernanceError::NotPaused);
+            }
+            env.storage().instance().set(&DataKey::Paused, &false);
+            env.events()
+                .publish((t_governance(), symbol_short!("unpausd")), ());
+            Ok(())
+        } else if *function_name == Symbol::new(env, "migrate") {
+            let stored: u32 = env
+                .storage()
+                .instance()
+                .get(&DataKey::SchemaVersion)
+                .unwrap_or(0);
+            if stored < CURRENT_SCHEMA_VERSION {
+                env.storage()
+                    .instance()
+                    .set(&DataKey::SchemaVersion, &CURRENT_SCHEMA_VERSION);
+            }
+            Ok(())
+        } else {
+            Err(GovernanceError::InvalidConfig)
+        }
+    }
+
+    /// Sets (or clears) the guardian allowed to `pause` instantly. Only
+    /// reachable via `execute` against a self-targeted proposal — see module
+    /// doc above.
+    pub fn propose_set_guardian(
+        env: Env,
+        proposer: Address,
+        guardian: Address,
+    ) -> Result<u64, GovernanceError> {
+        let func = Symbol::new(&env, "set_guardian");
+        let mut args: Vec<Val> = Vec::new(&env);
+        args.push_back(env.current_contract_address().into_val(&env));
+        args.push_back(guardian.into_val(&env));
+        Self::create_proposal(
+            &env,
+            proposer,
+            env.current_contract_address(),
+            func,
+            args,
+            ProposalKind::ParameterChange,
+        )
+    }
+
+    /// Instant pause, callable *only* by the guardian — no timelock,
+    /// matching the "lower-risk interim safeguard for the highest-severity
+    /// live incidents" acceptance criterion. Deliberately does *not* gate
+    /// `propose`/`vote`/`queue`/`execute`: governance must stay operable
+    /// while paused so it remains the only path back to `unpause`, and so it
+    /// can still be used to pause/fix every *other* contract.
+    pub fn pause(env: Env, caller: Address) -> Result<(), GovernanceError> {
+        caller.require_auth();
+        let is_guardian = env
+            .storage()
+            .instance()
+            .get::<_, Address>(&DataKey::Guardian)
+            .map(|g| g == caller)
+            .unwrap_or(false);
+        if !is_guardian {
+            return Err(GovernanceError::NotSelfGoverned);
+        }
+        if env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
+            return Err(GovernanceError::AlreadyPaused);
+        }
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events()
+            .publish((t_governance(), symbol_short!("paused")), (caller,));
+        Ok(())
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage().instance().get(&DataKey::Paused).unwrap_or(false)
+    }
+
+    pub fn get_schema_version(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::SchemaVersion)
+            .unwrap_or(0)
     }
 
     // -----------------------------------------------------------------------
@@ -384,6 +638,17 @@ impl GovernanceContract {
             .instance()
             .get(&DataKey::QuorumWeight)
             .ok_or(GovernanceError::NotInitialized)
+    }
+
+    pub fn get_upgrade_timelock_delay_secs(env: Env) -> Result<u64, GovernanceError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::UpgradeTimelockDelaySecs)
+            .ok_or(GovernanceError::NotInitialized)
+    }
+
+    pub fn get_guardian(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Guardian)
     }
 }
 

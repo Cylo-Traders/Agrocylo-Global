@@ -772,6 +772,58 @@ fn test_admin_cannot_repoint_governance_once_set() {
     assert_eq!(client.get_governance_contract(), Some(governance));
 }
 
+// ---------------------------------------------------------------------------
+// Upgrade, guardian, pause (Issue #757)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_upgrade_bypassing_governance_rejected() {
+    let (_env, client, _buyer, _farmer, _collector, _xlm, _usdc, _admin, _investor1, _id) =
+        setup_test();
+
+    let attacker = Address::generate(&_env);
+    let dummy_wasm_hash = soroban_sdk::BytesN::from_array(&_env, &[9u8; 32]);
+    let result = client
+        .mock_all_auths()
+        .try_upgrade(&attacker, &dummy_wasm_hash);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAdmin);
+}
+
+#[test]
+fn test_guardian_can_pause_instantly_governance_only_can_unpause() {
+    let (env, client, buyer, farmer, _collector, token, _, admin, _investor1, _id) =
+        setup_test();
+
+    let governance = env.register(MockGovernance, ());
+    client.set_governance_contract(&admin, &governance);
+
+    let guardian = Address::generate(&env);
+    client.set_guardian(&governance, &guardian);
+
+    // Guardian pauses instantly — no proposal, no timelock.
+    client.pause(&guardian);
+    assert!(client.is_paused());
+
+    // Paused: the core fund-moving path is blocked.
+    let result = client
+        .mock_all_auths()
+        .try_create_order(&buyer, &farmer, &token.address, &500);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::ContractPaused);
+
+    // The guardian cannot unpause — only governance can.
+    let err = client.try_unpause(&guardian).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::NotGoverned);
+
+    client.unpause(&governance);
+    assert!(!client.is_paused());
+
+    // Normal operation resumes.
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+    assert_eq!(order_id, 1);
+}
+
 #[test]
 fn test_create_order_uses_configured_fee_rate() {
     let (_env, client, buyer, farmer, fee_collector, xlm, _usdc, admin, _investor1, _id) =

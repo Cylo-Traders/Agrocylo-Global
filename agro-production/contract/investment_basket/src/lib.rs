@@ -18,8 +18,8 @@
 //! not block collection from the others — see `sweep_constituent`.
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env,
-    IntoVal, Symbol, Val, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, BytesN,
+    Env, Error as HostError, IntoVal, Symbol, Val, Vec,
 };
 
 // ---------------------------------------------------------------------------
@@ -49,6 +49,12 @@ pub enum BasketError {
 
     WithdrawTooEarly = 40,
     NothingToWithdraw = 41,
+
+    InvalidGovernanceContract = 50,
+    ContractPaused = 51,
+    NotPaused = 52,
+    AlreadyPaused = 53,
+    AlreadyMigrated = 54,
 }
 
 // ---------------------------------------------------------------------------
@@ -95,6 +101,29 @@ pub struct Basket {
     pub created_at: u64,
 }
 
+/// Shadow of `Basket` as it was stored *before* Issue #682 added `created_at`
+/// (schema version 1). Kept solely so `migrate` can decode legacy entries —
+/// Soroban's struct decoding requires every field the target type declares to
+/// be present in the stored map, so reading a pre-#682 `Basket(id)` entry
+/// directly as the current `Basket` type would trap, not return `None`. This
+/// is the worked example `docs/CONTRACT_UPGRADES.md` references for every
+/// other contract's `migrate`. Its fields are a strict subset of `Basket`'s,
+/// so it *also* decodes fine against an already-migrated entry (extra map
+/// keys are ignored) — `migrate` still gates on `SchemaVersion`/the
+/// migration cursor rather than relying on that, since decode success alone
+/// can't tell "pre-#682" apart from "just happens to have `created_at`".
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct OldBasketV1 {
+    pub id: u64,
+    pub escrow_contract: Address,
+    pub token: Address,
+    pub total_deposit: i128,
+    pub total_collected: i128,
+    pub status: BasketStatus,
+    pub constituents: Vec<BasketConstituent>,
+}
+
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
@@ -112,7 +141,28 @@ pub enum DataKey {
     /// fair share of the *current* `total_collected` minus whatever they've
     /// already been paid, rather than a one-shot all-or-nothing flag.
     Claimed(u64, Address),
+    /// Governance contract authorized to change governed parameters and gate
+    /// `upgrade`/`set_guardian`/`unpause`/`migrate` (Issue #757). Falls back
+    /// to admin-only while unset, same pattern as the escrow contracts.
+    GovernanceContract,
+    /// Address allowed to instantly `pause` without going through
+    /// governance's full proposal flow. Settable only via
+    /// `require_governed_caller`.
+    Guardian,
+    Paused,
+    SchemaVersion,
+    /// Highest basket_id `migrate` has translated so far (Issue #757).
+    /// `SchemaVersion` only flips to `CURRENT_SCHEMA_VERSION` once this
+    /// reaches `BasketCount`, so a batched migration can't be declared
+    /// "done" while baskets remain un-translated.
+    MigrationCursor,
 }
+
+/// Current on-chain storage layout version. Version 1 predates Issue #682
+/// (`Basket` had no `created_at`); version 2 is current. Bump again and
+/// extend `migrate` the same way for any future layout change — see
+/// `docs/CONTRACT_UPGRADES.md`.
+const CURRENT_SCHEMA_VERSION: u32 = 2;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -158,7 +208,197 @@ impl InvestmentBasketContract {
         env.storage()
             .instance()
             .set(&DataKey::EscrowContractRef, &escrow_contract);
+        // A freshly-initialized contract's baskets always have the current
+        // shape from the start, so there's nothing to migrate — the version
+        // starts at CURRENT, not 0/1. See `migrate` for the pre-#682 case.
+        env.storage()
+            .instance()
+            .set(&DataKey::SchemaVersion, &CURRENT_SCHEMA_VERSION);
         Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Governance, upgrade, guardian, pause (Issue #757)
+    // -----------------------------------------------------------------------
+
+    /// Set (or update) the governance contract address. Admin-only for the
+    /// initial bootstrap while no governance is configured; once set, only
+    /// the governance contract itself can re-point this (same hardened
+    /// pattern as `contracts/escrow`/`production_escrow` post-#680).
+    /// `governance` must be a live contract implementing the expected
+    /// interface, checked via a known view-function call before it's
+    /// accepted.
+    pub fn set_governance_contract(
+        env: Env,
+        caller: Address,
+        governance: Address,
+    ) -> Result<(), BasketError> {
+        caller.require_auth();
+        require_governed_caller(&env, &caller)?;
+        governance_client::verify(&env, &governance)
+            .map_err(|_| BasketError::InvalidGovernanceContract)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::GovernanceContract, &governance);
+        Ok(())
+    }
+
+    pub fn get_governance_contract(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::GovernanceContract)
+    }
+
+    /// Upgrades this contract's WASM. Governance-gated: admin-only while no
+    /// governance is configured, governance-only once it is. Callers should
+    /// use governance's `propose_upgrade`, which applies the longer upgrade
+    /// timelock. See `docs/CONTRACT_UPGRADES.md` for the required
+    /// pause -> upgrade -> migrate -> unpause sequencing.
+    pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) -> Result<(), BasketError> {
+        caller.require_auth();
+        require_governed_caller(&env, &caller)?;
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.events()
+            .publish((t_basket(), symbol_short!("upgraded")), (new_wasm_hash,));
+        Ok(())
+    }
+
+    /// Sets the guardian allowed to `pause` instantly. Governance-gated
+    /// identically to `set_governance_contract`.
+    pub fn set_guardian(env: Env, caller: Address, guardian: Address) -> Result<(), BasketError> {
+        caller.require_auth();
+        require_governed_caller(&env, &caller)?;
+        env.storage().instance().set(&DataKey::Guardian, &guardian);
+        Ok(())
+    }
+
+    /// Instant pause — no timelock — callable by the guardian or the
+    /// configured governance contract.
+    pub fn pause(env: Env, caller: Address) -> Result<(), BasketError> {
+        caller.require_auth();
+        let is_guardian = env
+            .storage()
+            .instance()
+            .get::<_, Address>(&DataKey::Guardian)
+            .map(|g| g == caller)
+            .unwrap_or(false);
+        let is_governance = env
+            .storage()
+            .instance()
+            .get::<_, Address>(&DataKey::GovernanceContract)
+            .map(|g| g == caller)
+            .unwrap_or(false);
+        if !is_guardian && !is_governance {
+            return Err(BasketError::NotAdmin);
+        }
+        if env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
+            return Err(BasketError::AlreadyPaused);
+        }
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events()
+            .publish((t_basket(), symbol_short!("paused")), (caller,));
+        Ok(())
+    }
+
+    /// Unpause. Deliberately governance-only (never the guardian) — a
+    /// compromised guardian key can halt operations but never resume them
+    /// unilaterally.
+    pub fn unpause(env: Env, caller: Address) -> Result<(), BasketError> {
+        caller.require_auth();
+        require_governed_caller(&env, &caller)?;
+        if !env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
+            return Err(BasketError::NotPaused);
+        }
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events()
+            .publish((t_basket(), symbol_short!("unpausd")), (caller,));
+        Ok(())
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage().instance().get(&DataKey::Paused).unwrap_or(false)
+    }
+
+    /// Storage migration (Issue #757), worked example: translates baskets
+    /// stored under the pre-#682 shape (`OldBasketV1`, no `created_at`) into
+    /// the current `Basket` shape, backfilling `created_at` with 0 (unknown
+    /// creation time for baskets that predate the field — callers that rely
+    /// on `created_at` for `withdraw_basket`'s deadline should treat 0 as
+    /// "eligible immediately", which is the conservative/depositor-favorable
+    /// default). Processes up to `batch_size` basket_ids starting right
+    /// after `MigrationCursor`, so a basket population too large for one
+    /// call can be migrated over several; `SchemaVersion` only flips to
+    /// `CURRENT_SCHEMA_VERSION` once the cursor reaches `BasketCount`, so
+    /// normal operations can't observe a "migrated" contract with
+    /// un-translated baskets still in it. Expected to run while
+    /// `is_paused()` — see `docs/CONTRACT_UPGRADES.md`.
+    pub fn migrate(env: Env, caller: Address, batch_size: u32) -> Result<u32, BasketError> {
+        caller.require_auth();
+        require_governed_caller(&env, &caller)?;
+
+        let stored: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::SchemaVersion)
+            .unwrap_or(0);
+        if stored >= CURRENT_SCHEMA_VERSION {
+            return Err(BasketError::AlreadyMigrated);
+        }
+        if batch_size == 0 || batch_size > MAX_BASKET_SIZE {
+            return Err(BasketError::TooManyConstituents);
+        }
+
+        let basket_count: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::BasketCount)
+            .unwrap_or(0);
+        let cursor: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MigrationCursor)
+            .unwrap_or(0);
+
+        let mut migrated: u32 = 0;
+        let mut id = cursor + 1;
+        while id <= basket_count && migrated < batch_size {
+            let key = DataKey::Basket(id);
+            if let Some(old) = env.storage().persistent().get::<_, OldBasketV1>(&key) {
+                let translated = Basket {
+                    id: old.id,
+                    escrow_contract: old.escrow_contract,
+                    token: old.token,
+                    total_deposit: old.total_deposit,
+                    total_collected: old.total_collected,
+                    status: old.status,
+                    constituents: old.constituents,
+                    created_at: 0,
+                };
+                env.storage().persistent().set(&key, &translated);
+            }
+            migrated += 1;
+            id += 1;
+        }
+
+        let new_cursor = cursor + migrated as u64;
+        env.storage()
+            .instance()
+            .set(&DataKey::MigrationCursor, &new_cursor);
+        if new_cursor >= basket_count {
+            env.storage()
+                .instance()
+                .set(&DataKey::SchemaVersion, &CURRENT_SCHEMA_VERSION);
+        }
+        Ok(migrated)
+    }
+
+    pub fn get_schema_version(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::SchemaVersion)
+            .unwrap_or(0)
+    }
+
+    pub fn get_guardian(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Guardian)
     }
 
     /// Admin curates a new basket from a set of campaigns and their weights
@@ -257,6 +497,7 @@ impl InvestmentBasketContract {
         amount: i128,
     ) -> Result<(), BasketError> {
         depositor.require_auth();
+        require_not_paused(&env)?;
         if amount <= 0 {
             return Err(BasketError::InvalidAmount);
         }
@@ -306,6 +547,7 @@ impl InvestmentBasketContract {
     /// instead of it being stuck behind a permanently-Open basket.
     pub fn fund_basket(env: Env, caller: Address, basket_id: u64) -> Result<(), BasketError> {
         caller.require_auth();
+        require_not_paused(&env)?;
         let mut basket = load_basket(&env, basket_id)?;
         if basket.status != BasketStatus::Open {
             return Err(BasketError::BasketNotOpen);
@@ -369,6 +611,7 @@ impl InvestmentBasketContract {
         basket_id: u64,
     ) -> Result<i128, BasketError> {
         depositor.require_auth();
+        require_not_paused(&env)?;
         let mut basket = load_basket(&env, basket_id)?;
         if basket.status != BasketStatus::Open {
             return Err(BasketError::BasketNotOpen);
@@ -424,6 +667,7 @@ impl InvestmentBasketContract {
         basket_id: u64,
     ) -> Result<i128, BasketError> {
         depositor.require_auth();
+        require_not_paused(&env)?;
         let mut basket = load_basket(&env, basket_id)?;
         if basket.status != BasketStatus::Funded {
             return Err(BasketError::BasketNotFunded);
@@ -525,6 +769,52 @@ fn read_admin(env: &Env) -> Result<Address, BasketError> {
         .instance()
         .get(&DataKey::Admin)
         .ok_or(BasketError::NotInitialized)
+}
+
+/// Enforces that `caller` is the authorized party for governance-gated
+/// actions: the governance contract if one has been set via
+/// `set_governance_contract`, otherwise the raw admin as a fallback so a
+/// deployment that never configures governance keeps working as before.
+fn require_governed_caller(env: &Env, caller: &Address) -> Result<(), BasketError> {
+    if let Some(governance) = env
+        .storage()
+        .instance()
+        .get::<_, Address>(&DataKey::GovernanceContract)
+    {
+        if *caller != governance {
+            return Err(BasketError::NotAdmin);
+        }
+        return Ok(());
+    }
+    let admin_addr = read_admin(env)?;
+    if *caller != admin_addr {
+        return Err(BasketError::NotAdmin);
+    }
+    Ok(())
+}
+
+fn require_not_paused(env: &Env) -> Result<(), BasketError> {
+    if env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
+        return Err(BasketError::ContractPaused);
+    }
+    Ok(())
+}
+
+/// Verifies a candidate governance address is a real deployed governance
+/// contract (mirrors the check added to `contracts/escrow`/`production_escrow`
+/// in #680), so `set_governance_contract` can't be pointed at an arbitrary
+/// admin-controlled address.
+mod governance_client {
+    use super::{Env, HostError, Address, Symbol, Val, Vec};
+
+    pub fn verify(env: &Env, governance: &Address) -> Result<(), ()> {
+        let func = Symbol::new(env, "get_admin");
+        let args: Vec<Val> = Vec::new(env);
+        match env.try_invoke_contract::<Val, HostError>(governance, &func, args) {
+            Ok(_) => Ok(()),
+            Err(_) => Err(()),
+        }
+    }
 }
 
 fn load_basket(env: &Env, id: u64) -> Result<Basket, BasketError> {

@@ -74,7 +74,7 @@ fn test_register_new_farmer() {
     let farmer = client.get_farmer(&farmer_one).unwrap();
     assert_eq!(farmer.address, farmer_one);
 
-    let farmers = client.get_all_farmers();
+    let farmers = client.get_farmers(&0, &50);
     assert_eq!(farmers.len(), 1);
     assert_eq!(farmers.get(0).unwrap(), farmer_one);
 }
@@ -91,7 +91,7 @@ fn test_duplicate_farmer_registration_fails() {
         RegistryError::FarmerAlreadyRegistered
     );
 
-    let farmers = client.get_all_farmers();
+    let farmers = client.get_farmers(&0, &50);
     assert_eq!(farmers.len(), 1);
 }
 
@@ -121,7 +121,7 @@ fn test_register_campaign_from_authorized_escrow_contract() {
 
     client.register_campaign(&escrow_contract, &101, &farmer_one, &Some(88));
 
-    let campaigns = client.get_all_campaigns();
+    let campaigns = client.get_campaigns(&0, &50);
     assert_eq!(campaigns.len(), 1);
     assert_eq!(campaigns.get(0).unwrap().source_contract, escrow_contract);
 }
@@ -137,7 +137,7 @@ fn test_unauthorized_campaign_registration_is_rejected() {
         RegistryError::UnauthorizedContract
     );
 
-    let campaigns = client.get_all_campaigns();
+    let campaigns = client.get_campaigns(&0, &50);
     assert_eq!(campaigns.len(), 0);
 }
 
@@ -152,12 +152,12 @@ fn test_multiple_campaigns_are_indexed_per_farmer() {
     client.register_campaign(&escrow_contract, &2, &farmer_one, &Some(11));
     client.register_campaign(&production_contract, &3, &farmer_two, &Some(12));
 
-    let farmer_one_campaigns = client.get_campaigns_by_farmer(&farmer_one);
+    let farmer_one_campaigns = client.get_farmer_campaigns(&farmer_one, &0, &50);
     assert_eq!(farmer_one_campaigns.len(), 2);
     assert_eq!(farmer_one_campaigns.get(0).unwrap().campaign_id, 1);
     assert_eq!(farmer_one_campaigns.get(1).unwrap().campaign_id, 2);
 
-    let farmer_two_campaigns = client.get_campaigns_by_farmer(&farmer_two);
+    let farmer_two_campaigns = client.get_farmer_campaigns(&farmer_two, &0, &50);
     assert_eq!(farmer_two_campaigns.len(), 1);
     assert_eq!(farmer_two_campaigns.get(0).unwrap().campaign_id, 3);
 }
@@ -171,7 +171,7 @@ fn test_get_all_campaigns_returns_complete_results() {
     client.register_campaign(&production_contract, &10, &farmer_one, &Some(50));
     client.register_campaign(&production_contract, &11, &farmer_two, &None);
 
-    let all_campaigns = client.get_all_campaigns();
+    let all_campaigns = client.get_campaigns(&0, &50);
     assert_eq!(all_campaigns.len(), 2);
     assert_eq!(all_campaigns.get(0).unwrap().campaign_id, 10);
     assert_eq!(all_campaigns.get(1).unwrap().campaign_id, 11);
@@ -182,10 +182,10 @@ fn test_empty_campaign_lists_are_handled_safely() {
     let (env, client, _, _, _, _, farmer_one, _) = setup_test();
     client.register_farmer(&farmer_one);
 
-    let all_campaigns = client.get_all_campaigns();
+    let all_campaigns = client.get_campaigns(&0, &50);
     assert_eq!(all_campaigns, Vec::new(&env));
 
-    let farmer_campaigns = client.get_campaigns_by_farmer(&farmer_one);
+    let farmer_campaigns = client.get_farmer_campaigns(&farmer_one, &0, &50);
     assert_eq!(farmer_campaigns, Vec::new(&env));
 }
 
@@ -199,7 +199,7 @@ fn test_campaign_registration_requires_registered_farmer() {
         RegistryError::FarmerNotRegistered
     );
 
-    let campaigns = client.get_all_campaigns();
+    let campaigns = client.get_campaigns(&0, &50);
     assert_eq!(campaigns.len(), 0);
 }
 
@@ -228,14 +228,14 @@ fn test_repeated_campaign_entries_do_not_corrupt_state() {
         RegistryError::CampaignAlreadyRegistered
     );
 
-    let all_campaigns = client.get_all_campaigns();
+    let all_campaigns = client.get_campaigns(&0, &50);
     assert_eq!(all_campaigns.len(), 1);
     assert_eq!(
         all_campaigns.get(0).unwrap().linked_escrow_order_id,
         Some(99)
     );
 
-    let farmer_campaigns = client.get_campaigns_by_farmer(&farmer_one);
+    let farmer_campaigns = client.get_farmer_campaigns(&farmer_one, &0, &50);
     assert_eq!(farmer_campaigns.len(), 1);
 }
 
@@ -336,4 +336,39 @@ fn test_reputation_is_tracked_independently_per_farmer() {
 
     assert_eq!(client.get_reputation(&farmer_one).score, 10);
     assert_eq!(client.get_reputation(&farmer_two).score, -5);
+}
+
+// ---------------------------------------------------------------------------
+// Upgrade, guardian, pause (Issue #757)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_upgrade_bypassing_governance_rejected() {
+    let (env, client, _, _, _, _, _, _) = setup_test();
+    let attacker = Address::generate(&env);
+    let dummy_wasm_hash = BytesN::from_array(&env, &[9u8; 32]);
+    let result = client.try_upgrade(&attacker, &dummy_wasm_hash);
+    assert_eq!(result.unwrap_err().unwrap(), RegistryError::NotAdmin);
+}
+
+#[test]
+fn test_guardian_pause_blocks_register_farmer_governance_only_unpauses() {
+    let (env, client, admin, _, _, _, farmer_one, _) = setup_test();
+
+    let guardian = Address::generate(&env);
+    client.set_guardian(&admin, &guardian);
+
+    client.pause(&guardian);
+    assert!(client.is_paused());
+
+    let result = client.try_register_farmer(&farmer_one);
+    assert_eq!(result.unwrap_err().unwrap(), RegistryError::ContractPaused);
+
+    let err = client.try_unpause(&guardian).unwrap_err().unwrap();
+    assert_eq!(err, RegistryError::NotAdmin);
+
+    client.unpause(&admin);
+    assert!(!client.is_paused());
+    client.register_farmer(&farmer_one);
+    assert!(client.is_farmer_registered(&farmer_one));
 }

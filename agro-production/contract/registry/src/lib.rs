@@ -9,7 +9,8 @@
 // unbounded per-farmer Vec, reducing worst-case from O(n) to O(limit) = O(50) with pagination.
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
+    Error as HostError, Symbol, Val, Vec,
 };
 
 #[contracterror]
@@ -23,6 +24,12 @@ pub enum RegistryError {
     CampaignAlreadyRegistered = 5,
     UnauthorizedContract = 6,
     InvalidFarmerAddress = 7,
+
+    NotAdmin = 8,
+    InvalidGovernanceContract = 9,
+    ContractPaused = 10,
+    NotPaused = 11,
+    AlreadyPaused = 12,
 }
 
 #[contracttype]
@@ -70,7 +77,21 @@ pub enum DataKey {
     FarmerCampaignCount(Address),
     FarmerCampaignAt(Address, u64),
     Reputation(Address),
+    /// Governance contract authorized to gate `upgrade`/`set_guardian`/
+    /// `unpause`/`migrate` (Issue #757). Falls back to admin-only while
+    /// unset, same pattern as the escrow contracts.
+    GovernanceContract,
+    /// Address allowed to instantly `pause` without going through
+    /// governance's full proposal flow.
+    Guardian,
+    Paused,
+    SchemaVersion,
 }
+
+/// Current on-chain storage layout version (Issue #757). Bump when a stored
+/// `#[contracttype]` gains/loses/reshapes a field, and extend `migrate` to
+/// translate existing entries — see `docs/CONTRACT_UPGRADES.md`.
+const CURRENT_SCHEMA_VERSION: u32 = 1;
 
 const COMPLETION_POINTS: i64 = 10;
 const DISPUTE_PENALTY_POINTS: i64 = 15;
@@ -100,6 +121,10 @@ impl RegistryContract {
             .instance()
             .set(&DataKey::ProductionContract, &production_contract);
 
+        env.storage()
+            .instance()
+            .set(&DataKey::SchemaVersion, &CURRENT_SCHEMA_VERSION);
+
         // (registry, updated) → emitted on initialization and any future contract re-linking
         env.events().publish(
             (symbol_short!("registry"), symbol_short!("updated")),
@@ -109,6 +134,142 @@ impl RegistryContract {
         Ok(())
     }
 
+    // -----------------------------------------------------------------------
+    // Governance, upgrade, guardian, pause (Issue #757)
+    // -----------------------------------------------------------------------
+
+    /// Set (or update) the governance contract address. Admin-only bootstrap
+    /// while unset; governance-only once set (same hardened pattern as
+    /// `contracts/escrow`/`production_escrow` post-#680). `governance` must
+    /// be a live contract implementing the expected interface, checked via a
+    /// known view-function call before it's accepted.
+    pub fn set_governance_contract(
+        env: Env,
+        caller: Address,
+        governance: Address,
+    ) -> Result<(), RegistryError> {
+        caller.require_auth();
+        require_governed_caller(&env, &caller)?;
+        governance_client::verify(&env, &governance)
+            .map_err(|_| RegistryError::InvalidGovernanceContract)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::GovernanceContract, &governance);
+        Ok(())
+    }
+
+    pub fn get_governance_contract(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::GovernanceContract)
+    }
+
+    /// Upgrades this contract's WASM. Governance-gated: admin-only while no
+    /// governance is configured, governance-only once it is. Callers should
+    /// use governance's `propose_upgrade`, which applies the longer upgrade
+    /// timelock. See `docs/CONTRACT_UPGRADES.md` for the required
+    /// pause -> upgrade -> migrate -> unpause sequencing.
+    pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) -> Result<(), RegistryError> {
+        caller.require_auth();
+        require_governed_caller(&env, &caller)?;
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.events().publish(
+            (symbol_short!("registry"), symbol_short!("upgraded")),
+            (new_wasm_hash,),
+        );
+        Ok(())
+    }
+
+    /// Sets the guardian allowed to `pause` instantly. Governance-gated
+    /// identically to `set_governance_contract`.
+    pub fn set_guardian(env: Env, caller: Address, guardian: Address) -> Result<(), RegistryError> {
+        caller.require_auth();
+        require_governed_caller(&env, &caller)?;
+        env.storage().instance().set(&DataKey::Guardian, &guardian);
+        Ok(())
+    }
+
+    /// Instant pause — no timelock — callable by the guardian or the
+    /// configured governance contract.
+    pub fn pause(env: Env, caller: Address) -> Result<(), RegistryError> {
+        caller.require_auth();
+        let is_guardian = env
+            .storage()
+            .instance()
+            .get::<_, Address>(&DataKey::Guardian)
+            .map(|g| g == caller)
+            .unwrap_or(false);
+        let is_governance = env
+            .storage()
+            .instance()
+            .get::<_, Address>(&DataKey::GovernanceContract)
+            .map(|g| g == caller)
+            .unwrap_or(false);
+        if !is_guardian && !is_governance {
+            return Err(RegistryError::NotAdmin);
+        }
+        if env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
+            return Err(RegistryError::AlreadyPaused);
+        }
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events().publish(
+            (symbol_short!("registry"), symbol_short!("paused")),
+            (caller,),
+        );
+        Ok(())
+    }
+
+    /// Unpause. Deliberately governance-only (never the guardian).
+    pub fn unpause(env: Env, caller: Address) -> Result<(), RegistryError> {
+        caller.require_auth();
+        require_governed_caller(&env, &caller)?;
+        if !env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
+            return Err(RegistryError::NotPaused);
+        }
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events().publish(
+            (symbol_short!("registry"), symbol_short!("unpausd")),
+            (caller,),
+        );
+        Ok(())
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage().instance().get(&DataKey::Paused).unwrap_or(false)
+    }
+
+    /// Storage migration hook. This contract's schema hasn't changed since
+    /// `CURRENT_SCHEMA_VERSION` was introduced — nothing to translate yet.
+    /// A future layout-changing upgrade extends this with an old-shape read
+    /// + new-shape write per affected `DataKey`, following the worked
+    /// example in `investment_basket::migrate`. Governance-gated, and
+    /// expected to run while `is_paused()` — see
+    /// `docs/CONTRACT_UPGRADES.md`.
+    pub fn migrate(env: Env, caller: Address) -> Result<u32, RegistryError> {
+        caller.require_auth();
+        require_governed_caller(&env, &caller)?;
+        let stored: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::SchemaVersion)
+            .unwrap_or(0);
+        if stored < CURRENT_SCHEMA_VERSION {
+            env.storage()
+                .instance()
+                .set(&DataKey::SchemaVersion, &CURRENT_SCHEMA_VERSION);
+        }
+        Ok(CURRENT_SCHEMA_VERSION)
+    }
+
+    pub fn get_schema_version(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::SchemaVersion)
+            .unwrap_or(0)
+    }
+
+    pub fn get_guardian(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Guardian)
+    }
+
     pub fn get_contract_refs(env: Env) -> Result<ContractRefs, RegistryError> {
         let refs = read_contract_refs(&env)?;
         Ok(refs)
@@ -116,6 +277,7 @@ impl RegistryContract {
 
     pub fn register_farmer(env: Env, farmer: Address) -> Result<(), RegistryError> {
         require_initialized(&env)?;
+        require_not_paused(&env)?;
         validate_farmer_address(&env, &farmer)?;
         farmer.require_auth();
 
@@ -208,6 +370,7 @@ impl RegistryContract {
         linked_escrow_order_id: Option<u64>,
     ) -> Result<(), RegistryError> {
         let refs = read_contract_refs(&env)?;
+        require_not_paused(&env)?;
         validate_farmer_address(&env, &farmer)?;
         source_contract.require_auth();
 
@@ -445,6 +608,59 @@ fn require_initialized(env: &Env) -> Result<(), RegistryError> {
         return Err(RegistryError::NotInitialized);
     }
     Ok(())
+}
+
+/// Enforces that `caller` is the authorized party for governance-gated
+/// actions: the governance contract if one has been set via
+/// `set_governance_contract`, otherwise the raw admin as a fallback.
+fn require_governed_caller(env: &Env, caller: &Address) -> Result<(), RegistryError> {
+    if let Some(governance) = env
+        .storage()
+        .instance()
+        .get::<_, Address>(&DataKey::GovernanceContract)
+    {
+        if *caller != governance {
+            return Err(RegistryError::NotAdmin);
+        }
+        return Ok(());
+    }
+    let admin_addr: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .ok_or(RegistryError::NotInitialized)?;
+    if *caller != admin_addr {
+        return Err(RegistryError::NotAdmin);
+    }
+    Ok(())
+}
+
+/// Gates `register_farmer`/`register_campaign` only — deliberately *not*
+/// `record_order_outcome`, which the escrow contracts invoke via a plain
+/// (non-`try_`) cross-contract call as part of their own `confirm_receipt`/
+/// `resolve_dispute` core paths. Pausing that too would let a registry
+/// pause brick unrelated escrow functionality, which is a bigger blast
+/// radius than the pause is meant to have — see `docs/CONTRACT_UPGRADES.md`.
+fn require_not_paused(env: &Env) -> Result<(), RegistryError> {
+    if env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
+        return Err(RegistryError::ContractPaused);
+    }
+    Ok(())
+}
+
+/// Verifies a candidate governance address is a real deployed governance
+/// contract (mirrors the check added to the escrow contracts in #680).
+mod governance_client {
+    use super::{Address, Env, HostError, Symbol, Val, Vec};
+
+    pub fn verify(env: &Env, governance: &Address) -> Result<(), ()> {
+        let func = Symbol::new(env, "get_admin");
+        let args: Vec<Val> = Vec::new(env);
+        match env.try_invoke_contract::<Val, HostError>(governance, &func, args) {
+            Ok(_) => Ok(()),
+            Err(_) => Err(()),
+        }
+    }
 }
 
 fn read_contract_refs(env: &Env) -> Result<ContractRefs, RegistryError> {

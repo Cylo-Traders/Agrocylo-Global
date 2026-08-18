@@ -12,7 +12,10 @@ use production_escrow_v2::{
     CampaignStatus, ProductionEscrowContract, ProductionEscrowContractClient,
 };
 
-use crate::{BasketError, BasketStatus, InvestmentBasketContract, InvestmentBasketContractClient};
+use crate::{
+    BasketConstituent, BasketError, BasketStatus, DataKey, InvestmentBasketContract,
+    InvestmentBasketContractClient, OldBasketV1,
+};
 
 struct TestEnv<'a> {
     env: Env,
@@ -362,4 +365,110 @@ fn test_withdraw_basket_after_deadline_recovers_principal() {
         .unwrap_err()
         .unwrap();
     assert_eq!(err, BasketError::NothingToWithdraw);
+}
+
+// ---------------------------------------------------------------------------
+// Governance, upgrade, guardian, pause, storage migration (Issue #757)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_upgrade_bypassing_governance_rejected() {
+    let t = setup();
+    let attacker = Address::generate(&t.env);
+    let dummy_wasm_hash = soroban_sdk::BytesN::from_array(&t.env, &[9u8; 32]);
+    let result = t.basket.try_upgrade(&attacker, &dummy_wasm_hash);
+    assert_eq!(result.unwrap_err().unwrap(), BasketError::NotAdmin);
+}
+
+#[test]
+fn test_guardian_pause_blocks_deposit_governance_only_unpauses() {
+    let t = setup();
+    let now = t.env.ledger().timestamp();
+    let deadline = now + 100_000;
+    let c1 = t.escrow.create_campaign(&t.farmer, &t.token_id, &1_000_000, &deadline);
+    let constituents = vec![&t.env, (c1, 10_000u32)];
+    let basket_id = t.basket.create_basket(&t.admin, &t.token_id, &constituents);
+
+    let guardian = Address::generate(&t.env);
+    // Admin bootstrap fallback: no governance configured yet.
+    t.basket.set_guardian(&t.admin, &guardian);
+
+    t.basket.pause(&guardian);
+    assert!(t.basket.is_paused());
+
+    let result = t
+        .basket
+        .try_deposit(&t.depositor, &basket_id, &500_000);
+    assert_eq!(result.unwrap_err().unwrap(), BasketError::ContractPaused);
+
+    // Guardian cannot unpause (falls back to admin-gating since no
+    // governance is configured — guardian is still not admin).
+    let err = t.basket.try_unpause(&guardian).unwrap_err().unwrap();
+    assert_eq!(err, BasketError::NotAdmin);
+
+    t.basket.unpause(&t.admin);
+    assert!(!t.basket.is_paused());
+    t.basket.deposit(&t.depositor, &basket_id, &500_000);
+}
+
+/// Worked example for Issue #757's storage-migration requirement: Issue #682
+/// added `Basket.created_at`, so a basket written by code that predates that
+/// fix would be stored without it. This simulates exactly that — a basket
+/// whose persisted entry is in the pre-#682 shape — and proves `migrate`
+/// translates it correctly, backfilling `created_at` and flipping
+/// `SchemaVersion`, so a subsequent normal `get_basket` call (which decodes
+/// via the *current* `Basket` type) works instead of trapping.
+#[test]
+fn test_migrate_translates_pre_682_baskets_and_flips_schema_version() {
+    let t = setup();
+    let now = t.env.ledger().timestamp();
+    let deadline = now + 100_000;
+    let c1 = t.escrow.create_campaign(&t.farmer, &t.token_id, &1_000_000, &deadline);
+    let constituents = vec![&t.env, (c1, 10_000u32)];
+    // create_basket via the current contract always produces the current
+    // shape — simulate "this basket predates #682" by overwriting its
+    // storage entry with the old shape and winding SchemaVersion back to 1,
+    // as if this were a live deployment that hadn't upgraded/migrated yet.
+    let basket_id = t.basket.create_basket(&t.admin, &t.token_id, &constituents);
+
+    let basket_contract_id = t.basket.address.clone();
+    t.env.as_contract(&basket_contract_id, || {
+        let old = OldBasketV1 {
+            id: basket_id,
+            escrow_contract: t.escrow.address.clone(),
+            token: t.token_id.clone(),
+            total_deposit: 0,
+            total_collected: 0,
+            status: BasketStatus::Open,
+            constituents: soroban_sdk::Vec::<BasketConstituent>::new(&t.env),
+        };
+        t.env
+            .storage()
+            .persistent()
+            .set(&DataKey::Basket(basket_id), &old);
+        t.env
+            .storage()
+            .instance()
+            .set(&DataKey::SchemaVersion, &1u32);
+    });
+
+    assert_eq!(t.basket.get_schema_version(), 1);
+
+    // Admin bootstrap fallback (no governance configured) drives the batch.
+    let migrated = t.basket.migrate(&t.admin, &10);
+    assert_eq!(migrated, 1);
+
+    // SchemaVersion only flips once the cursor reaches BasketCount.
+    assert_eq!(t.basket.get_schema_version(), 2);
+
+    // The basket now decodes fine as the current shape, with created_at
+    // backfilled to the documented default.
+    let migrated_basket = t.basket.get_basket(&basket_id);
+    assert_eq!(migrated_basket.created_at, 0);
+    assert_eq!(migrated_basket.status, BasketStatus::Open);
+
+    // Re-running migrate is a clean no-op error, not a silent re-translation
+    // that could clobber real data with the backfill default.
+    let err = t.basket.try_migrate(&t.admin, &10).unwrap_err().unwrap();
+    assert_eq!(err, BasketError::AlreadyMigrated);
 }
