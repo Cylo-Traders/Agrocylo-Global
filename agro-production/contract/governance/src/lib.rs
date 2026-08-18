@@ -421,3 +421,5 @@ fn save_proposal(env: &Env, p: &Proposal) {
 
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod invariant_tests;

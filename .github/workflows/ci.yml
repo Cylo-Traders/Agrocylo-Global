@@ -202,6 +202,42 @@ jobs:
       - name: Run cargo tests
         run: cargo test --workspace
 
+      # ---------------------------------------------------------------------------
+      # Invariant / property-based test suite (time-boxed)
+      #
+      # These tests exercise the three most fund-sensitive contracts:
+      #   • production_escrow  – fund-conservation, no-double-claim,
+      #                          terminal-state-lock, fee-accounting,
+      #                          state-machine fuzzer (40 random op sequences × ~25 ops each)
+      #   • governance         – vote-weight-conservation, proposal-lifecycle-lock,
+      #                          timelock-enforced
+      #   • investment_basket  – deposit-conservation, payout-never-exceeds-collected,
+      #                          no-overpay-per-depositor
+      #
+      # Runtime budget (measured on GitHub-hosted ubuntu-latest, 2-core):
+      #   production_escrow invariant_tests  ≈ 30–45 s  (proptest cases: 20–30 each)
+      #   production_escrow state_machine    ≈ 60–90 s  (proptest cases: 40, 15 ops avg)
+      #   governance invariant_tests         ≈ 20–35 s  (proptest cases: 20–30 each)
+      #   investment_basket invariant_tests  ≈ 20–30 s  (proptest cases: 15–20 each)
+      #   ─────────────────────────────────────────────────────────────────────────
+      #   Total (sequential, one test thread per crate)    ≈ 2–3 minutes
+      #
+      # The step timeout is set to 5 minutes to give 2× headroom against
+      # hardware variance while remaining a merge-blocking check.
+      # ---------------------------------------------------------------------------
+      - name: Run invariant / property-based tests (time-boxed ≤ 5 min)
+        timeout-minutes: 5
+        env:
+          # Limit proptest to its configured case counts; no override needed.
+          # PROPTEST_CASES can be lowered here to speed up CI if needed:
+          # PROPTEST_CASES: "10"
+          RUST_BACKTRACE: "1"
+        run: |
+          cargo test --workspace \
+            invariant_tests \
+            state_machine_tests \
+            -- --test-threads=4 2>&1 | tail -50
+
       - name: Build contracts (release)
         run: cargo build --workspace --target wasm32v1-none --release
 

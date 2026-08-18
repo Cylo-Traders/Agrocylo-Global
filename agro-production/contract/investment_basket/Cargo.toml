@@ -17,3 +17,4 @@ soroban-sdk = { workspace = true }
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
 production-escrow-v2 = { path = "../production_escrow", features = ["testutils"] }
+proptest = "1.4.0"

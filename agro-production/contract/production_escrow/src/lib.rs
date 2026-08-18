@@ -2173,3 +2173,7 @@ fn release_tranche_internal(
 
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod invariant_tests;
+#[cfg(test)]
+mod state_machine_tests;
