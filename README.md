@@ -203,3 +203,7 @@ For production, ensure the following are configured (see `.env.example`):
 * [Telegram](https://t.me/Tiya_jd)
 * [X](https://x.com/Tiya_JD)
 * [Community Telegram](https://t.me/AgricCylo)
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
