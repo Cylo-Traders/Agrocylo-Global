@@ -107,7 +107,7 @@ export class IntegratorService {
 
     const [profiles, campaigns] = await Promise.all([
       prisma.profile.findMany({
-        where: { wallet_address: { in: wallets }, role: "FARMER" },
+        where: { walletAddress: { in: wallets }, role: "FARMER" },
         include: { location: true },
       }),
       prisma.campaign.findMany({
@@ -123,9 +123,9 @@ export class IntegratorService {
     }
 
     return profiles.map((p) => {
-      const farmerCampaigns = campaignsByFarmer.get(p.wallet_address) ?? [];
+      const farmerCampaigns = campaignsByFarmer.get((p as any).walletAddress ?? (p as any).wallet_address) ?? [];
       return {
-        farmerWallet: p.wallet_address,
+        farmerWallet: (p as any).walletAddress ?? (p as any).wallet_address,
         displayName: p.name ?? null,
         region: p.location ? [p.location.city, p.location.country].filter(Boolean).join(", ") : null,
         totalCampaigns: farmerCampaigns.length,
@@ -187,14 +187,14 @@ async function resolveScopedWallets(scope: IntegratorScope): Promise<string[]> {
         { country: { equals: scope.scopedRegion, mode: "insensitive" } },
       ],
     },
-    select: { wallet_address: true, city: true, country: true },
+    select: { walletAddress: true, city: true, country: true },
   });
   return locations
     .filter(
       (l) =>
-        l.city?.toLowerCase() === region || l.country?.toLowerCase() === region,
+        (l as any).city?.toLowerCase() === region || (l as any).country?.toLowerCase() === region,
     )
-    .map((l) => l.wallet_address);
+    .map((l) => (l as any).walletAddress ?? (l as any).wallet_address);
 }
 
 /** Serializes a list of flat records to CSV (Issue #662: CSV + JSON output). */

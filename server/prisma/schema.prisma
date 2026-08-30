@@ -54,6 +54,10 @@ model NotificationPreference {
 
 model User {
   id            String   @id @default(uuid())
+  /// Canonical identity — wallet address is the primary key for all
+  /// financial and profile linkage. Stored lower-cased (Stellar G... checksum
+  /// is case-insensitive for DB lookup; original case preserved in JWT).
+  /// Single source of truth for identity; see Profile 1:1 extension.
   walletAddress String   @unique
   role          String?
   createdAt     DateTime @default(now())
@@ -61,6 +65,7 @@ model User {
 
   ordersAsBuyer  Order[] @relation("BuyerOrders")
   ordersAsSeller Order[] @relation("SellerOrders")
+  profile        Profile?
 
   @@map("users")
 }
@@ -121,7 +126,7 @@ model Product {
   createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  farmer       Profile            @relation(fields: [farmerWallet], references: [wallet_address], onDelete: Cascade)
+  farmer       Profile            @relation(fields: [farmerWallet], references: [walletAddress], onDelete: Restrict)
   cartItems    CartItem[]
   orders       Order[]
   priceHistory PriceHistory[]
@@ -154,7 +159,7 @@ model Cart {
   createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  buyer Profile    @relation(fields: [buyerWallet], references: [wallet_address], onDelete: Cascade)
+  buyer Profile    @relation(fields: [buyerWallet], references: [walletAddress], onDelete: Restrict)
   items CartItem[]
 
   @@index([buyerWallet])
@@ -184,18 +189,22 @@ model CartItem {
 model Order {
   id             String   @id @default(uuid())
   orderIdOnChain String   @unique
-  buyerAddress   String
-  sellerAddress  String
+  /// Nullable to allow out-of-order ingestion without FK violation; placeholder rows set needsBackfill=true
+  buyerAddress   String?
+  sellerAddress  String?
+  /// Canonical integer string (i128 stroops) — fixed, no exponent, no leading zeros. See lib/money.ts
   amount         String
   token          String
   status         String
   productId      String?  @db.Uuid
   txHash         String?
+  /// True if row was created by a status-only event before order.created and needs backfill
+  needsBackfill  Boolean  @default(false) @map("needs_backfill")
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  buyerUser  User     @relation("BuyerOrders", fields: [buyerAddress], references: [walletAddress], onDelete: Cascade)
-  sellerUser User     @relation("SellerOrders", fields: [sellerAddress], references: [walletAddress], onDelete: Cascade)
+  buyerUser  User?     @relation("BuyerOrders", fields: [buyerAddress], references: [walletAddress], onDelete: Restrict)
+  sellerUser User?     @relation("SellerOrders", fields: [sellerAddress], references: [walletAddress], onDelete: Restrict)
   product    Product? @relation(fields: [productId], references: [id])
   dispute    Dispute?
 
@@ -211,6 +220,7 @@ model Campaign {
   id                String   @id @default(uuid())
   campaignIdOnChain String   @unique
   creatorAddress    String
+  /// Canonical integer string (i128 stroops) — fixed, no exponent, no leading zeros. See lib/money.ts
   goalAmount        String
   token             String
   status            String
@@ -226,6 +236,7 @@ model Investment {
   sourceEventId     String   @unique
   campaignIdOnChain String
   investorAddress   String
+  /// Canonical integer string (i128 stroops) — fixed, no exponent, no leading zeros. See lib/money.ts
   amount            String
   token             String
   txHash            String?
@@ -237,6 +248,8 @@ model Investment {
 }
 
 model BlockchainTransaction {
+  /// Canonical event table — single source of truth for all on-chain events.
+  /// EscrowEvent / EscrowTransaction are derived projections from this table.
   id                String   @id @default(uuid())
   sourceEventId     String   @unique
   eventType         String
@@ -257,10 +270,13 @@ model BlockchainTransaction {
 }
 
 model EscrowEvent {
+  /// Derived projection from BlockchainTransaction (canonical). Kept for backward compat / query convenience.
+  /// Writes are idempotent upserts keyed on [ledger, eventIndex].
   id         String   @id @default(uuid())
   orderId    String
   buyer      String
   seller     String
+  /// Canonical integer string — see lib/money.ts
   amount     String
   token      String
   action     String
@@ -273,12 +289,16 @@ model EscrowEvent {
 }
 
 model EscrowTransaction {
+  /// Derived projection — idempotent. Canonical source is BlockchainTransaction.
+  /// Unique on [ledger, eventIndex] to guarantee replay idempotency.
   id             String   @id @default(uuid())
   orderIdOnChain String
   action         String
   ledger         Int
+  eventIndex     Int      @default(0)
   timestamp      DateTime
 
+  @@unique([ledger, eventIndex])
   @@map("escrow_transactions")
 }
 
@@ -295,7 +315,9 @@ model PriceHistory {
 }
 
 model Profile {
-  wallet_address String    @id
+  /// 1:1 extension of User (canonical identity). walletAddress FK to users.wallet_address.
+  /// Standardised Prisma field name walletAddress (DB column wallet_address) to unify identity queries.
+  walletAddress String    @id @map("wallet_address")
   name           String?   @map("display_name")
   bio            String?
   avatar_url     String?
@@ -304,18 +326,19 @@ model Profile {
   products       Product[]
   carts          Cart[]
   reviews        Review[]
+  user           User     @relation(fields: [walletAddress], references: [walletAddress], onDelete: Cascade)
 
   @@map("profiles")
 }
 
 model Location {
-  wallet_address String   @id
+  walletAddress String   @id @map("wallet_address")
   lat            Float    @map("latitude")
   lng            Float    @map("longitude")
   city           String?
   country        String?
   is_public      Boolean  @default(true)
-  profile        Profile? @relation(fields: [wallet_address], references: [wallet_address])
+  profile        Profile? @relation(fields: [walletAddress], references: [walletAddress])
 
   @@map("locations")
 }
@@ -593,7 +616,7 @@ model Review {
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  profile Profile @relation(fields: [subjectWallet], references: [wallet_address], onDelete: Cascade)
+  profile Profile @relation(fields: [subjectWallet], references: [walletAddress], onDelete: Restrict)
 
   @@index([subjectWallet, createdAt(sort: Desc)])
   @@index([reviewerWallet])
@@ -688,4 +711,18 @@ model ReconciliationAlert {
   @@index([resolvedAt])
   @@index([driftType])
   @@map("reconciliation_alerts")
+}
+
+model DeadLetter {
+  id            String   @id @default(uuid())
+  sourceEventId String   @unique @map("source_event_id")
+  ledger        Int
+  eventIndex    Int      @map("event_index")
+  eventType     String   @map("event_type")
+  reason        String
+  payload       Json?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([ledger, eventIndex])
+  @@map("dead_letters")
 }

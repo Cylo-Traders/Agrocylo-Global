@@ -39,6 +39,9 @@ vi.mock("./events/blockchainEventIngestionService.js", () => ({
 vi.mock("./events/escrowEventIngestionService.js", () => ({
   EscrowEventIngestionService: { ingestEvent: vi.fn() },
 }));
+vi.mock("../config/sentry.js", () => ({
+  captureAlert: vi.fn(),
+}));
 
 import { detectRecoveryGap, loadCheckpoint, persistCheckpoint, dispatchEvent } from "./contractWatcher.js";
 import { prisma } from "../config/database.js";
