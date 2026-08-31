@@ -5,32 +5,8 @@ name: CI
 
 on:
   pull_request:
-    paths:
-      - "client/**"
-      - "server/**"
-      - "contracts/**"
-      - "agro-production/client/**"
-      - "agro-production/contract/**"
-      - "packages/**"
-      - "package.json"
-      - "package-lock.json"
-      - "turbo.json"
-      - "scripts/**"
-      - ".github/workflows/ci.yml"
   push:
     branches: [main]
-    paths:
-      - "client/**"
-      - "server/**"
-      - "contracts/**"
-      - "agro-production/client/**"
-      - "agro-production/contract/**"
-      - "packages/**"
-      - "package.json"
-      - "package-lock.json"
-      - "turbo.json"
-      - "scripts/**"
-      - ".github/workflows/ci.yml"
   merge_group:
 
 concurrency:
@@ -45,8 +21,64 @@ env:
   NEXT_TELEMETRY_DISABLED: "1"
 
 jobs:
+  # ── Determine which paths changed ────────────────────────────────────────────
+  # Used by other jobs to skip if their paths haven't changed (Issue #912)
+  paths:
+    name: Determine changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      client: ${{ steps.changes.outputs.client }}
+      server: ${{ steps.changes.outputs.server }}
+      contracts: ${{ steps.changes.outputs.contracts }}
+      agro-client: ${{ steps.changes.outputs.agro-client }}
+      shared-deps: ${{ steps.changes.outputs.shared-deps }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check changed paths
+        uses: dorny/paths-filter@v2
+        id: changes
+        with:
+          filters: |
+            client:
+              - 'client/**'
+              - 'packages/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'turbo.json'
+              - 'scripts/**'
+              - '.github/workflows/ci.yml'
+            server:
+              - 'server/**'
+              - 'packages/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'turbo.json'
+              - 'scripts/**'
+              - '.github/workflows/ci.yml'
+            contracts:
+              - 'contracts/**'
+              - 'Cargo.toml'
+              - 'rust-toolchain.toml'
+              - '.github/workflows/ci.yml'
+            agro-client:
+              - 'agro-production/client/**'
+              - 'packages/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'turbo.json'
+              - 'scripts/**'
+              - '.github/workflows/ci.yml'
+            shared-deps:
+              - 'client/**'
+              - 'agro-production/client/**'
+              - 'package.json'
+              - 'package-lock.json'
   shared-dependency-versions:
     name: Shared client dependency versions (Issue #755 / #728)
+    needs: paths
+    if: needs.paths.outputs.shared-deps == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -58,6 +90,8 @@ jobs:
 
   client:
     name: Client · Next.js
+    needs: paths
+    if: needs.paths.outputs.client == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -88,11 +122,9 @@ jobs:
       # broken on main); switched to `eslint .` directly. That surfaced ~20
       # pre-existing lint errors across the app that were never actually
       # being checked before (the old script crashed before linting a single
-      # file). Non-blocking for now, matching the server job's precedent
-      # above, until that debt is paid down separately.
+      # file). These must be fixed to keep lint quality high.
       - name: Lint
         run: npm run lint
-        continue-on-error: true
 
       - name: Generate Next.js types
         run: |
@@ -109,6 +141,8 @@ jobs:
 
   server:
     name: Server · Node.js
+    needs: paths
+    if: needs.paths.outputs.server == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -159,6 +193,8 @@ jobs:
 
   server-integration:
     name: Server · Prisma schema/migration integration
+    needs: paths
+    if: needs.paths.outputs.server == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -209,6 +245,8 @@ jobs:
 
   contracts:
     name: Contracts · Rust (Soroban)
+    needs: paths
+    if: needs.paths.outputs.contracts == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -299,6 +337,8 @@ jobs:
 
   agro-production-client:
     name: Agro-Production Client · Next.js
+    needs: paths
+    if: needs.paths.outputs.agro-client == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -332,12 +372,10 @@ jobs:
 
       # Migrated .eslintrc.json -> flat config alongside the eslint-config-next
       # 16 bump (Issue #755). That surfaced ~66 pre-existing lint errors that
-      # were never actually checked before under the old config. Non-blocking
-      # for now, matching the server job's precedent, until that debt is paid
-      # down separately.
+      # were never actually checked before under the old config. These must be
+      # fixed to keep lint quality high.
       - name: Lint
         run: npm run lint
-        continue-on-error: true
 
       - name: Type check
         run: npx tsc --noEmit
