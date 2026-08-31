@@ -2,6 +2,7 @@ import { prisma } from "../../config/database.js";
 import type { MappedEscrowEvent } from "../../types/escrowEvent.js";
 import logger from "../../config/logger.js";
 import { wsManager } from "../wsManager.js";
+import { OrderStatus } from "../../constants/status.js";
 
 /**
  * @deprecated — Derived projection from canonical BlockchainTransaction.
@@ -106,14 +107,14 @@ export class EscrowEventProjectionService {
 
     await prisma.order.upsert({
       where: { orderIdOnChain: parsed.orderId },
-      update: { status: "PENDING" },
+      update: { status: OrderStatus.PENDING },
       create: {
         orderIdOnChain: parsed.orderId,
         buyerAddress: canonicalBuyer!,
         sellerAddress: canonicalSeller!,
         amount: parsed.amount!,
         token: parsed.token!,
-        status: "PENDING",
+        status: OrderStatus.PENDING,
         productId: product?.id,
         createdAt: eventDate,
       } as any,
@@ -121,7 +122,7 @@ export class EscrowEventProjectionService {
 
     wsManager.broadcast("order:status_changed", {
       orderId: parsed.orderId,
-      status: "PENDING",
+      status: OrderStatus.PENDING,
       buyer: parsed.buyer,
       seller: parsed.seller,
       amount: parsed.amount,
@@ -166,7 +167,7 @@ export class EscrowEventProjectionService {
     }
     wsManager.broadcast("order:status_changed", {
       orderId,
-      status: "COMPLETED",
+      status: OrderStatus.COMPLETED,
     });
   }
 
@@ -182,14 +183,14 @@ export class EscrowEventProjectionService {
     }
     wsManager.broadcast("order:status_changed", {
       orderId,
-      status: "REFUNDED",
+      status: OrderStatus.REFUNDED,
     });
   }
 
   private static async handleOrderDisputed(orderId: string, raisedBy: string, eventDate: Date) {
     await prisma.order.update({
       where: { orderIdOnChain: orderId },
-      data: { status: "DISPUTED" },
+      data: { status: OrderStatus.DISPUTED },
     });
 
     await prisma.dispute.upsert({
@@ -210,14 +211,14 @@ export class EscrowEventProjectionService {
   private static async handleOrderResolved(orderId: string, isRefund: boolean, eventDate: Date) {
     await prisma.order.update({
       where: { orderIdOnChain: orderId },
-      data: { status: isRefund ? "REFUNDED" : "COMPLETED" },
+      data: { status: isRefund ? OrderStatus.REFUNDED : OrderStatus.COMPLETED },
     });
 
     await prisma.dispute.update({
       where: { orderIdOnChain: orderId },
       data: {
         status: "RESOLVED",
-        outcome: isRefund ? "REFUNDED" : "COMPLETED",
+        outcome: isRefund ? OrderStatus.REFUNDED : OrderStatus.COMPLETED,
         resolvedAt: eventDate,
       },
     });

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { prisma } from "../config/database.js";
 import { ApiError, NotFoundError, ValidationError } from "../http/errors.js";
 import { hashApiKey } from "../middleware/integratorAuth.js";
+import { CampaignStatus, OrderStatus } from "../constants/status.js";
 
 export interface IntegratorScope {
   organizationName: string;
@@ -129,8 +130,8 @@ export class IntegratorService {
         displayName: p.name ?? null,
         region: p.location ? [p.location.city, p.location.country].filter(Boolean).join(", ") : null,
         totalCampaigns: farmerCampaigns.length,
-        settledCampaigns: farmerCampaigns.filter((c) => c.status === "SETTLED").length,
-        activeCampaigns: farmerCampaigns.filter((c) => c.status === "ACTIVE").length,
+        settledCampaigns: farmerCampaigns.filter((c) => c.status === CampaignStatus.SETTLED).length,
+        activeCampaigns: farmerCampaigns.filter((c) => c.status === CampaignStatus.ACTIVE).length,
       };
     });
   }
@@ -154,8 +155,8 @@ export class IntegratorService {
     for (const o of orders) {
       const entry = bySeller.get(o.sellerAddress) ?? { total: 0, completed: 0, refunded: 0, pending: 0 };
       entry.total += 1;
-      if (o.status === "COMPLETED") entry.completed += 1;
-      else if (o.status === "REFUNDED") entry.refunded += 1;
+      if (o.status === OrderStatus.COMPLETED) entry.completed += 1;
+      else if (o.status === OrderStatus.REFUNDED) entry.refunded += 1;
       else entry.pending += 1;
       bySeller.set(o.sellerAddress, entry);
     }

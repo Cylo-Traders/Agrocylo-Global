@@ -140,14 +140,19 @@ jobs:
 
       - name: Lint
         run: npm run lint
-        continue-on-error: true
 
       - name: Format check
         run: npm run format:check
-        continue-on-error: true
 
       - name: Type check
         run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+        continue-on-error: true
 
       - name: Test with coverage
         run: npm run test:coverage

@@ -43,13 +43,16 @@ vi.mock("../config/sentry.js", () => ({
   captureAlert: vi.fn(),
 }));
 
-import { detectRecoveryGap, loadCheckpoint, persistCheckpoint, dispatchEvent } from "./contractWatcher.js";
+import { detectRecoveryGap, loadCheckpoint, persistCheckpoint, dispatchEvent, fetchEventsPaginated, MAX_LEDGER_SPAN } from "./contractWatcher.js";
 import { prisma } from "../config/database.js";
 import logger from "../config/logger.js";
 import { NotificationService } from "./notificationService.js";
 import { wsManager } from "./wsManager.js";
+import { contractWatcherUnhandledTotal } from "./promMetrics.js";
+import { captureAlert } from "../config/sentry.js";
 
 const notifyFromEscrowEvent = vi.mocked(NotificationService.notifyFromEscrowEvent);
+const notify = vi.mocked(NotificationService.notify);
 // Issue #756 fix: `dispatchEvent` broadcasts via `broadcastAuthenticated`
 // (added in an unrelated, prior change), but this was still pointed at the
 // old `broadcast` method, failing every test below with "not a function"
@@ -131,6 +134,85 @@ describe("contractWatcher", () => {
       expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining("Unhandled event action"),
       );
+    });
+
+    it("handles cancelled event with notification + WS broadcast", () => {
+      dispatchEvent("cancelled", ["order-10", "BUYER"], 600);
+      expect(broadcast).toHaveBeenCalledWith("order:cancelled", expect.objectContaining({ orderId: "order-10" }));
+      // notifyFromEscrowEvent is called via refund path
+      expect(notifyFromEscrowEvent).toHaveBeenCalled();
+    });
+
+    it("handles disputed event with broadcast and notification", () => {
+      dispatchEvent("disputed", ["order-11", "BUYER", "FARMER"], 601);
+      expect(broadcast).toHaveBeenCalledWith("order:disputed", expect.objectContaining({ orderId: "order-11" }));
+      expect(broadcast).toHaveBeenCalledWith("order:status_changed", expect.objectContaining({ status: "DISPUTED" }));
+    });
+
+    it("handles resolved event with broadcast", () => {
+      dispatchEvent("resolved", ["order-12", "Release", "BUYER", "FARMER"], 602);
+      expect(broadcast).toHaveBeenCalledWith("order:resolved", expect.objectContaining({ orderId: "order-12" }));
+    });
+
+    it("handles split:created with broadcast", () => {
+      dispatchEvent("created", ["order-13", "FARMER", "TOKEN", "500"], 603, "split");
+      expect(broadcast).toHaveBeenCalledWith("split:created", expect.objectContaining({ orderId: "order-13" }));
+    });
+
+    it("handles split:disputed and split:resolved with broadcast + notification", () => {
+      dispatchEvent("disputed", ["order-14", "BUYER"], 604, "split");
+      expect(broadcast).toHaveBeenCalledWith("split:disputed", expect.objectContaining({ orderId: "order-14" }));
+      dispatchEvent("resolved", ["order-15", "Refund", "BUYER", "FARMER"], 605, "split");
+      expect(broadcast).toHaveBeenCalledWith("split:resolved", expect.objectContaining({ orderId: "order-15" }));
+    });
+
+    it("handles order.splitnew (production split) as split family", () => {
+      dispatchEvent("splitnew", ["order-16", "CAMPAIGN_1", "1000"], 606, "order");
+      expect(broadcast).toHaveBeenCalledWith("order:splitnew", expect.objectContaining({ orderId: "order-16" }));
+    });
+
+    it("acknowledges campaign and basket events as indexed-only without unhandled metric", () => {
+      const inc = vi.mocked(contractWatcherUnhandledTotal.inc);
+      inc.mockClear();
+      dispatchEvent("created", ["camp-1", "FARMER", "TOKEN", "1000", "123"], 700, "campaign");
+      expect(inc).not.toHaveBeenCalled();
+      expect(broadcast).toHaveBeenCalledWith("campaign:created", expect.any(Object));
+
+      inc.mockClear();
+      dispatchEvent("funded", ["basket-1", "100", "90", "10"], 701, "basket");
+      expect(inc).not.toHaveBeenCalled();
+      // basket events broadcast as basket:funded
+      expect(broadcast).toHaveBeenCalledWith("basket:funded", expect.any(Object));
+    });
+
+    it("acknowledges paused/upgraded as indexed, no notification", () => {
+      const inc = vi.mocked(contractWatcherUnhandledTotal.inc);
+      inc.mockClear();
+      dispatchEvent("paused", ["order-1", "ADMIN"], 702, "order");
+      expect(inc).not.toHaveBeenCalled();
+      expect(broadcast).not.toHaveBeenCalledWith("order:paused", expect.anything());
+    });
+
+    it("supports full topic string dispatch (entity.action)", () => {
+      dispatchEvent("order.cancelled", ["order-20", "BUYER"], 710);
+      expect(broadcast).toHaveBeenCalledWith("order:cancelled", expect.objectContaining({ orderId: "order-20" }));
+    });
+
+    it("increments unhandled metric + alert for unknown action", () => {
+      const inc = vi.mocked(contractWatcherUnhandledTotal.inc);
+      const alert = vi.mocked(captureAlert);
+      inc.mockClear();
+      alert.mockClear();
+      dispatchEvent("unknown_action_xyz", ["order-5"], 504, "order");
+      expect(inc).toHaveBeenCalledWith(expect.objectContaining({ action: "unknown_action_xyz", entity: "order" }));
+      expect(alert).toHaveBeenCalledWith("contract_watcher_unhandled_event", expect.any(String), expect.objectContaining({ action: "unknown_action_xyz" }));
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("Unhandled event action"));
+    });
+
+    it("routes governance contract events to governance dispatcher", () => {
+      // governance via entity
+      dispatchEvent("proposed", ["prop-1", "PROPOSER", "TARGET", "FUNC"], 800, "governance");
+      expect(broadcast).toHaveBeenCalledWith("governance:proposed", expect.objectContaining({ proposalId: "prop-1" }));
     });
   });
 
@@ -257,6 +339,76 @@ describe("contractWatcher", () => {
         "[ContractWatcher] Failed to persist checkpoint",
         expect.any(Error),
       );
+    });
+  });
+
+  describe("fetchEventsPaginated — pagination & checkpoint boundary", () => {
+    it("pages through multi-page response and returns all events before advancing checkpoint", async () => {
+      const mockGetEvents = vi
+        .fn()
+        .mockResolvedValueOnce({
+          events: [
+            { ledger: 10, contractId: "test-contract", topic: [], value: {}, transactionIndex: 0 },
+            { ledger: 11, contractId: "test-contract", topic: [], value: {}, transactionIndex: 0 },
+          ],
+          cursor: "cursor-1",
+        })
+        .mockResolvedValueOnce({
+          events: [{ ledger: 12, contractId: "test-contract", topic: [], value: {}, transactionIndex: 0 }],
+          cursor: undefined,
+        });
+      const mockServer: any = { getEvents: mockGetEvents };
+
+      const { events, pages, drained } = await fetchEventsPaginated(mockServer, 10, 100, ["test-contract"]);
+
+      expect(mockGetEvents).toHaveBeenCalledTimes(2);
+      expect(mockGetEvents).toHaveBeenNthCalledWith(1, expect.objectContaining({ startLedger: 10, cursor: undefined }));
+      expect(mockGetEvents).toHaveBeenNthCalledWith(2, expect.objectContaining({ cursor: "cursor-1" }));
+      expect(events).toHaveLength(3);
+      expect(pages).toBe(2);
+      expect(drained).toBe(true);
+      // All ledgers within span, checkpoint should advance to beyond max ledger
+      expect(events.map((e: any) => e.ledger)).toEqual([10, 11, 12]);
+    });
+
+    it("bounds by max ledger span — events beyond span are not included but span still drains", async () => {
+      const mockGetEvents = vi.fn().mockResolvedValue({
+        events: [
+          { ledger: 10, contractId: "test-contract", topic: [], value: {}, transactionIndex: 0 },
+          { ledger: 150, contractId: "test-contract", topic: [], value: {}, transactionIndex: 0 },
+        ],
+        cursor: undefined,
+      });
+      const mockServer: any = { getEvents: mockGetEvents };
+
+      // Span is 100 ledgers from 10 => endLedger 110; ledger 150 should be filtered out
+      const { events, drained } = await fetchEventsPaginated(mockServer, 10, 110, ["test-contract"]);
+      expect(events).toHaveLength(1);
+      expect(events[0].ledger).toBe(10);
+      expect(drained).toBe(true);
+    });
+
+    it("marks not drained when max pages exceeded", async () => {
+      const mockGetEvents = vi.fn().mockResolvedValue({
+        events: [{ ledger: 10, contractId: "test-contract", topic: [], value: {}, transactionIndex: 0 }],
+        cursor: "next-cursor",
+      });
+      const mockServer: any = { getEvents: mockGetEvents };
+
+      const { drained, pages } = await fetchEventsPaginated(mockServer, 10, 1000, ["test-contract"]);
+      expect(drained).toBe(false);
+      expect(pages).toBe(50); // MAX_PAGES_PER_POLL
+    });
+
+    it("handles empty page with cursor continuation", async () => {
+      const mockGetEvents = vi
+        .fn()
+        .mockResolvedValueOnce({ events: [], cursor: "cursor-1" })
+        .mockResolvedValueOnce({ events: [{ ledger: 10, contractId: "test-contract", topic: [], value: {}, transactionIndex: 0 }], cursor: undefined });
+      const mockServer: any = { getEvents: mockGetEvents };
+      const { events, pages } = await fetchEventsPaginated(mockServer, 10, 100, ["test-contract"]);
+      expect(events).toHaveLength(1);
+      expect(pages).toBe(2);
     });
   });
 });

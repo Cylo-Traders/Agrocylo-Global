@@ -185,14 +185,14 @@ export class BlockchainEventPersistenceService {
             creatorAddress: canonicalCreator ?? event.actorAddress ?? "",
             goalAmount: canonicalAmount,
             token: event.token ?? "",
-            status: "ACTIVE",
+            status: CampaignStatus.ACTIVE,
           },
           create: {
             campaignIdOnChain: event.campaignIdOnChain ?? "",
             creatorAddress: canonicalCreator ?? event.actorAddress ?? "",
             goalAmount: canonicalAmount,
             token: event.token ?? "",
-            status: "ACTIVE",
+            status: CampaignStatus.ACTIVE,
           },
         });
         return;
@@ -209,7 +209,7 @@ export class BlockchainEventPersistenceService {
             creatorAddress: "",
             goalAmount: "0",
             token: event.token ?? "",
-            status: "ACTIVE",
+            status: CampaignStatus.ACTIVE,
           },
         });
         await tx.investment.upsert({
@@ -231,13 +231,13 @@ export class BlockchainEventPersistenceService {
         if (!event.campaignIdOnChain) throw new Error("campaign.settled missing campaignIdOnChain");
         await tx.campaign.upsert({
           where: { campaignIdOnChain: event.campaignIdOnChain },
-          update: { status: event.status ?? "SETTLED" },
+          update: { status: event.status ?? CampaignStatus.SETTLED },
           create: {
             campaignIdOnChain: event.campaignIdOnChain ?? "",
             creatorAddress: canonicalWallet(event.actorAddress) ?? event.actorAddress ?? "",
             goalAmount: "0",
             token: event.token ?? "",
-            status: event.status ?? "SETTLED",
+            status: event.status ?? CampaignStatus.SETTLED,
           },
         });
         return;

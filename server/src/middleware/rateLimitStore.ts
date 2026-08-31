@@ -118,28 +118,4 @@ export function createRateLimitStore(redisClient: Redis) {
   };
 }
 
-/**
- * Factory function to create a rate-limit store that automatically
- * configures Redis client and handles connection lifecycle.
- */
-export function createRedisRateLimitStore(redisUrl: string) {
-  const Redis = require('ioredis');
-  const redisClient = new Redis(redisUrl, {
-    retryStrategy: (times: number) => {
-      const delay = Math.min(times * 50, 2000);
-      return delay;
-    },
-    enableReadyCheck: true,
-    enableOfflineQueue: true,
-  });
 
-  redisClient.on('error', (error: Error) => {
-    logger.error('[RateLimit] Redis connection error', { error });
-  });
-
-  redisClient.on('connect', () => {
-    logger.info('[RateLimit] Redis connected');
-  });
-
-  return createRateLimitStore(redisClient);
-}

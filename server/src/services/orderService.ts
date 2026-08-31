@@ -2,6 +2,7 @@ import { prisma } from "../config/database.js";
 import { ApiError, NotFoundError } from "../http/errors.js";
 import logger from "../config/logger.js";
 import { toClientProfile, toClientRole } from "../lib/profileDto.js";
+import { OrderStatus } from "../constants/status.js";
 
 const ORDER_INCLUDE = {
   product: true,
@@ -90,8 +91,8 @@ export class OrderService {
       const [totalOrders, completedCount, refundedCount, disputedCount] =
         await Promise.all([
           prisma.order.count({ where: { sellerAddress } }),
-          prisma.order.count({ where: { sellerAddress, status: "COMPLETED" } }),
-          prisma.order.count({ where: { sellerAddress, status: "REFUNDED" } }),
+          prisma.order.count({ where: { sellerAddress, status: OrderStatus.COMPLETED } }),
+          prisma.order.count({ where: { sellerAddress, status: OrderStatus.REFUNDED } }),
           prisma.dispute.count({
             where: {
               order: { sellerAddress },
