@@ -31,7 +31,7 @@ export function useInvest() {
   // Resolve any pending waitForIndexedInvestment call as soon as the server
   // emits the investment.indexed WebSocket event, avoiding REST polling.
   useWebSocket((msg) => {
-    if (msg.event === "investment.indexed") {
+    if (msg.type === "investment.indexed") {
       const payload = msg.payload as Investment & { txHash?: string };
       if (payload.txHash) resolveIndexedInvestment(payload.txHash, payload);
     }

@@ -1,7 +1,9 @@
 import { defineConfig } from 'vitest/config';
+import react from '@vitejs/plugin-react';
 import path from 'path';
 
 export default defineConfig({
+  plugins: [react()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -11,10 +13,6 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
-  },
-  // Components author JSX without importing React (Next.js supplies it). vitest's
-  // bare esbuild transform does not, so inject it for the classic runtime.
-  esbuild: {
-    jsxInject: `import React from 'react'`,
+    include: ['src/**/*.test.{ts,tsx}'],
   },
 });
