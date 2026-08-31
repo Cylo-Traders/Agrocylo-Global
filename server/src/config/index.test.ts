@@ -41,4 +41,14 @@ describe("environment validation", () => {
     expect(config.jwtSecret).toBe("test-secret-at-least-32-chars-long!!");
     expect(config.nodeEnv).toBe("test");
   });
+
+  it.each(["METRICS_API_KEY", "SUPABASE_SERVICE_ROLE_KEY"])("fails production startup when %s is missing", async (key) => {
+    setRequiredEnv({ NODE_ENV: "production", ALLOWED_ORIGINS: "https://app.example.com", METRICS_API_KEY: "secret", SUPABASE_SERVICE_ROLE_KEY: "secret", INTEGRATOR_API_KEY_PEPPER: "production-integrator-pepper-at-least-32-chars", [key]: "" });
+    await expect(importFreshConfig()).rejects.toThrow(new RegExp(key));
+  });
+
+  it("rejects non-HTTPS production origins", async () => {
+    setRequiredEnv({ NODE_ENV: "production", ALLOWED_ORIGINS: "http://app.example.com", METRICS_API_KEY: "secret", SUPABASE_SERVICE_ROLE_KEY: "secret", INTEGRATOR_API_KEY_PEPPER: "production-integrator-pepper-at-least-32-chars" });
+    await expect(importFreshConfig()).rejects.toThrow(/ALLOWED_ORIGINS/);
+  });
 });

@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { Router } from 'express';
 import logger from '../config/logger.js';
 import { ApiError, sendProblem } from '../http/errors.js';
-import { authRateLimiter } from '../middleware/rateLimiter.js';
+import { authRateLimiter, nonceWalletRateLimiter } from '../middleware/rateLimiter.js';
 import { requireWallet, type WalletRequest } from '../middleware/walletAuth.js';
 import {
   generateNonce,
@@ -15,7 +15,7 @@ import {
 const router = Router();
 
 // POST /auth/nonce
-router.post('/nonce', authRateLimiter, async (req: Request, res: Response) => {
+router.post('/nonce', authRateLimiter, nonceWalletRateLimiter, async (req: Request, res: Response) => {
   try {
     const { walletAddress } = req.body as { walletAddress?: string };
     if (!walletAddress) {
@@ -33,15 +33,16 @@ router.post('/nonce', authRateLimiter, async (req: Request, res: Response) => {
 // POST /auth/verify
 router.post('/verify', authRateLimiter, async (req: Request, res: Response) => {
   try {
-    const { walletAddress, signature } = req.body as {
+    const { walletAddress, signature, message } = req.body as {
       walletAddress?: string;
       signature?: string;
+      message?: string;
     };
-    if (!walletAddress || !signature) {
-      return sendProblem(res, req, new ApiError(400, 'Bad Request', 'walletAddress and signature are required'));
+    if (!walletAddress || !signature || !message) {
+      return sendProblem(res, req, new ApiError(400, 'Bad Request', 'walletAddress, signature, and message are required'));
     }
     logger.info('Signature verification requested', { walletAddress });
-    const tokens = await verifySignature(walletAddress, signature);
+    const tokens = await verifySignature(walletAddress, signature, message);
     return res.status(200).json(tokens);
   } catch (err) {
     if (err instanceof ApiError) return sendProblem(res, req, err);

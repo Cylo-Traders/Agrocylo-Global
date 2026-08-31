@@ -59,7 +59,7 @@ Validated by a Zod schema in [`server/src/config/index.ts`](../../server/src/con
 | `DATABASE_URL` | ✅ | — | Postgres connection string |
 | `SUPABASE_URL` | ✅ | — | Supabase project URL |
 | `SUPABASE_ANON_KEY` | ✅ | — | Supabase anon key |
-| `SUPABASE_SERVICE_ROLE_KEY` | | `""` | Server-side Supabase key (image uploads) |
+| `SUPABASE_SERVICE_ROLE_KEY` | ✅ prod | `""` | Server-side Supabase key (image uploads) |
 | `SUPABASE_PRODUCT_IMAGES_BUCKET` | | `product-images` | |
 | `PRODUCT_IMAGE_PLACEHOLDER_URL` | | placehold.co URL | |
 | `JWT_SECRET` | ✅ | — | API JWT signing key, HS256, ≥ 32 bytes. See rotation below. |
@@ -70,10 +70,13 @@ Validated by a Zod schema in [`server/src/config/index.ts`](../../server/src/con
 | `GOVERNANCE_CONTRACT_ID` | watcher | `""` | governance ID (required when watcher on) |
 | `RPC_URL` | | testnet RPC | Soroban RPC endpoint |
 | `WS_PATH` | | `/ws` | Socket.io path |
-| `METRICS_API_KEY` | | `""` | Bearer token for `/metrics` (blank = open) |
+| `METRICS_API_KEY` | ✅ prod | `""` | Bearer token for `/metrics`; blank denies access |
+| `INTEGRATOR_API_KEY_PEPPER` | ✅ prod | development-only value | HMAC secret for integrator API-key digests |
+| `INTEGRATOR_MONTHLY_QUOTA` | | `10000` | Maximum requests per integrator key per UTC month |
 | `SENTRY_DSN` | | `""` | Error reporting (blank = disabled) |
 | `SENTRY_TRACES_SAMPLE_RATE` | | `0.1` | |
-| `ALLOWED_ORIGINS` | | `http://localhost:3000` | Comma-separated CORS origins |
+| `ALLOWED_ORIGINS` | ✅ prod | `http://localhost:3000` | Comma-separated CORS origins; HTTPS only in production |
+| `ADMIN_WALLETS` | | `""` | Comma-separated Stellar public keys that receive `ADMIN` JWTs on login. See [`admin.md`](./admin.md). |
 | `PORT`, `NODE_ENV` | | `5000` / `development` | Log level is derived from `NODE_ENV`, not a separate var |
 
 ### `client/` (marketplace frontend, port 3000)
@@ -85,6 +88,7 @@ read by `sentry.*.config.ts`.
 |---|---|---|
 | `NEXT_PUBLIC_API_URL` | ✅ | Backend base URL (REST + Socket.io) |
 | `NEXT_PUBLIC_SOROBAN_RPC_URL` | ✅ | Soroban RPC (match passphrase) |
+| `NEXT_PUBLIC_HORIZON_URL` | | Horizon endpoint; overrides the per-network default in `src/lib/stellar.ts` |
 | `NEXT_PUBLIC_NETWORK_PASSPHRASE` | ✅ | App refuses to start if unset |
 | `NEXT_PUBLIC_STELLAR_NETWORK` | | `testnet` / `mainnet` selector |
 | `NEXT_PUBLIC_CONTRACT_ID` | ✅ | marketplace escrow contract |
@@ -163,6 +167,11 @@ environment for the client apps, not as runtime secrets.
 ---
 
 ## Key rotation
+
+`INTEGRATOR_API_KEY_PEPPER` cannot be rotated in place because changing it
+invalidates every stored HMAC digest. Issue replacement integrator keys first,
+deploy the new pepper, then revoke the old keys. Never retain raw API keys or
+the previous pepper in the database.
 
 ### `JWT_SECRET` (both API servers) — tested procedure
 

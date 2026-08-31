@@ -17,6 +17,11 @@ export const imageUpload = multer({
   },
 });
 
+export const evidenceUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: maxUploadBytes, files: 1 },
+});
+
 export function isUnsupportedMimeType(file?: Express.Multer.File): boolean {
   if (!file) {
     return false;

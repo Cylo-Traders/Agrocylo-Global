@@ -141,7 +141,7 @@ async function dispatchAlerts(
  * a single farmer's registered location.
  */
 export async function pollFarmerWeather(walletAddress: string): Promise<void> {
-  const location = await prisma.location.findUnique({ where: { wallet_address: walletAddress } });
+  const location = await prisma.location.findUnique({ where: { walletAddress } });
   if (!location) return;
 
   const { reading, raw } = await fetchCurrentWeather(location.lat, location.lng);
@@ -157,13 +157,14 @@ export async function pollFarmerWeather(walletAddress: string): Promise<void> {
  * whole batch.
  */
 export async function pollAllFarmerLocations(): Promise<void> {
-  const locations = await prisma.location.findMany({ select: { wallet_address: true } });
+  const locations = await prisma.location.findMany({ select: { walletAddress: true } });
 
-  for (const { wallet_address } of locations) {
+  for (const loc of locations as any[]) {
+    const walletAddr = loc.walletAddress ?? loc.wallet_address;
     try {
-      await pollFarmerWeather(wallet_address);
+      await pollFarmerWeather(walletAddr);
     } catch (error) {
-      logger.error(`[weatherService] Failed to poll weather for ${wallet_address}`, error);
+      logger.error(`[weatherService] Failed to poll weather for ${walletAddr}`, error);
     }
   }
 }

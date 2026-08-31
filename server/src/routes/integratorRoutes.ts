@@ -3,7 +3,6 @@ import rateLimit from "express-rate-limit";
 import type { Request, Response, NextFunction } from "express";
 import {
   requireIntegratorApiKey,
-  recordIntegratorUsage,
   type IntegratorRequest,
 } from "../middleware/integratorAuth.js";
 import { requireAdmin, type AdminRequest } from "../middleware/adminAuth.js";
@@ -31,7 +30,6 @@ function respond(
   req: Request,
   res: Response,
   rows: Array<Record<string, unknown>>,
-  endpointLabel: string,
 ): void {
   const format = typeof req.query["format"] === "string" ? req.query["format"] : "json";
   if (format === "csv") {
@@ -39,7 +37,6 @@ function respond(
   } else {
     res.status(200).json({ data: rows, count: rows.length });
   }
-  recordIntegratorUsage(req as IntegratorRequest, res, endpointLabel);
 }
 
 // GET /integrator/v1/reports/farmers
@@ -55,7 +52,7 @@ router.get(
       const limit = Number(req.query["limit"] ?? 100);
       ensureNotOverPageLimit(limit);
       const rows = await IntegratorService.getFarmerReport(req.integratorScope);
-      respond(req, res, rows.slice(0, limit), "/integrator/v1/reports/farmers");
+      respond(req, res, rows.slice(0, limit));
     } catch (error) {
       next(error);
     }
@@ -75,7 +72,7 @@ router.get(
       const limit = Number(req.query["limit"] ?? 100);
       ensureNotOverPageLimit(limit);
       const rows = await IntegratorService.getOrderReport(req.integratorScope);
-      respond(req, res, rows.slice(0, limit), "/integrator/v1/reports/orders");
+      respond(req, res, rows.slice(0, limit));
     } catch (error) {
       next(error);
     }

@@ -11,19 +11,20 @@
 //! the individual numbers (CPU instructions, memory, etc.) are captured and
 //! reported by the Soroban SDK's `env.cost_estimate().resources()` API.
 
+// Diagnostic harness: `println!` formatting and unused scaffolding fields are
+// intentional here — keep clippy's cosmetic lints off the measurement code.
+#![allow(
+    dead_code,
+    clippy::println_empty_string,
+    clippy::redundant_pattern_matching
+)]
+
 extern crate std;
 use std::println;
 
-use soroban_sdk::{
-    testutils::Address as _,
-    token::StellarAssetClient,
-    Address, Env, Vec,
-};
+use soroban_sdk::{testutils::Address as _, token::StellarAssetClient, Address, Env, Vec};
 
-use crate::{
-    ProductionEscrowContract,
-    ProductionEscrowContractClient,
-};
+use crate::{ProductionEscrowContract, ProductionEscrowContractClient};
 
 // -----------------------------------------------------------------------
 // Cost Harness Setup
@@ -116,21 +117,13 @@ fn cost_harness_batch_refund_investors_50_investors() {
     const BATCH_SIZE: usize = 50;
 
     let test_env = setup_cost_test_env(BATCH_SIZE);
-    print_cost_header(
-        "batch_refund_investors",
-        BATCH_SIZE,
-        "investors (max cap)",
-    );
+    print_cost_header("batch_refund_investors", BATCH_SIZE, "investors (max cap)");
 
     // Create a campaign
-    let campaign_id: u64 = test_env
-        .client
-        .create_campaign(
-            &test_env.farmer,
-            &test_env.token_id,
-            &50_000,
-            &9999999999,
-        );
+    let campaign_id: u64 =
+        test_env
+            .client
+            .create_campaign(&test_env.farmer, &test_env.token_id, &50_000, &9999999999);
 
     // Invest from all 50 investors
     for investor in test_env.investors.iter() {
@@ -138,13 +131,17 @@ fn cost_harness_batch_refund_investors_50_investors() {
     }
 
     // Mark campaign as failed to enable refunds
-    test_env.client.mark_campaign_failed(&test_env.admin, &campaign_id);
+    test_env
+        .client
+        .mark_campaign_failed(&test_env.admin, &campaign_id);
 
     // Prepare list of all investors for batch refund
     let investor_addrs = test_env.investors.clone();
 
     // Measure cost of batch_refund_investors
-    let result = test_env.client.try_batch_refund_investors(&campaign_id, &investor_addrs);
+    let result = test_env
+        .client
+        .try_batch_refund_investors(&campaign_id, &investor_addrs);
 
     if let Ok(_) = result {
         println!("Result: SUCCESS");
@@ -285,7 +282,9 @@ fn cost_harness_summary() {
     println!("  • get_campaigns pagination (e.g., 50 per page)");
     println!("");
     println!("Notes:");
-    println!("  - These tests are scaffolding; actual cargo test execution will produce real numbers");
+    println!(
+        "  - These tests are scaffolding; actual cargo test execution will produce real numbers"
+    );
     println!("  - Mock setup may not perfectly reflect live contract state (different ledger size, etc.)");
     println!("  - Results are indicative and should be verified via integration tests on testnet");
     println!("");

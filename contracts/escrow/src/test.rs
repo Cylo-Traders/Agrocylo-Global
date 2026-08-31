@@ -1055,20 +1055,27 @@ fn test_guardian_can_pause_instantly_governance_only_can_unpause() {
         .try_create_order(&buyer, &farmer, &token.address, &500);
     assert_eq!(result.unwrap_err().unwrap(), EscrowError::ContractPaused);
 
-    let cancel_res = client
-        .mock_all_auths()
-        .try_cancel_order(&buyer, &1);
-    assert_eq!(cancel_res.unwrap_err().unwrap(), EscrowError::ContractPaused);
+    let cancel_res = client.mock_all_auths().try_cancel_order(&buyer, &1);
+    assert_eq!(
+        cancel_res.unwrap_err().unwrap(),
+        EscrowError::ContractPaused
+    );
 
     let mark_res = client
         .mock_all_auths()
         .try_mark_delivered(&farmer, &admin, &1);
     assert_eq!(mark_res.unwrap_err().unwrap(), EscrowError::ContractPaused);
 
-    let dispute_res = client
-        .mock_all_auths()
-        .try_open_dispute(&buyer, &1, &String::from_str(&env, "reason"), &String::from_str(&env, "hash"));
-    assert_eq!(dispute_res.unwrap_err().unwrap(), EscrowError::ContractPaused);
+    let dispute_res = client.mock_all_auths().try_open_dispute(
+        &buyer,
+        &1,
+        &String::from_str(&env, "reason"),
+        &String::from_str(&env, "hash"),
+    );
+    assert_eq!(
+        dispute_res.unwrap_err().unwrap(),
+        EscrowError::ContractPaused
+    );
 
     // The guardian cannot unpause — only governance can.
     let err = client.try_unpause(&guardian).unwrap_err().unwrap();

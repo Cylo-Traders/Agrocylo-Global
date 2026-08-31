@@ -18,6 +18,9 @@ const envSchema = z.object({
   RUN_CONTRACT_WATCHER: booleanFromEnv.default(false),
   METRICS_API_KEY: z.string().default(""),
   SUPABASE_SERVICE_ROLE_KEY: z.string().default(""),
+  ALLOWED_ORIGINS: z.string().default("http://localhost:3000"),
+  INTEGRATOR_API_KEY_PEPPER: z.string().min(32).default("development-only-integrator-pepper-change-me"),
+  INTEGRATOR_MONTHLY_QUOTA: z.coerce.number().int().positive().default(10_000),
   SUPABASE_PRODUCT_IMAGES_BUCKET: z.string().min(1).default("product-images"),
   PRODUCT_IMAGE_PLACEHOLDER_URL: z.url().default("https://placehold.co/800x800/png?text=No+Image"),
   JWT_SECRET: z
@@ -35,6 +38,21 @@ const envSchema = z.object({
   // every environment except wherever alerts actually need to fire.
   SENTRY_DSN: z.string().default(""),
   SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0.1),
+  ADMIN_WALLETS: z.string().default(""),
+}).superRefine((env, ctx) => {
+  if (env.NODE_ENV !== "production") return;
+  for (const key of ["METRICS_API_KEY", "SUPABASE_SERVICE_ROLE_KEY"] as const) {
+    if (!env[key].trim()) ctx.addIssue({ code: "custom", path: [key], message: `${key} is required in production` });
+  }
+  const origins = env.ALLOWED_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean);
+  if (!origins.length || origins.some((origin) => {
+    try { return new URL(origin).protocol !== "https:"; } catch { return true; }
+  })) {
+    ctx.addIssue({ code: "custom", path: ["ALLOWED_ORIGINS"], message: "ALLOWED_ORIGINS must contain only valid https:// origins in production" });
+  }
+  if (env.INTEGRATOR_API_KEY_PEPPER === "development-only-integrator-pepper-change-me") {
+    ctx.addIssue({ code: "custom", path: ["INTEGRATOR_API_KEY_PEPPER"], message: "INTEGRATOR_API_KEY_PEPPER must be private in production" });
+  }
 });
 
 const parsedEnv = envSchema.safeParse(process.env);
@@ -58,11 +76,13 @@ validateContractWatcherConfig(
 export const config = {
   port: env.PORT,
   nodeEnv: env.NODE_ENV,
-  allowedOrigins: (process.env.ALLOWED_ORIGINS || "http://localhost:3000").split(",").map(origin => origin.trim()),
+  allowedOrigins: env.ALLOWED_ORIGINS.split(",").map(origin => origin.trim()),
   redisUrl: env.REDIS_URL,
   runWorkers: env.RUN_WORKERS,
   runContractWatcher: env.RUN_CONTRACT_WATCHER,
   metricsApiKey: env.METRICS_API_KEY,
+  integratorApiKeyPepper: env.INTEGRATOR_API_KEY_PEPPER,
+  integratorMonthlyQuota: env.INTEGRATOR_MONTHLY_QUOTA,
   supabaseUrl: env.SUPABASE_URL,
   supabaseAnonKey: env.SUPABASE_ANON_KEY,
   supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
@@ -75,4 +95,7 @@ export const config = {
   wsPath: env.WS_PATH,
   sentryDsn: env.SENTRY_DSN,
   sentryTracesSampleRate: env.SENTRY_TRACES_SAMPLE_RATE,
+  adminWallets: env.ADMIN_WALLETS.split(",")
+    .map((w) => w.trim().toUpperCase())
+    .filter(Boolean),
 };

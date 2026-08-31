@@ -21,7 +21,7 @@ router.post("/", requireWallet, async (req: WalletRequest, res, next) => {
         ? (req.body.variables as Record<string, unknown>)
         : {};
 
-    const result = await executeGraphQL(query, variables, req.walletAddress);
+    const result = await executeGraphQL(query, variables, req.walletAddress, req.walletRole);
     res.status(200).json(result);
   } catch (error) {
     next(error);

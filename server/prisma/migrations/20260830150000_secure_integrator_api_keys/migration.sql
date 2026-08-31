@@ -1,0 +1,2 @@
+ALTER TABLE "integrator_api_keys"
+ADD COLUMN "expires_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP + INTERVAL '1 year');

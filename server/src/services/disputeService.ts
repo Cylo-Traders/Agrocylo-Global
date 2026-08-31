@@ -2,6 +2,7 @@ import { prisma } from "../config/database.js";
 import { EvidenceStorageService } from "./evidenceStorageService.js";
 import { ApiError, NotFoundError } from "../http/errors.js";
 import logger from "../config/logger.js";
+import { DisputeStatus } from "../constants/status.js";
 
 export class DisputeService {
   /**
@@ -112,7 +113,7 @@ export class DisputeService {
       throw new ApiError(403, "Forbidden", "Only dispute participants can submit evidence");
     }
 
-    if (dispute.status === "Resolved" || dispute.status === "Dismissed") {
+    if (dispute.status === DisputeStatus.RESOLVED || dispute.status === DisputeStatus.DISMISSED) {
       throw new ApiError(409, "Conflict", `Cannot submit evidence to a ${dispute.status.toLowerCase()} dispute`);
     }
 

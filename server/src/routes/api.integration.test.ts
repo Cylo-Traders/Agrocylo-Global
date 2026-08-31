@@ -104,7 +104,11 @@ describe('Auth endpoints', () => {
   });
 
   it('POST /auth/nonce returns 200 when authService resolves', async () => {
-    vi.mocked(authService.generateNonce).mockResolvedValue({ nonce: 'abc123' });
+    vi.mocked(authService.generateNonce).mockResolvedValue({
+      nonce: 'abc123',
+      message: 'structured-message',
+      expiresAt: new Date(Date.now() + 300_000).toISOString(),
+    });
     const res = await request(app).post('/auth/nonce').send({ walletAddress: 'GTEST' });
     expect(res.status).toBe(200);
     expect(res.body.nonce).toBe('abc123');

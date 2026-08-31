@@ -7,17 +7,12 @@ import { config } from "../config/index.js";
  */
 export function requireMetricsAuth(req: Request, res: Response, next: NextFunction): void {
   const expected = config.metricsApiKey;
-  if (!expected) {
-    next();
-    return;
-  }
-
   const headerKey = req.header("x-metrics-api-key");
   const auth = req.header("authorization");
   const bearer =
     auth?.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : undefined;
 
-  if (headerKey === expected || bearer === expected) {
+  if (expected && (headerKey === expected || bearer === expected)) {
     next();
     return;
   }

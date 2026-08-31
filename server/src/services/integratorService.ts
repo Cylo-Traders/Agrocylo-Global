@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { prisma } from "../config/database.js";
 import { ApiError, NotFoundError, ValidationError } from "../http/errors.js";
 import { hashApiKey } from "../middleware/integratorAuth.js";
+import { CampaignStatus, OrderStatus } from "../constants/status.js";
 
 export interface IntegratorScope {
   organizationName: string;
@@ -10,6 +11,7 @@ export interface IntegratorScope {
 }
 
 const MAX_PAGE_SIZE = 200;
+const DEFAULT_KEY_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000;
 
 function generateRawKey(): string {
   // 32 bytes of entropy, hex-encoded; only ever returned once at creation.
@@ -44,6 +46,7 @@ export class IntegratorService {
         scopedFarmerWallets: scopedFarmerWallets ?? [],
         scopedRegion: scopedRegion ?? null,
         createdByAdmin,
+        expiresAt: new Date(Date.now() + DEFAULT_KEY_LIFETIME_MS),
       },
     });
 
@@ -62,6 +65,7 @@ export class IntegratorService {
         scopedRegion: true,
         createdByAdmin: true,
         revokedAt: true,
+        expiresAt: true,
         lastUsedAt: true,
         createdAt: true,
       },
@@ -104,7 +108,7 @@ export class IntegratorService {
 
     const [profiles, campaigns] = await Promise.all([
       prisma.profile.findMany({
-        where: { wallet_address: { in: wallets }, role: "FARMER" },
+        where: { walletAddress: { in: wallets }, role: "FARMER" },
         include: { location: true },
       }),
       prisma.campaign.findMany({
@@ -120,14 +124,14 @@ export class IntegratorService {
     }
 
     return profiles.map((p) => {
-      const farmerCampaigns = campaignsByFarmer.get(p.wallet_address) ?? [];
+      const farmerCampaigns = campaignsByFarmer.get((p as any).walletAddress ?? (p as any).wallet_address) ?? [];
       return {
-        farmerWallet: p.wallet_address,
+        farmerWallet: (p as any).walletAddress ?? (p as any).wallet_address,
         displayName: p.name ?? null,
         region: p.location ? [p.location.city, p.location.country].filter(Boolean).join(", ") : null,
         totalCampaigns: farmerCampaigns.length,
-        settledCampaigns: farmerCampaigns.filter((c) => c.status === "SETTLED").length,
-        activeCampaigns: farmerCampaigns.filter((c) => c.status === "ACTIVE").length,
+        settledCampaigns: farmerCampaigns.filter((c) => c.status === CampaignStatus.SETTLED).length,
+        activeCampaigns: farmerCampaigns.filter((c) => c.status === CampaignStatus.ACTIVE).length,
       };
     });
   }
@@ -151,8 +155,8 @@ export class IntegratorService {
     for (const o of orders) {
       const entry = bySeller.get(o.sellerAddress) ?? { total: 0, completed: 0, refunded: 0, pending: 0 };
       entry.total += 1;
-      if (o.status === "COMPLETED") entry.completed += 1;
-      else if (o.status === "REFUNDED") entry.refunded += 1;
+      if (o.status === OrderStatus.COMPLETED) entry.completed += 1;
+      else if (o.status === OrderStatus.REFUNDED) entry.refunded += 1;
       else entry.pending += 1;
       bySeller.set(o.sellerAddress, entry);
     }
@@ -184,14 +188,14 @@ async function resolveScopedWallets(scope: IntegratorScope): Promise<string[]> {
         { country: { equals: scope.scopedRegion, mode: "insensitive" } },
       ],
     },
-    select: { wallet_address: true, city: true, country: true },
+    select: { walletAddress: true, city: true, country: true },
   });
   return locations
     .filter(
       (l) =>
-        l.city?.toLowerCase() === region || l.country?.toLowerCase() === region,
+        (l as any).city?.toLowerCase() === region || (l as any).country?.toLowerCase() === region,
     )
-    .map((l) => l.wallet_address);
+    .map((l) => (l as any).walletAddress ?? (l as any).wallet_address);
 }
 
 /** Serializes a list of flat records to CSV (Issue #662: CSV + JSON output). */

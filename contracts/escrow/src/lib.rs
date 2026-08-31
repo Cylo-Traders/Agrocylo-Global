@@ -265,7 +265,6 @@ const DEFAULT_FEE_RATE_BPS: u32 = 300;
 /// Slippage tolerance used before `set_max_slippage_bps` has ever been called.
 const DEFAULT_MAX_SLIPPAGE_BPS: u32 = 100; // 1%
 
-
 fn read_max_slippage_bps(env: &Env) -> u32 {
     env.storage()
         .instance()
@@ -530,10 +529,18 @@ fn resolve_escrow_dispute_internal(
     // Issue #848: Token transfers happen LAST, after all state is finalized
     let token_client = token::Client::new(env, &order.token);
     if refund_amount > 0 {
-        token_client.transfer(&env.current_contract_address(), &order.buyer, &refund_amount);
+        token_client.transfer(
+            &env.current_contract_address(),
+            &order.buyer,
+            &refund_amount,
+        );
     }
     if release_amount > 0 {
-        token_client.transfer(&env.current_contract_address(), &order.farmer, &release_amount);
+        token_client.transfer(
+            &env.current_contract_address(),
+            &order.farmer,
+            &release_amount,
+        );
     }
 
     report_reputation_outcome(env, &order.farmer, Some(buyer_share_bps));
@@ -594,13 +601,16 @@ fn require_governed_caller(env: &Env, caller: &Address) -> Result<(), EscrowErro
 }
 
 fn require_not_paused(env: &Env) -> Result<(), EscrowError> {
-    if env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
+    if env
+        .storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
+    {
         return Err(EscrowError::ContractPaused);
     }
     Ok(())
 }
-
-
 
 #[contract]
 pub struct EscrowContract;
@@ -617,6 +627,10 @@ impl EscrowContract {
         if storage.has(&DataKey::Admin) {
             return Err(EscrowError::AlreadyInitialized);
         }
+        // Issue #843: initialize() must require the admin's authorization so a
+        // front-runner who never signed cannot seize admin on a fresh deploy.
+        // Mirrors production_escrow/weather-insurance.
+        admin.require_auth();
         // Issue #849: Check is_empty() FIRST before len() < 2, or remove the dead TokenWhitelistEmpty variant
         // Since the requirement is "MustSupportTwoTokens", we remove the redundant empty check
         if supported_tokens.len() < 2 {
@@ -1208,7 +1222,12 @@ impl EscrowContract {
             storage.extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
 
             // Record refund for later execution
-            refunds.push_back((order_id, order.buyer.clone(), order.token.clone(), order.amount));
+            refunds.push_back((
+                order_id,
+                order.buyer.clone(),
+                order.token.clone(),
+                order.amount,
+            ));
         }
 
         // Issue #848: ALL token transfers happen LAST, after all state is finalized

@@ -10,8 +10,20 @@ const isTest = process.env['NODE_ENV'] === 'test';
 const shouldSkipInTest = () => isTest && process.env['ENABLE_TEST_RATE_LIMIT'] !== 'true';
 
 // Initialize shared Redis client for all rate limiters
-let rateLimitStore: ReturnType<typeof createRateLimitStore> | null = null;
+// NOTE: Each limiter gets its own store instance so Store.init(options) can
+// capture the correct windowMs per limiter (fix for the 60s-everywhere bug).
+// Sharing a single store would cause the last init() to overwrite earlier
+// windows, e.g. auth's 15 min becoming 1 min.
 export let sharedRedisClient: Redis | null = null;
+
+function createStoreForLimiter(): ReturnType<typeof createRateLimitStore> | undefined {
+  if (!sharedRedisClient) return undefined;
+  return createRateLimitStore(sharedRedisClient);
+}
+
+// Legacy single store kept for backwards compatibility (e.g. tests, app.ts
+// idempotency import). Prefer createStoreForLimiter() for new limiters.
+let rateLimitStore: ReturnType<typeof createRateLimitStore> | null = null;
 
 try {
   sharedRedisClient = new Redis(config.redisUrl, {
@@ -41,6 +53,8 @@ try {
     throw new Error('CRITICAL: Rate limiting requires Redis in production. Set REDIS_URL environment variable.');
   }
 }
+
+export { rateLimitStore };
 
 function rateLimitHandler(req: Request, res: Response): void {
   logger.warn('[RateLimit] Request throttled', {
@@ -87,8 +101,22 @@ export const authRateLimiter = rateLimit({
   legacyHeaders: false,
   handler: rateLimitHandler,
   skip: shouldSkipInTest,
-  store: rateLimitStore || undefined,
+  // Cast to any — our Redis store is structurally compatible with express-rate-limit's Store
+  store: (createStoreForLimiter() as any) || undefined,
   keyGenerator: (req: Request) => `auth:${req.ip}`,
+});
+
+// A separate target-wallet limit prevents distributed callers from repeatedly
+// replacing a victim's sign-in challenge. generateNonce also reuses a live nonce.
+export const nonceWalletRateLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  limit: 5,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  handler: rateLimitHandler,
+  skip: shouldSkipInTest,
+  store: (createStoreForLimiter() as any) || undefined,
+  keyGenerator: (req: Request) => `auth-wallet:${String(req.body?.walletAddress ?? '').toUpperCase()}`,
 });
 
 /**
@@ -115,7 +143,7 @@ export const uploadRateLimiter = rateLimit({
   legacyHeaders: false,
   handler: rateLimitHandler,
   skip: shouldSkipInTest,
-  store: rateLimitStore || undefined,
+  store: (createStoreForLimiter() as any) || undefined,
   keyGenerator: (req: Request) => `upload:${req.ip}`,
 });
 
@@ -153,7 +181,7 @@ export const writeLimiter = rateLimit({
   legacyHeaders: false,
   handler: rateLimitHandler,
   skip: shouldSkipInTest,
-  store: rateLimitStore || undefined,
+  store: (createStoreForLimiter() as any) || undefined,
   keyGenerator: (req: Request) => `write:${req.ip}`,
 });
 

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import { prisma } from "../config/database.js";
 import logger from "../config/logger.js";
+import { config } from "../config/index.js";
 
 export interface IntegratorRequest extends Request {
   integratorApiKeyId?: string;
@@ -13,7 +14,7 @@ export interface IntegratorRequest extends Request {
 }
 
 export function hashApiKey(rawKey: string): string {
-  return crypto.createHash("sha256").update(rawKey).digest("hex");
+  return crypto.createHmac("sha256", config.integratorApiKeyPepper).update(rawKey).digest("hex");
 }
 
 /**
@@ -37,12 +38,25 @@ export async function requireIntegratorApiKey(
   try {
     const keyHash = hashApiKey(rawKey);
     const record = await prisma.integratorApiKey.findUnique({ where: { keyHash } });
-    if (!record || record.revokedAt) {
-      res.status(401).json({ message: "Invalid or revoked API key." });
+    if (!record || record.revokedAt || record.expiresAt <= new Date()) {
+      res.status(401).json({ message: "Invalid, revoked, or expired API key." });
       return;
     }
 
     req.integratorApiKeyId = record.id;
+    res.once("finish", () => recordIntegratorUsage(req, res));
+
+    const now = new Date();
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const usedThisMonth = await prisma.integratorApiKeyUsage.count({
+      where: { apiKeyId: record.id, requestedAt: { gte: monthStart } },
+    });
+    if (usedThisMonth >= config.integratorMonthlyQuota) {
+      const nextMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+      res.setHeader("Retry-After", Math.ceil((nextMonth.getTime() - now.getTime()) / 1000));
+      res.status(429).json({ message: "Monthly integrator API quota exceeded." });
+      return;
+    }
     req.integratorScope = {
       organizationName: record.organizationName,
       scopedFarmerWallets: record.scopedFarmerWallets,
@@ -65,7 +79,7 @@ export async function requireIntegratorApiKey(
 export function recordIntegratorUsage(
   req: IntegratorRequest,
   res: Response,
-  endpoint: string,
+  endpoint = `${req.baseUrl}${req.path}`,
 ): void {
   if (!req.integratorApiKeyId) return;
   prisma.integratorApiKeyUsage
