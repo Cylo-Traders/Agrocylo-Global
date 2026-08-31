@@ -1,15 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const TEST_JWT_SECRET = vi.hoisted(() => 'test-jwt-secret-at-least-32-characters-long!!');
+const mockAdminWallets = vi.hoisted(() => [] as string[]);
 
 vi.mock('../config/index.js', () => ({
-  config: { jwtSecret: TEST_JWT_SECRET },
+  config: { jwtSecret: TEST_JWT_SECRET, adminWallets: mockAdminWallets },
 }));
 
 vi.mock('../config/database.js', () => ({
   prisma: {
     nonce: { upsert: vi.fn(), findUnique: vi.fn(), delete: vi.fn() },
     refreshToken: { create: vi.fn(), findUnique: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
+    user: { findUnique: vi.fn(), upsert: vi.fn() },
+    profile: { findUnique: vi.fn() },
   },
 }));
 
@@ -22,6 +25,7 @@ vi.mock('@stellar/stellar-sdk', () => ({
 import { buildSignInMessage, generateNonce, verifySignature, refreshAccessToken, logout } from './authService.js';
 import { prisma } from '../config/database.js';
 import { Keypair } from '@stellar/stellar-sdk';
+import jwt from 'jsonwebtoken';
 
 const mockNonceUpsert = vi.mocked(prisma.nonce.upsert);
 const mockNonceFindUnique = vi.mocked(prisma.nonce.findUnique);
@@ -31,6 +35,8 @@ const mockRefreshTokenFindUnique = vi.mocked(prisma.refreshToken.findUnique);
 const mockRefreshTokenDelete = vi.mocked(prisma.refreshToken.delete);
 const mockRefreshTokenDeleteMany = vi.mocked(prisma.refreshToken.deleteMany);
 const mockFromPublicKey = vi.mocked(Keypair.fromPublicKey);
+const mockUserFindUnique = vi.mocked(prisma.user.findUnique);
+const mockProfileFindUnique = vi.mocked((prisma as any).profile.findUnique);
 
 const VALID_WALLET = 'GBSOMEWALLET123456';
 const FUTURE_DATE_OBJ = new Date(Date.now() + 60_000);
@@ -49,6 +55,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockFromPublicKey.mockReturnValue({ verify: vi.fn().mockReturnValue(true) } as any);
   mockNonceFindUnique.mockResolvedValue(null);
+  mockUserFindUnique.mockResolvedValue(null);
+  mockProfileFindUnique.mockResolvedValue(null);
+  mockAdminWallets.length = 0;
 });
 
 describe('generateNonce', () => {
@@ -200,5 +209,116 @@ describe('logout', () => {
     expect(mockRefreshTokenDeleteMany).toHaveBeenCalledWith({
       where: { token: expect.stringMatching(/^[a-f0-9]{64}$/) },
     });
+  });
+});
+
+describe('role resolution — JWT aligns with DB enum (FARMER|BUYER|ADMIN)', () => {
+  const ADMIN_WALLET = 'GADMIN123456789ADMIN123456789ADMIN123456789AB';
+  const FARMER_WALLET = 'GFARMER123456FARMER123456789FARMER123456789A';
+  const BUYER_WALLET = 'GBUYER123456789BUYER123456789BUYER123456789AB';
+
+  function validChallengeFor(wallet: string) {
+    return { nonce: 'some-nonce', createdAt: ISSUED_AT, expiresAt: FUTURE_DATE_OBJ } as any;
+  }
+
+  it('admin wallet via ADMIN_WALLETS allowlist receives role ADMIN', async () => {
+    mockAdminWallets.push(ADMIN_WALLET);
+    const row = validChallengeFor(ADMIN_WALLET);
+    mockNonceFindUnique.mockResolvedValueOnce(row);
+    mockNonceDelete.mockResolvedValueOnce({} as any);
+    mockRefreshTokenCreate.mockResolvedValueOnce({} as any);
+
+    const msg = buildSignInMessage(ADMIN_WALLET, row.nonce, row.createdAt, row.expiresAt);
+    const { accessToken } = await verifySignature(ADMIN_WALLET, 'dGVzdA==', msg);
+    const decoded = jwt.verify(accessToken, TEST_JWT_SECRET) as any;
+    expect(decoded.role).toBe('ADMIN');
+    expect(decoded.walletAddress).toBe(ADMIN_WALLET);
+  });
+
+  it('admin wallet via users.role ADMIN receives role ADMIN', async () => {
+    mockUserFindUnique.mockResolvedValueOnce({ role: 'ADMIN' } as any);
+    const row = validChallengeFor(ADMIN_WALLET);
+    mockNonceFindUnique.mockResolvedValueOnce(row);
+    mockNonceDelete.mockResolvedValueOnce({} as any);
+    mockRefreshTokenCreate.mockResolvedValueOnce({} as any);
+
+    const msg = buildSignInMessage(ADMIN_WALLET, row.nonce, row.createdAt, row.expiresAt);
+    const { accessToken } = await verifySignature(ADMIN_WALLET, 'dGVzdA==', msg);
+    const decoded = jwt.verify(accessToken, TEST_JWT_SECRET) as any;
+    expect(decoded.role).toBe('ADMIN');
+  });
+
+  it('farmer wallet via profile.role FARMER receives role FARMER', async () => {
+    mockUserFindUnique.mockResolvedValueOnce(null);
+    mockProfileFindUnique.mockResolvedValueOnce({ role: 'FARMER' } as any);
+    const row = validChallengeFor(FARMER_WALLET);
+    mockNonceFindUnique.mockResolvedValueOnce(row);
+    mockNonceDelete.mockResolvedValueOnce({} as any);
+    mockRefreshTokenCreate.mockResolvedValueOnce({} as any);
+
+    const msg = buildSignInMessage(FARMER_WALLET, row.nonce, row.createdAt, row.expiresAt);
+    const { accessToken } = await verifySignature(FARMER_WALLET, 'dGVzdA==', msg);
+    const decoded = jwt.verify(accessToken, TEST_JWT_SECRET) as any;
+    expect(decoded.role).toBe('FARMER');
+  });
+
+  it('non-admin wallet defaults to BUYER, not legacy USER', async () => {
+    mockUserFindUnique.mockResolvedValueOnce(null);
+    mockProfileFindUnique.mockResolvedValueOnce(null);
+    const row = validChallengeFor(BUYER_WALLET);
+    mockNonceFindUnique.mockResolvedValueOnce(row);
+    mockNonceDelete.mockResolvedValueOnce({} as any);
+    mockRefreshTokenCreate.mockResolvedValueOnce({} as any);
+
+    const msg = buildSignInMessage(BUYER_WALLET, row.nonce, row.createdAt, row.expiresAt);
+    const { accessToken } = await verifySignature(BUYER_WALLET, 'dGVzdA==', msg);
+    const decoded = jwt.verify(accessToken, TEST_JWT_SECRET) as any;
+    expect(decoded.role).toBe('BUYER');
+    expect(decoded.role).not.toBe('USER');
+    expect(['FARMER', 'BUYER', 'ADMIN']).toContain(decoded.role);
+  });
+
+  it('refreshAccessToken reflects current DB role (admin → admin, non-admin → buyer)', async () => {
+    // First: admin via allowlist
+    mockAdminWallets.push(ADMIN_WALLET);
+    mockRefreshTokenFindUnique.mockResolvedValueOnce({
+      walletAddress: ADMIN_WALLET,
+      expiresAt: FUTURE_DATE_OBJ,
+    } as any);
+    mockRefreshTokenDelete.mockResolvedValueOnce({} as any);
+    mockRefreshTokenCreate.mockResolvedValueOnce({} as any);
+    const adminResult = await refreshAccessToken('admin-refresh');
+    const adminDecoded = jwt.verify(adminResult.accessToken, TEST_JWT_SECRET) as any;
+    expect(adminDecoded.role).toBe('ADMIN');
+
+    // Second: same wallet after removal from allowlist and DB demoted → BUYER
+    mockAdminWallets.length = 0;
+    mockUserFindUnique.mockResolvedValueOnce({ role: 'BUYER' } as any);
+    mockProfileFindUnique.mockResolvedValueOnce(null);
+    mockRefreshTokenFindUnique.mockResolvedValueOnce({
+      walletAddress: ADMIN_WALLET,
+      expiresAt: FUTURE_DATE_OBJ,
+    } as any);
+    mockRefreshTokenDelete.mockResolvedValueOnce({} as any);
+    mockRefreshTokenCreate.mockResolvedValueOnce({} as any);
+    const buyerResult = await refreshAccessToken('same-wallet-now-buyer');
+    const buyerDecoded = jwt.verify(buyerResult.accessToken, TEST_JWT_SECRET) as any;
+    expect(buyerDecoded.role).toBe('BUYER');
+  });
+
+  it('never issues JWT with legacy USER role', async () => {
+    const wallets = [ADMIN_WALLET, FARMER_WALLET, BUYER_WALLET];
+    for (const w of wallets) {
+      mockUserFindUnique.mockResolvedValueOnce(null);
+      mockProfileFindUnique.mockResolvedValueOnce(null);
+      const row = validChallengeFor(w);
+      mockNonceFindUnique.mockResolvedValueOnce(row);
+      mockNonceDelete.mockResolvedValueOnce({} as any);
+      mockRefreshTokenCreate.mockResolvedValueOnce({} as any);
+      const msg = buildSignInMessage(w, row.nonce, row.createdAt, row.expiresAt);
+      const { accessToken } = await verifySignature(w, 'dGVzdA==', msg);
+      const decoded = jwt.verify(accessToken, TEST_JWT_SECRET) as any;
+      expect(decoded.role).not.toBe('USER');
+    }
   });
 });

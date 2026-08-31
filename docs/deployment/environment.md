@@ -76,6 +76,7 @@ Validated by a Zod schema in [`server/src/config/index.ts`](../../server/src/con
 | `SENTRY_DSN` | | `""` | Error reporting (blank = disabled) |
 | `SENTRY_TRACES_SAMPLE_RATE` | | `0.1` | |
 | `ALLOWED_ORIGINS` | ✅ prod | `http://localhost:3000` | Comma-separated CORS origins; HTTPS only in production |
+| `ADMIN_WALLETS` | | `""` | Comma-separated Stellar public keys that receive `ADMIN` JWTs on login. See [`admin.md`](./admin.md). |
 | `PORT`, `NODE_ENV` | | `5000` / `development` | Log level is derived from `NODE_ENV`, not a separate var |
 
 ### `client/` (marketplace frontend, port 3000)
