@@ -7,18 +7,20 @@
 //! actual contract code and report any discrepancies between the expected
 //! pause-gating matrix and the real implementation.
 
+// Documentation-style test module: literal-bool asserts, const emptiness
+// checks, and `println!` progress lines are intentional here.
+#![allow(
+    clippy::bool_assert_comparison,
+    clippy::const_is_empty,
+    clippy::println_empty_string
+)]
+
 extern crate std;
 use std::{format, println};
 
-use soroban_sdk::{
-    testutils::Address as _,
-    Address, Env, Vec,
-};
+use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
 
-use crate::{
-    ProductionEscrowContract,
-    ProductionEscrowContractClient,
-};
+use crate::{ProductionEscrowContract, ProductionEscrowContractClient};
 
 // -----------------------------------------------------------------------
 // Pause-Gating Matrix
@@ -33,7 +35,11 @@ use crate::{
 
 const PAUSE_GATING_MATRIX: &[(&str, bool, &str)] = &[
     // production_escrow: PAUSE-GATED entry points (fund-moving mutations)
-    ("create_campaign", true, "Farmers cannot start campaigns while paused"),
+    (
+        "create_campaign",
+        true,
+        "Farmers cannot start campaigns while paused",
+    ),
     ("invest", true, "Investors cannot fund while paused"),
     ("start_production", true, "Production advances blocked"),
     ("mark_harvest", true, "Harvest claims blocked"),
@@ -46,15 +52,26 @@ const PAUSE_GATING_MATRIX: &[(&str, bool, &str)] = &[
     ("resolve_dispute", true, "Dispute resolution blocked"),
     ("batch_refund_investors", true, "Batch refunds blocked"),
     ("batch_refund_orders", true, "Batch refunds blocked"),
-
     // production_escrow: NOT pause-gated (governance, reads, setters)
     ("initialize", false, "Initialization (bootstrap only)"),
-    ("upgrade", false, "Upgrade is governance-gated, not pause-gated"),
-    ("set_guardian", false, "Setting guardian is governance-gated, not pause-gated"),
+    (
+        "upgrade",
+        false,
+        "Upgrade is governance-gated, not pause-gated",
+    ),
+    (
+        "set_guardian",
+        false,
+        "Setting guardian is governance-gated, not pause-gated",
+    ),
     ("pause", false, "Pause itself must always be callable"),
     ("unpause", false, "Unpause itself must always be callable"),
     ("is_paused", false, "Read-only view"),
-    ("migrate", false, "Migration is governance-gated, not pause-gated"),
+    (
+        "migrate",
+        false,
+        "Migration is governance-gated, not pause-gated",
+    ),
     ("get_schema_version", false, "Read-only view"),
     ("get_guardian", false, "Read-only view"),
     ("set_registry_contract", false, "Governance-gated setter"),
@@ -69,17 +86,45 @@ const PAUSE_GATING_MATRIX: &[(&str, bool, &str)] = &[
     ("get_admin", false, "Read-only view"),
     ("get_campaign", false, "Read-only view"),
     ("get_split_order", false, "Read-only view"),
-    ("cancel_order", false, "Read-only state check (no funds moved)"),
-    ("confirm_split_receipt", false, "Cross-contract call gating (not pause-gated)"),
-    ("open_split_dispute", false, "Dispute (may be pause-gated; see code review)"),
-    ("resolve_split_dispute", false, "Dispute (may be pause-gated; see code review)"),
-    ("finalize_failed", false, "Cleanup operation (may remain during pause)"),
+    (
+        "cancel_order",
+        false,
+        "Read-only state check (no funds moved)",
+    ),
+    (
+        "confirm_split_receipt",
+        false,
+        "Cross-contract call gating (not pause-gated)",
+    ),
+    (
+        "open_split_dispute",
+        false,
+        "Dispute (may be pause-gated; see code review)",
+    ),
+    (
+        "resolve_split_dispute",
+        false,
+        "Dispute (may be pause-gated; see code review)",
+    ),
+    (
+        "finalize_failed",
+        false,
+        "Cleanup operation (may remain during pause)",
+    ),
     ("refundable_amount", false, "Read-only calculation"),
-    ("transfer_investment", false, "Internal operation (not exposed?)"),
+    (
+        "transfer_investment",
+        false,
+        "Internal operation (not exposed?)",
+    ),
     ("set_arbitrators", false, "Admin/governance setter"),
     ("get_arbitrators", false, "Read-only view"),
     ("get_quorum", false, "Read-only view"),
-    ("vote_to_resolve", false, "Governance flow (not pause-gated?)"),
+    (
+        "vote_to_resolve",
+        false,
+        "Governance flow (not pause-gated?)",
+    ),
 ];
 
 #[test]
@@ -87,7 +132,10 @@ fn test_pause_gating_matrix_documents_all_entry_points() {
     // This test simply verifies that the pause-gating matrix exists and is formatted correctly.
     // It's a sanity check that the matrix is well-formed (not an actual behavior test).
 
-    assert!(!PAUSE_GATING_MATRIX.is_empty(), "Pause-gating matrix should not be empty");
+    assert!(
+        !PAUSE_GATING_MATRIX.is_empty(),
+        "Pause-gating matrix should not be empty"
+    );
 
     // Verify no duplicate entry points in the matrix
     let mut names = std::collections::HashSet::new();
@@ -161,7 +209,9 @@ fn test_pause_blocks_create_campaign() {
         Err(e) => {
             let err_str = format!("{:?}", e);
             assert!(
-                err_str.contains("ContractPaused") || err_str.contains("Paused") || err_str.contains("paused"),
+                err_str.contains("ContractPaused")
+                    || err_str.contains("Paused")
+                    || err_str.contains("paused"),
                 "Expected 'Paused' error, got: {}",
                 err_str
             );
@@ -193,25 +243,26 @@ fn test_unpause_allows_create_campaign() {
         Err(e) => {
             let err_str = format!("{:?}", e);
             assert!(
-                !err_str.contains("ContractPaused") && !err_str.contains("Paused") && !err_str.contains("paused"),
+                !err_str.contains("ContractPaused")
+                    && !err_str.contains("Paused")
+                    && !err_str.contains("paused"),
                 "Got Paused error after unpause (should have different error). Error: {}",
                 err_str
             );
-            println!("✓ create_campaign not blocked by pause after unpause (failed with: {})", err_str);
+            println!(
+                "✓ create_campaign not blocked by pause after unpause (failed with: {})",
+                err_str
+            );
         }
     }
 }
 
 #[test]
 fn test_is_paused_returns_correct_status() {
-    let (env, client, admin) = setup_paused_env();
+    let (_env, client, admin) = setup_paused_env();
 
     // Immediately after setup, should be paused
-    assert_eq!(
-        client.is_paused(),
-        true,
-        "is_paused should return true"
-    );
+    assert_eq!(client.is_paused(), true, "is_paused should return true");
     println!("✓ is_paused correctly reports paused=true");
 
     // Unpause
@@ -232,8 +283,14 @@ fn test_pause_gating_documented_entry_points_exist() {
     // It's a sanity check to ensure the documentation is kept in sync with the code.
 
     println!("Entry points documented in pause-gating matrix:");
-    let gated_count = PAUSE_GATING_MATRIX.iter().filter(|(_, gated, _)| *gated).count();
-    let not_gated_count = PAUSE_GATING_MATRIX.iter().filter(|(_, gated, _)| !*gated).count();
+    let gated_count = PAUSE_GATING_MATRIX
+        .iter()
+        .filter(|(_, gated, _)| *gated)
+        .count();
+    let not_gated_count = PAUSE_GATING_MATRIX
+        .iter()
+        .filter(|(_, gated, _)| !*gated)
+        .count();
 
     println!("  Pause-gated: {}", gated_count);
     println!("  Not pause-gated: {}", not_gated_count);

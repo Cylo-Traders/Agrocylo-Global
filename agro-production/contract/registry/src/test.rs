@@ -502,7 +502,8 @@ fn test_link_batch_to_order_duplicate_link_rejected() {
 
 #[test]
 fn test_mint_batch_unauthorized_source_rejected() {
-    let (env, client, _, _, production_contract, unauthorized_contract, farmer_one, _) = setup_test();
+    let (env, client, _, _, production_contract, unauthorized_contract, farmer_one, _) =
+        setup_test();
     client.register_farmer(&farmer_one);
     client.register_campaign(&production_contract, &1, &farmer_one, &None);
 

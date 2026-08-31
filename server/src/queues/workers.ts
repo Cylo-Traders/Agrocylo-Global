@@ -1,3 +1,4 @@
+import { Worker, QueueEvents } from "bullmq";
 import logger from "../config/logger.js";
 import { runWithLogContext } from "../config/logContext.js";
 import { createRedisConnection, type ConnectionOptions } from "./connection.js";
@@ -7,11 +8,6 @@ import { processNotifications } from "./processors/notifications.js";
 import { processReconciliation } from "./processors/reconciliation.js";
 import { queueJobLagSeconds, queueJobFailuresTotal } from "../services/promMetrics.js";
 import { captureAlert } from "../config/sentry.js";
-
-const { Worker, QueueEvents } = require("bullmq") as {
-  Worker: any;
-  QueueEvents: any;
-};
 
 type RunningWorkers = {
   workers: any[];

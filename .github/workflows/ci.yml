@@ -140,14 +140,19 @@ jobs:
 
       - name: Lint
         run: npm run lint
-        continue-on-error: true
 
       - name: Format check
         run: npm run format:check
-        continue-on-error: true
 
       - name: Type check
         run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+        continue-on-error: true
 
       - name: Test with coverage
         run: npm run test:coverage
@@ -234,10 +239,15 @@ jobs:
           path: target
           key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Run fast cargo check
-        run: cargo check --workspace --all-targets --target wasm32v1-none
+      # Two separate checks: the deployable contract crates must compile for
+      # the on-chain target (wasm32v1-none, no_std), and the test code must
+      # compile for the host. `--all-targets` cannot be combined with
+      # `--target wasm32v1-none` — test/bench targets pull in `std`, which
+      # that target has no crate for (E0463).
+      - name: Check contracts compile for wasm (deploy target)
+        run: cargo check --workspace --target wasm32v1-none
 
-      - name: Build tests (no-run)
+      - name: Build tests (no-run, host target)
         run: cargo test --workspace --no-run
 
       - name: Run cargo fmt

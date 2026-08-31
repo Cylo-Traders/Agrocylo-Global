@@ -1,7 +1,7 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, BytesN,
-    Env, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env,
+    Vec,
 };
 
 #[contracterror]
@@ -170,13 +170,13 @@ fn check_plausibility_bounds(param: &WeatherParam, value: i128) -> Result<(), In
     match param {
         WeatherParam::Rainfall => {
             // Rainfall in mm (cannot be negative, sane upper limit 10,000 mm)
-            if value < 0 || value > 10_000 {
+            if !(0..=10_000).contains(&value) {
                 return Err(InsuranceError::ReportedValueOutOfBounds);
             }
         }
         WeatherParam::Temperature => {
             // Temperature in degrees Celsius (sane range -100 to 100)
-            if value < -100 || value > 100 {
+            if !(-100..=100).contains(&value) {
                 return Err(InsuranceError::ReportedValueOutOfBounds);
             }
         }
@@ -213,7 +213,9 @@ impl WeatherInsuranceContract {
 
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Oracles, &oracles);
-        env.storage().instance().set(&DataKey::OracleQuorum, &quorum);
+        env.storage()
+            .instance()
+            .set(&DataKey::OracleQuorum, &quorum);
         env.storage()
             .instance()
             .set(&DataKey::PremiumRateBps, &premium_rate_bps);
@@ -317,10 +319,8 @@ impl WeatherInsuranceContract {
             return Err(InsuranceError::AlreadyPaused);
         }
         env.storage().instance().set(&DataKey::Paused, &true);
-        env.events().publish(
-            (symbol_short!("insur"), symbol_short!("paused")),
-            (caller,),
-        );
+        env.events()
+            .publish((symbol_short!("insur"), symbol_short!("paused")), (caller,));
         Ok(())
     }
 
@@ -394,7 +394,9 @@ impl WeatherInsuranceContract {
         }
         bump_instance(&env);
         env.storage().instance().set(&DataKey::Oracles, &oracles);
-        env.storage().instance().set(&DataKey::OracleQuorum, &quorum);
+        env.storage()
+            .instance()
+            .set(&DataKey::OracleQuorum, &quorum);
         Ok(())
     }
 

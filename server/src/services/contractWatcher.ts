@@ -9,16 +9,16 @@ import { BlockchainEventIngestionService } from "./events/blockchainEventIngesti
 import { EscrowEventIngestionService } from "./events/escrowEventIngestionService.js";
 import { indexGovernanceEvent } from "./governanceService.js";
 import { captureAlert } from "../config/sentry.js";
-import {
-  contractWatcherEventsPerPoll,
-  contractWatcherPagesPerPoll,
-  contractWatcherUnhandledTotal,
-} from "./promMetrics.js";
-import { OrderStatus } from "../constants/status.js";
 
-export const POLL_INTERVAL_MS = 5_000;
-export const MAX_LEDGER_SPAN = 100;
-export const MAX_PAGES_PER_POLL = 50;
+/**
+ * Canonical ingestion pipeline: BlockchainTransaction (transactions table) is
+ * the single source of truth. EscrowEvent/EscrowTransaction are derived
+ * projections rebuilt from it — not a second parallel ingestion path.
+ * This eliminates the Promise.allSettled dual-write duplication and ensures
+ * replay idempotency via @@unique([ledger,eventIndex]).
+ */
+
+const POLL_INTERVAL_MS = 5_000;
 const CHECKPOINT_SERVICE_NAME = "contract-watcher";
 
 /**
@@ -668,7 +668,15 @@ export async function startContractWatcher(): Promise<void> {
   const contractIds = [contractId, governanceContractId].filter(Boolean) as string[];
   logger.info(`[ContractWatcher] Listening for events on contracts ${contractIds.join(", ")} from ledger ${lastLedger} (max span ${MAX_LEDGER_SPAN}, max pages ${MAX_PAGES_PER_POLL})`);
 
-  setInterval(async () => {
+  let running = false;
+
+  async function poll() {
+    if (running) {
+      logger.debug("[ContractWatcher] Previous poll still running, skipping this tick");
+      scheduleNext();
+      return;
+    }
+    running = true;
     try {
       const latestSeq = (await server.getLatestLedger()).sequence;
       const endLedger = Math.min(lastLedger + MAX_LEDGER_SPAN, latestSeq);
@@ -716,42 +724,63 @@ export async function startContractWatcher(): Promise<void> {
         }
 
         const isGovernanceEvent =
-          Boolean(governanceContractId) && String((event as any).contractId) === governanceContractId;
-        const decoded = isGovernanceEvent ? decodeEvent(event) : null;
-        const ingestionResults = await Promise.allSettled(
-          isGovernanceEvent && decoded
-            ? [
-                indexGovernanceEvent(
-                  decoded.action,
-                  decoded.data,
-                  (event as any).ledger,
-                  (event as any).transactionIndex,
-                ),
-              ]
-            : [
-                BlockchainEventIngestionService.ingestEvent(event),
-                EscrowEventIngestionService.ingestEvent(event),
-              ],
-        );
+          Boolean(governanceContractId) && String(event.contractId) === governanceContractId;
 
-        const failures = ingestionResults.filter((r) => r.status === "rejected");
-        if (failures.length > 0) {
-          for (const f of failures) {
-            logger.error("[ContractWatcher] Ingestion failed for event", {
-              error: f.status === "rejected" ? (f as any).reason : undefined,
-              ledger: (event as any).ledger,
+        if (isGovernanceEvent && decodeEvent(event)) {
+          const decoded = decodeEvent(event)!;
+          try {
+            await indexGovernanceEvent(
+              decoded.action,
+              decoded.data,
+              event.ledger,
+              event.transactionIndex,
+            );
+          } catch (err) {
+            logger.error("[ContractWatcher] Governance ingestion failed", {
+              error: err instanceof Error ? err.message : String(err),
+              ledger: event.ledger,
             });
+            captureAlert(
+              "contract_watcher_ingestion_failure",
+              `Governance ingestion failed at ledger ${event.ledger}, checkpoint advance halted`,
+              { ledger: event.ledger },
+            );
+            return;
           }
+          if (event.ledger >= maxProcessedLedger) maxProcessedLedger = event.ledger + 1;
+          continue;
+        }
+
+        // Canonical pipeline: single ingestion, idempotent via BlockchainTransaction @@unique
+        // Dead-lettered (validation) events are swallowed inside persist() and still advance checkpoint
+        try {
+          await BlockchainEventIngestionService.ingestEvent(event);
+        } catch (err) {
+          // Transient failures (DB, RPC) — halt checkpoint and retry next poll
+          // Validation/dead-letter failures are already handled inside persist() and would not throw
+          logger.error("[ContractWatcher] Ingestion failed for event", {
+            error: err instanceof Error ? err.message : String(err),
+            ledger: event.ledger,
+          });
           logger.error(
             `[ContractWatcher] Halting checkpoint advance at ledger ${(event as any).ledger} due to ingestion failure. Will retry on next poll.`,
           );
           captureAlert(
             "contract_watcher_ingestion_failure",
-            `Contract watcher ingestion failed at ledger ${(event as any).ledger}, checkpoint advance halted`,
-            { ledger: (event as any).ledger, failureCount: failures.length },
+            `Contract watcher ingestion failed at ledger ${event.ledger}, checkpoint advance halted`,
+            { ledger: event.ledger },
           );
           return;
         }
+
+        // Best-effort derived projection (does not block checkpoint). Failures are logged only.
+        // EscrowEvent/EscrowTransaction are rebuildable from canonical BlockchainTransaction.
+        void EscrowEventIngestionService.ingestEvent(event).catch((err) => {
+          logger.warn("[ContractWatcher] Derived Escrow projection failed (non-blocking)", {
+            error: err instanceof Error ? err.message : String(err),
+            ledger: event.ledger,
+          });
+        });
 
         if (!isGovernanceEvent) handleEvent(event);
 
@@ -770,6 +799,23 @@ export async function startContractWatcher(): Promise<void> {
         logger.info(`[ContractWatcher] Advanced checkpoint to ${lastLedger} after processing ${processedCount} events in ${pages} page(s)`);
       }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("startLedger must be within the retention window")) {
+        logger.warn(`[ContractWatcher] Retention window exceeded — resetting checkpoint to latest ledger`);
+        try {
+          const latest = (await server.getLatestLedger()).sequence;
+          lastLedger = latest;
+          await persistCheckpoint(lastLedger);
+          captureAlert(
+            "contract_watcher_retention_window_reset",
+            `Contract watcher checkpoint reset to ledger ${lastLedger} after retention window error`,
+            { checkpoint: lastLedger },
+          );
+        } catch (resetErr) {
+          logger.error("[ContractWatcher] Failed to reset checkpoint after retention error", resetErr);
+        }
+        return;
+      }
       logger.error("[ContractWatcher] Poll error", err);
       // Sentry groups identical errors into one issue, so a sustained RPC
       // outage polling every 5s doesn't need its own cooldown logic here —
@@ -778,6 +824,15 @@ export async function startContractWatcher(): Promise<void> {
       captureAlert("contract_watcher_poll_error", "Contract watcher poll iteration failed", {
         error: err instanceof Error ? err.message : String(err),
       });
+    } finally {
+      running = false;
+      scheduleNext();
     }
-  }, POLL_INTERVAL_MS);
+  }
+
+  function scheduleNext() {
+    setTimeout(poll, POLL_INTERVAL_MS);
+  }
+
+  scheduleNext();
 }

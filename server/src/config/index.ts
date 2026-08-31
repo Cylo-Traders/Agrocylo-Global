@@ -38,6 +38,7 @@ const envSchema = z.object({
   // every environment except wherever alerts actually need to fire.
   SENTRY_DSN: z.string().default(""),
   SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0.1),
+  ADMIN_WALLETS: z.string().default(""),
 }).superRefine((env, ctx) => {
   if (env.NODE_ENV !== "production") return;
   for (const key of ["METRICS_API_KEY", "SUPABASE_SERVICE_ROLE_KEY"] as const) {
@@ -94,4 +95,7 @@ export const config = {
   wsPath: env.WS_PATH,
   sentryDsn: env.SENTRY_DSN,
   sentryTracesSampleRate: env.SENTRY_TRACES_SAMPLE_RATE,
+  adminWallets: env.ADMIN_WALLETS.split(",")
+    .map((w) => w.trim().toUpperCase())
+    .filter(Boolean),
 };

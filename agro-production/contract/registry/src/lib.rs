@@ -118,8 +118,9 @@ pub enum DataKey {
 /// translate existing entries — see `docs/CONTRACT_UPGRADES.md`.
 const CURRENT_SCHEMA_VERSION: u32 = 1;
 
-const TTL_THRESHOLD: u32 = 1_000;
-const TTL_EXTEND: u32 = 100_000;
+// NOTE: registry persistent entries (Farmer/Campaign/Batch/Reputation) are not
+// currently TTL-extended on write — tracked separately. The unused
+// persistent-TTL constants were removed here to unblock `clippy -D warnings`.
 
 const INSTANCE_TTL_THRESHOLD: u32 = 1_000;
 const INSTANCE_TTL_EXTEND: u32 = 100_000;

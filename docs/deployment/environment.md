@@ -76,6 +76,7 @@ Validated by a Zod schema in [`server/src/config/index.ts`](../../server/src/con
 | `SENTRY_DSN` | | `""` | Error reporting (blank = disabled) |
 | `SENTRY_TRACES_SAMPLE_RATE` | | `0.1` | |
 | `ALLOWED_ORIGINS` | ✅ prod | `http://localhost:3000` | Comma-separated CORS origins; HTTPS only in production |
+| `ADMIN_WALLETS` | | `""` | Comma-separated Stellar public keys that receive `ADMIN` JWTs on login. See [`admin.md`](./admin.md). |
 | `PORT`, `NODE_ENV` | | `5000` / `development` | Log level is derived from `NODE_ENV`, not a separate var |
 
 ### `client/` (marketplace frontend, port 3000)
@@ -87,6 +88,7 @@ read by `sentry.*.config.ts`.
 |---|---|---|
 | `NEXT_PUBLIC_API_URL` | ✅ | Backend base URL (REST + Socket.io) |
 | `NEXT_PUBLIC_SOROBAN_RPC_URL` | ✅ | Soroban RPC (match passphrase) |
+| `NEXT_PUBLIC_HORIZON_URL` | | Horizon endpoint; overrides the per-network default in `src/lib/stellar.ts` |
 | `NEXT_PUBLIC_NETWORK_PASSPHRASE` | ✅ | App refuses to start if unset |
 | `NEXT_PUBLIC_STELLAR_NETWORK` | | `testnet` / `mainnet` selector |
 | `NEXT_PUBLIC_CONTRACT_ID` | ✅ | marketplace escrow contract |
