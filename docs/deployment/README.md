@@ -190,6 +190,15 @@ It checks:
 - Root client `/` returns 200
 - Agro client `/` returns 200
 
+## Admin bootstrapping
+
+Admin wallets are designated either via the `ADMIN_WALLETS` env allowlist or
+via the DB `users.role = 'ADMIN'` (managed by `npm run grant-admin -- G...`).
+See [`admin.md`](./admin.md) for the full source-of-truth, login flow, and
+revocation procedure. `authService` signs JWTs with the real DB-enum role
+`FARMER | BUYER | ADMIN` (never the legacy `USER` literal) and `requireAdmin`
+enforces both the JWT claim **and** a live DB cross-check.
+
 ## Access control
 
 | Action | Who |
