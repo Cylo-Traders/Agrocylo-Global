@@ -391,6 +391,7 @@ describe('Product and cart API endpoints', () => {
       expect.any(String),
       { id: 'p1' },
       'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      undefined,
     );
   });
 
