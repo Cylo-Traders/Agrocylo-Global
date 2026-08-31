@@ -10,6 +10,9 @@ vi.mock("@sentry/node", () => ({
   init: sentryInit,
   captureMessage,
   captureException: vi.fn(),
+  setTag: vi.fn(),
+  expressIntegration: vi.fn(),
+  setupExpressErrorHandler: vi.fn(),
 }));
 
 describe("sentry config — without a DSN configured", () => {

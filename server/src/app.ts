@@ -2,10 +2,9 @@ import express from "express";
 import type { Request, Response } from "express";
 import cors from "cors";
 import helmet from "helmet";
-import * as Sentry from "@sentry/node";
 import logger from "./config/logger.js";
 import { config } from "./config/index.js";
-import { initializeSentry, extractTraceContext, withSpan } from "./config/observability.js";
+import { initializeSentry } from "./config/observability.js";
 import { prisma } from "./config/database.js";
 import { getSupabaseAdmin } from "./config/supabase.js";
 import {
@@ -177,6 +176,10 @@ app.get("/health", async (_req: Request, res: Response) => {
 });
 
 app.use(metricsRoutes);
+
+// Sentry error handler (v8): captures errors with request context, then
+// forwards to the next handler — must be registered after all routes.
+Sentry.setupExpressErrorHandler(app);
 
 app.use(productImageErrorHandler);
 app.use(disputeUploadErrorHandler);
