@@ -149,6 +149,9 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
 
+      - name: Build
+        run: npm run build
+
       - name: Test with coverage
         run: npm run test:coverage
 

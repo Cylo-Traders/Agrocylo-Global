@@ -2,10 +2,9 @@ import express from "express";
 import type { Request, Response } from "express";
 import cors from "cors";
 import helmet from "helmet";
-import * as Sentry from "@sentry/node";
 import logger from "./config/logger.js";
 import { config } from "./config/index.js";
-import { initializeSentry, extractTraceContext, withSpan } from "./config/observability.js";
+import { initializeSentry } from "./config/observability.js";
 import { prisma } from "./config/database.js";
 import { getSupabaseAdmin } from "./config/supabase.js";
 import {
@@ -55,9 +54,6 @@ import { registerAllEndpoints } from "./openapi/endpoints.js";
 initializeSentry('api');
 
 const app = express();
-
-// Sentry request handler must be the first middleware
-app.use(Sentry.Handlers.requestHandler());
 
 // Trust proxy to correctly extract client IP from X-Forwarded-For
 app.set('trust proxy', 1);
@@ -177,6 +173,10 @@ app.get("/health", async (_req: Request, res: Response) => {
 
 app.use(metricsRoutes);
 
+// Sentry error handler (v8): captures errors with request context, then
+// forwards to the next handler — must be registered after all routes.
+Sentry.setupExpressErrorHandler(app);
+
 app.use(productImageErrorHandler);
 app.use(apiErrorHandler);
 app.use(profileErrorHandler);
@@ -188,9 +188,6 @@ app.use(graphqlErrorHandler);
 app.use(adminErrorHandler);
 app.use(referralErrorHandler);
 app.use(integratorErrorHandler);
-
-// Sentry error handler must be before other error handlers
-app.use(Sentry.Handlers.errorHandler());
 
 app.use((err: unknown, req: Request, res: Response, _next: () => void) => {
   incrementErrorCount();
