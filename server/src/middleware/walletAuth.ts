@@ -42,7 +42,9 @@ export function requireWallet(req: WalletRequest, res: Response, next: NextFunct
       return;
     }
     req.walletAddress = decoded.walletAddress;
-    if (decoded.role) req.walletRole = decoded.role;
+    if (decoded.role) {
+      req.walletRole = decoded.role;
+    }
     next();
   } catch (err) {
     res.status(401).json({ message: 'Invalid or expired token.' });

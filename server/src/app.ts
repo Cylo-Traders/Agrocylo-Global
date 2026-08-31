@@ -12,7 +12,6 @@ import {
   incrementErrorCount,
 } from "./services/metricsService.js";
 import { ApiError, sendProblem } from "./http/errors.js";
-import { Sentry } from "./config/sentry.js";
 import { requestContext } from "./middleware/requestContext.js";
 import { requestLogger } from "./middleware/requestLogger.js";
 import { createIdempotencyMiddleware } from "./middleware/idempotency.js";
@@ -54,6 +53,11 @@ import { registerAllEndpoints } from "./openapi/endpoints.js";
 initializeSentry('api');
 
 const app = express();
+
+// Sentry request handler must be the first middleware (Sentry v8 removed Handlers — guard for tests)
+if ((Sentry as unknown as { Handlers?: { requestHandler: () => import("express").Handler } }).Handlers?.requestHandler) {
+  app.use((Sentry as unknown as { Handlers: { requestHandler: () => import("express").Handler } }).Handlers.requestHandler());
+}
 
 // Trust proxy to correctly extract client IP from X-Forwarded-For
 app.set('trust proxy', 1);
@@ -189,6 +193,11 @@ app.use(graphqlErrorHandler);
 app.use(adminErrorHandler);
 app.use(referralErrorHandler);
 app.use(integratorErrorHandler);
+
+// Sentry error handler must be before other error handlers (guard for v8)
+if ((Sentry as unknown as { Handlers?: { errorHandler: () => import("express").ErrorRequestHandler } }).Handlers?.errorHandler) {
+  app.use((Sentry as unknown as { Handlers: { errorHandler: () => import("express").ErrorRequestHandler } }).Handlers.errorHandler());
+}
 
 app.use((err: unknown, req: Request, res: Response, _next: () => void) => {
   incrementErrorCount();
