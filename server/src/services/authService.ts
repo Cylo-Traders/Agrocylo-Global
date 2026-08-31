@@ -66,14 +66,19 @@ function isStellarAddress(address: string): boolean {
   }
 }
 
+function canonicalWalletAddress(addr: string): string {
+  return addr.trim().toLowerCase();
+}
+
 export async function generateNonce(
   walletAddress: string,
 ): Promise<{ nonce: string; message: string; expiresAt: string }> {
   if (!isStellarAddress(walletAddress)) {
     throw new ApiError(400, "Bad Request", "Invalid Stellar wallet address");
   }
+  const canonical = canonicalWalletAddress(walletAddress);
 
-  const existing = await prisma.nonce.findUnique({ where: { walletAddress } });
+  const existing = await prisma.nonce.findUnique({ where: { walletAddress: canonical } });
   if (existing && new Date(existing.expiresAt) > new Date()) {
     return {
       nonce: existing.nonce,
@@ -86,8 +91,8 @@ export async function generateNonce(
   const issuedAt = new Date();
   const expiresAt = new Date(Date.now() + NONCE_TTL_MS);
   await prisma.nonce.upsert({
-    where: { walletAddress },
-    create: { walletAddress, nonce, expiresAt, createdAt: issuedAt },
+    where: { walletAddress: canonical },
+    create: { walletAddress: canonical, nonce, expiresAt, createdAt: issuedAt },
     update: { nonce, expiresAt, createdAt: issuedAt },
   });
   return { nonce, message: buildSignInMessage(walletAddress, nonce, issuedAt, expiresAt), expiresAt: expiresAt.toISOString() };
@@ -116,8 +121,9 @@ export async function verifySignature(
   if (!isStellarAddress(walletAddress)) {
     throw new ApiError(400, "Bad Request", "Invalid Stellar wallet address");
   }
+  const canonical = canonicalWalletAddress(walletAddress);
 
-  const row = await prisma.nonce.findUnique({ where: { walletAddress } });
+  const row = await prisma.nonce.findUnique({ where: { walletAddress: canonical } });
   if (!row)
     throw new ApiError(401, "Unauthorized", "No nonce found for this wallet");
   if (new Date(row.expiresAt) < new Date()) {
@@ -143,7 +149,10 @@ export async function verifySignature(
   }
 
   // One-time nonce: delete immediately after successful verification
-  await prisma.nonce.delete({ where: { walletAddress } });
+  await prisma.nonce.delete({ where: { walletAddress: canonical } });
+
+  // Canonical identity creation via single code path (shared with indexer)
+  await IdentityService.ensureUserAndProfile(canonical);
 
   const role = await resolveWalletRole(walletAddress);
   const accessToken = jwt.sign({ walletAddress, role }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
@@ -151,7 +160,7 @@ export async function verifySignature(
   const refreshExpiresAt = new Date(Date.now() + REFRESH_TTL_MS);
 
   await prisma.refreshToken.create({
-    data: { walletAddress, token: hashRefreshToken(refreshToken), expiresAt: refreshExpiresAt },
+    data: { walletAddress: canonical, token: hashRefreshToken(refreshToken), expiresAt: refreshExpiresAt },
   });
 
   return { accessToken, refreshToken };

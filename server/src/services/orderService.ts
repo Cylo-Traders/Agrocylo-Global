@@ -144,8 +144,8 @@ export class OrderService {
       }
 
       const [buyerProfile, sellerProfile] = await Promise.all([
-        prisma.profile.findUnique({ where: { wallet_address: order.buyerAddress } }),
-        prisma.profile.findUnique({ where: { wallet_address: order.sellerAddress } }),
+        prisma.profile.findUnique({ where: { walletAddress: order.buyerAddress! } }),
+        prisma.profile.findUnique({ where: { walletAddress: order.sellerAddress! } }),
       ]);
 
       return {
@@ -153,18 +153,18 @@ export class OrderService {
         buyer: buyerProfile
           ? toClientProfile(buyerProfile)
           : {
-              wallet_address: order.buyerAddress,
-              role: toClientRole(order.buyerUser.role ?? "BUYER"),
-              display_name: order.buyerAddress,
+              wallet_address: order.buyerAddress ?? "",
+              role: toClientRole((order.buyerUser as any)?.role ?? "BUYER"),
+              display_name: order.buyerAddress ?? "",
               bio: null,
               avatar_url: null,
             },
         seller: sellerProfile
           ? toClientProfile(sellerProfile)
           : {
-              wallet_address: order.sellerAddress,
-              role: toClientRole(order.sellerUser.role ?? "BUYER"),
-              display_name: order.sellerAddress,
+              wallet_address: order.sellerAddress ?? "",
+              role: toClientRole((order.sellerUser as any)?.role ?? "BUYER"),
+              display_name: order.sellerAddress ?? "",
               bio: null,
               avatar_url: null,
             },

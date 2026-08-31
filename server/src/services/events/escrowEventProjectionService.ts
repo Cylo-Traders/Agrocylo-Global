@@ -5,6 +5,12 @@ import { wsManager } from "../wsManager.js";
 import { OrderStatus } from "../../constants/status.js";
 
 /**
+ * @deprecated — Derived projection from canonical BlockchainTransaction.
+ * Kept for backward compat / query convenience. New code should use
+ * BlockchainEventPersistenceService + BlockchainTransaction (canonical table).
+ * This service is NOT called by contractWatcher anymore; it remains
+ * as a documented projection that can be rebuilt from BlockchainTransaction.
+ *
  * Service responsible for projecting on-chain events into the application domain models.
  * This ensures the database reflecting Users, Products, and Orders is always up to date.
  */
@@ -15,32 +21,52 @@ export class EscrowEventProjectionService {
   static async projectEvent(parsed: MappedEscrowEvent): Promise<void> {
     const { action, buyer, seller, orderId, timestamp } = parsed;
     const eventDate = timestamp;
+    // Canonicalize wallets for identity (single code path)
+    const canonicalBuyer = buyer ? buyer.trim().toLowerCase() : buyer;
+    const canonicalSeller = seller ? seller.trim().toLowerCase() : seller;
 
     try {
-      // 1. Ensure Users exist (Buyers and Sellers)
-      // We use upsert to create them if they don't exist yet
-      if (buyer) {
+      // 1. Ensure Users exist (Buyers and Sellers) — via canonical identity
+      if (canonicalBuyer) {
         await prisma.user.upsert({
-          where: { walletAddress: buyer },
+          where: { walletAddress: canonicalBuyer },
           update: { role: "BUYER" },
-          create: { walletAddress: buyer, role: "BUYER" },
+          create: { walletAddress: canonicalBuyer, role: "BUYER" },
+        });
+        await prisma.profile.upsert({
+          where: { walletAddress: canonicalBuyer },
+          update: {},
+          create: { walletAddress: canonicalBuyer, role: "BUYER" },
         });
       }
 
-      if (seller) {
+      if (canonicalSeller) {
         await prisma.user.upsert({
-          where: { walletAddress: seller },
+          where: { walletAddress: canonicalSeller },
           update: { role: "SELLER" },
-          create: { walletAddress: seller, role: "SELLER" },
+          create: { walletAddress: canonicalSeller, role: "SELLER" },
+        });
+        await prisma.profile.upsert({
+          where: { walletAddress: canonicalSeller },
+          update: {},
+          create: { walletAddress: canonicalSeller, role: "SELLER" },
         });
       }
 
-
-      await prisma.escrowTransaction.create({
-        data: {
+      // Idempotent upsert keyed on [ledger, eventIndex] — replay safe
+      await prisma.escrowTransaction.upsert({
+        where: {
+          ledger_eventIndex: {
+            ledger: parsed.ledger,
+            eventIndex: parsed.eventIndex,
+          },
+        },
+        update: {},
+        create: {
           orderIdOnChain: orderId,
           action: action.toUpperCase(),
           ledger: parsed.ledger,
+          eventIndex: parsed.eventIndex,
           timestamp: eventDate,
         },
       });
@@ -72,9 +98,11 @@ export class EscrowEventProjectionService {
   }
 
   private static async handleOrderCreated(parsed: MappedEscrowEvent, eventDate: Date) {
-    // Check if we can link a product based on the seller's wallet
+    // Check if we can link a product based on the seller's wallet (canonical)
+    const canonicalSeller = parsed.seller ? parsed.seller.trim().toLowerCase() : parsed.seller;
+    const canonicalBuyer = parsed.buyer ? parsed.buyer.trim().toLowerCase() : parsed.buyer;
     const product = await prisma.product.findFirst({
-      where: { farmerWallet: parsed.seller },
+      where: { farmerWallet: canonicalSeller },
     });
 
     await prisma.order.upsert({
@@ -82,14 +110,14 @@ export class EscrowEventProjectionService {
       update: { status: OrderStatus.PENDING },
       create: {
         orderIdOnChain: parsed.orderId,
-        buyerAddress: parsed.buyer!,
-        sellerAddress: parsed.seller!,
+        buyerAddress: canonicalBuyer!,
+        sellerAddress: canonicalSeller!,
         amount: parsed.amount!,
         token: parsed.token!,
         status: OrderStatus.PENDING,
         productId: product?.id,
         createdAt: eventDate,
-      },
+      } as any,
     });
 
     wsManager.broadcast("order:status_changed", {
@@ -115,17 +143,28 @@ export class EscrowEventProjectionService {
   }
 
   private static async handleOrderDelivered(orderId: string) {
-    await prisma.order.update({
-      where: { orderIdOnChain: orderId },
-      data: { status: OrderStatus.DELIVERED },
-    });
+    try {
+      await prisma.order.update({
+        where: { orderIdOnChain: orderId },
+        data: { status: "DELIVERED" },
+      });
+    } catch (e) {
+      // Idempotent: if order not yet created (out-of-order projection), ignore — canonical pipeline handles placeholder
+      if ((e as any)?.code !== "P2025") throw e;
+      logger.warn(`[EscrowProjection] Delivered for missing order ${orderId} — ignored (canonical handles placeholder)`);
+    }
   }
 
   private static async handleOrderConfirmed(orderId: string) {
-    await prisma.order.update({
-      where: { orderIdOnChain: orderId },
-      data: { status: OrderStatus.COMPLETED },
-    });
+    try {
+      await prisma.order.update({
+        where: { orderIdOnChain: orderId },
+        data: { status: "COMPLETED" },
+      });
+    } catch (e) {
+      if ((e as any)?.code !== "P2025") throw e;
+      logger.warn(`[EscrowProjection] Confirmed for missing order ${orderId} — ignored`);
+    }
     wsManager.broadcast("order:status_changed", {
       orderId,
       status: OrderStatus.COMPLETED,
@@ -133,10 +172,15 @@ export class EscrowEventProjectionService {
   }
 
   private static async handleOrderRefunded(orderId: string) {
-    await prisma.order.update({
-      where: { orderIdOnChain: orderId },
-      data: { status: OrderStatus.REFUNDED },
-    });
+    try {
+      await prisma.order.update({
+        where: { orderIdOnChain: orderId },
+        data: { status: "REFUNDED" },
+      });
+    } catch (e) {
+      if ((e as any)?.code !== "P2025") throw e;
+      logger.warn(`[EscrowProjection] Refunded for missing order ${orderId} — ignored`);
+    }
     wsManager.broadcast("order:status_changed", {
       orderId,
       status: OrderStatus.REFUNDED,

@@ -39,17 +39,8 @@ vi.mock("./events/blockchainEventIngestionService.js", () => ({
 vi.mock("./events/escrowEventIngestionService.js", () => ({
   EscrowEventIngestionService: { ingestEvent: vi.fn() },
 }));
-vi.mock("./promMetrics.js", () => ({
-  contractWatcherEventsPerPoll: { observe: vi.fn() },
-  contractWatcherPagesPerPoll: { observe: vi.fn() },
-  contractWatcherUnhandledTotal: { inc: vi.fn() },
-  reconciliationDriftTotal: { inc: vi.fn() },
-  reconciliationRunDurationSeconds: { observe: vi.fn() },
-  reconciliationErrorsTotal: { inc: vi.fn() },
-}));
 vi.mock("../config/sentry.js", () => ({
   captureAlert: vi.fn(),
-  Sentry: { captureMessage: vi.fn() },
 }));
 
 import { detectRecoveryGap, loadCheckpoint, persistCheckpoint, dispatchEvent, fetchEventsPaginated, MAX_LEDGER_SPAN } from "./contractWatcher.js";

@@ -2,22 +2,7 @@ import { rpc, Address, Contract, nativeToScVal, scValToNative as sdkScValToNativ
 import { prisma } from "../config/database.js";
 import { config } from "../config/index.js";
 import logger from "../config/logger.js";
-import {
-  CampaignStatus,
-  OrderStatus,
-  DisputeStatus,
-  ACTIVE_CAMPAIGN_STATUSES_ESCROW,
-  OPEN_ORDER_STATUSES,
-  normalizeOrderStatus,
-  fromContractOrderStatus,
-  fromContractCampaignStatus,
-} from "../constants/status.js";
-import { captureAlert } from "../config/sentry.js";
-import {
-  reconciliationDriftTotal,
-  reconciliationRunDurationSeconds,
-  reconciliationErrorsTotal,
-} from "./promMetrics.js";
+import { amountsEqual, canonicalizeAmount } from "../lib/money.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -179,8 +164,19 @@ async function reconcileOrders(
         continue;
       }
 
-      const chainStatus = fromContractOrderStatus(Number(native["status"]), "escrow");
-      const chainAmount = String(native["amount"] ?? "");
+      const chainStatus = ORDER_STATUS_MAP[Number(native["status"])] ?? String(native["status"]);
+      // Canonicalize chain amount: on-chain i128 may render as number/bigint; normalize to canonical string
+      let chainAmount = "";
+      try {
+        const rawAmt = native["amount"];
+        if (rawAmt !== undefined && rawAmt !== null && String(rawAmt).trim() !== "") {
+          chainAmount = canonicalizeAmount(String(rawAmt));
+        }
+      } catch {
+        chainAmount = String(native["amount"] ?? "").trim();
+      }
+      const chainBuyer = String(native["buyer"] ?? "");
+      const chainFarmer = String(native["farmer"] ?? "");
 
       // Status drift
       const dbStatusNorm = normalizeOrderStatus(order.status);
@@ -195,8 +191,9 @@ async function reconcileOrders(
         });
       }
 
-      // Amount drift
-      if (chainAmount && chainAmount !== order.amount) {
+      // Amount drift — numeric comparison, never raw string compare
+      // Equivalent canonical values must not register as drift (e.g. "1000" vs "1000.0")
+      if (chainAmount && !amountsEqual(chainAmount, order.amount)) {
         findings.push({
           entityType: "order",
           entityId: order.orderIdOnChain,
@@ -833,8 +830,16 @@ export async function reconcileSingleOrder(orderIdOnChain: string): Promise<Drif
     throw new Error("Unexpected contract response format");
   }
 
-  const chainStatus = fromContractOrderStatus(Number(native["status"]), "escrow");
-  const chainAmount = String(native["amount"] ?? "");
+  const chainStatus = ORDER_STATUS_MAP[Number(native["status"])] ?? String(native["status"]);
+  let chainAmount = "";
+  try {
+    const rawAmt = native["amount"];
+    if (rawAmt !== undefined && rawAmt !== null && String(rawAmt).trim() !== "") {
+      chainAmount = canonicalizeAmount(String(rawAmt));
+    }
+  } catch {
+    chainAmount = String(native["amount"] ?? "").trim();
+  }
   const dbStatusNorm = normalizeOrderStatus(order.status);
 
   if (chainStatus !== dbStatusNorm) {
@@ -848,7 +853,7 @@ export async function reconcileSingleOrder(orderIdOnChain: string): Promise<Drif
     });
   }
 
-  if (chainAmount && chainAmount !== order.amount) {
+  if (chainAmount && !amountsEqual(chainAmount, order.amount)) {
     findings.push({
       entityType: "order",
       entityId: orderIdOnChain,
