@@ -22,6 +22,10 @@ export interface RateLimitStoreValue {
  * over availability (allowing requests through when enforcement cannot be guaranteed).
  */
 export function createRateLimitStore(redisClient: Redis) {
+  // Managed by express-rate-limit v7 Store.init(options) — per-limiter instance.
+  // Default 60s until init() is called by the limiter.
+  let windowMs = 60_000;
+
   // Lua script for atomic increment + expire in a single operation
   // Returns [current_count, expires_at_ms]
   const incrWithExpireScript = `
@@ -44,6 +48,17 @@ export function createRateLimitStore(redisClient: Redis) {
 
   return {
     /**
+     * Called once per limiter by express-rate-limit v7 with the limiter's
+     * full options. We capture windowMs so the Redis PEXPIRE matches the
+     * limiter's configured window (fix for the 60s-everywhere bug).
+     */
+    init(options: any): void {
+      if (options?.windowMs && Number.isFinite(options.windowMs) && options.windowMs > 0) {
+        windowMs = options.windowMs;
+      }
+    },
+
+    /**
      * Increment the counter for the given key and return the new count.
      * With fail-closed degradation: throws on Redis error.
      */
@@ -53,12 +68,12 @@ export function createRateLimitStore(redisClient: Redis) {
           incrWithExpireScript,
           1,
           key,
-          '60000', // Default 1-minute window; caller overrides via middleware config
+          String(windowMs),
         )) as [number, number];
 
         const resetTime = pttl > 0
           ? new Date(Date.now() + pttl)
-          : new Date(Date.now() + 60000);
+          : new Date(Date.now() + windowMs);
 
         return {
           totalHits: count,
@@ -112,6 +127,26 @@ export function createRateLimitStore(redisClient: Redis) {
         await redisClient.del(key);
       } catch (error) {
         logger.error('[RateLimit] Redis reset failed', { key, error });
+        throw error;
+      }
+    },
+
+    /** Alias for express-rate-limit v7 which calls `resetKey` */
+    async resetKey(key: string): Promise<void> {
+      try {
+        await redisClient.del(key);
+      } catch (error) {
+        logger.error('[RateLimit] Redis resetKey failed', { key, error });
+        throw error;
+      }
+    },
+
+    /** Decrement on failed requests (v7 calls this when a request is not counted) */
+    async decrement(key: string): Promise<void> {
+      try {
+        await redisClient.decr(key);
+      } catch (error) {
+        logger.error('[RateLimit] Redis decrement failed', { key, error });
         throw error;
       }
     },
