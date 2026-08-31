@@ -83,13 +83,13 @@ describe('Idempotency Middleware', () => {
       const createRequest = () => ({
         headers: { 'idempotency-key': idempotencyKey },
         method: 'POST',
-      } as unknown as Request;
+      }) as unknown as Request;
 
       const createResponse = () => ({
         status: vi.fn().mockReturnThis(),
         json: vi.fn().mockReturnThis(),
         locals: {},
-      } as unknown as Response;
+      }) as unknown as Response;
 
       // Simulate two concurrent requests with same key
       const req1 = createRequest();
