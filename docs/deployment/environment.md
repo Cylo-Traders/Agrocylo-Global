@@ -88,6 +88,7 @@ read by `sentry.*.config.ts`.
 |---|---|---|
 | `NEXT_PUBLIC_API_URL` | ✅ | Backend base URL (REST + Socket.io) |
 | `NEXT_PUBLIC_SOROBAN_RPC_URL` | ✅ | Soroban RPC (match passphrase) |
+| `NEXT_PUBLIC_HORIZON_URL` | | Horizon endpoint; overrides the per-network default in `src/lib/stellar.ts` |
 | `NEXT_PUBLIC_NETWORK_PASSPHRASE` | ✅ | App refuses to start if unset |
 | `NEXT_PUBLIC_STELLAR_NETWORK` | | `testnet` / `mainnet` selector |
 | `NEXT_PUBLIC_CONTRACT_ID` | ✅ | marketplace escrow contract |

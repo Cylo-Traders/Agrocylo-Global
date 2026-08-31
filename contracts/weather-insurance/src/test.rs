@@ -457,8 +457,7 @@ fn test_multi_policy_pool_solvency_and_payout_conservation() {
     client.report_breach(&oracle1, &1, &600);
     client.report_breach(&oracle2, &1, &600);
 
-    env.ledger()
-        .set_timestamp(env.ledger().timestamp() + 4000);
+    env.ledger().set_timestamp(env.ledger().timestamp() + 4000);
     client.finalize_payout(&1);
 
     // Remaining solvency pool can still back Policy 2

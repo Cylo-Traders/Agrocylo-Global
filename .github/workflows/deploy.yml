@@ -332,7 +332,7 @@ jobs:
       - name: Health check — root client
         run: |
           code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
-            "${{ steps.urls.outputs.root }/" || true)
+            "${{ steps.urls.outputs.root }}/" || true)
           if [ "$code" != "200" ] && [ "$code" != "301" ] && [ "$code" != "302" ]; then
             echo "Root client health check failed (got $code)"
             exit 1
@@ -342,7 +342,7 @@ jobs:
       - name: Health check — agro client
         run: |
           code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
-            "${{ steps.urls.outputs.agro }/" || true)
+            "${{ steps.urls.outputs.agro }}/" || true)
           if [ "$code" != "200" ] && [ "$code" != "301" ] && [ "$code" != "302" ]; then
             echo "Agro client health check failed (got $code)"
             exit 1
