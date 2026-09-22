@@ -60,20 +60,39 @@ export async function apiRequest<T>(
     });
 
     if (!res.ok) {
-      let parsed: { message?: string; title?: string; code?: string } | null =
-        null;
+      let parsed:
+        | (Record<string, unknown> & {
+            message?: string;
+            title?: string;
+            code?: unknown;
+          })
+        | null = null;
       try {
         parsed = await res.json();
       } catch {
         // ignore
       }
+
+      const serverCode =
+        typeof parsed?.code === "string" && parsed.code.trim().length > 0
+          ? parsed.code.trim()
+          : undefined;
+
+      const code =
+        serverCode ?? (res.status === 404 ? "NOT_FOUND" : "SERVER_ERROR");
+
+      const message =
+        (typeof parsed?.message === "string" && parsed.message.trim().length > 0
+          ? parsed.message
+          : undefined) ||
+        (typeof parsed?.title === "string" && parsed.title.trim().length > 0
+          ? parsed.title
+          : undefined) ||
+        `Request failed with status ${res.status}`;
+
       throw new ApiRequestError({
-        code:
-          (parsed?.code ?? res.status === 404) ? "NOT_FOUND" : "SERVER_ERROR",
-        message:
-          parsed?.message ||
-          parsed?.title ||
-          `Request failed with status ${res.status}`,
+        code,
+        message,
         status: res.status,
         details: parsed,
       });
