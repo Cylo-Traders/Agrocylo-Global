@@ -6,10 +6,15 @@
   "main": "dist/index.js",
   "scripts": {
     "setup": "npm install && npx prisma generate",
+    "engines:check": "node scripts/require-node.mjs",
+    "predev": "npm run engines:check",
     "dev": "npx prisma generate && tsx watch src/index.ts",
     "worker:dev": "npx prisma generate && tsx watch src/worker.ts",
+    "prebuild": "npm run engines:check",
     "build": "npx prisma generate && tsc",
+    "prestart": "npm run engines:check",
     "start": "node dist/index.js",
+    "preworker:start": "npm run engines:check",
     "worker:start": "node dist/worker.js",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -29,7 +34,7 @@
   "author": "",
   "license": "ISC",
   "engines": {
-    "node": ">=22"
+    "node": "^22.12.0 || >=24.0.0"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.1",
