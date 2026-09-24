@@ -83,14 +83,17 @@ Validated by a Zod schema in [`server/src/config/index.ts`](../../server/src/con
 ### `client/` (marketplace frontend, port 3000)
 
 All browser vars are `NEXT_PUBLIC_*`. `SENTRY_DSN` (build-time, non-public) is
-read by `sentry.*.config.ts`.
+read by `sentry.*.config.ts`. Validation is performed at Next.js config
+evaluation by `src/lib/endpointValidator.ts` (Issue #927): malformed,
+unsupported-scheme, or credential-bearing URLs fail fast with variable-named
+guidance and no secret echo (see `client/.env.example`).
 
 | Variable | Required | Purpose |
 |---|---|---|
 | `NEXT_PUBLIC_API_URL` | ✅ | Backend base URL (REST + Socket.io) |
-| `NEXT_PUBLIC_SOROBAN_RPC_URL` | ✅ | Soroban RPC (match passphrase) |
-| `NEXT_PUBLIC_HORIZON_URL` | | Horizon endpoint; overrides the per-network default in `src/lib/stellar.ts` |
-| `NEXT_PUBLIC_NETWORK_PASSPHRASE` | ✅ | App refuses to start if unset |
+| `NEXT_PUBLIC_SOROBAN_RPC_URL` | ✅ prod / optional dev (falls back to `https://soroban-testnet.stellar.org`) | Soroban RPC (must match passphrase). Must be valid `https://` ( `http://` allowed only for `localhost`/`127.0.0.1`, e.g. `http://localhost:8000`); malformed / unsupported scheme / embedded credentials fail fast with variable-named error, no secret echo. |
+| `NEXT_PUBLIC_HORIZON_URL` | optional (validated if set; dev fallback `https://horizon-testnet.stellar.org`) | Horizon endpoint; overrides the per-network default in `src/lib/stellar.ts`. Same `https://` (local `http://`) scheme rules as RPC; malformed values fail fast. |
+| `NEXT_PUBLIC_NETWORK_PASSPHRASE` | ✅ prod / optional dev (defaults to `Test SDF Network ; September 2015`) | Stellar passphrase. Must match RPC. In `mainnet` mode an unset or testnet value is a hard build/runtime error — no silent fallback to testnet (see `src/services/stellar/networkConfig.ts`). |
 | `NEXT_PUBLIC_STELLAR_NETWORK` | | `testnet` / `mainnet` selector |
 | `NEXT_PUBLIC_CONTRACT_ID` | ✅ | marketplace escrow contract |
 | `NEXT_PUBLIC_ESCROW_CONTRACT_ID` | | explicit escrow alias |
@@ -135,12 +138,18 @@ Validated in [`agro-production/server/src/config/index.ts`](../../agro-productio
 
 ### `agro-production/client/` (port 3001)
 
+Validated at Next.js config evaluation by `src/lib/endpointValidator.ts` (same
+rules as root `client/` — malformed / unsupported-scheme / credential-bearing
+URLs fail fast with variable-named guidance, no secret echo; see
+`agro-production/client/.env.example`).
+
 | Variable | Required | Purpose |
 |---|---|---|
 | `NEXT_PUBLIC_API_URL` | ✅ | agro backend base URL |
 | `NEXT_PUBLIC_WS_URL` | | WebSocket URL (auto-derived if omitted) |
-| `NEXT_PUBLIC_SOROBAN_RPC_URL` | ✅ | Soroban RPC (match passphrase) |
-| `NEXT_PUBLIC_NETWORK_PASSPHRASE` | ✅ | |
+| `NEXT_PUBLIC_SOROBAN_RPC_URL` | ✅ prod / optional dev (falls back to `https://soroban-testnet.stellar.org`) | Soroban RPC (must match passphrase). Same `https://` (local `http://`) scheme rules as root client. |
+| `NEXT_PUBLIC_NETWORK_PASSPHRASE` | ✅ prod / optional dev (defaults to `Test SDF Network ; September 2015`) | Stellar passphrase; in `mainnet` mode an unset value is a hard error — no silent fallback. |
+| `NEXT_PUBLIC_HORIZON_URL` | optional (validated if set) | Horizon endpoint; same scheme rules as RPC. |
 | `NEXT_PUBLIC_PRODUCTION_CONTRACT_ID` | ✅ | production escrow contract |
 | `NEXT_PUBLIC_MAIN_CLIENT_URL` | | nav back to marketplace app |
 | `NEXT_PUBLIC_FEE_PERCENTILE` / `NEXT_PUBLIC_FEE_HEADROOM` / `NEXT_PUBLIC_MAX_INCLUSION_FEE` | | dynamic tx-fee estimation |

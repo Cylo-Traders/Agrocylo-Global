@@ -1,41 +1,78 @@
 import path from "node:path";
 import type { NextConfig } from "next";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { assertEndpointsValid } from "./src/lib/endpointValidator";
+
+// ── Resolve repository root for Turbopack ────────────────────────────────
+// Issue #918: previous implementation used process.cwd() + a literal Windows
+// separator, which fails when dev is launched from client/ vs root and on
+// non-Windows hosts. Derive from the config file location with
+// platform-safe path APIs.
+function getRepoRoot(): string {
+  // ESM: import.meta.url
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const metaUrl = (import.meta as any)?.url as string | undefined;
+    if (metaUrl) {
+      return path.resolve(path.dirname(fileURLToPath(metaUrl)), "..");
+    }
+  } catch {
+    // ignore
+  }
+  // Node 20.11+ exposes import.meta.dirname
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const metaDir = (import.meta as any)?.dirname as string | undefined;
+    if (metaDir) {
+      return path.resolve(metaDir, "..");
+    }
+  } catch {
+    // ignore
+  }
+  // CJS fallback (some Next.js loaders still use require)
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cjsDir = (globalThis as any).__dirname ?? (typeof __dirname !== "undefined" ? __dirname : undefined);
+    if (cjsDir) {
+      return path.resolve(cjsDir, "..");
+    }
+  } catch {
+    // ignore
+  }
+  // Last resort: cwd is client/ or root. Resolve up one level if we detect client suffix.
+  const cwd = process.cwd();
+  return cwd.endsWith(`${path.sep}client`) ? path.resolve(cwd, "..") : path.resolve(cwd);
+}
+
+const repoRoot = getRepoRoot();
 
 // ── Build-time validation for required network configuration ──
 // Fail fast if critical env vars are missing, preventing silent failures
 // where a production build accidentally uses testnet or wrong network.
+// Issue #927: delegate URL format/scheme checks to endpointValidator so
+// malformed values fail with variable-specific guidance, not generic Invalid URL.
+// Do not echo secrets / query tokens / full endpoint values.
 function validateNetworkConfig() {
-  const rpcUrl = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL;
+  const isProd = process.env.NODE_ENV === "production";
+
+  // EndpointValidator covers missing/empty, malformed, unsupported scheme,
+  // and http-only-for-localhost rules. It reports ALL invalid vars at once
+  // and never echoes raw values.
+  assertEndpointsValid(
+    {
+      NEXT_PUBLIC_SOROBAN_RPC_URL: process.env.NEXT_PUBLIC_SOROBAN_RPC_URL,
+      NEXT_PUBLIC_HORIZON_URL: process.env.NEXT_PUBLIC_HORIZON_URL,
+      NEXT_PUBLIC_NETWORK_PASSPHRASE: process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE,
+      NEXT_PUBLIC_STELLAR_ENV: process.env.NEXT_PUBLIC_STELLAR_ENV,
+      NODE_ENV: process.env.NODE_ENV,
+    },
+    { isProduction: isProd }
+  );
+
+  // Preserve passphrase network-mismatch warning from original validator
   const networkPassphrase = process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE;
-
-  if (!rpcUrl) {
-    console.error(
-      "❌ NEXT_PUBLIC_SOROBAN_RPC_URL is not set. " +
-      "This is required to connect to the Stellar network. " +
-      "Set it in your .env.local or deployment environment."
-    );
-    if (process.env.NODE_ENV === "production") {
-      throw new Error(
-        "NEXT_PUBLIC_SOROBAN_RPC_URL is required for production builds. " +
-        "Set this environment variable before building."
-      );
-    }
-  }
-
-  if (!networkPassphrase) {
-    console.error(
-      "❌ NEXT_PUBLIC_NETWORK_PASSPHRASE is not set. " +
-      "This is required to sign transactions correctly. " +
-      "Set it in your .env.local or deployment environment."
-    );
-    if (process.env.NODE_ENV === "production") {
-      throw new Error(
-        "NEXT_PUBLIC_NETWORK_PASSPHRASE is required for production builds. " +
-        "Set this environment variable before building."
-      );
-    }
-  }
-
+  const rpcUrl = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL;
   if (rpcUrl && networkPassphrase) {
     const isMainnet = networkPassphrase === "Public Global Stellar Network ; September 2015";
     const isTestnet = networkPassphrase === "Test SDF Network ; September 2015";
@@ -50,6 +87,10 @@ function validateNetworkConfig() {
     console.log(
       `✓ Network config validated: ${isMainnet ? "MAINNET" : isTestnet ? "TESTNET" : "CUSTOM"}`
     );
+  } else if (!isProd) {
+    // In dev, passphrase may be intentionally absent (fallback to testnet) — don't spam.
+    // In prod the assert above already threw.
+    console.log("ℹ️  Network config: using defaults for local development (set NEXT_PUBLIC_SOROBAN_RPC_URL / NEXT_PUBLIC_NETWORK_PASSPHRASE in .env.local for a specific network).");
   }
 }
 

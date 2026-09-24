@@ -1,7 +1,17 @@
-# Playwright end-to-end suite.
+# Playwright end-to-end suite — marketplace (client/).
 #
-# Runs on PRs that touch root client code. Can also be triggered manually
-# via the GitHub Actions UI or `gh workflow run e2e.yml --ref <branch>`.
+# Trigger scope (Issue #925):
+#   Runs on PRs and merge-queue groups that touch the marketplace dependency
+#   graph or its launcher: client code, shared frontend packages, and the
+#   root workspace manifests/lockfile plus Turbo config it actually consumes.
+#   Backend-only (server/**), contract-only (contracts/**, Cargo.*), or
+#   agro-production-only changes do NOT trigger this browser suite — they
+#   are covered by their own CI jobs (ci.yml).
+#   Can also be triggered manually via the GitHub Actions UI or
+#   `gh workflow run e2e.yml --ref <branch>`.
+#   See also: .github/workflows/ci.yml (path-filter policy) and
+#   docs/deployment/README.md (pipeline overview).
+#
 # Note: agro-production/client uses vitest instead of playwright; its tests run in CI workflow.
 
 name: E2E · Playwright
@@ -10,6 +20,18 @@ on:
   pull_request:
     paths:
       - "client/**"
+      - "packages/**"
+      - "package.json"
+      - "package-lock.json"
+      - "turbo.json"
+      - ".github/workflows/e2e.yml"
+  merge_group:
+    paths:
+      - "client/**"
+      - "packages/**"
+      - "package.json"
+      - "package-lock.json"
+      - "turbo.json"
       - ".github/workflows/e2e.yml"
   workflow_dispatch:
     inputs:
