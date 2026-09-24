@@ -1,8 +1,5 @@
+import { Queue } from "bullmq";
 import { createRedisConnection, type ConnectionOptions } from "./connection.js";
-
-// bullmq 5.77.6 ships incomplete type declarations, so we work around via require
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { Queue } = require("bullmq") as { Queue: any };
 
 let connection: ConnectionOptions | undefined;
 let indexingQueue: any;

@@ -46,7 +46,7 @@ describe("requireWallet rejects handoff tokens (Issue #686)", () => {
   });
 
   it("accepts a normal session token without a handoff audience claim", () => {
-    const sessionToken = jwt.sign({ walletAddress: WALLET, role: "USER" }, JWT_SECRET, {
+    const sessionToken = jwt.sign({ walletAddress: WALLET, role: "BUYER" }, JWT_SECRET, {
       expiresIn: "15m",
     });
 
@@ -58,5 +58,45 @@ describe("requireWallet rejects handoff tokens (Issue #686)", () => {
 
     expect(next).toHaveBeenCalledOnce();
     expect(req.walletAddress).toBe(WALLET);
+  });
+});
+
+describe("requireWallet role handling (DB enum FARMER|BUYER|ADMIN)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it.each(["BUYER", "FARMER", "ADMIN"] as const)("accepts token with role %s and exposes walletRole", (role) => {
+    const token = jwt.sign({ walletAddress: WALLET, role }, JWT_SECRET, { expiresIn: "15m" });
+    const req: any = { header: () => `Bearer ${token}` };
+    const res = makeRes();
+    const next = vi.fn();
+    requireWallet(req, res, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(req.walletAddress).toBe(WALLET);
+    expect(req.walletRole).toBe(role);
+  });
+
+  it("accepts tokens without explicit role (backwards compat) but sets walletAddress", () => {
+    const token = jwt.sign({ walletAddress: WALLET }, JWT_SECRET, { expiresIn: "15m" });
+    const req: any = { header: () => `Bearer ${token}` };
+    const res = makeRes();
+    const next = vi.fn();
+    requireWallet(req, res, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(req.walletAddress).toBe(WALLET);
+  });
+
+  it("rejects legacy USER role tokens if walletService expects DB enum — still authenticates but role is not ADMIN", () => {
+    // Legacy USER tokens are still valid for wallet auth (they have a walletAddress),
+    // but they must not be treated as ADMIN. This test documents that USER is not a DB enum value.
+    const legacyToken = jwt.sign({ walletAddress: WALLET, role: "USER" }, JWT_SECRET, { expiresIn: "15m" });
+    const req: any = { header: () => `Bearer ${legacyToken}` };
+    const res = makeRes();
+    const next = vi.fn();
+    requireWallet(req, res, next);
+    // walletAuth itself does not reject USER — it just exposes the role.
+    // Admin check happens in requireAdmin.
+    expect(next).toHaveBeenCalledOnce();
+    expect(req.walletRole).toBe("USER");
+    expect(["ADMIN", "FARMER", "BUYER"]).not.toContain(req.walletRole);
   });
 });

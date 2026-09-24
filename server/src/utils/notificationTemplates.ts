@@ -17,6 +17,20 @@ const templateByType: Record<NotificationEventType, (input: NotificationTemplate
     `Delivery confirmed for order #${orderId}. Payment has been released to the farmer.`,
   [NotificationEventType.REFUND_ISSUED]: ({ orderId }) =>
     `Refund issued for order #${orderId}. Funds have been returned to the buyer.`,
+  [NotificationEventType.ORDER_CANCELLED]: ({ orderId }) =>
+    `Order #${orderId} cancelled. Funds have been returned to the buyer.`,
+  [NotificationEventType.ORDER_DISPUTED]: ({ orderId }) =>
+    `Dispute opened for order #${orderId}. Awaiting resolution.`,
+  [NotificationEventType.DISPUTE_RESOLVED]: ({ orderId }) =>
+    `Dispute resolved for order #${orderId}.`,
+  [NotificationEventType.SPLIT_CREATED]: ({ orderId, amount, token }) =>
+    `Split order #${orderId} created${amount && token ? ` for ${amount} ${token}` : ""}.`,
+  [NotificationEventType.SPLIT_FUNDED]: ({ orderId }) =>
+    `Split order #${orderId} fully funded.`,
+  [NotificationEventType.SPLIT_DISPUTED]: ({ orderId }) =>
+    `Split order #${orderId} disputed.`,
+  [NotificationEventType.SPLIT_RESOLVED]: ({ orderId }) =>
+    `Split order #${orderId} dispute resolved.`,
   [NotificationEventType.ORDER_RECEIVED]: ({ orderId, amount, token }) =>
     `Order received #${orderId}${amount && token ? `: ${amount} ${token}` : ""}.`,
   [NotificationEventType.NEW_INVESTMENT]: ({ orderId, amount, token }) =>

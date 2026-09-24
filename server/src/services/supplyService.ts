@@ -17,7 +17,7 @@ const supplyBodySchema = z.object({
 
 async function assertFarmerProfile(wallet: string): Promise<void> {
   const profile = await prisma.profile.findUnique({
-    where: { wallet_address: wallet },
+    where: { walletAddress: wallet },
     select: { role: true },
   });
   if (!profile) {

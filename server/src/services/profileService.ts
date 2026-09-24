@@ -18,7 +18,7 @@ const updateProfileSchema = z.object({
 });
 
 export async function getProfile(wallet_address: string): Promise<ClientProfile> {
-  const profile = await prisma.profile.findUnique({ where: { wallet_address } });
+  const profile = await prisma.profile.findUnique({ where: { walletAddress: wallet_address } });
   if (!profile) {
     throw new ApiError(404, 'Not Found', 'Profile not found', 'https://cylos.io/errors/not-found');
   }
@@ -37,14 +37,14 @@ export async function createProfile(walletAddress: string, body: unknown): Promi
     throw new ApiError(400, 'Bad Request', 'display_name is required', 'https://cylos.io/errors/validation');
   }
 
-  const existing = await prisma.profile.findUnique({ where: { wallet_address: walletAddress } });
+  const existing = await prisma.profile.findUnique({ where: { walletAddress } });
   if (existing) {
     throw new ApiError(409, 'Conflict', 'Profile already exists', 'https://cylos.io/errors/conflict');
   }
 
   const profile = await prisma.profile.create({
     data: {
-      wallet_address: walletAddress,
+      walletAddress,
       name,
       bio: bio ?? null,
       avatar_url: avatarUrl ?? null,
@@ -80,7 +80,7 @@ export async function updateProfile(
   }
 
   const profile = await prisma.profile.update({
-    where: { wallet_address },
+    where: { walletAddress: wallet_address },
     data,
   });
 
@@ -88,7 +88,7 @@ export async function updateProfile(
 }
 
 export async function getProfileReputation(wallet_address: string) {
-  const profile = await prisma.profile.findUnique({ where: { wallet_address } });
+  const profile = await prisma.profile.findUnique({ where: { walletAddress: wallet_address } });
   if (!profile) {
     throw new ApiError(404, 'Not Found', 'Profile not found', 'https://cylos.io/errors/not-found');
   }
@@ -97,7 +97,7 @@ export async function getProfileReputation(wallet_address: string) {
 }
 
 export async function getProfileGraphData(wallet_address: string) {
-  const profile = await prisma.profile.findUnique({ where: { wallet_address } });
+  const profile = await prisma.profile.findUnique({ where: { walletAddress: wallet_address } });
   if (!profile) {
     throw new ApiError(404, 'Not Found', 'Profile not found', 'https://cylos.io/errors/not-found');
   }

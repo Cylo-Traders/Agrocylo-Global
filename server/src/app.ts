@@ -2,10 +2,9 @@ import express from "express";
 import type { Request, Response } from "express";
 import cors from "cors";
 import helmet from "helmet";
-import * as Sentry from "@sentry/node";
 import logger from "./config/logger.js";
 import { config } from "./config/index.js";
-import { initializeSentry, extractTraceContext, withSpan } from "./config/observability.js";
+import { initializeSentry } from "./config/observability.js";
 import { prisma } from "./config/database.js";
 import { getSupabaseAdmin } from "./config/supabase.js";
 import {
@@ -13,7 +12,6 @@ import {
   incrementErrorCount,
 } from "./services/metricsService.js";
 import { ApiError, sendProblem } from "./http/errors.js";
-import { Sentry } from "./config/sentry.js";
 import { requestContext } from "./middleware/requestContext.js";
 import { requestLogger } from "./middleware/requestLogger.js";
 import { createIdempotencyMiddleware } from "./middleware/idempotency.js";
@@ -56,8 +54,10 @@ initializeSentry('api');
 
 const app = express();
 
-// Sentry request handler must be the first middleware
-app.use(Sentry.Handlers.requestHandler());
+// Sentry request handler must be the first middleware (Sentry v8 removed Handlers — guard for tests)
+if ((Sentry as unknown as { Handlers?: { requestHandler: () => import("express").Handler } }).Handlers?.requestHandler) {
+  app.use((Sentry as unknown as { Handlers: { requestHandler: () => import("express").Handler } }).Handlers.requestHandler());
+}
 
 // Trust proxy to correctly extract client IP from X-Forwarded-For
 app.set('trust proxy', 1);
@@ -177,6 +177,10 @@ app.get("/health", async (_req: Request, res: Response) => {
 
 app.use(metricsRoutes);
 
+// Sentry error handler (v8): captures errors with request context, then
+// forwards to the next handler — must be registered after all routes.
+Sentry.setupExpressErrorHandler(app);
+
 app.use(productImageErrorHandler);
 app.use(disputeUploadErrorHandler);
 app.use(apiErrorHandler);
@@ -190,8 +194,10 @@ app.use(adminErrorHandler);
 app.use(referralErrorHandler);
 app.use(integratorErrorHandler);
 
-// Sentry error handler must be before other error handlers
-app.use(Sentry.Handlers.errorHandler());
+// Sentry error handler must be before other error handlers (guard for v8)
+if ((Sentry as unknown as { Handlers?: { errorHandler: () => import("express").ErrorRequestHandler } }).Handlers?.errorHandler) {
+  app.use((Sentry as unknown as { Handlers: { errorHandler: () => import("express").ErrorRequestHandler } }).Handlers.errorHandler());
+}
 
 app.use((err: unknown, req: Request, res: Response, _next: () => void) => {
   incrementErrorCount();

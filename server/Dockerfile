@@ -2,9 +2,6 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-ARG DATABASE_URL=postgresql://agrocylo:agrocylo123@localhost:5432/agrocylo_db
-ENV DATABASE_URL=$DATABASE_URL
-
 COPY package*.json ./
 RUN npm ci
 

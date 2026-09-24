@@ -69,7 +69,7 @@ export async function getFarmerLocations(query: unknown) {
   }
   const total = locations.length;
   const farmers = locations.slice(skip, skip + limit).map((location) => ({
-    wallet_address: location.wallet_address,
+    wallet_address: (location as any).walletAddress ?? (location as any).wallet_address,
     display_name: location.profile?.name ?? 'Farmer',
     bio: location.profile?.bio ?? null,
     avatar_url: location.profile?.avatar_url ?? null,
@@ -85,8 +85,8 @@ export async function setLocation(walletAddress: string, body: unknown) {
   const parsed = setLocationSchema.safeParse(body);
   if (!parsed.success) throw new ApiError(400, 'Bad Request', parsed.error.message, 'https://cylos.io/errors/validation');
   return prisma.location.upsert({
-    where: { wallet_address: walletAddress },
-    create: { wallet_address: walletAddress, ...parsed.data },
+    where: { walletAddress },
+    create: { walletAddress, ...parsed.data },
     update: parsed.data,
   });
 }
@@ -95,10 +95,10 @@ export async function updateLocation(wallet_address: string, requester: string, 
   if (requester !== wallet_address) throw new ApiError(403, 'Forbidden', 'You can only update your own location', 'https://cylos.io/errors/forbidden');
   const parsed = setLocationSchema.safeParse(body);
   if (!parsed.success) throw new ApiError(400, 'Bad Request', parsed.error.message, 'https://cylos.io/errors/validation');
-  return prisma.location.update({ where: { wallet_address }, data: parsed.data });
+  return prisma.location.update({ where: { walletAddress: wallet_address }, data: parsed.data });
 }
 
 export async function deleteLocation(wallet_address: string, requester: string) {
   if (requester !== wallet_address) throw new ApiError(403, 'Forbidden', 'You can only delete your own location', 'https://cylos.io/errors/forbidden');
-  await prisma.location.delete({ where: { wallet_address } });
+  await prisma.location.delete({ where: { walletAddress: wallet_address } });
 }

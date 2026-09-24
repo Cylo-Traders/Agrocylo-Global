@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
+import { connection } from "next/server";
 
 import { montserratAlternates } from "@/fonts";
 import { siteConfig } from "@/config/site.config";
@@ -44,18 +46,23 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Request-time CSP nonces require dynamic rendering so Next.js can apply the
+  // nonce to every framework/bootstrap script in the response.
+  await connection();
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
+
   return (
     <html lang="en" suppressHydrationWarning data-scroll-behavior="smooth">
       <body
         className={`${montserratAlternates.variable} flex min-h-dvh flex-col bg-background font-sans antialiased`}
       >
         <ErrorBoundary>
-          <GlobalProvider>{children}</GlobalProvider>
+          <GlobalProvider nonce={nonce}>{children}</GlobalProvider>
         </ErrorBoundary>
       </body>
     </html>

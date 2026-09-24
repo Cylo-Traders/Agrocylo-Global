@@ -1,6 +1,11 @@
 {
   "name": "agrocylo-monorepo",
   "private": true,
+  "packageManager": "npm@10.9.2",
+  "engines": {
+    "node": ">=22.13.0 <23",
+    "npm": ">=10.9.0 <11"
+  },
   "description": "Turborepo workspace root (Issue #755) tying the two Next.js clients and shared packages together, replacing independent per-app drift.",
   "workspaces": [
     "client",
@@ -8,15 +13,36 @@
     "packages/*"
   ],
   "scripts": {
+    "preinstall": "node scripts/check-toolchain.cjs",
+    "check:toolchain": "node scripts/check-toolchain.cjs",
+    "test:toolchain": "node --test scripts/check-toolchain.test.cjs",
     "build": "turbo run build",
     "dev": "turbo run dev",
+    "dev:marketplace": "npm run dev --workspace=client --",
+    "dev:production": "npm run dev --workspace=agro-production/client --",
     "lint": "turbo run lint",
     "test": "turbo run test",
+    "test:dev-launcher": "node --test scripts/dev-frontend.test.cjs",
     "check:versions": "node scripts/check-shared-versions.js",
-    "prepare": "husky"
+    "prepare": "husky || true",
+    "dev:client": "npm run dev --workspace client",
+    "dev:agro": "npm run dev --workspace agro-production/client",
+    "doctor": "node scripts/doctor-next.js",
+    "doctor:client": "node scripts/doctor-next.js --app=client",
+    "doctor:agro": "node scripts/doctor-next.js --app=agro",
+    "reset:next:client": "node scripts/reset-next-cache.js --app=client",
+    "reset:next:agro": "node scripts/reset-next-cache.js --app=agro",
+    "smoke:dev": "node scripts/smoke-dev-start.js",
+    "test:scripts": "node --test scripts/__tests__/*.test.js"
   },
   "devDependencies": {
     "turbo": "^2.3.3",
     "husky": "^9.0.0"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "npm",
+      "version": ">=10.0.0 <11.0.0"
+    }
   }
 }

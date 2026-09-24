@@ -17,7 +17,8 @@ export const queryKeys = {
     detail: (id: string) => ["orders", "detail", id] as const,
   },
   cart: {
-    all: () => ["cart"] as const,
+    all: (wallet?: string) => (wallet ? (["cart", wallet] as const) : (["cart"] as const)),
+    byWallet: (wallet: string) => ["cart", wallet] as const,
   },
   profile: {
     byWallet: (wallet: string) => ["profile", wallet] as const,

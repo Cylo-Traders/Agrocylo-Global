@@ -558,13 +558,15 @@ fn test_cancel_proposal_only_when_queued() {
     // Now it can be cancelled
     t.gov.cancel_proposal(&guardian, &proposal_id);
 
-    // Cannot cancel again (now Cancelled, not Queued)
+    // Cannot cancel again — now in the terminal Cancelled state. Matches the
+    // precedence execute()/queue() already use for a cancelled proposal
+    // (Issue #838).
     let err = t
         .gov
         .try_cancel_proposal(&guardian, &proposal_id)
         .unwrap_err()
         .unwrap();
-    assert_eq!(err, GovernanceError::NotQueued);
+    assert_eq!(err, GovernanceError::ProposalCancelled);
 }
 
 fn advance_time(env: &Env, delta: u64) {

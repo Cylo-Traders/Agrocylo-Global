@@ -7,6 +7,7 @@ import type {
 } from "@/types/product";
 
 import { API_BASE_URL } from "@/lib/apiConfig";
+import { apiRequest } from "@/lib/apiHelper";
 import { isTestMode } from "@/lib/testMode";
 
 function productFromJson(json: unknown): Product {
@@ -32,12 +33,7 @@ async function requestJson<T>(
 }
 
 export type ProductSort =
-  | "newest"
-  | "price-asc"
-  | "price-desc"
-  | "rating"
-  | "distance"
-  | "popular";
+  "newest" | "price-asc" | "price-desc" | "rating" | "distance" | "popular";
 
 export type ListProductsParams = {
   farmer?: string;
@@ -93,9 +89,13 @@ export async function listProducts(params: ListProductsParams = {}) {
   }>(url);
 }
 
-export async function getProductById(productId: string): Promise<Product | null> {
+export async function getProductById(
+  productId: string,
+): Promise<Product | null> {
   try {
-    const json = await requestJson<unknown>(`${API_BASE_URL}/products/${productId}`);
+    const json = await requestJson<unknown>(
+      `${API_BASE_URL}/products/${productId}`,
+    );
     return productFromJson(json);
   } catch (err) {
     if (err instanceof Error && /404|not found/i.test(err.message)) return null;
@@ -135,13 +135,12 @@ export async function createProduct(
     stock_quantity: input.stock_quantity ?? null,
   };
 
-  const json = await requestJson<unknown>(`${API_BASE_URL}/products`, {
+  const json = await apiRequest<unknown>("/products", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-wallet-address": walletAddress,
     },
-    body: JSON.stringify(payload),
+    body: payload,
   });
 
   return productFromJson(json);
@@ -163,59 +162,39 @@ export async function updateProduct(
     // leave as-is
   }
 
-  const json = await requestJson<unknown>(`${API_BASE_URL}/products/${productId}`, {
+  const json = await apiRequest<unknown>(`/products/${productId}`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
-      "x-wallet-address": walletAddress,
     },
-    body: JSON.stringify(payload),
+    body: payload,
   });
 
   return productFromJson(json);
 }
 
 export async function softDeleteProduct(
-  walletAddress: string,
+  _walletAddress: string,
   productId: string,
 ): Promise<Product> {
-  const json = await requestJson<unknown>(`${API_BASE_URL}/products/${productId}`, {
+  const json = await apiRequest<unknown>(`/products/${productId}`, {
     method: "DELETE",
-    headers: {
-      "x-wallet-address": walletAddress,
-    },
   });
   return productFromJson(json);
 }
 
 export async function uploadProductImage(
-  walletAddress: string,
+  _walletAddress: string,
   productId: string,
   file: File,
 ): Promise<{ image_url: string }> {
   const formData = new FormData();
   formData.append("image", file);
 
-  const res = await fetch(`${API_BASE_URL}/products/${productId}/image`, {
+  return apiRequest<{ image_url: string }>(`/products/${productId}/image`, {
     method: "POST",
-    headers: {
-      "x-wallet-address": walletAddress,
-    },
     body: formData,
   });
-
-  if (!res.ok) {
-    let message = `Image upload failed (${res.status})`;
-    try {
-      const body = await res.json();
-      message = body?.message || body?.title || message;
-    } catch {
-      // ignore
-    }
-    throw new Error(message);
-  }
-
-  return (await res.json()) as { image_url: string };
 }
 
 /** Admin: toggle is_available on any product. */
@@ -223,11 +202,14 @@ export async function adminSetProductVisibility(
   productId: string,
   isAvailable: boolean,
 ): Promise<Product> {
-  return requestJson<Product>(`${API_BASE_URL}/admin/products/${productId}/visibility`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ is_available: isAvailable }),
-  });
+  return requestJson<Product>(
+    `${API_BASE_URL}/admin/products/${productId}/visibility`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_available: isAvailable }),
+    },
+  );
 }
 
 /** Admin: permanently delist (hard-delete) a product. */
@@ -405,10 +387,10 @@ export function pushSearchHistory(term: string): string[] {
   const t = term.trim();
   if (!t) return readSearchHistory();
   const current = readSearchHistory();
-  const next = [t, ...current.filter((x) => x.toLowerCase() !== t.toLowerCase())].slice(
-    0,
-    SEARCH_HISTORY_LIMIT,
-  );
+  const next = [
+    t,
+    ...current.filter((x) => x.toLowerCase() !== t.toLowerCase()),
+  ].slice(0, SEARCH_HISTORY_LIMIT);
   writeLocal(SEARCH_HISTORY_KEY, next);
   return next;
 }
@@ -420,9 +402,56 @@ export function clearSearchHistory() {
 // ─── Favorites / Wishlist ─────────────────────────────────────────────────
 
 const FAVORITES_KEY = "market:favorites";
+const EMPTY_FAVORITES: string[] = Object.freeze([]) as unknown as string[];
+let favoriteSnapshot: string[] = EMPTY_FAVORITES;
+let favoriteSnapshotRaw: string | null | undefined;
+
+function parseFavoriteIds(raw: string | null): string[] {
+  if (!raw) return EMPTY_FAVORITES;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      !Array.isArray(parsed) ||
+      !parsed.every((id) => typeof id === "string")
+    ) {
+      return EMPTY_FAVORITES;
+    }
+    const unique = [...new Set(parsed)];
+    return unique.length
+      ? (Object.freeze(unique) as string[])
+      : EMPTY_FAVORITES;
+  } catch {
+    return EMPTY_FAVORITES;
+  }
+}
 
 export function getFavoriteIds(): string[] {
-  return readLocal<string[]>(FAVORITES_KEY, []);
+  if (typeof window === "undefined") return EMPTY_FAVORITES;
+  try {
+    const raw = window.localStorage.getItem(FAVORITES_KEY);
+    if (raw === favoriteSnapshotRaw) return favoriteSnapshot;
+    favoriteSnapshotRaw = raw;
+    favoriteSnapshot = parseFavoriteIds(raw);
+    return favoriteSnapshot;
+  } catch {
+    favoriteSnapshotRaw = null;
+    favoriteSnapshot = EMPTY_FAVORITES;
+    return favoriteSnapshot;
+  }
+}
+
+export function getServerFavoriteIds(): string[] {
+  return EMPTY_FAVORITES;
+}
+
+function persistFavoriteIds(ids: string[]): void {
+  const next = ids.length
+    ? (Object.freeze([...ids]) as string[])
+    : EMPTY_FAVORITES;
+  const raw = JSON.stringify(next);
+  favoriteSnapshot = next;
+  favoriteSnapshotRaw = raw;
+  writeLocal(FAVORITES_KEY, next);
 }
 
 export function isFavorite(productId: string): boolean {
@@ -438,12 +467,12 @@ export function toggleFavorite(productId: string): boolean {
   } else {
     next = [productId, ...current];
   }
-  writeLocal(FAVORITES_KEY, next);
+  persistFavoriteIds(next);
   return index < 0;
 }
 
 export function clearFavorites() {
-  writeLocal<string[]>(FAVORITES_KEY, []);
+  persistFavoriteIds([]);
 }
 
 // ─── Search Analytics ─────────────────────────────────────────────────────
@@ -502,10 +531,7 @@ export async function fetchSearchSuggestions(query: string): Promise<string[]> {
   }
   // Local fallback: filter the popular list + history
   const ql = q.toLowerCase();
-  const combined = [
-    ...readSearchHistory(),
-    ...FALLBACK_POPULAR_SEARCHES,
-  ];
+  const combined = [...readSearchHistory(), ...FALLBACK_POPULAR_SEARCHES];
   const seen = new Set<string>();
   const out: string[] = [];
   for (const term of combined) {

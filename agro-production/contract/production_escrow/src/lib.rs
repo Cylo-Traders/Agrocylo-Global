@@ -1970,7 +1970,7 @@ impl ProductionEscrowContract {
         from.require_auth();
         // Issue #847: Add pause gate like invest/claim_returns/refund
         require_not_paused(&env)?;
-        
+
         if from == to {
             return Err(EscrowError::SameInvestor);
         }
@@ -1979,7 +1979,7 @@ impl ProductionEscrowContract {
         if campaign.status == CampaignStatus::Settled || campaign.status == CampaignStatus::Failed {
             return Err(EscrowError::CampaignAlreadyTerminal);
         }
-        
+
         // Issue #847: Reject if to == farmer or contract address
         if to == campaign.farmer || to == env.current_contract_address() {
             return Err(EscrowError::InvalidAmount);
@@ -1999,7 +1999,7 @@ impl ProductionEscrowContract {
         if env.storage().persistent().has(&claim_key_from) {
             return Err(EscrowError::AlreadyTransferred);
         }
-        
+
         // Issue #847: Reject if recipient already claimed on this campaign
         let claim_key_to = DataKey::Claimed(campaign_id, to.clone());
         if env.storage().persistent().has(&claim_key_to) {
@@ -2411,10 +2411,7 @@ fn resolve_dispute_internal(
                 checked_sub(campaign.total_revenue, campaign.tranche_released)?,
             )?;
             if pool > 0 && farmer_bps > 0 {
-                let farmer_cut = checked_div(
-                    checked_mul(pool, farmer_bps as i128)?,
-                    BPS_DENOM,
-                )?;
+                let farmer_cut = checked_div(checked_mul(pool, farmer_bps as i128)?, BPS_DENOM)?;
                 if farmer_cut > 0 {
                     let token_client = token::Client::new(env, &campaign.token);
                     token_client.transfer(
@@ -2495,12 +2492,12 @@ fn release_tranche_internal(
 }
 
 #[cfg(test)]
+mod cost_harness_tests;
+#[cfg(test)]
 mod invariant_tests;
+#[cfg(test)]
+mod pause_gating_tests;
 #[cfg(test)]
 mod state_machine_tests;
 #[cfg(test)]
 mod test;
-#[cfg(test)]
-mod pause_gating_tests;
-#[cfg(test)]
-mod cost_harness_tests;

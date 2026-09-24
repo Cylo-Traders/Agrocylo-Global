@@ -10,11 +10,11 @@ import {
 
 /** Unread notifications for the connected wallet. */
 export function useUnreadNotifications() {
-  const { address, connected } = useWallet();
+  const { address, connected, authenticated } = useWallet();
   return useQuery({
     queryKey: queryKeys.notifications.unread(address ?? ""),
     queryFn: () => listUnreadNotifications(address!),
-    enabled: connected && !!address,
+    enabled: connected && authenticated && !!address,
     refetchInterval: 30 * 1000,
     staleTime: 0,
   });

@@ -510,8 +510,9 @@ fn test_invariant_timelock_proptest() {
 
     runner
         .run(
-            // timelock_delay in seconds: 1..=7*24*3600 (up to 1 week)
-            &(1u64..=(7 * 24 * 3600u64)),
+            // timelock_delay in seconds: MIN_TIMELOCK_DELAY_SECS (24h, Issue
+            // #851) up to 1 week — the range `initialize` actually accepts.
+            &((24 * 3600u64)..=(7 * 24 * 3600u64)),
             |timelock_delay| {
                 let env = Env::default();
                 env.mock_all_auths();

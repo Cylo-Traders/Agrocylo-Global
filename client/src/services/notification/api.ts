@@ -1,4 +1,4 @@
-import { API_BASE_URL } from "@/lib/apiConfig";
+import { apiRequest } from "@/lib/apiHelper";
 
 export interface OrderEventNotification {
   id: string;
@@ -10,53 +10,31 @@ export interface OrderEventNotification {
   createdAt: string;
 }
 
-async function requestJson<T>(
-  input: RequestInfo | URL,
-  init?: RequestInit,
-): Promise<T> {
-  const res = await fetch(input, init);
-  if (!res.ok) {
-    let message = `Request failed with status ${res.status}`;
-    try {
-      const body = await res.json();
-      message = body?.message || body?.title || message;
-    } catch {
-      // ignore
-    }
-    throw new Error(message);
-  }
-
-  return (await res.json()) as T;
-}
-
 export async function listUnreadNotifications(
   walletAddress: string,
 ): Promise<OrderEventNotification[]> {
-  const url = new URL(`${API_BASE_URL}/notifications`);
-  url.searchParams.set("unread_only", "true");
-
-  const response = await requestJson<{ items: OrderEventNotification[] }>(url, {
-    method: "GET",
-    headers: {
-      "x-wallet-address": walletAddress,
+  void walletAddress;
+  const response = await apiRequest<{ items: OrderEventNotification[] }>(
+    "/notifications?unread_only=true",
+    {
+      method: "GET",
+      cache: "no-store",
     },
-    cache: "no-store",
-  });
+  );
 
   return response.items;
 }
 
 export async function markNotificationsRead(
-  walletAddress: string,
+  _walletAddress: string,
   ids: string[],
 ): Promise<{ count: number }> {
-  return requestJson<{ count: number }>(`${API_BASE_URL}/notifications/read`, {
+  return apiRequest<{ count: number }>("/notifications/read", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-wallet-address": walletAddress,
     },
-    body: JSON.stringify({ ids }),
+    body: { ids },
   });
 }
 
@@ -101,13 +79,12 @@ export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
 export async function getNotificationPreferences(
   walletAddress: string,
 ): Promise<NotificationPrefs> {
-  const response = await requestJson<{ preferences: NotificationPrefs }>(
-    `${API_BASE_URL}/notifications/preferences`,
+  void walletAddress;
+  const response = await apiRequest<{ preferences: NotificationPrefs }>(
+    "/notifications/preferences",
     {
       method: "GET",
-      headers: {
-        "x-wallet-address": walletAddress,
-      },
+      headers: {},
       cache: "no-store",
     },
   );
@@ -115,18 +92,17 @@ export async function getNotificationPreferences(
 }
 
 export async function updateNotificationPreferences(
-  walletAddress: string,
+  _walletAddress: string,
   preferences: NotificationPrefs,
 ): Promise<NotificationPrefs> {
-  const response = await requestJson<{ preferences: NotificationPrefs }>(
-    `${API_BASE_URL}/notifications/preferences`,
+  const response = await apiRequest<{ preferences: NotificationPrefs }>(
+    "/notifications/preferences",
     {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        "x-wallet-address": walletAddress,
       },
-      body: JSON.stringify(preferences),
+      body: preferences,
     },
   );
   return response.preferences;

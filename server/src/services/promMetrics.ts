@@ -50,6 +50,47 @@ export const queueJobFailuresTotal = new client.Counter({
   registers: [registry],
 });
 
+export const contractWatcherEventsPerPoll = new client.Histogram({
+  name: "contract_watcher_events_per_poll",
+  help: "Number of events processed per contract watcher poll iteration",
+  buckets: [0, 1, 5, 10, 25, 50, 100, 250, 500],
+  registers: [registry],
+});
+
+export const contractWatcherPagesPerPoll = new client.Histogram({
+  name: "contract_watcher_pages_per_poll",
+  help: "Number of RPC pages fetched per contract watcher poll iteration",
+  buckets: [1, 2, 3, 5, 10, 20, 50],
+  registers: [registry],
+});
+
+export const contractWatcherUnhandledTotal = new client.Counter({
+  name: "contract_watcher_unhandled_events_total",
+  help: "Total unhandled contract events (unknown action)",
+  labelNames: ["action", "entity"],
+  registers: [registry],
+});
+
+export const reconciliationDriftTotal = new client.Counter({
+  name: "reconciliation_drift_total",
+  help: "Total drifts detected by reconciliation, labeled by entity and drift type",
+  labelNames: ["entity_type", "drift_type"],
+  registers: [registry],
+});
+
+export const reconciliationRunDurationSeconds = new client.Histogram({
+  name: "reconciliation_run_duration_seconds",
+  help: "Reconciliation run duration in seconds",
+  buckets: [0.1, 0.5, 1, 2.5, 5, 10, 30, 60],
+  registers: [registry],
+});
+
+export const reconciliationErrorsTotal = new client.Counter({
+  name: "reconciliation_errors_total",
+  help: "Total reconciliation errors",
+  registers: [registry],
+});
+
 /**
  * Records one completed HTTP request. `route` should be the matched route
  * pattern (e.g. "/orders/:id"), not the raw URL, to keep label cardinality
