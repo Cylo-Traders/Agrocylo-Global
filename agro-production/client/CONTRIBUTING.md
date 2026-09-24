@@ -6,37 +6,30 @@ Thank you for helping improve the Agrocylo frontend. This guide covers everythin
 
 ## Prerequisites
 
-- Node.js 18 or newer
-- npm (or pnpm)
-- A basic understanding of Next.js (App Router), React, and TypeScript
-- Freighter browser wallet extension (for testing wallet flows locally)
+Use Node.js 22.13.x and npm 10.9.x as declared at the workspace root. Freighter
+is needed only for live wallet flows.
 
 ---
 
 ## Getting started
 
 ```bash
-# 1. Fork the repository on GitHub, then clone your fork
 git clone https://github.com/<your-username>/Agrocylo-Global.git
-cd Agrocylo-Global/agro-production/client
-
-# 2. Install dependencies
-npm install
-
-# 3. Copy the env example and fill in your values
-cp .env.example .env.local
-
-# 4. Start the dev server
-npm run dev
+cd Agrocylo-Global
+npm ci
+cp agro-production/client/.env.example agro-production/client/.env.local
+npm run dev:production
 ```
 
-The app runs at `http://localhost:3000` by default.
+The app runs at `http://localhost:3001`. See
+[Frontend development setup](../../docs/FRONTEND_SETUP.md) for the canonical
+toolchain, both-app workflow, port overrides, and troubleshooting.
 
 ### Required environment variables
 
 | Variable | Description |
 |---|---|
-| `NEXT_PUBLIC_API_URL` | Backend API base URL (default: `http://localhost:5000`) |
+| `NEXT_PUBLIC_API_URL` | Backend API base URL (default: `http://localhost:5001`) |
 | `NEXT_PUBLIC_SOROBAN_RPC_URL` | Soroban RPC endpoint |
 | `NEXT_PUBLIC_NETWORK_PASSPHRASE` | Stellar network passphrase |
 
@@ -65,22 +58,15 @@ Key files to know:
 
 ## Running tests
 
-```bash
-npm run test          # run all tests once
-npm run test -- --watch  # watch mode
-```
-
-Tests use [Vitest](https://vitest.dev/) and live alongside source files under `src/__tests__/`. When adding a feature or fixing a bug, add a test that covers the new behaviour.
-
----
-
-## Storybook (component explorer)
+From the repository root:
 
 ```bash
-npm run storybook
+npm run test --workspace=agro-production/client
+npm run test:watch --workspace=agro-production/client
 ```
 
-Stories live in `src/**/*.stories.tsx`. Add a story for any new or significantly changed component so reviewers can inspect it in isolation.
+Tests use [Vitest](https://vitest.dev/) and live alongside source files. When
+adding a feature or fixing a bug, add a test that covers the new behaviour.
 
 ---
 

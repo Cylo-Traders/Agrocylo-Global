@@ -56,7 +56,8 @@ Validated by a Zod schema in [`server/src/config/index.ts`](../../server/src/con
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
-| `DATABASE_URL` | ✅ | — | Postgres connection string |
+| `DATABASE_URL` | ✅ runtime | — | Postgres connection string. Inject at container runtime; never pass it as a server image build argument. |
+| `PRISMA_GENERATE_DATABASE_URL` | generate only | — | Nonsecret, non-routable placeholder accepted only while generating Prisma artifacts. Do not set at runtime or for migrations. |
 | `SUPABASE_URL` | ✅ | — | Supabase project URL |
 | `SUPABASE_ANON_KEY` | ✅ | — | Supabase anon key |
 | `SUPABASE_SERVICE_ROLE_KEY` | ✅ prod | `""` | Server-side Supabase key (image uploads) |

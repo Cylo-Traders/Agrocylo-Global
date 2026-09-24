@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { NextConfig } from "next";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -95,42 +96,22 @@ function validateNetworkConfig() {
 
 validateNetworkConfig();
 
-// Resolve validated hostnames for CSP / image remotePatterns.
-// Re-use the same validator (idempotent) to avoid constructing URL from untrusted input directly.
-const { sorobanRpc, horizon: horizonHostname } = assertEndpointsValid(
-  {
-    NEXT_PUBLIC_SOROBAN_RPC_URL: process.env.NEXT_PUBLIC_SOROBAN_RPC_URL,
-    NEXT_PUBLIC_HORIZON_URL: process.env.NEXT_PUBLIC_HORIZON_URL,
-    NEXT_PUBLIC_NETWORK_PASSPHRASE: process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE,
-    NEXT_PUBLIC_STELLAR_ENV: process.env.NEXT_PUBLIC_STELLAR_ENV,
-    NODE_ENV: process.env.NODE_ENV,
-  },
-  { isProduction: process.env.NODE_ENV === "production" }
-);
+// Dependencies are hoisted to the repository root by the npm workspace
+// (Issue #755), so the bundler root has to be the workspace root — pointing it
+// at the app directory puts `next` itself outside the root and reproduces the
+// "couldn't find the Next.js package" / build-manifest ENOENT startup failure.
+// `__dirname` (never process.cwd()) keeps this stable when the app is started
+// through Turborepo or from another directory.
+const workspaceRoot = path.resolve(__dirname, "..");
+
+const sorobanRpc = new URL(process.env.NEXT_PUBLIC_SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org").hostname;
+const horizonHostname = new URL(process.env.NEXT_PUBLIC_HORIZON_URL || "https://horizon-testnet.stellar.org").hostname;
 
 async function headers() {
-  const imageHosts = [
-    "ipfs.io",
-    "gateway.pinata.cloud",
-    sorobanRpc,
-    horizonHostname,
-  ].filter(Boolean);
-
-  const cspImageSources = imageHosts.map(host => `https://${host}`).join(" ");
-  const cspConnectSources = [
-    `https://${sorobanRpc}`,
-    `https://${horizonHostname}`,
-    "https://freighter.app",
-  ].join(" ");
-
   return [
     {
       source: "/:path*",
       headers: [
-        {
-          key: "Content-Security-Policy",
-          value: `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' ${cspImageSources}; connect-src 'self' ${cspConnectSources}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`,
-        },
         {
           key: "Strict-Transport-Security",
           value: "max-age=31536000; includeSubDomains; preload",
@@ -156,7 +137,7 @@ const nextConfig: NextConfig = {
   output: "standalone",
   headers,
   turbopack: {
-    root: repoRoot,
+    root: workspaceRoot,
   },
   images: {
     qualities: [75, 100],

@@ -2,14 +2,20 @@
   "name": "agro-production-client",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.13.0 <23",
+    "npm": ">=10.9.0 <11"
+  },
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --port 3001",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest",
     "test:watch": "vitest --watch",
-    "test:a11y": "vitest run src/a11y.test.tsx"
+    "test:a11y": "vitest run src/a11y.test.tsx",
+    "doctor": "node ../../scripts/doctor-next.js --app=agro",
+    "reset:cache": "node ../../scripts/reset-next-cache.js --app=agro"
   },
   "dependencies": {
     "@agrocylo/wallet-core": "*",

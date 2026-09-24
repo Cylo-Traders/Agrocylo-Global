@@ -1,5 +1,9 @@
 import { API_BASE_URL } from "./apiConfig";
-import { getAccessToken } from "./authToken";
+import {
+  AUTH_EXPIRED_EVENT,
+  clearAuthSession,
+  getAccessToken,
+} from "./authToken";
 
 export interface ApiError {
   code: string;
@@ -27,9 +31,20 @@ interface RequestOptions {
   headers?: Record<string, string>;
   body?: unknown;
   timeout?: number;
+  cache?: RequestCache;
 }
 
 const DEFAULT_TIMEOUT = 15_000;
+
+function errorCodeFromResponse(
+  parsed: { code?: unknown } | null,
+  status: number,
+): string {
+  if (typeof parsed?.code === "string" && parsed.code.trim()) {
+    return parsed.code;
+  }
+  return status === 404 ? "NOT_FOUND" : "SERVER_ERROR";
+}
 
 export async function apiRequest<T>(
   path: string,
@@ -40,6 +55,7 @@ export async function apiRequest<T>(
     headers = {},
     body,
     timeout = DEFAULT_TIMEOUT,
+    cache,
   } = options;
 
   const url = `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
@@ -51,12 +67,20 @@ export async function apiRequest<T>(
     const res = await fetch(url, {
       method,
       headers: {
-        "Content-Type": "application/json",
+        ...(body instanceof FormData
+          ? {}
+          : { "Content-Type": "application/json" }),
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...headers,
       },
-      body: body ? JSON.stringify(body) : undefined,
+      body:
+        body == null
+          ? undefined
+          : body instanceof FormData
+            ? body
+            : JSON.stringify(body),
       signal: controller.signal,
+      cache,
     });
 
     if (!res.ok) {
@@ -67,9 +91,12 @@ export async function apiRequest<T>(
       } catch {
         // ignore
       }
+      if (res.status === 401 && accessToken && typeof window !== "undefined") {
+        clearAuthSession();
+        window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+      }
       throw new ApiRequestError({
-        code:
-          (parsed?.code ?? res.status === 404) ? "NOT_FOUND" : "SERVER_ERROR",
+        code: errorCodeFromResponse(parsed, res.status),
         message:
           parsed?.message ||
           parsed?.title ||

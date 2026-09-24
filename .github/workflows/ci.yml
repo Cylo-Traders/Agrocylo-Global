@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 env:
-  NODE_VERSION: "22"
+  NODE_VERSION: "22.13.0"
   NEXT_TELEMETRY_DISABLED: "1"
 
 jobs:
@@ -32,6 +32,8 @@ jobs:
       contracts: ${{ steps.changes.outputs.contracts }}
       agro-client: ${{ steps.changes.outputs.agro-client }}
       shared-deps: ${{ steps.changes.outputs.shared-deps }}
+      scripts: ${{ steps.changes.outputs.scripts }}
+      dev-smoke: ${{ steps.changes.outputs.dev-smoke }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -75,8 +77,21 @@ jobs:
               - 'agro-production/client/**'
               - 'package.json'
               - 'package-lock.json'
+            scripts:
+              - 'scripts/**'
+              - 'package.json'
+              - '.github/workflows/ci.yml'
+            dev-smoke:
+              - 'client/**'
+              - 'agro-production/client/**'
+              - 'packages/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'turbo.json'
+              - 'scripts/**'
+              - '.github/workflows/ci.yml'
   shared-dependency-versions:
-    name: Shared client dependency versions (Issue #755 / #728)
+    name: Shared client dependency versions (Issue #755 / #728 / #923)
     needs: paths
     if: needs.paths.outputs.shared-deps == 'true'
     runs-on: ubuntu-latest
@@ -85,8 +100,71 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Check client / agro-production/client stay on the same major versions
+      - name: Check shared framework/tooling versions and the next + eslint-config-next policy
         run: node scripts/check-shared-versions.js
+
+  repo-scripts:
+    name: Repo scripts · unit tests (Issue #920 / #921 / #923 / #924)
+    needs: paths
+    if: needs.paths.outputs.scripts == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # Fixtures run against temporary directories; only the doctor's
+      # "real repository" check needs an install, and it self-skips.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Version policy + doctor + cache reset + smoke harness tests
+        run: npm run test:scripts
+
+      - name: Shared dependency policy check
+        run: npm run check:versions
+
+      - name: Doctor · both clients resolve Next.js inside the bundler root
+        run: node scripts/doctor-next.js
+
+  dev-smoke:
+    name: Dev server cold-start smoke (Issue #924)
+    needs: paths
+    if: needs.paths.outputs.dev-smoke == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # Issue #755: one install at the repo root for both Next.js workspaces.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cold-start smoke (both clients + root launcher)
+        # --reset-cache proves the apps serve from a clean generated output;
+        # --cycles=2 also covers a stop/start cycle for each scenario.
+        run: node scripts/smoke-dev-start.js --skip-install --reset-cache --timeout=240000
+
+      - name: Upload startup logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-smoke-logs
+          path: .smoke-logs/
+          retention-days: 7
 
   client:
     name: Client · Next.js
@@ -149,10 +227,8 @@ jobs:
       run:
         working-directory: server
     env:
-      # prisma.config.ts requires DATABASE_URL to be set for any Prisma
-      # command, including `generate`, which otherwise doesn't need a
-      # reachable database — this job has no postgres service, so the value
-      # only needs to be well-formed, not connectable.
+      # Tests that import runtime configuration require a well-formed URL.
+      # Prisma artifact generation uses its separately scoped placeholder.
       DATABASE_URL: postgresql://agrocylo:agrocylo123@localhost:5432/agrocylo_test
 
     steps:
@@ -170,6 +246,9 @@ jobs:
         run: npm ci
 
       - name: Generate Prisma client
+        env:
+          DATABASE_URL: ""
+          PRISMA_GENERATE_DATABASE_URL: postgresql://prisma-generate:unused@localhost:5432/prisma_generate
         run: npx prisma generate
 
       - name: Lint
@@ -185,6 +264,10 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Verify server image excludes database credentials
+        working-directory: .
+        run: ./scripts/verify-server-image-no-database-url.sh
 
       - name: Test with coverage
         run: npm run test:coverage

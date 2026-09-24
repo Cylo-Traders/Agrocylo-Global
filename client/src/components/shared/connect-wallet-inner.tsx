@@ -15,7 +15,7 @@ import WalletModal from "@/components/modals/wallet-modal";
  * `connected` transition for a wallet that doesn't have a profile yet.
  */
 export function ConnectWalletInner() {
-  const { connected, address } = useWallet();
+  const { connected, authenticated, address } = useWallet();
   const { profile, isLoaded } = useProfile();
   const router = useRouter();
   const prevConnected = useRef(false);
@@ -23,13 +23,14 @@ export function ConnectWalletInner() {
   useEffect(() => {
     if (!isLoaded) return;
 
-    const justConnected = connected && !prevConnected.current;
-    prevConnected.current = connected;
+    const ready = connected && authenticated;
+    const justConnected = ready && !prevConnected.current;
+    prevConnected.current = ready;
 
     if (justConnected && address && !profile) {
       router.push("/onboarding");
     }
-  }, [connected, address, profile, isLoaded, router]);
+  }, [connected, authenticated, address, profile, isLoaded, router]);
 
   if (connected) {
     return <AccountModal />;
