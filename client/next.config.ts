@@ -67,28 +67,10 @@ const sorobanRpc = new URL(process.env.NEXT_PUBLIC_SOROBAN_RPC_URL || "https://s
 const horizonHostname = new URL(process.env.NEXT_PUBLIC_HORIZON_URL || "https://horizon-testnet.stellar.org").hostname;
 
 async function headers() {
-  const imageHosts = [
-    "ipfs.io",
-    "gateway.pinata.cloud",
-    sorobanRpc,
-    horizonHostname,
-  ].filter(Boolean);
-
-  const cspImageSources = imageHosts.map(host => `https://${host}`).join(" ");
-  const cspConnectSources = [
-    `https://${sorobanRpc}`,
-    `https://${horizonHostname}`,
-    "https://freighter.app",
-  ].join(" ");
-
   return [
     {
       source: "/:path*",
       headers: [
-        {
-          key: "Content-Security-Policy",
-          value: `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' ${cspImageSources}; connect-src 'self' ${cspConnectSources}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`,
-        },
         {
           key: "Strict-Transport-Security",
           value: "max-age=31536000; includeSubDomains; preload",

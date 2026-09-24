@@ -37,6 +37,8 @@ jobs:
         working-directory: client
     env:
       PLAYWRIGHT_BASE_URL: http://localhost:3000
+      NEXT_PUBLIC_SOROBAN_RPC_URL: https://soroban-testnet.stellar.org
+      NEXT_PUBLIC_NETWORK_PASSPHRASE: Test SDF Network ; September 2015
 
     steps:
       - name: Checkout
@@ -45,7 +47,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version-file: ".nvmrc"
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -71,6 +73,16 @@ jobs:
           else
             npx playwright test --project="$BROWSER"
           fi
+
+      - name: Verify production hydration and CSP
+        env:
+          PLAYWRIGHT_SERVER_MODE: production
+        run: |
+          BROWSER="${{ github.event.inputs.browser || 'chromium' }}"
+          if [ "$BROWSER" = "all" ]; then
+            BROWSER=chromium
+          fi
+          npx playwright test e2e/csp.spec.ts --project="$BROWSER"
 
       - name: Upload test report
         if: always()

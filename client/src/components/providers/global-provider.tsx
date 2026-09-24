@@ -18,6 +18,7 @@ import { TransactionFeedbackProvider } from "@/context/TransactionFeedbackContex
 
 interface GlobalProviderProps {
   children: ReactNode;
+  nonce?: string;
 }
 
 /**
@@ -35,7 +36,7 @@ interface GlobalProviderProps {
  * Top-level UI overlays (Toaster, route progress bar) sit alongside `children`
  * so they show on every route.
  */
-const GlobalProvider: FC<GlobalProviderProps> = ({ children }) => {
+const GlobalProvider: FC<GlobalProviderProps> = ({ children, nonce }) => {
   // Drive Lenis from GSAP's ticker — guarantees Lenis stays in sync with
   // any GSAP-driven animations on a single RAF.
   const lenisRef = useRef<LenisRef>(null);
@@ -49,7 +50,7 @@ const GlobalProvider: FC<GlobalProviderProps> = ({ children }) => {
   }, []);
 
   return (
-    <ThemeProvider>
+    <ThemeProvider nonce={nonce}>
       <ReactLenis root options={{ autoRaf: false }} ref={lenisRef}>
         <QueryProvider>
           <AnalyticsProvider>

@@ -1,5 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
+const serverPort =
+  new URL(baseURL).port || (baseURL.startsWith("https:") ? "443" : "80");
+const isProductionServer = process.env.PLAYWRIGHT_SERVER_MODE === "production";
+const serverCommand = isProductionServer
+  ? `npm run build -- --webpack && npm run start -- --port ${serverPort}`
+  : `npm run dev -- --port ${serverPort}`;
+
 /**
  * Agrocylo Global – Playwright Configuration
  * Issue: #28
@@ -13,7 +21,7 @@ export default defineConfig({
   reporter: [["html", { open: "never" }], ["list"]],
 
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000",
+    baseURL,
     screenshot: "only-on-failure",
     video: "retain-on-failure",
     trace: "on-first-retry",
@@ -27,9 +35,9 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: "npm run dev",
+    command: serverCommand,
     cwd: __dirname,
-    url: "http://localhost:3000",
+    url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 300_000,
     env: { NEXT_PUBLIC_DEMO_MODE: "true" },

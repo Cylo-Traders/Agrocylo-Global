@@ -38,26 +38,21 @@ Comment on the issue to let maintainers know you're interested. For substantial 
 
 #### For Frontend
 
-`client` and `agro-production/client` are npm workspace members (Issue
-#755) sharing a single root-level install — install once from the repo
-root, not inside each app's own directory:
+Install both frontend workspaces once from the repository root and launch
+them through the root scripts:
 
 ```bash
-npm install   # from the repo root; installs both client apps + packages/*
-
-# then run either app:
-npm run dev --workspace=client                        # root marketplace, http://localhost:3000
-npm run dev --workspace=agro-production/client         # production app
-
-# or use Turborepo to build/lint/test both at once:
-npm run build   # runs `turbo run build` across all workspace packages
+npm ci
+npm run dev                 # both frontends
+npm run dev:marketplace     # http://localhost:3000
+npm run dev:production      # http://localhost:3001
 ```
 
-Shared code (design-system primitives, wallet/auth hooks, common types)
-lives under `packages/*` — see `packages/wallet-core` for the first
-extracted example. If you're duplicating something that already exists in
-one app while working on the other, that's a signal it belongs in a shared
-package instead.
+Use root `npm install` only for intentional dependency changes. The supported
+Node/npm versions, per-app `.env.local` locations, port overrides, and startup
+troubleshooting are maintained in
+[Frontend development setup](docs/FRONTEND_SETUP.md). Shared code belongs under
+`packages/*`; do not create client-specific lockfiles or dependency installs.
 
 #### Dev ports
 
@@ -141,10 +136,9 @@ see [`docs/DEPENDENCY_UPGRADE_POLICY.md`](docs/DEPENDENCY_UPGRADE_POLICY.md).
 
 #### For Backend
 ```bash
-cd agro-production/server  # or cd server/ for root marketplace
+cd agro-production/server  # port 5001; use server/ for marketplace port 5000
 npm install
 npm run dev
-# Server runs on http://localhost:3001
 ```
 
 #### For Smart Contracts (Rust/Soroban)
@@ -178,7 +172,7 @@ See `docs/TOOLCHAIN.md` for complete version info and `respective README.md` fil
 
 **Before committing:**
 - Run tests: `npm test` (frontend/backend) or `cargo test --workspace` (contracts)
-- Type-check: `npm run type-check` (Node.js/React) or `cargo check --workspace` (contracts)
+- Type-check: `npx tsc --noEmit --project client/tsconfig.json` (marketplace), `npx tsc --noEmit --project agro-production/client/tsconfig.json` (production), or `cargo check --workspace` (contracts)
 - Lint: `npm run lint` (Node.js) or `cargo clippy --workspace --all-targets -- -D warnings` (contracts)
 
 **⚠️ Critical for Rust Contracts (Issue #777, #679):**
