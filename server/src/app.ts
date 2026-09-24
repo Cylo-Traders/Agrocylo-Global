@@ -47,7 +47,7 @@ import analyticsRoutes from "./routes/analyticsRoutes.js";
 import governanceRoutes from "./routes/governanceRoutes.js";
 import ussdRoutes from "./routes/ussdRoutes.js";
 import documentRoutes from "./routes/documentRoutes.js";
-import { registerAllEndpoints } from "./openapi/endpoints.js";
+import { registerAllEndpoints } from "./openapi/endpoints.ts";
 
 // Initialize error tracking and tracing
 initializeSentry('api');
@@ -67,6 +67,13 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'none'"],
+      scriptSrc: ["'self'", "https://cdn.jsdelivr.net"],
+      styleSrc: ["'self'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
+      imgSrc: ["'self'", "data:", "https://cdn.jsdelivr.net"],
+      connectSrc: ["'self'"], // For /openapi.json fetch
+      fontSrc: ["'self'", "https://fonts.googleapis.com"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
     },
   },
   referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
@@ -128,6 +135,7 @@ app.use(governanceRoutes);
 app.use(ussdRoutes);
 
 // Documentation endpoints (OpenAPI spec and Swagger UI)
+registerAllEndpoints(); // Populate the OpenAPI registry
 app.use(documentRoutes);
 
 app.get("/health", async (_req: Request, res: Response) => {

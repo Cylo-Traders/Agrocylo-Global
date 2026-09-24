@@ -2,40 +2,54 @@ import { prisma } from '../config/database.js';
 import { ApiError } from '../http/errors.js';
 import { z } from 'zod';
 
-const setLocationSchema = z.object({
+const updateLocationSchema = z.object({
   lat: z.number().min(-90).max(90).optional(),
   lng: z.number().min(-180).max(180).optional(),
   latitude: z.number().min(-90).max(90).optional(),
   longitude: z.number().min(-180).max(180).optional(),
   city: z.string().trim().max(120).optional().nullable(),
   country: z.string().trim().max(120).optional().nullable(),
-  is_public: z.boolean().default(true),
+  is_public: z.boolean().optional(),
 }).transform((value, ctx) => {
+  const data: {
+    lat?: number;
+    lng?: number;
+    city?: string | null;
+    country?: string | null;
+    is_public?: boolean;
+  } = {};
+  if (value.lat !== undefined) data.lat = value.lat;
+  if (value.lng !== undefined) data.lng = value.lng;
+  if (value.latitude !== undefined) data.lat = value.latitude;
+  if (value.longitude !== undefined) data.lng = value.longitude;
+  if (value.city !== undefined) data.city = value.city;
+  if (value.country !== undefined) data.country = value.country;
+  if (value.is_public !== undefined) data.is_public = value.is_public;
+
+  if (Object.keys(data).length === 0) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'At least one field to update must be provided',
+    });
+  }
+  return data;
+});
+
+const createLocationSchema = updateLocationSchema.required({
+  lat: true,
+  lng: true,
+}).or(updateLocationSchema.required({
+  latitude: true,
+  longitude: true,
+})).transform((value) => {
   const lat = value.lat ?? value.latitude;
   const lng = value.lng ?? value.longitude;
-
-  if (lat === undefined) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['lat'],
-      message: 'lat or latitude is required',
-    });
-  }
-
-  if (lng === undefined) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['lng'],
-      message: 'lng or longitude is required',
-    });
-  }
-
   return {
-    lat: lat ?? 0,
-    lng: lng ?? 0,
+    lat: lat!,
+    lng: lng!,
     city: value.city ?? null,
     country: value.country ?? null,
-    is_public: value.is_public,
+    is_public: value.is_public ?? true,
   };
 });
 
@@ -82,7 +96,7 @@ export async function getFarmerLocations(query: unknown) {
 }
 
 export async function setLocation(walletAddress: string, body: unknown) {
-  const parsed = setLocationSchema.safeParse(body);
+  const parsed = createLocationSchema.safeParse(body);
   if (!parsed.success) throw new ApiError(400, 'Bad Request', parsed.error.message, 'https://cylos.io/errors/validation');
   return prisma.location.upsert({
     where: { walletAddress },
@@ -93,7 +107,7 @@ export async function setLocation(walletAddress: string, body: unknown) {
 
 export async function updateLocation(wallet_address: string, requester: string, body: unknown) {
   if (requester !== wallet_address) throw new ApiError(403, 'Forbidden', 'You can only update your own location', 'https://cylos.io/errors/forbidden');
-  const parsed = setLocationSchema.safeParse(body);
+  const parsed = updateLocationSchema.safeParse(body);
   if (!parsed.success) throw new ApiError(400, 'Bad Request', parsed.error.message, 'https://cylos.io/errors/validation');
   return prisma.location.update({ where: { walletAddress: wallet_address }, data: parsed.data });
 }
