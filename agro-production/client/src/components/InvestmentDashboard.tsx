@@ -13,9 +13,18 @@ import { useWebSocket, type WsMessage } from "@/hooks/useWebSocket";
 
 interface Props {
   investorAddress: string;
+  role?: 'investor' | 'buyer';
 }
 
-export default function InvestmentDashboard({ investorAddress }: Props) {
+export default function InvestmentDashboard({ investorAddress, role = 'investor' }: Props) {
+  // Issue #1018: Integrate investor dashboard scope with existing buyer dashboard
+  if (role === 'buyer') {
+    return (
+      <div className="bg-surface border border-border rounded-xl p-8 text-center text-muted text-sm">
+        This is the Investment Dashboard. Buyer-specific dashboard features will be integrated here or in a separate component.
+      </div>
+    );
+  }
   const [investments, setInvestments] = useState<InvestmentWithCampaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

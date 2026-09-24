@@ -42,6 +42,7 @@ type Handler = (msg: WsMessage) => void;
 
 export interface UseWebSocketOptions {
   token?: string;
+  portfolioId?: string;
 }
 
 export interface UseWebSocketReturn {
@@ -88,6 +89,16 @@ export function useWebSocket(onMessage: Handler, options?: UseWebSocketOptions):
       }
 
       flushQueue(ws);
+
+      // Issue #1017: Send subscribe message for portfolio if portfolioId is provided.
+      if (options?.portfolioId) {
+        const subscribeMsg = JSON.stringify({
+          type: "subscribe",
+          channel: "portfolio",
+          id: options.portfolioId,
+        });
+        ws.send(subscribeMsg);
+      }
     };
 
     ws.onmessage = (e) => {
