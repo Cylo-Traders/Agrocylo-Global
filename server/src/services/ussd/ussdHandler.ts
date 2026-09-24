@@ -1,4 +1,4 @@
-﻿import {
+import {
   getSession,
   createSession,
   updateSession,
@@ -14,18 +14,19 @@ import { prisma } from "../../config/database.js";
 
 const MAX_TEXT_LENGTH = 182;
 
-function truncate(text: string): string {
-  if (text.length <= MAX_TEXT_LENGTH) return text;
-  return text.slice(0, MAX_TEXT_LENGTH - 3) + "...";
-}
-
 /**
  * Validate a Stellar public key (G... address, 56 chars, base32).
  * Uses the same base-32 alphabet as StrKey: A-Z and 2-7.
- * This mirrors the application's authService.isStellarAddress pattern.
  */
-function isStellarPublicKey(address: string): boolean {
+export function isStellarPublicKey(address: string): boolean {
   return /^G[A-Z2-7]{55}$/.test(address);
+}
+
+
+
+function truncate(text: string): string {
+  if (text.length <= MAX_TEXT_LENGTH) return text;
+  return text.slice(0, MAX_TEXT_LENGTH - 3) + "...";
 }
 
 function mainMenu(): string {
@@ -49,6 +50,10 @@ export async function handleUssdRequest(
   if (!session) {
     session = await createSession(sessionId, phoneNumber);
     return mainMenu();
+  }
+
+  if (session.phoneNumber !== phoneNumber) {
+    throw new Error("Session phone number mismatch");
   }
 
   await updateSession(sessionId, {});
@@ -101,9 +106,9 @@ async function handleLinkWallet(
   if (!isStellarPublicKey(wallet)) {
     return "CON Invalid Stellar address. Enter a valid G... Stellar public key:";
   }
-  await linkPhoneToWallet(phoneNumber, wallet);
+  await linkPhoneToWallet(phoneNumber, wallet, false);
   await updateSession(sessionId, { step: "main_menu", walletAddress: wallet });
-  return truncate("END Wallet linked successfully!\n" + mainMenu());
+  return truncate("END Wallet link requested! Verification required before completing transactions.\n" + mainMenu());
 }
 
 async function handleListSupplyCrop(
@@ -127,8 +132,8 @@ async function handleListSupplyCrop(
     for (const s of result.items) {
       const fs = s as { farmerWallet: string; quantityAvailable: string; unit?: string | null; pricePerUnit?: string | null };
       response +=
-        - ...:  +
-        ${fs.quantityAvailable}  @ \n;
+        `- ${fs.farmerWallet.slice(0, 6)}...${fs.farmerWallet.slice(-4)}: ` +
+        `${fs.quantityAvailable} ${fs.unit ?? ""} @ ${fs.pricePerUnit ?? "N/A"}\n`;
     }
     await updateSession(sessionId, { step: "main_menu" });
     return truncate(response);
@@ -148,7 +153,7 @@ async function handleOrderStatusId(
     return "CON Please enter a valid Order ID:";
   }
 
-  const wallet = await getWalletByPhone(phoneNumber);
+  const wallet = await getWalletByPhone(phoneNumber, true);
   if (!wallet) {
     await updateSession(sessionId, { step: "main_menu" });
     return truncate("END No wallet linked to this number. Use option 4 to link first.\n" + mainMenu());
@@ -163,10 +168,10 @@ async function handleOrderStatusId(
 
     const response =
       "END Order " + orderId + "\n" +
-      Status: \n +
-      Amount:  \n +
-      Buyer: ...\n +
-      Seller: ...;
+      `Status: ${order.status}\n` +
+      `Amount: ${order.amount} ${order.token}\n` +
+      `Buyer: ${order.buyerAddress.slice(0, 6)}...\n` +
+      `Seller: ${order.sellerAddress.slice(0, 6)}...`;
 
     await updateSession(sessionId, { step: "main_menu" });
     return response;
@@ -186,7 +191,7 @@ async function handleConfirmReceiptId(
     return "CON Please enter a valid Order ID:";
   }
 
-  const wallet = await getWalletByPhone(phoneNumber);
+  const wallet = await getWalletByPhone(phoneNumber, true);
   if (!wallet) {
     await updateSession(sessionId, { step: "main_menu" });
     return truncate("END No wallet linked to this number. Use option 4 to link first.\n" + mainMenu());
@@ -204,14 +209,14 @@ async function handleConfirmReceiptId(
       data: { status: "COMPLETED" },
     });
 
-    const buyerPhone = await getPhoneByWallet(order.buyerAddress);
-    const sellerPhone = await getPhoneByWallet(order.sellerAddress);
+    const buyerPhone = await getPhoneByWallet(order.buyerAddress, true);
+    const sellerPhone = await getPhoneByWallet(order.sellerAddress, true);
 
     if (buyerPhone) {
-      await sendSms(buyerPhone, Receipt confirmed for Order . Thank you!);
+      await sendSms(buyerPhone, `Receipt confirmed for Order ${orderId}. Thank you!`);
     }
     if (sellerPhone) {
-      await sendSms(sellerPhone, Buyer confirmed receipt for Order . Funds will be released.);
+      await sendSms(sellerPhone, `Buyer confirmed receipt for Order ${orderId}. Funds will be released.`);
     }
 
     await updateSession(sessionId, { step: "main_menu" });
