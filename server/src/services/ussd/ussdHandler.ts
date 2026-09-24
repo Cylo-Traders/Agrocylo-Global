@@ -1,4 +1,4 @@
-import {
+﻿import {
   getSession,
   createSession,
   updateSession,
@@ -17,6 +17,15 @@ const MAX_TEXT_LENGTH = 182;
 function truncate(text: string): string {
   if (text.length <= MAX_TEXT_LENGTH) return text;
   return text.slice(0, MAX_TEXT_LENGTH - 3) + "...";
+}
+
+/**
+ * Validate a Stellar public key (G... address, 56 chars, base32).
+ * Uses the same base-32 alphabet as StrKey: A-Z and 2-7.
+ * This mirrors the application's authService.isStellarAddress pattern.
+ */
+function isStellarPublicKey(address: string): boolean {
+  return /^G[A-Z2-7]{55}$/.test(address);
 }
 
 function mainMenu(): string {
@@ -77,7 +86,7 @@ async function handleMainMenu(sessionId: string, input: string): Promise<string>
       return "CON Enter the Order ID to confirm receipt:";
     case "4":
       await updateSession(sessionId, { step: "link_wallet", state: {} });
-      return "CON Enter your wallet address (0x...):";
+      return "CON Enter your Stellar wallet address (G...):";
     default:
       return "CON Invalid choice.\n" + mainMenu();
   }
@@ -89,8 +98,8 @@ async function handleLinkWallet(
   input: string,
 ): Promise<string> {
   const wallet = input.trim();
-  if (!/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
-    return "CON Invalid wallet address. Enter a valid 0x address:";
+  if (!isStellarPublicKey(wallet)) {
+    return "CON Invalid Stellar address. Enter a valid G... Stellar public key:";
   }
   await linkPhoneToWallet(phoneNumber, wallet);
   await updateSession(sessionId, { step: "main_menu", walletAddress: wallet });
@@ -118,8 +127,8 @@ async function handleListSupplyCrop(
     for (const s of result.items) {
       const fs = s as { farmerWallet: string; quantityAvailable: string; unit?: string | null; pricePerUnit?: string | null };
       response +=
-        `- ${fs.farmerWallet.slice(0, 6)}...${fs.farmerWallet.slice(-4)}: ` +
-        `${fs.quantityAvailable} ${fs.unit ?? ""} @ ${fs.pricePerUnit ?? "N/A"}\n`;
+        - ...:  +
+        ${fs.quantityAvailable}  @ \n;
     }
     await updateSession(sessionId, { step: "main_menu" });
     return truncate(response);
@@ -154,10 +163,10 @@ async function handleOrderStatusId(
 
     const response =
       "END Order " + orderId + "\n" +
-      `Status: ${order.status}\n` +
-      `Amount: ${order.amount} ${order.token}\n` +
-      `Buyer: ${order.buyerAddress.slice(0, 6)}...\n` +
-      `Seller: ${order.sellerAddress.slice(0, 6)}...`;
+      Status: \n +
+      Amount:  \n +
+      Buyer: ...\n +
+      Seller: ...;
 
     await updateSession(sessionId, { step: "main_menu" });
     return response;
@@ -199,10 +208,10 @@ async function handleConfirmReceiptId(
     const sellerPhone = await getPhoneByWallet(order.sellerAddress);
 
     if (buyerPhone) {
-      await sendSms(buyerPhone, `Receipt confirmed for Order ${orderId}. Thank you!`);
+      await sendSms(buyerPhone, Receipt confirmed for Order . Thank you!);
     }
     if (sellerPhone) {
-      await sendSms(sellerPhone, `Buyer confirmed receipt for Order ${orderId}. Funds will be released.`);
+      await sendSms(sellerPhone, Buyer confirmed receipt for Order . Funds will be released.);
     }
 
     await updateSession(sessionId, { step: "main_menu" });

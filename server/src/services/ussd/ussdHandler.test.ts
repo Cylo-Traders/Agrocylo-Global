@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+﻿import { describe, it, expect, beforeEach, vi } from "vitest";
 import { prisma } from "../../config/database.js";
 
 vi.mock("../../config/database.js", () => ({
@@ -121,7 +121,7 @@ describe("handleUssdRequest", () => {
 
       const response = await handleUssdRequest(SESSION_ID, PHONE, "4");
 
-      expect(response).toContain("Enter your wallet address");
+      expect(response).toContain("Enter your Stellar wallet address");
     });
   });
 
@@ -131,9 +131,9 @@ describe("handleUssdRequest", () => {
         .fn()
         .mockResolvedValueOnce(makeSession({ step: "link_wallet" }));
       prisma.phoneLink.upsert = vi.fn().mockResolvedValueOnce({});
-      prisma.ussdSession.update = vi.fn().mockResolvedValueOnce(makeSession({ walletAddress: "0xabcd1234abcd1234abcd1234abcd1234abcd1234" }));
+      prisma.ussdSession.update = vi.fn().mockResolvedValueOnce(makeSession({ walletAddress: "GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVWXYZ2" }));
 
-      const response = await handleUssdRequest(SESSION_ID, PHONE, "0xabcd1234abcd1234abcd1234abcd1234abcd1234");
+      const response = await handleUssdRequest(SESSION_ID, PHONE, "GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVWXYZ2");
 
       expect(response).toContain("Wallet linked");
     });
@@ -145,7 +145,7 @@ describe("handleUssdRequest", () => {
       prisma.ussdSession.update = vi.fn().mockResolvedValueOnce(makeSession());
 
       const response = await handleUssdRequest(SESSION_ID, PHONE, "invalid");
-      expect(response).toContain("Invalid wallet address");
+      expect(response).toContain("Invalid Stellar address");
     });
   });
 
@@ -268,3 +268,5 @@ describe("handleUssdRequest", () => {
     });
   });
 });
+
+
