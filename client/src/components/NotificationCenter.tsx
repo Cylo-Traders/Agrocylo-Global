@@ -127,14 +127,15 @@ function NotificationList({
           variant="ghost"
           size="icon"
           className="text-muted-foreground hover:text-destructive size-11"
-          aria-label="Clear all notifications"
+          aria-label="Clear all notifications (all pages)"
+          title="Clear all notifications for this wallet – includes items beyond the current page"
           onClick={onClearAll}
         >
           <Trash2 className="size-4" />
         </Button>
       </div>
 
-      {error && <p className="text-destructive text-sm text-center py-4">{error}</p>}
+      {error && <p className="text-destructive text-sm text-center py-4" role="alert">{error}</p>}
 
       {isLoading && notifications.length === 0 && (
         <div className="space-y-3">
@@ -253,11 +254,11 @@ export function NotificationCenter({ walletAddress, className }: NotificationCen
                 error={error}
                 hasNextPage={hasNextPage}
                 unreadCount={unreadCount}
-                onMarkAllRead={() => void markAllRead()}
-                onClearAll={clearAll}
+                onMarkAllRead={() => void markAllRead().catch(() => {})}
+                onClearAll={() => void clearAll().catch(() => {})}
                 onLoadNextPage={() => void loadNextPage()}
-                onMarkRead={(id) => void markRead([id])}
-                onDelete={deleteNotification}
+                onMarkRead={(id) => void markRead([id]).catch(() => {})}
+                onDelete={(id) => void deleteNotification(id).catch(() => {})}
               />
             </TabsContent>
           ))}

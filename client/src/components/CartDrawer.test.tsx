@@ -80,7 +80,7 @@ describe('CartDrawer Component', () => {
     const proceedBtn = screen.getByText('Proceed to Checkout');
     fireEvent.click(proceedBtn);
 
-    expect(screen.getByText('Confirm Orders')).toBeInTheDocument();
+    expect(screen.getByText('Per-farmer escrow')).toBeInTheDocument();
     expect(screen.getByLabelText(/Delivery deadline/i)).toBeInTheDocument();
   });
 

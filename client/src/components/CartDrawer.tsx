@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -57,6 +57,7 @@ import {
 type OrderSuccess = { orderId: string; farmerWallet: string; txHash: string };
 type OrderFailure = { farmerWallet: string; error: string };
 type GroupStatus = "pending" | "success" | "error";
+type CleanupFailure = { farmerWallet: string; error: string; itemIds: string[] };
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -80,10 +81,15 @@ export default function CartDrawer() {
   const [running, setRunning] = useState(false);
   const [successOrders, setSuccessOrders] = useState<OrderSuccess[]>([]);
   const [failedOrders, setFailedOrders] = useState<OrderFailure[]>([]);
+  const [cleanupFailures, setCleanupFailures] = useState<CleanupFailure[]>([]);
   const [progressMessage, setProgressMessage] = useState<string>("");
   const [groupProgress, setGroupProgress] = useState<
     Record<string, GroupStatus>
   >({});
+
+  // Operation snapshot – keeps the active checkout isolated from drawer visibility
+  const operationIdRef = useRef(0);
+  const checkoutGroupsRef = useRef<CartGroup[] | null>(null);
 
   const totals = useMemo(() => {
     const gross = cart.groups.reduce(
@@ -95,18 +101,62 @@ export default function CartDrawer() {
     return { gross, fee, net };
   }, [cart.groups]);
 
-  const closeAndReset = () => {
+  const closeAndReset = useCallback(() => {
+    if (running) return;
     setStep(1);
-    setRunning(false);
     setDeliveryDeadline("");
     setSuccessOrders([]);
     setFailedOrders([]);
+    setCleanupFailures([]);
     setProgressMessage("");
     setGroupProgress({});
+    checkoutGroupsRef.current = null;
     setDrawerOpen(false);
-  };
+  }, [running, setDrawerOpen]);
+
+  const handleOpenChange = useCallback(
+    (next: boolean) => {
+      if (!next) {
+        if (running) {
+          // Block dismissal while escrow creation is pending – prevents clearing
+          // running/results while createOrdersForCart still awaits signatures.
+          toast.message("Checkout in progress — please wait for escrow creation to complete.");
+          return;
+        }
+        closeAndReset();
+        return;
+      }
+      setDrawerOpen(true);
+    },
+    [running, closeAndReset, setDrawerOpen],
+  );
+
+  const retryCleanup = useCallback(async () => {
+    if (cleanupFailures.length === 0) return;
+    const pending = [...cleanupFailures];
+    setCleanupFailures([]);
+    for (const entry of pending) {
+      try {
+        await Promise.all(entry.itemIds.map((id) => removeCartItem(id)));
+      } catch (err) {
+        setCleanupFailures((prev) => [
+          ...prev,
+          {
+            farmerWallet: entry.farmerWallet,
+            error: err instanceof Error ? err.message : "Failed to clear cart items.",
+            itemIds: entry.itemIds,
+          },
+        ]);
+      }
+    }
+    await refreshCart();
+    if (cleanupFailures.length === 0) {
+      toast.success("Cart cleanup completed.");
+    }
+  }, [cleanupFailures, removeCartItem, refreshCart]);
 
   async function createOrdersForCart(groups: CartGroup[]) {
+    if (running) return;
     if (!isContractConfigured()) {
       toast.error("Platform not yet configured for this network. Checkout is unavailable.");
       return;
@@ -121,9 +171,12 @@ export default function CartDrawer() {
       return;
     }
 
+    const opId = ++operationIdRef.current;
+    checkoutGroupsRef.current = groups;
     setRunning(true);
     setSuccessOrders([]);
     setFailedOrders([]);
+    setCleanupFailures([]);
     setProgressMessage("Starting checkout…");
     setGroupProgress(
       Object.fromEntries(groups.map((g) => [g.farmer_wallet, "pending"])),
@@ -132,6 +185,8 @@ export default function CartDrawer() {
     try {
       // Sequential — Freighter only handles one signing prompt at a time.
       for (let i = 0; i < groups.length; i++) {
+        // Guard: if a newer operation started, abort this one
+        if (operationIdRef.current !== opId) break;
         const group = groups[i];
         const farmerWallet = group.farmer_wallet;
         const idxLabel = `${i + 1} of ${groups.length}`;
@@ -221,23 +276,44 @@ export default function CartDrawer() {
 
         // Remove items for this farmer so a partial-failure retry doesn't
         // duplicate the orders that already succeeded.
-        await Promise.all(group.items.map((it) => removeCartItem(it.id)));
-        await refreshCart();
+        // Cleanup failures are isolated – they must not mark the escrow as failed
+        // and must not trigger another escrow creation on retry.
+        try {
+          await Promise.all(group.items.map((it) => removeCartItem(it.id)));
+          await refreshCart();
+        } catch (err) {
+          const cleanupError = err instanceof Error ? err.message : "Failed to clear cart items after escrow creation.";
+          setCleanupFailures((prev) => [
+            ...prev,
+            { farmerWallet, error: cleanupError, itemIds: group.items.map((it) => it.id) },
+          ]);
+          // Still refresh to sync any partial removals; ignore secondary errors
+          try {
+            await refreshCart();
+          } catch {
+            // ignore
+          }
+        }
       }
     } finally {
-      setRunning(false);
-      setStep(3);
-      setProgressMessage("Checkout complete.");
+      // Only the owning operation may clear running/step; prevents a stale
+      // closeAndReset from masking an in-flight checkout.
+      if (operationIdRef.current === opId) {
+        setRunning(false);
+        setStep(3);
+        setProgressMessage("Checkout complete.");
+      }
     }
   }
 
   const groups = cart.groups;
   const empty = groups.length === 0;
+  const hasResult = successOrders.length > 0 || failedOrders.length > 0 || cleanupFailures.length > 0;
 
   return (
     <Sheet
       open={drawerOpen}
-      onOpenChange={(next) => (next ? setDrawerOpen(true) : closeAndReset())}
+      onOpenChange={handleOpenChange}
     >
       <SheetContent
         side="right"
@@ -267,6 +343,17 @@ export default function CartDrawer() {
             <p className="text-muted-foreground text-sm">Loading cart…</p>
           ) : cartError ? (
             <p className="text-destructive text-sm">{cartError}</p>
+          ) : step === 3 || hasResult ? (
+            <Step3Result
+              successOrders={successOrders}
+              failedOrders={failedOrders}
+              cleanupFailures={cleanupFailures}
+              onView={(orderId) => {
+                closeAndReset();
+                router.push(`/orders/${orderId}`);
+              }}
+              onRetryCleanup={() => void retryCleanup()}
+            />
           ) : empty ? (
             <EmptyCart
               onBrowse={() => {
@@ -294,15 +381,17 @@ export default function CartDrawer() {
             <Step3Result
               successOrders={successOrders}
               failedOrders={failedOrders}
+              cleanupFailures={cleanupFailures}
               onView={(orderId) => {
                 closeAndReset();
                 router.push(`/orders/${orderId}`);
               }}
+              onRetryCleanup={() => void retryCleanup()}
             />
           )}
         </div>
 
-        {!empty && (
+        {(!empty || step === 3 || hasResult) && (
           <SheetFooter className="border-t px-6 py-4">
             {step === 1 && (
               <div className="flex w-full gap-3">
@@ -310,6 +399,7 @@ export default function CartDrawer() {
                   variant="outline"
                   onClick={() => setDrawerOpen(false)}
                   className="flex-1"
+                  disabled={running}
                 >
                   Continue shopping
                 </Button>
@@ -346,10 +436,11 @@ export default function CartDrawer() {
                   variant="outline"
                   onClick={() => setStep(1)}
                   className="flex-1"
+                  disabled={running}
                 >
                   Back to cart
                 </Button>
-                <Button onClick={closeAndReset} className="flex-[2]">
+                <Button onClick={closeAndReset} className="flex-[2]" disabled={running}>
                   Done
                 </Button>
               </div>
@@ -577,11 +668,15 @@ function Step2Confirm({
 function Step3Result({
   successOrders,
   failedOrders,
+  cleanupFailures,
   onView,
+  onRetryCleanup,
 }: {
   successOrders: OrderSuccess[];
   failedOrders: OrderFailure[];
+  cleanupFailures: CleanupFailure[];
   onView: (orderId: string) => void;
+  onRetryCleanup: () => void;
 }) {
   return (
     <div className="space-y-5">
@@ -639,6 +734,37 @@ function Step3Result({
             ))}
           </CardContent>
         </Card>
+      )}
+
+      {cleanupFailures.length > 0 && (
+        <Card className="border-amber-500/30">
+          <CardHeader>
+            <CardTitle className="text-amber-600 flex items-center gap-2 text-sm">
+              <Loader2 className="size-4" />
+              Cart cleanup pending
+            </CardTitle>
+            <p className="text-muted-foreground text-xs">
+              Escrow succeeded but some cart items could not be cleared. Retry will not create another escrow.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {cleanupFailures.map((c, idx) => (
+              <div key={idx} className="space-y-0.5">
+                <p className="font-mono text-xs">
+                  {formatTruncatedAddress(c.farmerWallet)}
+                </p>
+                <p className="text-muted-foreground text-sm">{c.error}</p>
+              </div>
+            ))}
+            <Button variant="outline" size="sm" onClick={onRetryCleanup} className="w-full">
+              Retry cart cleanup
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {successOrders.length === 0 && failedOrders.length === 0 && cleanupFailures.length === 0 && (
+        <p className="text-muted-foreground text-sm text-center py-8">No orders were created.</p>
       )}
     </div>
   );
