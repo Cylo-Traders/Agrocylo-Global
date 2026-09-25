@@ -238,12 +238,10 @@ describe("processIndexing", () => {
   });
 
   describe("unknown job name", () => {
-    it("should log a warning for unrecognized job names", async () => {
+    it("should reject unrecognized job names", async () => {
       const job = makeJob("unknown-job-type", { some: "data" });
 
-      await processIndexing(job);
-
-      expect(logger.warn).toHaveBeenCalledWith("Unknown indexing job name", expect.any(Object));
+      await expect(processIndexing(job)).rejects.toThrow("Unknown indexing job name");
     });
   });
 });

@@ -1,6 +1,7 @@
 import express from 'express';
 import type { Request, Response } from 'express';
 import cors from 'cors';
+import { corsOptions } from './config/cors.js';
 import helmet from 'helmet';
 import * as Sentry from '@sentry/node';
 import logger from './config/logger.js';
@@ -70,21 +71,7 @@ app.use(
   })
 );
 
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      if (!origin || config.allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-wallet-address'],
-    maxAge: 3600,
-  })
-);
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(requestContext);
 app.use(requestLogger);

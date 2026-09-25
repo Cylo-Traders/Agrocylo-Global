@@ -14,6 +14,22 @@ interface TokenPayload {
   aud?: string;
 }
 
+/**
+ * Resolves the caller's verified session principal from a Bearer token, or
+ * null when the token is missing, invalid, expired, or a handoff token.
+ */
+export function sessionPrincipal(req: Request): { walletAddress: string; role?: string } | null {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ') || !config.jwtSecret) return null;
+  try {
+    const decoded = jwt.verify(authHeader.slice(7), config.jwtSecret) as TokenPayload;
+    if (!decoded.walletAddress || decoded.aud === HANDOFF_AUDIENCE) return null;
+    return { walletAddress: decoded.walletAddress, role: decoded.role };
+  } catch {
+    return null;
+  }
+}
+
 export function requireWallet(req: WalletRequest, res: Response, next: NextFunction): void {
   const authHeader = req.header('Authorization');
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
