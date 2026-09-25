@@ -245,6 +245,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Issue #944: verify prisma, @prisma/client, and @prisma/adapter-pg are
+      # all on the same major before attempting generation. A CLI/client major
+      # mismatch produces a confusing MODULE_NOT_FOUND error; this surfaces the
+      # real cause early with an actionable message.
+      - name: Check Prisma toolchain compatibility
+        working-directory: .
+        run: node scripts/check-prisma-versions.js
+
       - name: Generate Prisma client
         env:
           DATABASE_URL: ""
@@ -311,6 +319,11 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Issue #944: verify Prisma toolchain before generation (same as server job above).
+      - name: Check Prisma toolchain compatibility
+        working-directory: .
+        run: node scripts/check-prisma-versions.js
 
       - name: Generate Prisma client
         run: npx prisma generate

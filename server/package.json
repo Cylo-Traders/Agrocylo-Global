@@ -6,9 +6,9 @@
   "main": "dist/index.js",
   "scripts": {
     "setup": "npm install && npx prisma generate",
-    "dev": "tsx watch src/index.ts",
-    "worker:dev": "tsx watch src/worker.ts",
-    "build": "tsc",
+    "dev": "npx prisma generate && tsx watch src/index.ts",
+    "worker:dev": "npx prisma generate && tsx watch src/worker.ts",
+    "build": "npx prisma generate && tsc",
     "start": "node dist/index.js",
     "worker:start": "node dist/worker.js",
     "test": "vitest run",
