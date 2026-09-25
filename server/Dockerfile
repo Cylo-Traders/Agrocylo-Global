@@ -2,15 +2,12 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-ARG DATABASE_URL=postgresql://agrocylo:agrocylo123@localhost:5432/agrocylo_db
-ENV DATABASE_URL=$DATABASE_URL
-
 COPY package*.json ./
 RUN npm ci
 
 COPY . .
 
-RUN npx prisma generate
+RUN PRISMA_GENERATE_DATABASE_URL=postgresql://prisma-generate:unused@localhost:5432/prisma_generate npx prisma generate
 RUN npm run build
 
 EXPOSE 5000

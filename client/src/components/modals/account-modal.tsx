@@ -7,7 +7,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { HiMiniArrowUpRight } from "react-icons/hi2";
 import { IoIosPower } from "react-icons/io";
-import { ChevronDown } from "lucide-react";
+import { AlertTriangle, ChevronDown, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -58,7 +58,16 @@ export default function AccountModal() {
   const [open, setOpen] = useState(false);
   const router = useRouter();
 
-  const { address, balance, network, disconnect } = useWallet();
+  const {
+    address,
+    balance,
+    network,
+    disconnect,
+    authenticated,
+    authenticating,
+    sessionError,
+    reauthenticate,
+  } = useWallet();
   const { profile } = useProfile();
 
   const rawName = profile?.display_name ?? "Anonymous";
@@ -173,6 +182,39 @@ export default function AccountModal() {
             </Button>
           </div>
         </div>
+
+        <DropdownMenuSeparator />
+
+        {!authenticated && (
+          <div className="bg-destructive/5 mx-3 my-2 space-y-3 rounded-md border border-destructive/30 p-3">
+            <div className="flex items-start gap-2 text-sm text-destructive">
+              <AlertTriangle
+                className="mt-0.5 size-4 shrink-0"
+                aria-hidden="true"
+              />
+              <p>
+                {sessionError ??
+                  "Sign in with your wallet to use your cart and account."}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              className="min-h-10 w-full"
+              disabled={authenticating}
+              aria-busy={authenticating}
+              onClick={() => void reauthenticate()}
+            >
+              {authenticating ? (
+                <Loader2
+                  className="size-4 animate-spin motion-reduce:animate-none"
+                  aria-hidden="true"
+                />
+              ) : null}
+              {authenticating ? "Waiting for wallet…" : "Sign in again"}
+            </Button>
+          </div>
+        )}
 
         <DropdownMenuSeparator />
 

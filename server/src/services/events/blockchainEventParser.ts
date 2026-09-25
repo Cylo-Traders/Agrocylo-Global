@@ -1,6 +1,7 @@
 import { scValToNative } from "@stellar/stellar-sdk";
 import type { IndexedEvent, IndexedEventType } from "../../types/indexedEvent.js";
 import type { RawRpcEvent } from "../../types/rawRpcEvent.js";
+import { CampaignStatus, OrderStatus } from "../../constants/status.js";
 
 const SUPPORTED_EVENT_TYPES = new Set<IndexedEventType>([
   "campaign.created",
@@ -79,7 +80,7 @@ export class BlockchainEventParser {
           actorAddress: toStringValue(data[1]),
           amount: toStringValue(data[2]),
           token: toStringValue(data[3]),
-          status: "ACTIVE",
+          status: CampaignStatus.ACTIVE,
         };
       case "campaign.invested":
         return {
@@ -94,7 +95,7 @@ export class BlockchainEventParser {
           ...common,
           campaignIdOnChain: toStringValue(data[0]),
           actorAddress: toStringValue(data[1]),
-          status: toStringValue(data[2]) ?? "SETTLED",
+          status: toStringValue(data[2]) ?? CampaignStatus.SETTLED,
         };
 
       // Contract: publish((order, created), (order_id, buyer, farmer, amount, token))
@@ -106,7 +107,7 @@ export class BlockchainEventParser {
           secondaryAddress: toStringValue(data[2]), // farmer
           amount: toStringValue(data[3]),
           token: toStringValue(data[4]),
-          status: "PENDING",
+          status: OrderStatus.PENDING,
         };
 
       // Contract: publish((order, delivered), (order_id, farmer, buyer, delivery_timestamp))
@@ -116,7 +117,7 @@ export class BlockchainEventParser {
           orderIdOnChain: toStringValue(data[0]),
           actorAddress: toStringValue(data[1]),     // farmer
           secondaryAddress: toStringValue(data[2]), // buyer
-          status: "DELIVERED",
+          status: OrderStatus.DELIVERED,
         };
 
       // Contract: publish((order, confirmed), (order_id, buyer, farmer))
@@ -126,7 +127,7 @@ export class BlockchainEventParser {
           orderIdOnChain: toStringValue(data[0]),
           actorAddress: toStringValue(data[1]),     // buyer
           secondaryAddress: toStringValue(data[2]), // farmer
-          status: "COMPLETED",
+          status: OrderStatus.COMPLETED,
         };
 
       // Contract: publish((order, refunded), (order_id, buyer))
@@ -135,7 +136,7 @@ export class BlockchainEventParser {
           ...common,
           orderIdOnChain: toStringValue(data[0]),
           actorAddress: toStringValue(data[1]),     // buyer
-          status: "REFUNDED",
+          status: OrderStatus.REFUNDED,
         };
 
       default:

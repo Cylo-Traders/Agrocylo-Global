@@ -92,6 +92,21 @@ export interface Product {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  unit: string;
+  quantity: number;
+  pricePerUnit: string;
+  location: string;
+  farmerAddress: string;
+}
+
+export interface ProductFilters {
+  category?: string;
+  location?: string;
+  minPrice?: string;
+  maxPrice?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
 }
 
 export interface ProductDetail extends Product {

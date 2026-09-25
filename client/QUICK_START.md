@@ -1,18 +1,24 @@
 # Quick Start
 
 ## Prerequisites
-- Node.js 20+
-- npm 10+
-- Freighter wallet browser extension
-- Backend server running on port 5000
+
+Use the Node.js 22.13.x and npm 10.9.x policy declared at the repository root.
+The marketplace backend uses port 5000. A Freighter wallet extension is needed
+for live wallet flows.
 
 ## Installation
+
+Run everything from the repository root:
+
 ```bash
-cd client
-npm install
-cp .env.example .env.local
-npm run dev
+npm ci
+cp client/.env.example client/.env.local
+npm run dev:marketplace
+# http://localhost:3000
 ```
+
+See [Frontend development setup](../docs/FRONTEND_SETUP.md) for both-app
+launching, port overrides, environment guidance, and startup troubleshooting.
 
 ## Key Libraries
 

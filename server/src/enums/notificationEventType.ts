@@ -4,6 +4,14 @@ export enum NotificationEventType {
   FUNDS_LOCKED = "funds_locked",
   DELIVERY_CONFIRMED = "delivery_confirmed",
   REFUND_ISSUED = "refund_issued",
+  ORDER_CANCELLED = "order_cancelled",
+  ORDER_DISPUTED = "order_disputed",
+  DISPUTE_RESOLVED = "dispute_resolved",
+  // Split orders
+  SPLIT_CREATED = "split_created",
+  SPLIT_FUNDED = "split_funded",
+  SPLIT_DISPUTED = "split_disputed",
+  SPLIT_RESOLVED = "split_resolved",
   // Legacy / extended
   ORDER_RECEIVED = "order_received",
   NEW_INVESTMENT = "new_investment",

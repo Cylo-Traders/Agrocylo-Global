@@ -27,7 +27,7 @@ export function toClientRole(role: string): ClientProfileRole {
 
 export function toClientProfile(profile: Profile): ClientProfile {
   return {
-    wallet_address: profile.wallet_address,
+    wallet_address: (profile as any).walletAddress ?? (profile as any).wallet_address,
     role: toClientRole(profile.role),
     display_name: profile.name ?? '',
     bio: profile.bio ?? null,

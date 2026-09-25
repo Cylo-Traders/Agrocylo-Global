@@ -25,12 +25,16 @@ export function useProducts(params: ListProductsParams = {}) {
 
 /** Authenticated farmer's own products. */
 export function useMyProducts() {
-  const { address, connected } = useWallet();
+  const { address, connected, authenticated } = useWallet();
   return useQuery({
     queryKey: queryKeys.products.mine(address ?? ""),
     queryFn: () =>
-      listProducts({ farmer: address!, includeUnavailable: true, pageSize: 100 }),
-    enabled: connected && !!address,
+      listProducts({
+        farmer: address!,
+        includeUnavailable: true,
+        pageSize: 100,
+      }),
+    enabled: connected && authenticated && !!address,
   });
 }
 
@@ -48,8 +52,7 @@ export function useCreateProduct() {
   const { address } = useWallet();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: ProductWriteInput) =>
-      createProduct(address!, input),
+    mutationFn: (input: ProductWriteInput) => createProduct(address!, input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.products.all() });
     },

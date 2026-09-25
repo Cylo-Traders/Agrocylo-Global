@@ -62,8 +62,6 @@ services:
     build:
       context: ./server
       dockerfile: Dockerfile
-      args:
-        DATABASE_URL: ${DATABASE_URL:-postgresql://agrocylo:agrocylo123@postgres:5432/agrocylo_db}
     container_name: agrocylo-backend
     environment:
       NODE_ENV: development

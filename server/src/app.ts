@@ -46,8 +46,10 @@ initializeSentry('api');
 
 const app = express();
 
-// Sentry request handler must be the first middleware
-app.use(Sentry.Handlers.requestHandler());
+// Sentry request handler must be the first middleware (Sentry v8 removed Handlers — guard for tests)
+if ((Sentry as unknown as { Handlers?: { requestHandler: () => import("express").Handler } }).Handlers?.requestHandler) {
+  app.use((Sentry as unknown as { Handlers: { requestHandler: () => import("express").Handler } }).Handlers.requestHandler());
+}
 
 // Trust proxy to correctly extract client IP from X-Forwarded-For
 app.set('trust proxy', 1);
@@ -123,6 +125,7 @@ app.use(governanceRoutes);
 app.use(ussdRoutes);
 
 // Documentation endpoints (OpenAPI spec and Swagger UI)
+registerAllEndpoints(); // Populate the OpenAPI registry
 app.use(documentRoutes);
 
 app.get('/health', async (_req: Request, res: Response) => {
@@ -168,6 +171,10 @@ app.get('/health', async (_req: Request, res: Response) => {
 
 app.use(metricsRoutes);
 
+// Sentry error handler (v8): captures errors with request context, then
+// forwards to the next handler — must be registered after all routes.
+Sentry.setupExpressErrorHandler(app);
+
 app.use(productImageErrorHandler);
 app.use(disputeUploadErrorHandler);
 app.use(apiErrorHandler);
@@ -181,8 +188,10 @@ app.use(adminErrorHandler);
 app.use(referralErrorHandler);
 app.use(integratorErrorHandler);
 
-// Sentry error handler must be before other error handlers
-app.use(Sentry.Handlers.errorHandler());
+// Sentry error handler must be before other error handlers (guard for v8)
+if ((Sentry as unknown as { Handlers?: { errorHandler: () => import("express").ErrorRequestHandler } }).Handlers?.errorHandler) {
+  app.use((Sentry as unknown as { Handlers: { errorHandler: () => import("express").ErrorRequestHandler } }).Handlers.errorHandler());
+}
 
 app.use((err: unknown, req: Request, res: Response, _next: () => void) => {
   incrementErrorCount();

@@ -1,4 +1,5 @@
 import { API_BASE_URL as API_BASE } from "@/lib/apiConfig";
+import { ApiRequestError, apiRequest } from "@/lib/apiHelper";
 import { isTestMode } from "@/lib/testMode";
 import type { ProfileRole } from "@/types/wallet";
 
@@ -154,7 +155,12 @@ function mapProfile(raw: Record<string, unknown>): Profile {
 async function parseErrorMessage(res: Response): Promise<string> {
   try {
     const body = await res.json();
-    return body?.detail ?? body?.message ?? body?.title ?? `Request failed (${res.status})`;
+    return (
+      body?.detail ??
+      body?.message ??
+      body?.title ??
+      `Request failed (${res.status})`
+    );
   } catch {
     return `Request failed (${res.status})`;
   }
@@ -197,15 +203,15 @@ export async function createProfile(
     };
   }
 
-  const res = await fetch(`${API_BASE}/profiles`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-wallet-address": walletAddress,
-    },
-    body: JSON.stringify(data),
-  });
-  if (res.status === 409) {
+  try {
+    const body = await apiRequest<Record<string, unknown>>("/profiles", {
+      method: "POST",
+      body: data,
+    });
+    return mapProfile(body);
+  } catch (error) {
+    if (!(error instanceof ApiRequestError) || error.status !== 409)
+      throw error;
     try {
       return await updateProfile(walletAddress, {
         displayName: data.display_name,
@@ -216,10 +222,8 @@ export async function createProfile(
       const existing = await getProfile(walletAddress);
       if (existing) return existing;
     }
+    throw error;
   }
-  if (!res.ok) throw new Error(await parseErrorMessage(res));
-  const body = (await res.json()) as Record<string, unknown>;
-  return mapProfile(body);
 }
 
 export async function updateProfile(
@@ -234,11 +238,9 @@ export async function updateProfile(
       wallet_address: walletAddress,
       role: existing?.role ?? "farmer",
       display_name: displayName ?? existing?.display_name ?? "Test Farmer",
-      bio: data.bio !== undefined ? data.bio : existing?.bio ?? null,
+      bio: data.bio !== undefined ? data.bio : (existing?.bio ?? null),
       avatar_url:
-        avatarUrl !== undefined
-          ? avatarUrl
-          : (existing?.avatar_url ?? null),
+        avatarUrl !== undefined ? avatarUrl : (existing?.avatar_url ?? null),
     };
   }
 
@@ -250,19 +252,10 @@ export async function updateProfile(
     ...(avatarUrl !== undefined ? { avatar_url: avatarUrl } : {}),
   };
 
-  const res = await fetch(
-    `${API_BASE}/profiles/${encodeURIComponent(walletAddress)}`,
-    {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        "x-wallet-address": walletAddress,
-      },
-      body: JSON.stringify(payload),
-    },
+  const body = await apiRequest<Record<string, unknown>>(
+    `/profiles/${encodeURIComponent(walletAddress)}`,
+    { method: "PATCH", body: payload },
   );
-  if (!res.ok) throw new Error(await parseErrorMessage(res));
-  const body = (await res.json()) as Record<string, unknown>;
   return mapProfile(body);
 }
 
@@ -270,21 +263,20 @@ export async function registerLocation(
   data: LocationData,
   walletAddress: string,
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/locations`, {
+  void walletAddress;
+  await apiRequest<void>("/locations", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-wallet-address": walletAddress,
     },
-    body: JSON.stringify({
+    body: {
       lat: data.lat,
       lng: data.lng,
       city: data.city,
       country: data.country,
       is_public: data.is_public,
-    }),
+    },
   });
-  if (!res.ok) throw new Error(await parseErrorMessage(res));
 }
 
 const USER_PROFILE_PREFIX = "agrocylo:user-profile:";
@@ -313,13 +305,23 @@ function pick<T>(items: T[], seed: number, offset = 0): T {
   return items[(seed + offset) % items.length];
 }
 
-function mapReputation(score: number, computedAt: string): UserProfileReputation {
+function mapReputation(
+  score: number,
+  computedAt: string,
+): UserProfileReputation {
   const badge =
-    score >= 95 ? "legend" : score >= 82 ? "top seller" : score >= 68 ? "trusted" : "new";
+    score >= 95
+      ? "legend"
+      : score >= 82
+        ? "top seller"
+        : score >= 68
+          ? "trusted"
+          : "new";
 
   const badgeDescription = {
     legend: "Elite performance across sales, reviews, and trust metrics.",
-    "top seller": "Consistently strong ratings, response times, and delivery history.",
+    "top seller":
+      "Consistently strong ratings, response times, and delivery history.",
     trusted: "Reliable counterpart with positive transaction history.",
     new: "Profile is new and building a reputation.",
   }[badge];
@@ -328,16 +330,27 @@ function mapReputation(score: number, computedAt: string): UserProfileReputation
     score,
     badge,
     badgeDescription,
-    history: [{ label: new Date(computedAt).toLocaleDateString("en"), score, note: "Backend computed score" }],
+    history: [
+      {
+        label: new Date(computedAt).toLocaleDateString("en"),
+        score,
+        note: "Backend computed score",
+      },
+    ],
   };
 }
 
-async function fetchReputation(walletAddress: string): Promise<UserProfileReputation> {
+async function fetchReputation(
+  walletAddress: string,
+): Promise<UserProfileReputation> {
   const response = await fetch(
     `${API_BASE}/profiles/${encodeURIComponent(walletAddress)}/reputation`,
   );
   if (!response.ok) throw new Error(await parseErrorMessage(response));
-  const snapshot = (await response.json()) as { score: number; computedAt: string };
+  const snapshot = (await response.json()) as {
+    score: number;
+    computedAt: string;
+  };
   return mapReputation(snapshot.score, snapshot.computedAt);
 }
 
@@ -350,11 +363,15 @@ function deriveStats(
     reviewCount > 0
       ? Number(
           (
-            reviews.reduce((sum, review) => sum + review.rating, 0) / reviewCount
+            reviews.reduce((sum, review) => sum + review.rating, 0) /
+            reviewCount
           ).toFixed(1),
         )
       : stats.averageRating;
-  const helpfulVotesReceived = reviews.reduce((sum, review) => sum + review.helpfulVotes, 0);
+  const helpfulVotesReceived = reviews.reduce(
+    (sum, review) => sum + review.helpfulVotes,
+    0,
+  );
 
   return {
     ...stats,
@@ -436,7 +453,9 @@ function buildReviews(seed: number, profile: UserProfileInfo): UserReview[] {
       rating,
       title: titles[(seed + index) % titles.length],
       body: bodies[(seed + index) % bodies.length],
-      createdAt: new Date(Date.now() - (index + 1) * 86_400_000 * 12).toISOString(),
+      createdAt: new Date(
+        Date.now() - (index + 1) * 86_400_000 * 12,
+      ).toISOString(),
       transactionHash: `TX-${profile.walletAddress.slice(0, 6)}-${index + 1}`,
       verifiedTransaction: true,
       helpfulVotes: (seed + index) % 14,
@@ -445,7 +464,8 @@ function buildReviews(seed: number, profile: UserProfileInfo): UserReview[] {
       response:
         index === 0
           ? {
-              message: "Thanks for the thoughtful review. Looking forward to serving you again.",
+              message:
+                "Thanks for the thoughtful review. Looking forward to serving you again.",
               responderName: profile.displayName,
               respondedAt: new Date(Date.now() - 86_400_000 * 2).toISOString(),
             }
@@ -454,8 +474,17 @@ function buildReviews(seed: number, profile: UserProfileInfo): UserReview[] {
   });
 }
 
-function buildActivity(seed: number, profile: UserProfileInfo): ActivityEntry[] {
-  const types: Array<ActivityEntry["kind"]> = ["sale", "purchase", "review", "dispute", "profile"];
+function buildActivity(
+  seed: number,
+  profile: UserProfileInfo,
+): ActivityEntry[] {
+  const types: Array<ActivityEntry["kind"]> = [
+    "sale",
+    "purchase",
+    "review",
+    "dispute",
+    "profile",
+  ];
   const actions = [
     "Completed an escrow settlement",
     "Received a verified review",
@@ -468,10 +497,13 @@ function buildActivity(seed: number, profile: UserProfileInfo): ActivityEntry[] 
     id: `${profile.walletAddress}-activity-${index + 1}`,
     kind: pick(types, seed, index),
     title: actions[(seed + index) % actions.length],
-    description: index % 2 === 0
-      ? `Activity recorded for ${profile.displayName}.`
-      : `Trust history updated after a recent marketplace event.`,
-    occurredAt: new Date(Date.now() - (index + 1) * 86_400_000 * 6).toISOString(),
+    description:
+      index % 2 === 0
+        ? `Activity recorded for ${profile.displayName}.`
+        : `Trust history updated after a recent marketplace event.`,
+    occurredAt: new Date(
+      Date.now() - (index + 1) * 86_400_000 * 6,
+    ).toISOString(),
   }));
 }
 
@@ -495,11 +527,14 @@ function buildProfileInfo(userId: string, seed: number): UserProfileInfo {
   return {
     walletAddress: userId,
     displayName: displayNames[seed % displayNames.length],
-    bio:
-      "Verified agricultural trader focused on transparent, fair, and timely marketplace transactions.",
+    bio: "Verified agricultural trader focused on transparent, fair, and timely marketplace transactions.",
     avatarUrl: null,
     location: locations[seed % locations.length],
-    memberSince: new Date(2021 + (seed % 4), (seed % 10) + 1, 1).toLocaleDateString("en", {
+    memberSince: new Date(
+      2021 + (seed % 4),
+      (seed % 10) + 1,
+      1,
+    ).toLocaleDateString("en", {
       month: "short",
       year: "numeric",
     }),
@@ -577,7 +612,10 @@ function readStoredProfile(userId: string): UserProfileData | null {
 
 function writeStoredProfile(profile: UserProfileData): void {
   if (!hasWindow()) return;
-  window.localStorage.setItem(storageKey(profile.walletAddress), JSON.stringify(profile));
+  window.localStorage.setItem(
+    storageKey(profile.walletAddress),
+    JSON.stringify(profile),
+  );
 }
 
 function normalizeProfile(profile: UserProfileData): UserProfileData {
@@ -585,7 +623,11 @@ function normalizeProfile(profile: UserProfileData): UserProfileData {
   return {
     ...profile,
     stats,
-    trustIndicators: buildTrustIndicators(profile.profile, stats, profile.reputation),
+    trustIndicators: buildTrustIndicators(
+      profile.profile,
+      stats,
+      profile.reputation,
+    ),
   };
 }
 
@@ -616,11 +658,13 @@ export async function updateUserProfile(
         (input.displayName ?? input.display_name)?.trim() ||
         current.profile.displayName,
       bio: input.bio?.trim() ?? current.profile.bio,
-      avatarUrl: input.avatarUrl ?? input.avatar_url ?? current.profile.avatarUrl,
+      avatarUrl:
+        input.avatarUrl ?? input.avatar_url ?? current.profile.avatarUrl,
       location: input.location?.trim() ?? current.profile.location,
       socialLinks: input.socialLinks ?? current.profile.socialLinks,
       privacy: input.privacy ?? current.profile.privacy,
-      verificationRequested: input.verificationRequested ?? current.profile.verificationRequested,
+      verificationRequested:
+        input.verificationRequested ?? current.profile.verificationRequested,
     },
   });
 
@@ -646,7 +690,11 @@ export async function submitReview(
   }
 
   const current = await getUserProfile(userId);
-  if (current.reviews.some((review) => review.transactionHash === draft.transactionHash.trim())) {
+  if (
+    current.reviews.some(
+      (review) => review.transactionHash === draft.transactionHash.trim(),
+    )
+  ) {
     throw new Error("This transaction has already been reviewed.");
   }
 
@@ -671,13 +719,16 @@ export async function submitReview(
   const nextStats: UserProfileStats = {
     ...current.stats,
     reviewCount: nextReviews.length,
-    averageRating:
-      Number(
-        (
-          nextReviews.reduce((sum, item) => sum + item.rating, 0) / nextReviews.length
-        ).toFixed(1),
-      ),
-    helpfulVotesReceived: nextReviews.reduce((sum, item) => sum + item.helpfulVotes, 0),
+    averageRating: Number(
+      (
+        nextReviews.reduce((sum, item) => sum + item.rating, 0) /
+        nextReviews.length
+      ).toFixed(1),
+    ),
+    helpfulVotesReceived: nextReviews.reduce(
+      (sum, item) => sum + item.helpfulVotes,
+      0,
+    ),
   };
   const next: UserProfileData = normalizeProfile({
     ...current,
@@ -728,7 +779,10 @@ export async function voteReviewHelpful(
     reviews: nextReviews,
     stats: {
       ...current.stats,
-      helpfulVotesReceived: nextReviews.reduce((sum, item) => sum + item.helpfulVotes, 0),
+      helpfulVotesReceived: nextReviews.reduce(
+        (sum, item) => sum + item.helpfulVotes,
+        0,
+      ),
     },
   });
 

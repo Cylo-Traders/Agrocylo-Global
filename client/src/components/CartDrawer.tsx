@@ -46,18 +46,23 @@ import { formatTruncatedAddress } from "@/lib/helpers/format-address";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
-  PLATFORM_FEE_BPS,
-  BPS_DENOM,
-  xlmToStroops,
   feeFromGrossStroops,
+  formatMinorUnits,
 } from "@/lib/feeCalculations";
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-type OrderSuccess = { orderId: string; farmerWallet: string; txHash: string };
-type OrderFailure = { farmerWallet: string; error: string };
+type OrderSuccess = { orderId: string; farmerWallet: string; currency: string; groupKey: string; txHash: string };
+type OrderFailure = { farmerWallet: string; currency: string; groupKey: string; error: string };
 type GroupStatus = "pending" | "success" | "error";
 type CleanupFailure = { farmerWallet: string; error: string; itemIds: string[] };
+
+function groupKeyOf(g: CartGroup): string {
+  return `${g.farmer_wallet}|${g.currency}`;
+}
+function groupKeyFromParts(farmerWallet: string, currency: string): string {
+  return `${farmerWallet}|${currency}`;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -73,6 +78,8 @@ export default function CartDrawer() {
     refreshCart,
     setQuantityForProduct,
     removeCartItem,
+    hasPendingUpdates,
+    getConfirmedCart,
   } = useCart();
   const { address, connected, signAndSubmit } = useWallet();
 
@@ -165,6 +172,10 @@ export default function CartDrawer() {
       toast.error("Connect your wallet to checkout.");
       return;
     }
+    if (hasPendingUpdates) {
+      toast.error("Cart updates are still pending. Please wait a moment and try again.");
+      return;
+    }
     const deadline = deliveryDeadline?.trim();
     if (!deadline) {
       toast.error("Please select a delivery deadline.");
@@ -178,8 +189,37 @@ export default function CartDrawer() {
     setFailedOrders([]);
     setCleanupFailures([]);
     setProgressMessage("Starting checkout…");
+
+    // Obtain confirmed snapshot before signing to avoid stale subtotal
+    let snapshotGroups: CartGroup[] = groups;
+    try {
+      setProgressMessage("Confirming cart…");
+      const confirmed = await getConfirmedCart();
+      if (confirmed) {
+        snapshotGroups = confirmed.groups;
+        if (snapshotGroups.length === 0 && groups.length > 0) {
+          toast.error("Cart confirmation failed. Please try again.");
+          setRunning(false);
+          setProgressMessage("Checkout failed: could not confirm cart.");
+          return;
+        }
+      } else if (hasPendingUpdates) {
+        toast.error("Cart confirmation failed. Please retry.");
+        setRunning(false);
+        setProgressMessage("Checkout blocked: pending updates failed to persist.");
+        return;
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to confirm cart.";
+      toast.error(msg);
+      setRunning(false);
+      setProgressMessage(msg);
+      return;
+    }
+
+    // Derive progress and totals from the confirmed snapshot
     setGroupProgress(
-      Object.fromEntries(groups.map((g) => [g.farmer_wallet, "pending"])),
+      Object.fromEntries(snapshotGroups.map((g) => [groupKeyOf(g), "pending"])),
     );
 
     try {
@@ -189,7 +229,9 @@ export default function CartDrawer() {
         if (operationIdRef.current !== opId) break;
         const group = groups[i];
         const farmerWallet = group.farmer_wallet;
-        const idxLabel = `${i + 1} of ${groups.length}`;
+        const currency = group.currency;
+        const gKey = groupKeyOf(group);
+        const idxLabel = `${i + 1} of ${snapshotGroups.length}`;
 
         const gross = BigInt(group.subtotal || "0");
 
@@ -197,18 +239,18 @@ export default function CartDrawer() {
 
         let tokenContractId: string;
         try {
-          tokenContractId = requireTokenContractId(group.currency);
+          tokenContractId = requireTokenContractId(currency);
         } catch {
-          const error = `Missing token contract for ${group.currency}.`;
-          setFailedOrders((prev) => [...prev, { farmerWallet, error }]);
-          setGroupProgress((prev) => ({ ...prev, [farmerWallet]: "error" }));
+          const error = `Missing token contract for ${currency}.`;
+          setFailedOrders((prev) => [...prev, { farmerWallet, currency, groupKey: gKey, error }]);
+          setGroupProgress((prev) => ({ ...prev, [gKey]: "error" }));
           continue;
         }
 
         if (gross <= BigInt(0)) {
           const error = "Amount must be positive.";
-          setFailedOrders((prev) => [...prev, { farmerWallet, error }]);
-          setGroupProgress((prev) => ({ ...prev, [farmerWallet]: "error" }));
+          setFailedOrders((prev) => [...prev, { farmerWallet, currency, groupKey: gKey, error }]);
+          setGroupProgress((prev) => ({ ...prev, [gKey]: "error" }));
           continue;
         }
 
@@ -227,10 +269,10 @@ export default function CartDrawer() {
             const approvalResult = await signAndSubmit(approval.data);
             if (!approvalResult.success || !approvalResult.txHash) {
               const error = approvalResult.error || "Approval transaction failed.";
-              setFailedOrders((prev) => [...prev, { farmerWallet, error }]);
+              setFailedOrders((prev) => [...prev, { farmerWallet, currency, groupKey: gKey, error }]);
               setGroupProgress((prev) => ({
                 ...prev,
-                [farmerWallet]: "error",
+                [gKey]: "error",
               }));
               continue;
             }
@@ -249,8 +291,8 @@ export default function CartDrawer() {
         if (!built.success || !built.data) {
           const error =
             built.error || "Failed to build create_order transaction.";
-          setFailedOrders((prev) => [...prev, { farmerWallet, error }]);
-          setGroupProgress((prev) => ({ ...prev, [farmerWallet]: "error" }));
+          setFailedOrders((prev) => [...prev, { farmerWallet, currency, groupKey: gKey, error }]);
+          setGroupProgress((prev) => ({ ...prev, [gKey]: "error" }));
           continue;
         }
 
@@ -259,8 +301,8 @@ export default function CartDrawer() {
         const createResult = await signAndSubmit(builtData.txXdr);
         if (!createResult.success || !createResult.txHash) {
           const error = createResult.error || "create_order transaction failed.";
-          setFailedOrders((prev) => [...prev, { farmerWallet, error }]);
-          setGroupProgress((prev) => ({ ...prev, [farmerWallet]: "error" }));
+          setFailedOrders((prev) => [...prev, { farmerWallet, currency, groupKey: gKey, error }]);
+          setGroupProgress((prev) => ({ ...prev, [gKey]: "error" }));
           continue;
         }
 
@@ -269,12 +311,14 @@ export default function CartDrawer() {
           {
             orderId: builtData.orderId,
             farmerWallet,
+            currency,
+            groupKey: gKey,
             txHash: createResult.txHash!,
           },
         ]);
-        setGroupProgress((prev) => ({ ...prev, [farmerWallet]: "success" }));
+        setGroupProgress((prev) => ({ ...prev, [gKey]: "success" }));
 
-        // Remove items for this farmer so a partial-failure retry doesn't
+        // Remove items for this farmer+currency so a partial-failure retry doesn't
         // duplicate the orders that already succeeded.
         // Cleanup failures are isolated – they must not mark the escrow as failed
         // and must not trigger another escrow creation on retry.
@@ -364,18 +408,20 @@ export default function CartDrawer() {
           ) : step === 1 ? (
             <Step1Review
               groups={groups}
-              totals={totals}
+              totalsPerCurrency={totalsPerCurrency}
               setQuantityForProduct={setQuantityForProduct}
+              hasPendingUpdates={hasPendingUpdates}
             />
           ) : step === 2 ? (
             <Step2Confirm
               groups={groups}
-              totals={totals}
+              totalsPerCurrency={totalsPerCurrency}
               deliveryDeadline={deliveryDeadline}
               setDeliveryDeadline={setDeliveryDeadline}
               running={running}
               progressMessage={progressMessage}
               groupProgress={groupProgress}
+              hasPendingUpdates={hasPendingUpdates}
             />
           ) : (
             <Step3Result
@@ -403,7 +449,7 @@ export default function CartDrawer() {
                 >
                   Continue shopping
                 </Button>
-                <Button onClick={() => setStep(2)} className="flex-[2]">
+                <Button onClick={() => setStep(2)} className="flex-[2]" disabled={hasPendingUpdates || cartLoading}>
                   Proceed to Checkout
                   <ArrowRight className="size-4" />
                 </Button>
@@ -423,10 +469,10 @@ export default function CartDrawer() {
                 <Button
                   onClick={() => void createOrdersForCart(groups)}
                   isLoading={running}
-                  disabled={running || !deliveryDeadline}
+                  disabled={running || !deliveryDeadline || hasPendingUpdates}
                   className="flex-[2]"
                 >
-                  {running ? "Signing…" : "Confirm & Create Escrow Orders"}
+                  {running ? "Signing…" : hasPendingUpdates ? "Saving cart…" : "Confirm & Create Escrow Orders"}
                 </Button>
               </div>
             )}
@@ -509,18 +555,25 @@ function EmptyCart({ onBrowse }: { onBrowse: () => void }) {
 
 function Step1Review({
   groups,
-  totals,
+  totalsPerCurrency,
   setQuantityForProduct,
+  hasPendingUpdates,
 }: {
   groups: CartGroup[];
-  totals: { gross: bigint; fee: bigint; net: bigint };
+  totalsPerCurrency: Array<{ currency: string; gross: bigint; fee: bigint; net: bigint }>;
   setQuantityForProduct: (productId: string, quantity: number) => void;
+  hasPendingUpdates?: boolean;
 }) {
   return (
     <div className="space-y-5">
+      {hasPendingUpdates && (
+        <p className="text-muted-foreground flex items-center gap-1 text-xs">
+          <Loader2 className="size-3 animate-spin" /> Saving cart…
+        </p>
+      )}
       <div className="space-y-4">
         {groups.map((g) => (
-          <Card key={g.farmer_wallet}>
+          <Card key={groupKeyOf(g)}>
             <CardHeader>
               <CardTitle className="text-sm font-semibold">
                 {g.farmer_name}
@@ -539,7 +592,7 @@ function Step1Review({
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">{it.name}</p>
                     <p className="text-muted-foreground text-xs">
-                      {it.unit_price} {g.currency} / {it.unit}
+                      {formatMinorUnits(it.unit_price)} {g.currency} / {it.unit}
                     </p>
                   </div>
                   <div className="bg-secondary flex items-center gap-1 rounded-full p-1">
@@ -587,14 +640,22 @@ function Step1Review({
 
       <Card className="bg-secondary/40">
         <CardContent className="space-y-1.5 py-4 text-sm">
-          <Row label="Subtotal" value={totals.gross.toString()} />
-          <Row
-            label="Platform fee (3%)"
-            value={totals.fee.toString()}
-            muted
-          />
-          <Separator className="my-2" />
-          <Row label="Farmer receives" value={totals.net.toString()} bold />
+          {totalsPerCurrency.length === 0 ? (
+            <Row label="Subtotal" value="0" />
+          ) : (
+            totalsPerCurrency.map((t) => (
+              <div key={t.currency} className="space-y-1.5">
+                <Row label={`Subtotal (${t.currency})`} value={`${formatMinorUnits(t.gross)} ${t.currency}`} />
+                <Row
+                  label={`Platform fee (3%) (${t.currency})`}
+                  value={`${formatMinorUnits(t.fee)} ${t.currency}`}
+                  muted
+                />
+                <Row label={`Farmer receives (${t.currency})`} value={`${formatMinorUnits(t.net)} ${t.currency}`} bold />
+                {totalsPerCurrency.length > 1 && <Separator className="my-2" />}
+              </div>
+            ))
+          )}
         </CardContent>
       </Card>
     </div>
@@ -603,20 +664,22 @@ function Step1Review({
 
 function Step2Confirm({
   groups,
-  totals,
+  totalsPerCurrency,
   deliveryDeadline,
   setDeliveryDeadline,
   running,
   progressMessage,
   groupProgress,
+  hasPendingUpdates,
 }: {
   groups: CartGroup[];
-  totals: { gross: bigint; fee: bigint; net: bigint };
+  totalsPerCurrency: Array<{ currency: string; gross: bigint; fee: bigint; net: bigint }>;
   deliveryDeadline: string;
   setDeliveryDeadline: (v: string) => void;
   running: boolean;
   progressMessage: string;
   groupProgress: Record<string, GroupStatus>;
+  hasPendingUpdates?: boolean;
 }) {
   return (
     <div className="space-y-5">
@@ -628,6 +691,10 @@ function Step2Confirm({
         onChange={(e) => setDeliveryDeadline(e.target.value)}
       />
 
+      {hasPendingUpdates && (
+        <p className="text-amber-600 text-xs">Cart is still saving. Checkout will wait for confirmation.</p>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">Per-farmer escrow</CardTitle>
@@ -637,13 +704,14 @@ function Step2Confirm({
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
           {groups.map((g) => {
-            const status = groupProgress[g.farmer_wallet] ?? "pending";
+            const gKey = groupKeyOf(g);
+            const status = groupProgress[gKey] ?? "pending";
             return (
               <div
-                key={g.farmer_wallet}
+                key={gKey}
                 className="flex items-center justify-between gap-3"
               >
-                <span className="truncate">{g.farmer_name}</span>
+                <span className="truncate">{g.farmer_name} · {g.currency}</span>
                 <GroupStatusBadge status={status} running={running} />
               </div>
             );
@@ -658,7 +726,9 @@ function Step2Confirm({
 
       <Card className="bg-secondary/40">
         <CardContent className="space-y-1.5 py-4 text-sm">
-          <Row label="Total locked in escrow" value={totals.net.toString()} bold />
+          {totalsPerCurrency.map((t) => (
+            <Row key={t.currency} label={`Total locked in escrow (${t.currency})`} value={`${formatMinorUnits(t.net)} ${t.currency}`} bold />
+          ))}
         </CardContent>
       </Card>
     </div>
@@ -692,14 +762,15 @@ function Step3Result({
           <CardContent className="space-y-3">
             {successOrders.map((o) => (
               <div
-                key={`${o.farmerWallet}-${o.orderId}`}
+                key={`${o.groupKey}-${o.orderId}`}
                 className="flex items-start justify-between gap-3"
               >
                 <div className="min-w-0">
-                  <p className="text-sm font-medium">Order #{o.orderId}</p>
+                  <p className="text-sm font-medium">Order #{o.orderId} · {o.currency}</p>
                   <p className="text-muted-foreground font-mono text-xs break-all">
                     {o.txHash}
                   </p>
+                  <p className="text-muted-foreground font-mono text-xs">{formatTruncatedAddress(o.farmerWallet)}</p>
                 </div>
                 <Button
                   variant="outline"
@@ -725,9 +796,9 @@ function Step3Result({
           </CardHeader>
           <CardContent className="space-y-3">
             {failedOrders.map((f, idx) => (
-              <div key={idx} className="space-y-0.5">
+              <div key={`${f.groupKey}-${idx}`} className="space-y-0.5">
                 <p className="font-mono text-xs">
-                  {formatTruncatedAddress(f.farmerWallet)}
+                  {formatTruncatedAddress(f.farmerWallet)} · {f.currency}
                 </p>
                 <p className="text-muted-foreground text-sm">{f.error}</p>
               </div>
@@ -840,19 +911,19 @@ function SubtotalRow({
       <div className="flex justify-between">
         <span className="text-muted-foreground">Subtotal</span>
         <span>
-          {gross.toString()} {currency}
+          {formatMinorUnits(gross)} {currency}
         </span>
       </div>
       <div className="flex justify-between">
         <span className="text-muted-foreground">Fee (3%)</span>
         <span className="text-muted-foreground">
-          {fee.toString()} {currency}
+          {formatMinorUnits(fee)} {currency}
         </span>
       </div>
       <div className="flex justify-between font-medium">
         <span>Farmer receives</span>
         <span>
-          {net.toString()} {currency}
+          {formatMinorUnits(net)} {currency}
         </span>
       </div>
     </div>

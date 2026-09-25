@@ -13,23 +13,25 @@ vi.mock('next/navigation', () => ({
 // Mock the hooks used in the component
 const mockRefreshCart = vi.fn();
 const mockSetDrawerOpen = vi.fn();
+const mockGetConfirmedCart = vi.fn(() => Promise.resolve(null));
 
 vi.mock('@/context/CartContext', () => ({
   useCart: () => ({
     cart: {
+      cart_id: 'cart_1',
       groups: [
         {
           farmer_wallet: 'FARMER_1',
           farmer_name: 'Green Farm',
           currency: 'USDC',
-          subtotal: '1000',
+          subtotal: '10000000',
           items: [
             {
               id: 'item_1',
               product_id: 'p1',
               name: 'Organic Wheat',
               quantity: '10',
-              unit_price: '100',
+              unit_price: '1000000',
               unit: 'kg'
             }
           ]
@@ -44,6 +46,10 @@ vi.mock('@/context/CartContext', () => ({
     refreshCart: mockRefreshCart,
     setQuantityForProduct: vi.fn(),
     removeCartItem: vi.fn(),
+    hasPendingUpdates: false,
+    pendingCount: 0,
+    flushPendingUpdates: vi.fn(() => Promise.resolve()),
+    getConfirmedCart: mockGetConfirmedCart,
   }),
 }));
 
@@ -67,10 +73,11 @@ describe('CartDrawer Component', () => {
     expect(screen.getByText('Green Farm')).toBeInTheDocument();
     expect(screen.getByText('Organic Wheat')).toBeInTheDocument();
 
-    // Verify calculations (Gross 1000, Fee 3% = 30, Net = 970)
-    expect(screen.getAllByText('1000')).toHaveLength(2); // Group subtotal and Total Gross
-    expect(screen.getAllByText('30')).toHaveLength(2);   // Group fee and Total Fee
-    expect(screen.getAllByText('970')).toHaveLength(2);  // Group net and Total Net
+    // Verify calculations with formatted minor units (7 decimals)
+    // 10,000,000 base = 1 USDC, fee 300,000 = 0.03, net 9,700,000 = 0.97
+    expect(screen.getByText('1 USDC')).toBeInTheDocument();
+    expect(screen.getByText('0.03 USDC')).toBeInTheDocument();
+    expect(screen.getByText('0.97 USDC')).toBeInTheDocument();
   });
 
   it('progresses through checkout steps', async () => {
@@ -84,10 +91,10 @@ describe('CartDrawer Component', () => {
     expect(screen.getByLabelText(/Delivery deadline/i)).toBeInTheDocument();
   });
 
-  it('closes and resets when clicking the close button', () => {
+  it('closes and resets when clicking continue shopping', () => {
     render(<CartDrawer />);
 
-    const closeBtn = screen.getByText('Close');
+    const closeBtn = screen.getByText('Continue shopping');
     fireEvent.click(closeBtn);
 
     expect(mockSetDrawerOpen).toHaveBeenCalledWith(false);

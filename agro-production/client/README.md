@@ -1,27 +1,28 @@
 # Agro Production — Client
 
-Quick start and development notes for the `agro-production/client` frontend.
+This directory contains the campaign/crowdfunding frontend. It shares the
+root npm workspace and lockfile with the marketplace client.
 
-> **Environment variables:** the authoritative reference for every variable this app reads is [`docs/deployment/environment.md`](../../docs/deployment/environment.md). `.env.example` is checked against code by `scripts/check-env-drift.js` in CI.
+> Follow [the canonical frontend setup](../../docs/FRONTEND_SETUP.md) from the
+> repository root for the Node.js 22.13.x/npm 10.9.x policy, `npm ci`, launcher
+> commands, port overrides, and startup troubleshooting.
 
-Prerequisites
-- Node.js 18+ and npm or pnpm
-
-Install
+## Setup
 
 ```bash
-npm install
+# Repository root
+npm ci
+cp agro-production/client/.env.example agro-production/client/.env.local
+npm run dev:production
+# http://localhost:3001
 ```
 
 ## Environment Variables
 
-Copy the example file and fill in real values:
-
-```bash
-cp .env.example .env
-```
-
-A unified example covering both server and client vars lives at `agro-production/.env.example`.
+This app reads `agro-production/client/.env.local`. The authoritative
+per-app reference is
+[`docs/deployment/environment.md`](../../docs/deployment/environment.md);
+`.env.example` drift is checked in CI.
 
 | Client var | Server var it mirrors | Required | Notes |
 |---|---|---|---|
@@ -32,18 +33,12 @@ A unified example covering both server and client vars lives at `agro-production
 | `NEXT_PUBLIC_NETWORK_PASSPHRASE` | — | Yes | Stellar network passphrase (client-only) |
 | `NEXT_PUBLIC_NATIVE_TOKEN_CONTRACT_ID` | — | No | XLM native token SAC address |
 
-Available scripts
-- `npm run dev` — start Next.js dev server
-- `npm run build` — build for production
-- `npm run start` — start built app
-- `npm run test` — run unit/integration tests (Vitest)
-- `npm run storybook` — start Storybook for components
+Available root commands
 
-Testing
-- Tests use Vitest and simple DOM mocking. Run `npm run test` to execute.
-
-Storybook
-- Start with `npm run storybook`. Stories live under `src/**/*.stories.*`.
+- `npm run dev:production` — start only this app on port 3001
+- `npm run build --workspace=agro-production/client` — production build
+- `npm run test --workspace=agro-production/client` — Vitest suite
+- `npm run lint --workspace=agro-production/client` — ESLint
 
 Notes for developers
 - API calls are centralized in `src/lib/apiClient.ts` and wrapped by the service modules in `src/services/*`.

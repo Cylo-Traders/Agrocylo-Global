@@ -394,7 +394,13 @@ impl GovernanceContract {
 
         env.events().publish(
             (t_governance(), symbol_short!("proposed")),
-            (EVENT_SCHEMA_VERSION, id, proposer, target_contract, function_name),
+            (
+                EVENT_SCHEMA_VERSION,
+                id,
+                proposer,
+                target_contract,
+                function_name,
+            ),
         );
         Ok(id)
     }
@@ -410,16 +416,18 @@ impl GovernanceContract {
         if *target == env.current_contract_address() {
             return Ok(());
         }
-        // For cross-contract, only allow the known governance-gated functions
-        let func_str = func.to_string();
-        let allowed = func_str == "set_fee_config"
-            || func_str == "set_supported_tokens"
-            || func_str == "update_supported_tokens"
-            || func_str == "set_registry_contract"
-            || func_str == "set_guardian"
-            || func_str == "pause"
-            || func_str == "unpause"
-            || func_str == "upgrade";
+        // For cross-contract, only allow the known governance-gated functions.
+        // `Symbol` has no `to_string` in `no_std` Soroban — compare against
+        // interned symbols directly, the same way `create_proposal` derives
+        // the proposal kind from `function_name`.
+        let allowed = *func == Symbol::new(env, "set_fee_config")
+            || *func == Symbol::new(env, "set_supported_tokens")
+            || *func == Symbol::new(env, "update_supported_tokens")
+            || *func == Symbol::new(env, "set_registry_contract")
+            || *func == Symbol::new(env, "set_guardian")
+            || *func == Symbol::new(env, "pause")
+            || *func == Symbol::new(env, "unpause")
+            || *func == Symbol::new(env, "upgrade");
         if allowed {
             Ok(())
         } else {
@@ -497,8 +505,10 @@ impl GovernanceContract {
         if proposal.votes_for < quorum || proposal.votes_for <= proposal.votes_against {
             proposal.status = ProposalStatus::Rejected;
             save_proposal(&env, &proposal);
-            env.events()
-                .publish((t_governance(), symbol_short!("rejected")), (EVENT_SCHEMA_VERSION, proposal_id));
+            env.events().publish(
+                (t_governance(), symbol_short!("rejected")),
+                (EVENT_SCHEMA_VERSION, proposal_id),
+            );
             return Ok(());
         }
 
@@ -506,8 +516,10 @@ impl GovernanceContract {
         proposal.queued_at = env.ledger().timestamp();
         save_proposal(&env, &proposal);
 
-        env.events()
-            .publish((t_governance(), symbol_short!("queued")), (EVENT_SCHEMA_VERSION, proposal_id));
+        env.events().publish(
+            (t_governance(), symbol_short!("queued")),
+            (EVENT_SCHEMA_VERSION, proposal_id),
+        );
         Ok(())
     }
 
@@ -542,8 +554,10 @@ impl GovernanceContract {
         proposal.status = ProposalStatus::Cancelled;
         save_proposal(&env, &proposal);
 
-        env.events()
-            .publish((t_governance(), symbol_short!("cancelled")), (EVENT_SCHEMA_VERSION, proposal_id));
+        env.events().publish(
+            (t_governance(), symbol_short!("cancelled")),
+            (EVENT_SCHEMA_VERSION, proposal_id),
+        );
         Ok(())
     }
 
@@ -670,8 +684,10 @@ impl GovernanceContract {
                 return Err(GovernanceError::NotPaused);
             }
             env.storage().instance().set(&DataKey::Paused, &false);
-            env.events()
-                .publish((t_governance(), symbol_short!("unpausd")), (EVENT_SCHEMA_VERSION,));
+            env.events().publish(
+                (t_governance(), symbol_short!("unpausd")),
+                (EVENT_SCHEMA_VERSION,),
+            );
             Ok(())
         } else if *function_name == Symbol::new(env, "migrate") {
             let stored: u32 = env
@@ -739,8 +755,10 @@ impl GovernanceContract {
             return Err(GovernanceError::AlreadyPaused);
         }
         env.storage().instance().set(&DataKey::Paused, &true);
-        env.events()
-            .publish((t_governance(), symbol_short!("paused")), (EVENT_SCHEMA_VERSION, caller));
+        env.events().publish(
+            (t_governance(), symbol_short!("paused")),
+            (EVENT_SCHEMA_VERSION, caller),
+        );
         Ok(())
     }
 

@@ -14,6 +14,9 @@ export interface WalletState {
   networkMismatch: boolean;
   activeWalletId: string | null; // ID of the currently active wallet adapter
   restoring: boolean; // true when restoring from localStorage
+  authenticated: boolean;
+  authenticating: boolean;
+  sessionError: string | null;
 }
 
 export interface WalletContextType extends WalletState {
@@ -21,10 +24,13 @@ export interface WalletContextType extends WalletState {
   connect: (adapterId?: string) => Promise<void>;
   disconnect: () => void;
   refreshBalance: () => Promise<void>;
+  reauthenticate: () => Promise<void>;
   /** Sign a transaction XDR with the active wallet, submit it, and wait for confirmation. */
   signAndSubmit: (transactionXdr: string) => Promise<SignAndSubmitResult>;
 }
 
-export function isAdminRole(role: ProfileRole | string | undefined | null): boolean {
+export function isAdminRole(
+  role: ProfileRole | string | undefined | null,
+): boolean {
   return role === "admin" || role?.toUpperCase() === "ADMIN";
 }

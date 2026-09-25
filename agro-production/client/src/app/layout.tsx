@@ -7,6 +7,7 @@ import NavBar from "@/components/NavBar";
 import AnalyticsInit from "@/components/AnalyticsInit";
 import HandoffConsumer from "@/components/HandoffConsumer";
 import PendingTransactionsResolver from "@/components/PendingTransactionsResolver";
+import { redirect } from "next/navigation";
 
 export const metadata: Metadata = {
   title: "Agro Production",
@@ -14,6 +15,11 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  // Issue #1020: Production build gate for agro-production routes.
+  // In a real scenario, this environment variable would be set during the production build process.
+  if (process.env.NODE_ENV === 'production' && process.env.NEXT_PUBLIC_AGRO_PRODUCTION_ENABLED !== 'true') {
+    redirect('/');
+  }
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen bg-background text-foreground antialiased">

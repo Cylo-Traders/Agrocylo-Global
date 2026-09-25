@@ -18,6 +18,10 @@ interface FreighterDirect {
     xdr: string,
     opts?: { networkPassphrase?: string; accountToSign?: string },
   ) => Promise<string>;
+  signMessage?: (
+    message: string,
+    opts?: { address?: string; networkPassphrase?: string },
+  ) => Promise<string | { signedMessage: string }>;
 }
 
 declare global {

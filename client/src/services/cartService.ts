@@ -1,30 +1,10 @@
 import type { CartState } from "@/types/cart";
-import { API_BASE_URL } from "@/lib/apiConfig";
-
-async function requestJson<T>(
-  input: RequestInfo | URL,
-  init?: RequestInit,
-): Promise<T> {
-  const res = await fetch(input, init);
-  if (!res.ok) {
-    let message = `Request failed with status ${res.status}`;
-    try {
-      const body = await res.json();
-      message = body?.message || body?.title || message;
-    } catch {
-      // ignore
-    }
-    throw new Error(message);
-  }
-  return (await res.json()) as T;
-}
+import { apiRequest } from "@/lib/apiHelper";
 
 export async function getActiveCart(walletAddress: string): Promise<CartState> {
-  return requestJson<CartState>(`${API_BASE_URL}/cart`, {
+  void walletAddress;
+  return apiRequest<CartState>("/cart", {
     method: "GET",
-    headers: {
-      "x-wallet-address": walletAddress,
-    },
   });
 }
 
@@ -33,16 +13,15 @@ export async function addItemToCart(
   productId: string,
   quantity: number,
 ): Promise<CartState> {
-  return requestJson<CartState>(`${API_BASE_URL}/cart/items`, {
+  return apiRequest<CartState>("/cart/items", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-wallet-address": walletAddress,
     },
-    body: JSON.stringify({
+    body: {
       product_id: productId,
       quantity: String(quantity),
-    }),
+    },
   });
 }
 
@@ -51,15 +30,14 @@ export async function updateCartItemQuantity(
   itemId: string,
   quantity: number,
 ): Promise<CartState> {
-  return requestJson<CartState>(`${API_BASE_URL}/cart/items/${itemId}`, {
+  return apiRequest<CartState>(`/cart/items/${itemId}`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
-      "x-wallet-address": walletAddress,
     },
-    body: JSON.stringify({
+    body: {
       quantity: String(quantity),
-    }),
+    },
   });
 }
 
@@ -67,20 +45,14 @@ export async function removeCartItem(
   walletAddress: string,
   itemId: string,
 ): Promise<CartState> {
-  return requestJson<CartState>(`${API_BASE_URL}/cart/items/${itemId}`, {
+  return apiRequest<CartState>(`/cart/items/${itemId}`, {
     method: "DELETE",
-    headers: {
-      "x-wallet-address": walletAddress,
-    },
   });
 }
 
 export async function clearCart(walletAddress: string): Promise<CartState> {
-  return requestJson<CartState>(`${API_BASE_URL}/cart`, {
+  void walletAddress;
+  return apiRequest<CartState>("/cart", {
     method: "DELETE",
-    headers: {
-      "x-wallet-address": walletAddress,
-    },
   });
 }
-

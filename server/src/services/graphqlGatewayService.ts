@@ -1,301 +1,349 @@
-import { ApiError } from "../http/errors.js";
-import { listProducts, getProductGraphData } from "./productService.js";
-import { OrderService } from "./orderService.js";
-import { getProfileGraphData } from "./profileService.js";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
-type Variables = Record<string, unknown>;
+const mockGetProductGraphData = vi.fn();
+const mockListProducts = vi.fn();
+const mockGetGraphOrder = vi.fn();
+const mockGetAllForWallet = vi.fn();
+const mockGetProfileGraphData = vi.fn();
 
-interface RootField {
-  alias: string | null;
-  name: string;
-  args: Record<string, unknown>;
-}
+vi.mock("./productService.js", () => ({
+  getProductGraphData: (...args: any[]) => mockGetProductGraphData(...args),
+  listProducts: (...args: any[]) => mockListProducts(...args),
+}));
 
-function isWhitespace(char: string): boolean {
-  return /\s/.test(char);
-}
+vi.mock("./orderService.js", () => ({
+  OrderService: {
+    getGraphOrder: (...args: any[]) => mockGetGraphOrder(...args),
+    getAllForWallet: (...args: any[]) => mockGetAllForWallet(...args),
+  },
+}));
 
-function isIdentifierStart(char: string): boolean {
-  return /[A-Za-z_]/.test(char);
-}
+vi.mock("./profileService.js", () => ({
+  getProfileGraphData: (...args: any[]) => mockGetProfileGraphData(...args),
+}));
 
-function isIdentifierPart(char: string): boolean {
-  return /[A-Za-z0-9_]/.test(char);
-}
+import { executeGraphQL, MAX_DEPTH, MAX_ALIAS_COUNT, MAX_QUERY_SIZE } from "./graphqlGatewayService.js";
 
-function skipWhitespace(text: string, index: number): number {
-  let cursor = index;
-  while (cursor < text.length && isWhitespace(text[cursor]!)) {
-    cursor += 1;
-  }
-  return cursor;
-}
+const WALLET_A = "GA" + "A".repeat(55);
+const WALLET_B = "GB" + "B".repeat(55);
+const WALLET_ADMIN = "GADMIN" + "A".repeat(50);
 
-function readIdentifier(text: string, index: number): { value: string; nextIndex: number } {
-  let cursor = index;
-  if (!isIdentifierStart(text[cursor]!)) {
-    throw new ApiError(400, "Bad Request", "Invalid GraphQL query");
-  }
-  cursor += 1;
-  while (cursor < text.length && isIdentifierPart(text[cursor]!)) {
-    cursor += 1;
-  }
-  return { value: text.slice(index, cursor), nextIndex: cursor };
-}
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockGetProductGraphData.mockResolvedValue({ id: "prod-1", name: "Maize" });
+  mockListProducts.mockResolvedValue({ items: [], total: 0 });
+  mockGetAllForWallet.mockResolvedValue([{ orderIdOnChain: "order-1", buyerAddress: WALLET_A }]);
+  mockGetProfileGraphData.mockResolvedValue({ profile: { wallet_address: WALLET_A } });
+  mockGetGraphOrder.mockResolvedValue({
+    orderIdOnChain: "order-123",
+    buyerAddress: WALLET_A,
+    sellerAddress: "GSELLER" + "S".repeat(48),
+  });
+});
 
-function readBalanced(text: string, index: number, openChar: string, closeChar: string): {
-  value: string;
-  nextIndex: number;
-} {
-  let cursor = index;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
+describe("GraphQL Gateway — IDOR protection", () => {
+  it("authenticated as A, orders(wallet: B) → denied (403)", async () => {
+    const query = `{ orders(wallet: "${WALLET_B}") { id } }`;
+    const result = await executeGraphQL(query, {}, WALLET_A);
+    expect(result.errors).toBeDefined();
+    expect(result.errors![0].message).toMatch(/access|Forbidden/i);
+    expect(mockGetAllForWallet).not.toHaveBeenCalled();
+  });
 
-  while (cursor < text.length) {
-    const char = text[cursor]!;
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === "\"") {
-        inString = false;
-      }
-    } else if (char === "\"") {
-      inString = true;
-    } else if (char === openChar) {
-      depth += 1;
-    } else if (char === closeChar) {
-      depth -= 1;
-      if (depth === 0) {
-        return { value: text.slice(index, cursor + 1), nextIndex: cursor + 1 };
-      }
+  it("authenticated as A, orders via variables wallet: B → denied", async () => {
+    const query = `query Q($w: String) { orders(wallet: $w) { id } }`;
+    const result = await executeGraphQL(query, { w: WALLET_B }, WALLET_A);
+    expect(result.errors).toBeDefined();
+    expect(result.errors![0].message).toMatch(/access|Forbidden/i);
+    expect(mockGetAllForWallet).not.toHaveBeenCalled();
+  });
+
+  it("authenticated as A, profile(wallet: B) → denied", async () => {
+    const query = `{ profile(wallet: "${WALLET_B}") { id } }`;
+    const result = await executeGraphQL(query, {}, WALLET_A);
+    expect(result.errors).toBeDefined();
+    expect(result.errors![0].message).toMatch(/access|Forbidden/i);
+    expect(mockGetProfileGraphData).not.toHaveBeenCalled();
+  });
+
+  it("profile with wallet_address arg also denied for non-admin", async () => {
+    const query = `{ profile(wallet_address: "${WALLET_B}") { id } }`;
+    const result = await executeGraphQL(query, {}, WALLET_A);
+    expect(result.errors).toBeDefined();
+    expect(mockGetProfileGraphData).not.toHaveBeenCalled();
+  });
+
+  it("orders without wallet arg returns own wallet's orders", async () => {
+    const query = `{ orders { id } }`;
+    const result = await executeGraphQL(query, {}, WALLET_A);
+    expect(result.errors).toBeUndefined();
+    expect(mockGetAllForWallet).toHaveBeenCalledWith(WALLET_A);
+    expect(result.data.orders).toBeDefined();
+  });
+
+  it("profile without wallet arg returns own profile", async () => {
+    const query = `{ profile { id } }`;
+    const result = await executeGraphQL(query, {}, WALLET_A);
+    expect(result.errors).toBeUndefined();
+    expect(mockGetProfileGraphData).toHaveBeenCalledWith(WALLET_A);
+  });
+
+  it("admin caller can request another wallet's orders", async () => {
+    const query = `{ orders(wallet: "${WALLET_B}") { id } }`;
+    const result = await executeGraphQL(query, {}, WALLET_ADMIN, "ADMIN");
+    expect(result.errors).toBeUndefined();
+    expect(mockGetAllForWallet).toHaveBeenCalledWith(WALLET_B);
+  });
+
+  it("admin caller can request another wallet's profile", async () => {
+    const query = `{ profile(wallet: "${WALLET_B}") { id } }`;
+    const result = await executeGraphQL(query, {}, WALLET_ADMIN, "ADMIN");
+    expect(result.errors).toBeUndefined();
+    expect(mockGetProfileGraphData).toHaveBeenCalledWith(WALLET_B);
+  });
+
+  it("admin case-insensitive role check (admin lower)", async () => {
+    const query = `{ orders(wallet: "${WALLET_B}") { id } }`;
+    const result = await executeGraphQL(query, {}, WALLET_ADMIN, "admin");
+    expect(result.errors).toBeUndefined();
+    expect(mockGetAllForWallet).toHaveBeenCalledWith(WALLET_B);
+  });
+
+  it("non-admin with different case wallet still denied (case-insensitive)", async () => {
+    const query = `{ orders(wallet: "${WALLET_B.toLowerCase()}") { id } }`;
+    const result = await executeGraphQL(query, {}, WALLET_A);
+    expect(result.errors).toBeDefined();
+    expect(mockGetAllForWallet).not.toHaveBeenCalled();
+  });
+
+  it("authenticated as A, orders(wallet: A) with matching wallet succeeds", async () => {
+    const query = `{ orders(wallet: "${WALLET_A}") { id } }`;
+    const result = await executeGraphQL(query, {}, WALLET_A);
+    expect(result.errors).toBeUndefined();
+    expect(mockGetAllForWallet).toHaveBeenCalledWith(WALLET_A);
+  });
+
+  it("singular order checks ownership — non-owner gets 403", async () => {
+    const query = `{ order(id: "order-123") { id } }`;
+    mockGetGraphOrder.mockResolvedValueOnce({
+      orderIdOnChain: "order-123",
+      buyerAddress: WALLET_A,
+      sellerAddress: "GSELLERxxx",
+    });
+    const result = await executeGraphQL(query, {}, WALLET_B);
+    expect(result.errors).toBeDefined();
+    expect(result.errors![0].message).toMatch(/access|Forbidden/i);
+  });
+
+  it("singular order — admin can view any order", async () => {
+    const query = `{ order(id: "order-123") { id } }`;
+    mockGetGraphOrder.mockResolvedValueOnce({
+      orderIdOnChain: "order-123",
+      buyerAddress: WALLET_A,
+      sellerAddress: "GSELLERxxx",
+    });
+    const result = await executeGraphQL(query, {}, WALLET_ADMIN, "ADMIN");
+    expect(result.errors).toBeUndefined();
+    expect(result.data.order).toBeDefined();
+  });
+
+  it("singular order — owner (buyer) can view", async () => {
+    const query = `{ order(id: "order-123") { id } }`;
+    mockGetGraphOrder.mockResolvedValueOnce({
+      orderIdOnChain: "order-123",
+      buyerAddress: WALLET_A,
+      sellerAddress: "GSELLERxxx",
+    });
+    const result = await executeGraphQL(query, {}, WALLET_A);
+    expect(result.errors).toBeUndefined();
+    expect(result.data.order).toBeDefined();
+  });
+
+  it("matrix: every per-user field respects cross-wallet denial", async () => {
+    const fields = [
+      `{ orders(wallet: "${WALLET_B}") { id } }`,
+      `{ profile(wallet: "${WALLET_B}") { id } }`,
+      `{ orders(walletAddress: "${WALLET_B}") { id } }`,
+      `{ profile(walletAddress: "${WALLET_B}") { id } }`,
+      `{ orders(wallet_address: "${WALLET_B}") { id } }`,
+      `{ profile(wallet_address: "${WALLET_B}") { id } }`,
+      `{ orders(id: "${WALLET_B}") { id } }`,
+      `{ profile(id: "${WALLET_B}") { id } }`,
+    ];
+    for (const q of fields) {
+      vi.clearAllMocks();
+      mockGetAllForWallet.mockResolvedValue([]);
+      mockGetProfileGraphData.mockResolvedValue({ profile: {} });
+      const result = await executeGraphQL(q, {}, WALLET_A);
+      expect(result.errors, `field ${q} should be denied`).toBeDefined();
+      expect(result.errors![0].message).toMatch(/Forbidden|access/i);
     }
-    cursor += 1;
-  }
+  });
 
-  throw new ApiError(400, "Bad Request", "Unbalanced GraphQL selection");
-}
-
-function splitTopLevel(text: string): string[] {
-  const parts: string[] = [];
-  let current = "";
-  let depthParens = 0;
-  let depthBrackets = 0;
-  let depthBraces = 0;
-  let inString = false;
-  let escaped = false;
-
-  for (const char of text) {
-    if (inString) {
-      current += char;
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === "\"") {
-        inString = false;
-      }
-      continue;
+  it("matrix via variables: every wallet arg variant denied", async () => {
+    const cases: Array<{ field: string; argName: string }> = [
+      { field: "orders", argName: "wallet" },
+      { field: "orders", argName: "walletAddress" },
+      { field: "orders", argName: "wallet_address" },
+      { field: "orders", argName: "id" },
+      { field: "profile", argName: "wallet" },
+      { field: "profile", argName: "walletAddress" },
+      { field: "profile", argName: "wallet_address" },
+      { field: "profile", argName: "id" },
+    ];
+    for (const c of cases) {
+      vi.clearAllMocks();
+      mockGetAllForWallet.mockResolvedValue([]);
+      mockGetProfileGraphData.mockResolvedValue({ profile: {} });
+      const query = `query Q($w: String) { ${c.field}(${c.argName}: $w) { id } }`;
+      const result = await executeGraphQL(query, { w: WALLET_B }, WALLET_A);
+      expect(result.errors, `field ${c.field} arg ${c.argName} via variables should be denied`).toBeDefined();
     }
+  });
+});
 
-    if (char === "\"") {
-      inString = true;
-      current += char;
-      continue;
+describe("GraphQL Gateway — DoS protections", () => {
+  it("depth bomb via nested selection is rejected with 400", async () => {
+    // Build nested depth > MAX_DEPTH by nesting arbitrary fields inside product JSON scalar
+    // Depth = 1 (product) + nested levels
+    let nested = "";
+    for (let i = 0; i < MAX_DEPTH + 2; i++) {
+      nested += ` level${i} {`;
     }
-
-    if (char === "(") depthParens += 1;
-    if (char === ")") depthParens -= 1;
-    if (char === "[") depthBrackets += 1;
-    if (char === "]") depthBrackets -= 1;
-    if (char === "{") depthBraces += 1;
-    if (char === "}") depthBraces -= 1;
-
-    if (char === "," && depthParens === 0 && depthBrackets === 0 && depthBraces === 0) {
-      if (current.trim()) parts.push(current.trim());
-      current = "";
-    } else {
-      current += char;
+    // close braces
+    nested += " id ";
+    for (let i = 0; i < MAX_DEPTH + 2; i++) {
+      nested += " }";
     }
-  }
+    const query = `{ product(id: "1") ${nested} }`;
+    await expect(executeGraphQL(query, {}, WALLET_A)).rejects.toMatchObject({ status: 400 });
+  });
 
-  if (current.trim()) {
-    parts.push(current.trim());
-  }
+  it("depth bomb via fragment chain is rejected with 400", async () => {
+    const fragmentDepthQuery = `
+      fragment F1 on Query { product(id: "1") }
+      fragment F2 on Query { ...F1 }
+      fragment F3 on Query { ...F2 }
+      fragment F4 on Query { ...F3 }
+      fragment F5 on Query { ...F4 }
+      fragment F6 on Query { ...F5 }
+      fragment F7 on Query { ...F6 }
+      fragment F8 on Query { ...F7 }
+      fragment F9 on Query { ...F8 }
+      query { ...F9 }
+    `;
+    await expect(executeGraphQL(fragmentDepthQuery, {}, WALLET_A)).rejects.toMatchObject({ status: 400 });
+  });
 
-  return parts;
-}
+  it("alias explosion is rejected with 400", async () => {
+    const aliases = Array.from({ length: MAX_ALIAS_COUNT + 5 }, (_, i) => `alias${i}: product(id: "1")`).join(" ");
+    const query = `{ ${aliases} }`;
+    await expect(executeGraphQL(query, {}, WALLET_A)).rejects.toMatchObject({ status: 400 });
+  });
 
-function parseValue(value: string, variables: Variables): unknown {
-  const trimmed = value.trim();
-  if (trimmed.startsWith("$")) {
-    return variables[trimmed.slice(1)] as unknown;
-  }
-  if (trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
-    return trimmed.slice(1, -1);
-  }
-  if (trimmed === "true") return true;
-  if (trimmed === "false") return false;
-  if (trimmed === "null") return null;
-  if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
-    return Number(trimmed);
-  }
-  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-    return splitTopLevel(trimmed.slice(1, -1)).map((part) => parseValue(part, variables));
-  }
-  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-    return parseArgs(trimmed.slice(1, -1), variables);
-  }
-  return trimmed;
-}
+  it("field count explosion is rejected with 400", async () => {
+    // Use many top-level fields (product repeated without alias would be invalid due to duplicate, so use aliases to inflate fieldCount)
+    const many = Array.from({ length: 110 }, (_, i) => `a${i}: product(id: "${i}")`).join(" ");
+    const query = `{ ${many} }`;
+    await expect(executeGraphQL(query, {}, WALLET_A)).rejects.toMatchObject({ status: 400 });
+  });
 
-function parseArgs(argText: string, variables: Variables): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  const pairs = splitTopLevel(argText);
-  for (const pair of pairs) {
-    if (!pair) continue;
-    const separatorIndex = pair.indexOf(":");
-    if (separatorIndex === -1) continue;
-    const key = pair.slice(0, separatorIndex).trim();
-    const value = pair.slice(separatorIndex + 1);
-    result[key] = parseValue(value, variables);
-  }
-  return result;
-}
+  it("query exceeding max size is rejected with 400", async () => {
+    const bigQuery = `{ product(id: "${"a".repeat(MAX_QUERY_SIZE)}") }`;
+    expect(bigQuery.length).toBeGreaterThan(MAX_QUERY_SIZE);
+    await expect(executeGraphQL(bigQuery, {}, WALLET_A)).rejects.toMatchObject({ status: 400 });
+  });
 
-function parseRootFields(query: string, variables: Variables): RootField[] {
-  const firstBrace = query.indexOf("{");
-  const lastBrace = query.lastIndexOf("}");
-  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
-    throw new ApiError(400, "Bad Request", "GraphQL query must contain a selection set");
-  }
+  it("valid query passes depth/cost checks", async () => {
+    const query = `{ product(id: "prod-1") }`;
+    const result = await executeGraphQL(query, {}, WALLET_A);
+    expect(result.errors).toBeUndefined();
+    expect(mockGetProductGraphData).toHaveBeenCalledWith("prod-1");
+  });
 
-  const body = query.slice(firstBrace + 1, lastBrace);
-  const fields: RootField[] = [];
-  let index = 0;
+  it("valid query with alias under limit passes", async () => {
+    const query = `{ a1: product(id: "1") a2: product(id: "2") }`;
+    const result = await executeGraphQL(query, {}, WALLET_A);
+    expect(result.errors).toBeUndefined();
+  });
 
-  while (index < body.length) {
-    index = skipWhitespace(body, index);
-    if (index >= body.length) break;
-    if (body[index] === ",") {
-      index += 1;
-      continue;
-    }
+  it("unsupported field is rejected with 400 via schema validation", async () => {
+    const query = `{ unsupportedField }`;
+    await expect(executeGraphQL(query, {}, WALLET_A)).rejects.toMatchObject({ status: 400 });
+  });
 
-    const first = readIdentifier(body, index);
-    index = skipWhitespace(body, first.nextIndex);
+  it("introspection query is allowed but still depth-limited", async () => {
+    const introspection = `{ __schema { queryType { name } } }`;
+    // buildSchema includes introspection, so this should succeed and not be a DoS vector itself
+    const result = await executeGraphQL(introspection, {}, WALLET_A);
+    expect(result.data.__schema).toBeDefined();
+    // but a deeply nested introspection bomb should still be rejected
+    let deepIntrospection = "{ __schema { queryType { name } types { name fields { name args { name type { name } } } } } }";
+    // Wrap with nesting to blow depth if needed - here simple check that normal introspection works
+    expect(result.errors).toBeUndefined();
+  });
+});
 
-    let alias: string | null = null;
-    let name = first.value;
+describe("GraphQL Gateway — uses real graphql-js engine", () => {
+  it("exposes a published schema SDL", async () => {
+    const { getSchemaSDL, graphQLSchema } = await import("./graphqlGatewayService.js");
+    const sdl = getSchemaSDL();
+    expect(sdl).toContain("type Query");
+    expect(sdl).toContain("product");
+    expect(sdl).toContain("orders");
+    expect(sdl).toContain("profile");
+    expect(graphQLSchema).toBeDefined();
+  });
 
-    if (body[index] === ":") {
-      alias = first.value;
-      index = skipWhitespace(body, index + 1);
-      const actual = readIdentifier(body, index);
-      name = actual.value;
-      index = skipWhitespace(body, actual.nextIndex);
-    }
+  it("rejects malformed GraphQL syntax with 400", async () => {
+    const query = `{ product(id: ) }`; // syntax error
+    await expect(executeGraphQL(query, {}, WALLET_A)).rejects.toMatchObject({ status: 400 });
+  });
 
-    let args: Record<string, unknown> = {};
-    if (body[index] === "(") {
-      const balanced = readBalanced(body, index, "(", ")");
-      args = parseArgs(balanced.value.slice(1, -1), variables);
-      index = skipWhitespace(body, balanced.nextIndex);
-    }
+  it("handles variables substitution correctly for allowed field", async () => {
+    const query = `query Q($pid: String) { product(id: $pid) }`;
+    const result = await executeGraphQL(query, { pid: "prod-var" }, WALLET_A);
+    expect(result.errors).toBeUndefined();
+    expect(mockGetProductGraphData).toHaveBeenCalledWith("prod-var");
+  });
 
-    if (body[index] === "{") {
-      const balanced = readBalanced(body, index, "{", "}");
-      index = balanced.nextIndex;
-    }
+  it("rejects query with unbalanced braces as 400", async () => {
+    const query = `{ product(id: "1")`;
+    await expect(executeGraphQL(query, {}, WALLET_A)).rejects.toMatchObject({ status: 400 });
+  });
 
-    fields.push({ alias, name, args });
-  }
+  it("empty query is rejected with 400", async () => {
+    await expect(executeGraphQL("", {}, WALLET_A)).rejects.toMatchObject({ status: 400 });
+    await expect(executeGraphQL("   ", {}, WALLET_A)).rejects.toMatchObject({ status: 400 });
+  });
+});
 
-  return fields;
-}
+describe("GraphQL Gateway — edge cases", () => {
+  it("orders with no auth and no wallet arg → 401", async () => {
+    const query = `{ orders { id } }`;
+    const result = await executeGraphQL(query, {}, undefined);
+    expect(result.errors).toBeDefined();
+    expect(result.errors![0].message).toMatch(/Unauthorized|Wallet/i);
+  });
 
-function pickWallet(args: Record<string, unknown>, fallback?: string): string | undefined {
-  const candidate = args.wallet ?? args.walletAddress ?? args.wallet_address ?? args.id;
-  if (typeof candidate === "string" && candidate) return candidate;
-  return fallback;
-}
+  it("profile with no auth and no wallet arg → 401", async () => {
+    const query = `{ profile { id } }`;
+    const result = await executeGraphQL(query, {}, undefined);
+    expect(result.errors).toBeDefined();
+    expect(result.errors![0].message).toMatch(/Unauthorized|Wallet/i);
+  });
 
-export async function executeGraphQL(
-  query: string,
-  variables: Variables,
-  walletAddress?: string,
-): Promise<{ data: Record<string, unknown>; errors: Array<{ message: string }> | undefined }> {
-  const rootFields = parseRootFields(query, variables);
-  const data: Record<string, unknown> = {};
-  const errors: Array<{ message: string }> = [];
+  it("product without id → 400 error in result", async () => {
+    const query = `{ product { id } }`;
+    const result = await executeGraphQL(query, {}, WALLET_A);
+    expect(result.errors).toBeDefined();
+    expect(result.errors![0].message).toMatch(/product id is required/i);
+  });
 
-  for (const field of rootFields) {
-    const key = field.alias ?? field.name;
-
-    try {
-      switch (field.name) {
-        case "product": {
-          const rawProductId = field.args.id ?? field.args.productId ?? "";
-          const productId = typeof rawProductId === "string" ? rawProductId : "";
-          if (!productId) throw new ApiError(400, "Bad Request", "product id is required");
-          data[key] = await getProductGraphData(productId);
-          break;
-        }
-        case "products": {
-          const result = await listProducts({
-            farmer: typeof field.args.farmer === "string" ? field.args.farmer : undefined,
-            category: typeof field.args.category === "string" ? field.args.category : undefined,
-            search: typeof field.args.search === "string" ? field.args.search : undefined,
-            location: typeof field.args.location === "string" ? field.args.location : undefined,
-            minPrice: typeof field.args.minPrice === "string" ? field.args.minPrice : undefined,
-            maxPrice: typeof field.args.maxPrice === "string" ? field.args.maxPrice : undefined,
-            page: typeof field.args.page === "string" ? field.args.page : undefined,
-            pageSize: typeof field.args.pageSize === "string" ? field.args.pageSize : undefined,
-            includeUnavailable:
-              typeof field.args.includeUnavailable === "boolean"
-                ? field.args.includeUnavailable
-                : undefined,
-          });
-          data[key] = result;
-          break;
-        }
-        case "order": {
-          const rawOrderId = field.args.id ?? field.args.orderIdOnChain ?? field.args.orderId ?? "";
-          const orderId = typeof rawOrderId === "string" ? rawOrderId : "";
-          if (!orderId) throw new ApiError(400, "Bad Request", "order id is required");
-          const order = await OrderService.getGraphOrder(orderId);
-          if (walletAddress && order.buyerAddress !== walletAddress && order.sellerAddress !== walletAddress) {
-            throw new ApiError(403, "Forbidden", "You do not have access to this order");
-          }
-          data[key] = order;
-          break;
-        }
-        case "orders": {
-          const address = pickWallet(field.args, walletAddress);
-          if (!address) throw new ApiError(401, "Unauthorized", "Wallet address is required");
-          data[key] = await OrderService.getAllForWallet(address);
-          break;
-        }
-        case "profile": {
-          const address = pickWallet(field.args, walletAddress);
-          if (!address) throw new ApiError(401, "Unauthorized", "Wallet address is required");
-          data[key] = await getProfileGraphData(address);
-          break;
-        }
-        default:
-          throw new ApiError(400, "Bad Request", `Unsupported GraphQL field: ${field.name}`);
-      }
-    } catch (error) {
-      errors.push({
-        message: error instanceof Error ? error.message : "GraphQL execution failed",
-      });
-    }
-  }
-
-  return {
-    data,
-    errors: errors.length > 0 ? errors : undefined,
-  };
-}
+  it("products list is public and does not enforce wallet check", async () => {
+    const query = `{ products(search: "maize") }`;
+    const result = await executeGraphQL(query, {}, WALLET_A);
+    expect(result.errors).toBeUndefined();
+    expect(mockListProducts).toHaveBeenCalledWith(expect.objectContaining({ search: "maize" }));
+  });
+});

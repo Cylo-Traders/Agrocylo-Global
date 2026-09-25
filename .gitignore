@@ -29,6 +29,7 @@ next-env.d.ts
 
 # Test output
 coverage/
+.smoke-logs/
 playwright-report/
 test-results/
 .nyc_output/

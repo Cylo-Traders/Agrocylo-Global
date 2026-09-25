@@ -3,6 +3,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 import {
   getFavoriteIds,
+  getServerFavoriteIds,
   toggleFavorite,
   clearFavorites,
 } from "@/services/productService";
@@ -10,8 +11,15 @@ import {
 const FAVORITE_EVENT = "favorites-change";
 
 function subscribeToFavorites(callback: () => void): () => void {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === "market:favorites") callback();
+  };
   window.addEventListener(FAVORITE_EVENT, callback);
-  return () => window.removeEventListener(FAVORITE_EVENT, callback);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    window.removeEventListener(FAVORITE_EVENT, callback);
+    window.removeEventListener("storage", onStorage);
+  };
 }
 
 function emitFavoriteChange() {
@@ -24,7 +32,7 @@ export function useFavorites() {
   const favoriteIds = useSyncExternalStore(
     subscribeToFavorites,
     getFavoriteIds,
-    getFavoriteIds,
+    getServerFavoriteIds,
   );
 
   const toggle = useCallback((productId: string) => {

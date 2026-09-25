@@ -1,78 +1,57 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as Sentry from '@sentry/node';
-import {
-  initializeSentry,
-  createSpan,
-  withSpan,
-  extractTraceContext,
-  captureException,
-  captureMessage,
-  SENSITIVE_PATTERNS,
-} from './observability.js';
 
-// Mock Sentry
+// Mock Sentry with the v8 API surface
 vi.mock('@sentry/node', () => ({
   init: vi.fn(),
-  Handlers: {
-    requestHandler: vi.fn(() => (req: any, res: any, next: any) => next()),
-    errorHandler: vi.fn(() => (err: any, req: any, res: any, next: any) => next(err)),
-  },
+  startSpan: vi.fn((_options: unknown, callback: (span: unknown) => unknown) =>
+    callback({ setStatus: vi.fn(), recordException: vi.fn(), end: vi.fn() }),
+  ),
   setTag: vi.fn(),
   captureException: vi.fn(),
   captureMessage: vi.fn(),
-  Integrations: {
-    Http: vi.fn(),
-  },
-}));
-
-// Mock OpenTelemetry
-vi.mock('@opentelemetry/api', () => ({
-  trace: {
-    getTracer: vi.fn(() => ({
-      startSpan: vi.fn(() => ({
-        setStatus: vi.fn(),
-        recordException: vi.fn(),
-        end: vi.fn(),
-      })),
-    })),
-    setSpan: vi.fn((ctx) => ctx),
-  },
-  context: {
-    active: vi.fn(),
-    with: vi.fn((ctx, fn) => fn()),
-  },
-  propagation: {},
+  expressIntegration: vi.fn(),
+  setupExpressErrorHandler: vi.fn(),
 }));
 
 describe('Observability Configuration', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
+    vi.doMock('./index.js', () => ({
+      config: { nodeEnv: 'production', sentryDsn: '', sentryTracesSampleRate: 0.1 },
+    }));
+    vi.doMock('./logger.js', () => ({
+      default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    }));
     delete process.env.SENTRY_DSN;
   });
 
   describe('Sentry initialization', () => {
-    it('should skip initialization if SENTRY_DSN is not set', () => {
+    it('should skip initialization if SENTRY_DSN is not set', async () => {
+      const { initializeSentry } = await import('./observability.js');
       initializeSentry('api');
       expect(Sentry.init).not.toHaveBeenCalled();
     });
 
-    it('should initialize Sentry with production config when SENTRY_DSN is set', () => {
+    it('should initialize Sentry with production config when SENTRY_DSN is set', async () => {
       process.env.SENTRY_DSN = 'https://key@sentry.io/project';
-      process.env.NODE_ENV = 'production';
 
+      const { initializeSentry } = await import('./observability.js');
       initializeSentry('api');
 
       expect(Sentry.init).toHaveBeenCalledWith(
         expect.objectContaining({
           dsn: 'https://key@sentry.io/project',
-          environment: expect.any(String),
+          environment: 'production',
         }),
       );
     });
 
-    it('should set process type tag', () => {
+    it('should set process type tag', async () => {
       process.env.SENTRY_DSN = 'https://key@sentry.io/project';
 
+      const { initializeSentry } = await import('./observability.js');
       initializeSentry('worker');
 
       expect(Sentry.setTag).toHaveBeenCalledWith('process_type', 'worker');
@@ -80,15 +59,16 @@ describe('Observability Configuration', () => {
   });
 
   describe('Sensitive data scrubbing', () => {
-    it('should scrub wallet addresses from strings', () => {
+    it('should scrub wallet addresses from strings', async () => {
+      const { SENSITIVE_PATTERNS } = await import('./observability.js');
       const testString = 'User GBUQWP3BOUZX34STELLA55MKHXUBZ4JTMCE6ADIIX7A2TCNJCBHHNFM requested access';
       const scrubbed = JSON.stringify(
         { data: testString },
         (key, value) => {
           if (typeof value === 'string') {
             return value
-              .replace(SENSITIVE_PATTERNS[0], '[WALLET_ADDRESS_REDACTED]')
-              .replace(SENSITIVE_PATTERNS[1], '[PRIVATE_KEY_REDACTED]');
+              .replace(SENSITIVE_PATTERNS[0]!, '[WALLET_ADDRESS_REDACTED]')
+              .replace(SENSITIVE_PATTERNS[1]!, '[PRIVATE_KEY_REDACTED]');
           }
           return value;
         },
@@ -98,29 +78,25 @@ describe('Observability Configuration', () => {
       expect(scrubbed).not.toContain('GBUQWP3BOUZX34');
     });
 
-    it('should scrub sensitive object keys', () => {
+    it('should scrub sensitive object keys', async () => {
+      const { scrubSensitiveData } = await import('./sentry.js');
       const testObject = {
         wallet_address: 'GBUQWP3BOUZX34STELLA55MKHXUBZ4JTMCE6ADIIX7A2TCNJCBHHNFM',
         privateKey: 'SBUZXPZ4ZPEZ3F7HWMLMPVJWQFXLWM3YTZVZSFGQX6NLKGMTVNV6F4IV',
         name: 'John Doe',
       };
 
-      const scrubbed = JSON.stringify(testObject, (key, value) => {
-        if (
-          key.toLowerCase().includes('wallet') ||
-          key.toLowerCase().includes('key') ||
-          key.toLowerCase().includes('secret')
-        ) {
-          return '[REDACTED]';
-        }
-        return value;
-      });
+      const scrubbed = scrubSensitiveData(testObject) as Record<string, unknown>;
 
-      expect(scrubbed).toContain('[REDACTED]');
-      expect(scrubbed).toContain('John Doe');
+      expect(scrubbed).toEqual({
+        wallet_address: '[REDACTED]',
+        privateKey: '[REDACTED]',
+        name: 'John Doe',
+      });
     });
 
-    it('should handle nested objects', () => {
+    it('should handle nested objects', async () => {
+      const { scrubSensitiveData } = await import('./sentry.js');
       const testObject = {
         user: {
           id: '123',
@@ -131,20 +107,19 @@ describe('Observability Configuration', () => {
         },
       };
 
-      const scrubbed = JSON.stringify(testObject, (key, value) => {
-        if (key.toLowerCase().includes('wallet') || key.toLowerCase().includes('secret')) {
-          return '[REDACTED]';
-        }
-        return value;
-      });
+      const scrubbed = scrubSensitiveData(testObject) as {
+        user: { id: string; wallet: string; metadata: { secret_key: string } };
+      };
 
-      expect(scrubbed).toContain('[REDACTED]');
-      expect(scrubbed).toContain('"id":"123"');
+      expect(scrubbed.user.wallet).toBe('[REDACTED]');
+      expect(scrubbed.user.metadata.secret_key).toBe('[REDACTED]');
+      expect(scrubbed.user.id).toBe('123');
     });
   });
 
   describe('Trace context extraction', () => {
-    it('should extract x-request-id from headers', () => {
+    it('should extract x-request-id from headers', async () => {
+      const { extractTraceContext } = await import('./observability.js');
       const headers = {
         'x-request-id': 'req-12345',
         'user-agent': 'test-client',
@@ -155,7 +130,8 @@ describe('Observability Configuration', () => {
       expect(context['x-request-id']).toBe('req-12345');
     });
 
-    it('should extract traceparent from headers', () => {
+    it('should extract traceparent from headers', async () => {
+      const { extractTraceContext } = await import('./observability.js');
       const headers = {
         'traceparent': '00-trace-id-span-id-01',
       };
@@ -165,7 +141,8 @@ describe('Observability Configuration', () => {
       expect(context.traceparent).toBe('00-trace-id-span-id-01');
     });
 
-    it('should handle missing headers gracefully', () => {
+    it('should handle missing headers gracefully', async () => {
+      const { extractTraceContext } = await import('./observability.js');
       const headers = {};
 
       const context = extractTraceContext(headers);
@@ -173,7 +150,8 @@ describe('Observability Configuration', () => {
       expect(context).toEqual({});
     });
 
-    it('should ignore array header values', () => {
+    it('should ignore array header values', async () => {
+      const { extractTraceContext } = await import('./observability.js');
       const headers = {
         'x-request-id': ['id1', 'id2'],
       } as Record<string, string | string[] | undefined>;
@@ -185,7 +163,8 @@ describe('Observability Configuration', () => {
   });
 
   describe('Exception capture', () => {
-    it('should capture exception with Sentry', () => {
+    it('should capture exception with Sentry', async () => {
+      const { captureException } = await import('./observability.js');
       const error = new Error('Test error');
       const context = { operation: 'test_op' };
 
@@ -199,7 +178,8 @@ describe('Observability Configuration', () => {
       );
     });
 
-    it('should capture message with Sentry', () => {
+    it('should capture message with Sentry', async () => {
+      const { captureMessage } = await import('./observability.js');
       captureMessage('Test message', 'warning');
 
       expect(Sentry.captureMessage).toHaveBeenCalledWith('Test message', 'warning');
@@ -208,6 +188,7 @@ describe('Observability Configuration', () => {
 
   describe('Span creation and tracing', () => {
     it('should create span with request ID attribute', async () => {
+      const { withSpan } = await import('./observability.js');
       const requestId = 'req-correlation-123';
 
       await withSpan(
@@ -217,11 +198,18 @@ describe('Observability Configuration', () => {
         requestId,
       );
 
-      // Verify span was created with request_id
-      // Note: Actual verification depends on mock implementation
+      expect(Sentry.startSpan).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'test_operation',
+          op: 'function',
+          attributes: expect.objectContaining({ request_id: requestId }),
+        }),
+        expect.any(Function),
+      );
     });
 
     it('should handle span success', async () => {
+      const { withSpan } = await import('./observability.js');
       const result = await withSpan(
         'successful_operation',
         async () => 'success_result',
@@ -231,6 +219,7 @@ describe('Observability Configuration', () => {
     });
 
     it('should handle span errors', async () => {
+      const { withSpan } = await import('./observability.js');
       const error = new Error('Operation failed');
 
       expect(
@@ -241,6 +230,7 @@ describe('Observability Configuration', () => {
           },
         ),
       ).rejects.toThrow('Operation failed');
+      expect(Sentry.captureException).toHaveBeenCalledWith(error);
     });
   });
 });

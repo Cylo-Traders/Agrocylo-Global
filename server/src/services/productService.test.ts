@@ -201,6 +201,7 @@ describe('getSuggestedPrice', () => {
       has_suggestion: false,
       suggested_price: null,
       currency: null,
+      unit: null,
       sample_count: 0,
     });
   });
@@ -215,6 +216,8 @@ describe('getSuggestedPrice', () => {
 
     expect(result.has_suggestion).toBe(false);
     expect(result.sample_count).toBe(1);
+    expect(result.currency).toBeNull();
+    expect(result.unit).toBeNull();
   });
 
   it('suggests the median price once enough sales history exists', async () => {
@@ -231,6 +234,7 @@ describe('getSuggestedPrice', () => {
       has_suggestion: true,
       suggested_price: '550',
       currency: 'USDC',
+      unit: 'kg',
       sample_count: 3,
     });
   });
@@ -247,6 +251,42 @@ describe('getSuggestedPrice', () => {
     const result = await getSuggestedPrice('prod-1', '0xfarmer');
 
     expect(result.suggested_price).toBe('101');
+    expect(result.currency).toBe('USDC');
+    expect(result.unit).toBe('kg');
+  });
+
+  it('keeps suggestions within the target currency and unit', async () => {
+    mockFindUnique.mockResolvedValueOnce({ ...SAMPLE_PRODUCT, category: 'Vegetables' } as any);
+    mockPriceHistoryFindMany.mockResolvedValueOnce([]);
+
+    await getSuggestedPrice('prod-1', '0xfarmer');
+
+    expect(mockPriceHistoryFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          product: {
+            farmerWallet: '0xfarmer',
+            category: 'Vegetables',
+            currency: 'USDC',
+            unit: 'kg',
+          },
+        },
+      }),
+    );
+  });
+
+  it('yields no suggestion when too few comparable rows remain after filtering', async () => {
+    mockFindUnique.mockResolvedValueOnce({ ...SAMPLE_PRODUCT, category: 'Vegetables' } as any);
+    mockPriceHistoryFindMany.mockResolvedValueOnce([
+      { price: '500', currency: 'USDC' },
+      { price: '510', currency: 'USDC' },
+    ] as any);
+
+    const result = await getSuggestedPrice('prod-1', '0xfarmer');
+
+    expect(result.has_suggestion).toBe(false);
+    expect(result.suggested_price).toBeNull();
+    expect(result.sample_count).toBe(2);
   });
 
   it('scopes the query to the calling farmer and same category', async () => {
@@ -257,7 +297,14 @@ describe('getSuggestedPrice', () => {
 
     expect(mockPriceHistoryFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { product: { farmerWallet: '0xfarmer', category: 'Vegetables' } },
+        where: {
+          product: {
+            farmerWallet: '0xfarmer',
+            category: 'Vegetables',
+            currency: 'USDC',
+            unit: 'kg',
+          },
+        },
       }),
     );
   });
@@ -270,7 +317,14 @@ describe('getSuggestedPrice', () => {
 
     expect(mockPriceHistoryFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { product: { id: 'prod-1', farmerWallet: '0xfarmer' } },
+        where: {
+          product: {
+            id: 'prod-1',
+            farmerWallet: '0xfarmer',
+            currency: 'USDC',
+            unit: 'kg',
+          },
+        },
       }),
     );
   });

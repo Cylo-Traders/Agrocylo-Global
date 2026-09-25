@@ -248,6 +248,7 @@ export interface SuggestedPriceResult {
   has_suggestion: boolean;
   suggested_price: string | null;
   currency: string | null;
+  unit: string | null;
   sample_count: number;
 }
 
@@ -266,7 +267,9 @@ export function computeSuggestedPrice(prices: number[]): number | null {
  * Suggests a listing price for `productId` based on the calling farmer's own
  * past `PriceHistory` rows for the same category (falling back to the same
  * product when it has no category), most recent first. Scoped strictly to
- * `farmerWallet` — never reads another farmer's sales history.
+ * `farmerWallet` — never reads another farmer's sales history — and to the
+ * target product's currency and unit so mixed-currency or mixed-unit history
+ * can never be combined as if directly comparable (Issue #970).
  */
 export async function getSuggestedPrice(
   productId: string,
@@ -281,12 +284,22 @@ export async function getSuggestedPrice(
   const history = await prisma.priceHistory.findMany({
     where: {
       product: product.category
-        ? { farmerWallet: farmerWallet.toLowerCase(), category: product.category }
-        : { id: product.id, farmerWallet: farmerWallet.toLowerCase() },
+        ? {
+            farmerWallet: farmerWallet.toLowerCase(),
+            category: product.category,
+            currency: product.currency,
+            unit: product.unit,
+          }
+        : {
+            id: product.id,
+            farmerWallet: farmerWallet.toLowerCase(),
+            currency: product.currency,
+            unit: product.unit,
+          },
     },
     orderBy: { timestamp: 'desc' },
     take: MAX_SALES_CONSIDERED,
-    select: { price: true, currency: true },
+    select: { price: true },
   });
 
   const prices = history.map((row) => Number(row.price)).filter((n) => Number.isFinite(n));
@@ -295,7 +308,8 @@ export async function getSuggestedPrice(
   return {
     has_suggestion: suggested !== null,
     suggested_price: suggested !== null ? suggested.toString() : null,
-    currency: suggested !== null ? (history[0]?.currency ?? product.currency) : null,
+    currency: suggested !== null ? product.currency : null,
+    unit: suggested !== null ? product.unit : null,
     sample_count: prices.length,
   };
 }

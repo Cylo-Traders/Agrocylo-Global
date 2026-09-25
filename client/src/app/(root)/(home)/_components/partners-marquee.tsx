@@ -1,7 +1,7 @@
 import Image from "next/image";
 
 import Wrapper from "@/components/shared/wrapper";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 export default function WorkWith() {
   return (
@@ -10,19 +10,15 @@ export default function WorkWith() {
         <div className="flex items-center gap-4">
           <div className="flex items-center">
             <Avatar className="size-11 border-2 border-[#FCCD29]">
-              <AvatarImage src="https://github.com/shadcn.png" />
               <AvatarFallback>JJ</AvatarFallback>
             </Avatar>
             <Avatar className="-ml-4 size-11 border-2 border-[#FCCD29]">
-              <AvatarImage src="https://github.com/shadcn.png" />
               <AvatarFallback>DN</AvatarFallback>
             </Avatar>
             <Avatar className="-ml-4 size-11 border-2 border-[#FCCD29]">
-              <AvatarImage src="https://github.com/shadcn.png" />
               <AvatarFallback>OM</AvatarFallback>
             </Avatar>
             <Avatar className="-ml-4 size-11 border-2 border-[#FCCD29]">
-              <AvatarImage src="https://github.com/shadcn.png" />
               <AvatarFallback>HD</AvatarFallback>
             </Avatar>
           </div>

@@ -1,4 +1,5 @@
 import { WebSocketServer, WebSocket, type RawData } from "ws";
+import { z } from "zod";
 import type { Server } from "node:http";
 import jwt from "jsonwebtoken";
 import logger from "../config/logger.js";
@@ -6,10 +7,7 @@ import { config } from "../config/index.js";
 import { HANDOFF_AUDIENCE } from "./authService.js";
 import { websocketConnections } from "./promMetrics.js";
 
-interface AuthMessage {
-  type: "auth";
-  token: string;
-}
+
 
 interface ClientSocket {
   ws: WebSocket;
@@ -116,8 +114,18 @@ export class WsManager {
           return;
         }
 
-        const msg = parsed as AuthMessage;
-        if (msg.type !== "auth" || !msg.token) return;
+        const AuthMessageSchema = z.object({
+          type: z.literal("auth"),
+          token: z.string().min(1),
+        });
+
+        const parseResult = AuthMessageSchema.safeParse(parsed);
+        if (!parseResult.success) {
+          logger.warn(`WebSocket received malformed auth message: ${parseResult.error.message}; closing connection`);
+          ws.close(4001, "Bad Request");
+          return;
+        }
+        const msg = parseResult.data;
 
         try {
           const payload = jwt.verify(msg.token, String(config.jwtSecret)) as {

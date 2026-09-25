@@ -269,49 +269,37 @@ docker compose down -v   # stops containers + wipes database volumes
 
 ### Running locally without Docker
 
-If you prefer to run services individually, you can start each one manually.
-This requires Node.js 20+, PostgreSQL, and Redis installed on your host.
-
-#### Agro-production server
-
-1. Navigate to the server directory:
-   ```bash
-   cd agro-production/server
-   ```
-
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-3. Set up the database (create a PostgreSQL database named `agrocylo_production`
-   and set `DATABASE_URL` in a `.env` file — see `.env.example`).
-
-4. Run migrations and start the dev server:
-   ```bash
-   npx prisma migrate deploy
-   npm run dev
-   ```
-
-   The server runs on `http://localhost:5001` by default.
-
-#### Root server
-
-1. `cd server && npm install`
-2. Copy `.env.example` to `.env` and fill in the required values (at minimum
-   `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and a 32+ character
-   `JWT_SECRET`).
-3. `npx prisma migrate deploy && npm run dev`
+If you prefer to run services individually, start them from the documented
+working directory.
 
 #### Clients
 
-```bash
-# Root marketplace client
-cd client && npm install && npm run dev    # → http://localhost:3000
+Both frontends use one root npm workspace install and the committed root
+lockfile. From the repository root:
 
-# Agro-production client
-cd agro-production/client && npm install && npm run dev  # → http://localhost:3000
+```bash
+npm ci
+npm run dev                 # both: marketplace 3000, production 3001
+npm run dev:marketplace     # marketplace only: http://localhost:3000
+npm run dev:production      # production only: http://localhost:3001
 ```
+
+Copy each app's `.env.example` to `.env.local` inside that app. See the
+[canonical frontend setup and troubleshooting guide](docs/FRONTEND_SETUP.md)
+for the supported Node/npm policy, port overrides, environment files, and
+startup recovery.
+
+#### Agro-production server
+
+From `agro-production/server/`, install its server dependencies, configure
+`.env`, run `npx prisma migrate deploy`, then `npm run dev`. It listens on
+`http://localhost:5001` by default.
+
+#### Root server
+
+From `server/`, install its server dependencies, copy `.env.example` to
+`.env`, run `npx prisma migrate deploy`, then `npm run dev`. It listens on
+`http://localhost:5000` by default.
 
 ### 🔌 API Documentation
 

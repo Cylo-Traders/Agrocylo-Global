@@ -12,6 +12,8 @@ export interface WalletAdapter {
   supportsMobile(): boolean;
   getPublicKey(): Promise<string>;
   getNetwork(): Promise<string>;
+  /** Signs a UTF-8 authentication challenge when the wallet supports it. */
+  signMessage?(message: string, address: string): Promise<string>;
   /** Returns the deep-link URL to open the wallet on mobile, or null if unsupported. */
   mobileDeepLink(): string | null;
 }
@@ -58,13 +60,39 @@ export const FreighterAdapter: WalletAdapter = {
     const { getCurrentNetworkName } = await import("./stellar");
     return getCurrentNetworkName();
   },
+
+  async signMessage(message, address) {
+    const direct = window.freighter ?? window.freighterApi ?? null;
+    const signer = direct?.signMessage
+      ? direct
+      : (FreighterApi as unknown as {
+          signMessage?: (
+            value: string,
+            options?: { address?: string },
+          ) => Promise<string | { signedMessage: string }>;
+        });
+    if (!signer.signMessage) {
+      throw new Error(
+        "This Freighter version cannot sign login messages. Update Freighter and try again.",
+      );
+    }
+    const result = await signer.signMessage(message, { address });
+    const signature =
+      typeof result === "string" ? result : result.signedMessage;
+    if (!signature)
+      throw new Error("Freighter did not return a login signature");
+    return signature;
+  },
 };
 
 // ─── xBull adapter ─────────────────────────────────────────────────────────
 
 type XBullWindow = Window & {
   xBullSDK?: {
-    connect(opts?: { canRequestPublicKey?: boolean; canRequestSign?: boolean }): Promise<void>;
+    connect(opts?: {
+      canRequestPublicKey?: boolean;
+      canRequestSign?: boolean;
+    }): Promise<void>;
     getPublicKey(): Promise<string>;
     isConnected(): Promise<boolean>;
   };
@@ -180,7 +208,8 @@ export const AlbedoAdapter: WalletAdapter = {
     const albedo = (window as AlbedoWindow).albedo;
     if (!albedo) throw new Error("Albedo is not installed");
     const result = await albedo.connect();
-    if (!result.publicKey) throw new Error("Albedo did not return a public key");
+    if (!result.publicKey)
+      throw new Error("Albedo did not return a public key");
     return result.publicKey;
   },
 

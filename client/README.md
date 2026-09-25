@@ -1,20 +1,24 @@
 # AgroCylo Frontend Setup
 
-Welcome to the AgroCylo frontend repository. This document outlines the setup, architecture, and environment configuration.
+This directory contains the marketplace frontend. Installation is shared with
+the production frontend through the root npm workspace.
 
-> **Environment variables:** the authoritative reference for every variable this app reads is [`docs/deployment/environment.md`](../docs/deployment/environment.md). `.env.example` is checked against code by `scripts/check-env-drift.js` in CI.
+> Follow [the canonical frontend setup](../docs/FRONTEND_SETUP.md) from the
+> repository root for the supported Node/npm versions, `npm ci`, launcher
+> commands, port overrides, and startup troubleshooting.
 
 ## Setup
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
+```bash
+# Repository root
+npm ci
+cp client/.env.example client/.env.local
+npm run dev:marketplace
+# http://localhost:3000
+```
 
-2. Start the development server:
-   ```bash
-   npm run dev
-   ```
+The authoritative variable reference is
+[`docs/deployment/environment.md`](../docs/deployment/environment.md).
 
 ## Wallet Setup
 
@@ -25,10 +29,10 @@ We use Freighter for interacting with the Stellar network.
 
 ## Environment Variables
 
-Copy `.env.example` to `.env.local` and fill in the required values:
+The marketplace reads `client/.env.local`. Create it from the repository root:
 
 ```bash
-cp .env.example .env.local
+cp client/.env.example client/.env.local
 ```
 
 ### Required Variables
@@ -126,6 +130,22 @@ cd ../server && npm run test:coverage
 ```
 
 ## Troubleshooting
+## Content Security Policy
+
+`client/src/proxy.ts` generates a new nonce for every document request and
+passes the same policy to Next.js in the request and browser response. Next.js
+applies that nonce to its framework and bootstrap scripts. Development alone
+adds `'unsafe-eval'` and the page's exact WebSocket origin for Fast Refresh;
+production keeps those out of the policy. API, backend WebSocket, Soroban RPC,
+Horizon, analytics, and Sentry connections are limited to origins derived from
+their configured URLs.
+
+Because nonces are request-specific, the root layout calls `connection()` and
+all marketplace pages render dynamically. Static optimization, ISR, and shared
+CDN HTML caching are therefore unavailable for this app unless the CSP strategy
+changes. Framing remains denied by both `frame-ancestors 'none'` and
+`X-Frame-Options: DENY`.
+
 
 ### Missing contract ID errors
 Set `NEXT_PUBLIC_CONTRACT_ID` in `.env.local` to the deployed escrow contract address. The frontend will not render on-chain features without it.
