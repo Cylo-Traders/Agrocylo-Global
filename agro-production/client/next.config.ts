@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertEndpointsValid } from "./src/lib/endpointValidator";
+import { getAllowedProductImageHosts, getAllowedProductImageOrigins } from "./src/lib/productImagePolicy";
 
 // ── Resolve repository root for Turbopack ────────────────────────────────
 // Issue #918: client fix derives repo root from config file location; this
@@ -81,6 +82,13 @@ const { sorobanRpc, horizon: horizonHostname } = assertEndpointsValid(
   { isProduction: process.env.NODE_ENV === "production" }
 );
 
+const productImageHosts = getAllowedProductImageHosts();
+const productImageOrigins = getAllowedProductImageOrigins();
+const productImagePatterns = productImageOrigins.map((origin) => {
+  const url = new URL(origin);
+  return { protocol: url.protocol.replace(":", "") as "http" | "https", hostname: url.hostname };
+});
+
 const nextConfig: NextConfig = {
   output: "standalone",
   // Issue #755: shared monorepo packages ship raw TS source, so Next.js
@@ -92,8 +100,8 @@ const nextConfig: NextConfig = {
   // Keep CSP/image hosts in sync with the validated endpoints so a
   // malformed value never reaches `new URL(...).hostname` as a generic throw.
   async headers() {
-    const imageHosts = ["ipfs.io", "gateway.pinata.cloud", sorobanRpc, horizonHostname].filter(Boolean);
-    const cspImageSources = imageHosts.map((h) => `https://${h}`).join(" ");
+    const imageHosts = ["ipfs.io", "gateway.pinata.cloud", sorobanRpc, horizonHostname, ...productImageHosts].filter(Boolean);
+    const cspImageSources = [...new Set([...imageHosts.map((h) => `https://${h}`), ...productImageOrigins])].join(" ");
     const cspConnectSources = [`https://${sorobanRpc}`, `https://${horizonHostname}`, "https://freighter.app"].join(" ");
     return [
       {
@@ -121,6 +129,7 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "gateway.pinata.cloud" },
       { protocol: "https", hostname: sorobanRpc },
       { protocol: "https", hostname: horizonHostname },
+      ...productImagePatterns,
     ],
   },
 };
