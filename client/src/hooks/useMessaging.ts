@@ -24,6 +24,19 @@ export function useMessaging(conversationId?: string) {
   const [error, setError] = useState<string | null>(null);
   const cursorRef = useRef<string | undefined>(undefined);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const isLoadingRef = useRef(false);
+  const activeConversationIdRef = useRef<string | undefined>(conversationId);
+  const requestIdRef = useRef(0);
+
+  // Keep active id in sync without causing re-renders
+  useEffect(() => {
+    activeConversationIdRef.current = conversationId;
+  }, [conversationId]);
+
+  // Keep isLoadingRef in sync for guards that read state
+  useEffect(() => {
+    isLoadingRef.current = isLoading;
+  }, [isLoading]);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -34,30 +47,9 @@ export function useMessaging(conversationId?: string) {
     }
   }, []);
 
-  const loadMessages = useCallback(async () => {
-    if (!conversationId || isLoading) return;
-
-    setIsLoading(true);
-    try {
-      const { messages: newMessages, nextCursor } = await fetchMessages(
-        conversationId,
-        cursorRef.current
-      );
-
-      setMessages(prev => cursorRef.current ? [...newMessages, ...prev] : newMessages);
-      cursorRef.current = nextCursor;
-      setHasMore(!!nextCursor);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load messages');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [conversationId, isLoading]);
-
-  // Load Conversations
-
+  // Load Conversations + socket for conversation list (stable, not dependent on message loading)
   useEffect(() => {
-    loadConversations();
+    void loadConversations();
 
     const unsubNew = messagingSocket.on('new_conversation', (conv: Conversation) => {
       setConversations(prev => [conv, ...prev]);
@@ -73,24 +65,88 @@ export function useMessaging(conversationId?: string) {
     };
   }, [loadConversations]);
 
-  // Load Messages
-
+  // Conversation-scoped history + subscriptions
+  // Resets only when conversation identity changes; stable while loading toggles
   useEffect(() => {
-    if (!conversationId) return;
+    if (!conversationId) {
+      setMessages([]);
+      cursorRef.current = undefined;
+      setHasMore(false);
+      setTypingUsers(new Set());
+      if (typingTimerRef.current) {
+        clearTimeout(typingTimerRef.current);
+        typingTimerRef.current = undefined;
+      }
+      return;
+    }
 
+    // Reset history/cursor/typing state only when conversation identity changes
     cursorRef.current = undefined;
-    loadMessages();
-    markAsRead(conversationId);
+    setMessages([]);
+    setHasMore(false);
+    setTypingUsers(new Set());
+    setError(null);
+    if (typingTimerRef.current) {
+      clearTimeout(typingTimerRef.current);
+      typingTimerRef.current = undefined;
+    }
+
+    const requestedConversationId = conversationId;
+    const requestedCursor = undefined;
+    const requestId = ++requestIdRef.current;
+    isLoadingRef.current = true;
+    setIsLoading(true);
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const { messages: newMessages, nextCursor } = await fetchMessages(
+          requestedConversationId,
+          requestedCursor,
+        );
+        if (cancelled) return;
+        // Discard responses from superseded conversations
+        if (activeConversationIdRef.current !== requestedConversationId) return;
+        if (requestId !== requestIdRef.current) return;
+
+        setMessages(prev => {
+          // Merge by ID so HTTP and real-time delivery cannot create duplicates
+          // For initial load prev is [] after reset; handle socket race by deduping
+          const existingIds = new Set(prev.map(m => m.id));
+          const unique = newMessages.filter(m => !existingIds.has(m.id));
+          if (prev.length === 0) return unique;
+          const fetchedIds = new Set(newMessages.map(m => m.id));
+          return [...unique, ...prev.filter(m => !fetchedIds.has(m.id))];
+        });
+        cursorRef.current = nextCursor;
+        setHasMore(!!nextCursor);
+      } catch (err) {
+        if (!cancelled && activeConversationIdRef.current === requestedConversationId && requestId === requestIdRef.current) {
+          setError(err instanceof Error ? err.message : 'Failed to load messages');
+        }
+      } finally {
+        if (!cancelled && requestId === requestIdRef.current && activeConversationIdRef.current === requestedConversationId) {
+          isLoadingRef.current = false;
+          setIsLoading(false);
+        }
+      }
+    })();
+
+    // Handle mark-as-read failures without unhandled promises
+    void markAsRead(requestedConversationId).catch(() => {});
 
     const unsubMessage = messagingSocket.on('new_message', (msg: Message) => {
-      if (msg.conversationId === conversationId) {
-        setMessages(prev => [...prev, msg]);
-        markAsRead(conversationId);
+      if (msg.conversationId === requestedConversationId) {
+        setMessages(prev => {
+          if (prev.some(m => m.id === msg.id)) return prev;
+          return [...prev, msg];
+        });
+        void markAsRead(requestedConversationId).catch(() => {});
       }
     });
 
     const unsubEdit = messagingSocket.on('message_edited', (msg: Message) => {
-      if (msg.conversationId === conversationId) {
+      if (msg.conversationId === requestedConversationId) {
         setMessages(prev => prev.map(m => m.id === msg.id ? msg : m));
       }
     });
@@ -100,13 +156,13 @@ export function useMessaging(conversationId?: string) {
     });
 
     const unsubReaction = messagingSocket.on('reaction_added', (msg: Message) => {
-      if (msg.conversationId === conversationId) {
+      if (msg.conversationId === requestedConversationId) {
         setMessages(prev => prev.map(m => m.id === msg.id ? msg : m));
       }
     });
 
     const unsubTyping = messagingSocket.on('typing', (indicator: TypingIndicator) => {
-      if (indicator.conversationId === conversationId) {
+      if (indicator.conversationId === requestedConversationId) {
         setTypingUsers(prev => {
           const next = new Set(prev);
           if (indicator.isTyping) {
@@ -120,19 +176,65 @@ export function useMessaging(conversationId?: string) {
     });
 
     return () => {
+      cancelled = true;
+      // If this effect's request is still the latest, clear loading
+      if (requestId === requestIdRef.current) {
+        isLoadingRef.current = false;
+        setIsLoading(false);
+      }
       unsubMessage();
       unsubEdit();
       unsubDelete();
       unsubReaction();
       unsubTyping();
+      if (typingTimerRef.current) {
+        clearTimeout(typingTimerRef.current);
+        typingTimerRef.current = undefined;
+      }
     };
-  }, [conversationId, loadMessages]);
+  }, [conversationId]);
 
-  const loadMore = () => {
-    if (hasMore && !isLoading) {
-      loadMessages();
-    }
-  };
+  const loadMore = useCallback(() => {
+    const cid = activeConversationIdRef.current;
+    if (!cid) return;
+    if (!hasMore) return;
+    if (isLoadingRef.current) return;
+    const requestedCursor = cursorRef.current;
+    if (!requestedCursor) return;
+    const requestedConversationId = cid;
+    const requestId = ++requestIdRef.current;
+    // Capture cursor before awaiting
+    const capturedCursor = requestedCursor;
+    isLoadingRef.current = true;
+    setIsLoading(true);
+    void (async () => {
+      try {
+        const { messages: newMessages, nextCursor } = await fetchMessages(
+          requestedConversationId,
+          capturedCursor,
+        );
+        if (activeConversationIdRef.current !== requestedConversationId) return;
+        if (requestId !== requestIdRef.current) return;
+        setMessages(prev => {
+          const existingIds = new Set(prev.map(m => m.id));
+          const unique = newMessages.filter(m => !existingIds.has(m.id));
+          // Prepend older page before existing
+          return [...unique, ...prev];
+        });
+        cursorRef.current = nextCursor;
+        setHasMore(!!nextCursor);
+      } catch (err) {
+        if (activeConversationIdRef.current === requestedConversationId && requestId === requestIdRef.current) {
+          setError(err instanceof Error ? err.message : 'Failed to load messages');
+        }
+      } finally {
+        if (activeConversationIdRef.current === requestedConversationId && requestId === requestIdRef.current) {
+          isLoadingRef.current = false;
+          setIsLoading(false);
+        }
+      }
+    })();
+  }, [hasMore]);
 
   //  Send Message 
 
@@ -146,7 +248,10 @@ export function useMessaging(conversationId?: string) {
         file ? 'file' : 'text',
         file
       );
-      setMessages(prev => [...prev, msg]);
+      setMessages(prev => {
+        if (prev.some(m => m.id === msg.id)) return prev;
+        return [...prev, msg];
+      });
       return msg;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send');
@@ -231,6 +336,16 @@ export function useMessaging(conversationId?: string) {
       sendTypingIndicator(conversationId, false);
     }, 3000);
   }, [conversationId]);
+
+  // Cleanup typing timer on unmount
+  useEffect(() => {
+    return () => {
+      if (typingTimerRef.current) {
+        clearTimeout(typingTimerRef.current);
+        typingTimerRef.current = undefined;
+      }
+    };
+  }, []);
 
   // Current Conversation 
 
