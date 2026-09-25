@@ -23,9 +23,27 @@ The Express + TypeScript backend for Agrocylo-Global. It exposes a REST API, man
 
 | Tool       | Version                       |
 | ---------- | ----------------------------- |
-| Node.js    | >= 20.x                       |
+| Node.js    | 22.12+ (or 24+), see below    |
 | npm        | >= 10.x                       |
 | PostgreSQL | >= 15 (or a Supabase project) |
+
+### Node version policy
+
+This service supports **Node 22.12+** (and 24+). The range is not arbitrary: the
+locked Prisma toolchain (`@prisma/client` 7.10.0) supports
+`^20.19 || ^22.12 || >=24.0`, so Node 22.0–22.11 and the odd-numbered 23.x line
+are outside what Prisma accepts.
+
+- `engines.node` in `server/package.json` is the single source of truth
+  (`^22.12.0 || >=24.0.0`).
+- `server/.npmrc` sets `engine-strict=true`, so `npm ci` / `npm install` refuse
+  to install on an unsupported release.
+- `npm run engines:check` (also wired into `dev`, `build`, `start` and
+  `worker:start`) prints the required range and exit code 1 before the app
+  bootstraps on an unsupported runtime.
+- `server/.nvmrc` pins the development version (`22.12.0`); run `nvm install &&
+  nvm use` inside `server/`.
+- The container image is `node:22.12-alpine`.
 
 ---
 
