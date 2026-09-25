@@ -1,67 +1,130 @@
-# Building - Buyer-Seller Escrow Smart Contract
+﻿# Agrocylo Smart Contracts
 
-This repository is specifically for smart contracts.
+Soroban/Stellar smart contracts for the Agrocylo Global platform.
+Resolved: Issue #1 - Smart contract repository set-up.
 
-### Requirements
+## Contracts
 
-- Soroban Rust ([Stellar Docs](https://developers.stellar.org/docs/build/smart-contracts/getting-started/setup))
-- Steller CLI ([Install](https://developers.stellar.org/docs/build/smart-contracts/getting-started/setup))
+| Contract | Path | Purpose |
+|---|---|---|
+| escrow | contracts/escrow | Buyer-seller escrow with dispute resolution and arbitrator pool |
+| weather-insurance | contracts/weather-insurance | Parametric crop-insurance with oracle-reported thresholds |
 
-### Getting Started
+Production contracts in agro-production/contract/ include:
+- production_escrow
+- investment_basket
+- governance
+- registry
 
-Refer to [main repo](https://github.com/Cylo-Traders/Agrocylo-Global/tree/main) to have general grasp of the project. For this project, please follow Srorban Rust and Stellar CLI rules correctly.
+---
 
-### Code Review Checklist
+## Prerequisites
 
-Before submitting a pull request, verify the following:
+### 1. Rust and WASM target
 
-**Security:**
-- [ ] `require_auth()` called on the correct party in every mutating function
-- [ ] Initialization guard exists (`AlreadyInitialized` pattern)
-- [ ] Storage writes happen before external calls (Checks-Effects-Interactions)
-- [ ] All arithmetic uses `checked_*` operations
+This repository uses a pinned toolchain in rust-toolchain.toml:
+
+    channel = 1.89.0
+    targets = [wasm32v1-none]
+
+Install Rust via rustup (https://rustup.rs/):
+
+    curl --proto =https --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+### 2. Stellar CLI
+
+Install: https://developers.stellar.org/docs/build/smart-contracts/getting-started/setup
+
+    cargo install --locked stellar-cli
+
+### 3. Soroban SDK
+
+Pinned in root Cargo.toml - fetched automatically by cargo.
+
+---
+
+## Building
+
+Build all contracts for deployment:
+
+    cargo build --target wasm32v1-none --release
+
+Build a single contract:
+
+    cargo build -p escrow --target wasm32v1-none --release
+
+Format and lint:
+
+    cargo fmt --all
+    cargo clippy --all-targets -- -D warnings
+
+---
+
+## Running Unit Tests
+
+No live network required. Uses in-process soroban-sdk testutils.
+
+    # All tests
+    cargo test
+
+    # Single contract
+    cargo test -p escrow
+
+    # Specific test
+    cargo test -p escrow -- test::test_create_order
+
+---
+
+## Deploying to Testnet
+
+### 1. Create identity and fund
+
+    stellar keys generate my-wallet --network testnet
+    stellar keys fund my-wallet --network testnet
+
+### 2. Build
+
+    cargo build -p escrow --target wasm32v1-none --release
+
+### 3. Deploy
+
+    stellar contract deploy --wasm target/wasm32v1-none/release/escrow.wasm --source my-wallet --network testnet
+
+### 4. Initialize
+
+    stellar contract invoke --id CONTRACT_ADDRESS --source my-wallet --network testnet -- initialize --admin YOUR_G_ADDRESS --fee_collector YOUR_G_ADDRESS --fee_rate_bps 300
+
+---
+
+## Code Review Checklist
+
+Security:
+- [ ] require_auth() called on correct party in every mutating function
+- [ ] Initialization guard exists (AlreadyInitialized pattern)
+- [ ] Storage writes before external calls (CEI pattern)
+- [ ] All arithmetic uses checked_* operations
 - [ ] State transitions guard on current status
-- [ ] Dispute resolutions validate admin identity
-- [ ] Fee calculations use safe arithmetic
-- [ ] Token transfers originate from `env.current_contract_address()` on outbound
+- [ ] Token transfers from env.current_contract_address()
 
-**Gas Optimization:**
-- [ ] Batch operations skip invalid items with `continue` instead of failing
-- [ ] Storage reads cached when reused across multiple lookups
-- [ ] Instance storage used for singleton values (Admin, Config)
-- [ ] Persistent storage used for per-item data (Orders, Campaigns)
+Gas Optimization:
+- [ ] Batch ops skip invalid items with continue
+- [ ] Storage reads cached across lookups
+- [ ] Instance storage for singletons (Admin, Config)
+- [ ] Persistent storage for per-item data (Orders, Campaigns)
 - [ ] TTL extended on all persistent entries
-- [ ] Event data avoids redundant/retrievable fields
 
-**Quality:**
-- [ ] Error messages are specific to the failure mode
-- [ ] Edge cases tested (zero/negative amounts, duplicate operations)
+Quality:
+- [ ] Error messages specific to failure mode
+- [ ] Edge cases tested
 - [ ] Events emitted for every state transition
-- [ ] Tests cover valid and invalid state transitions
+- [ ] Tests cover valid and invalid transitions
 
-See [`GAS_OPTIMIZATION.md`](./GAS_OPTIMIZATION.md) for detailed gas analysis and [`SECURITY_AUDIT.md`](./SECURITY_AUDIT.md) for the full security audit.
+---
 
-#### Building and Testing
+## Contributor Notes
 
-- `cd contracts`
-- `cargo build --target wasm32-unknown-unknown --release`
-- `cargo test`
+- Never put private keys, signed XDR, bearer/session tokens in fixtures, logs, or screenshots.
+- Coordinate schema/config changes across agro-production/client, agro-production/server, and contracts.
+- Follow Soroban SDK standards: https://developers.stellar.org/docs/build/smart-contracts/
+- Run cargo fmt --all and cargo clippy before every PR.
 
-#### Deploying to Testnet
-
-First, ensure you have the Stellar CLI installed and configured.
-
-Create an identity (if you haven't already):
-
-```bash
-stellar keys generate my-wallet --network testnet
-```
-
-Deploy the contract:
-
-```bash
-stellar contract deploy \
-    --wasm target/wasm32-unknown-unknown/release/escrow.wasm \
-    --source my-wallet \
-    --network testnet
-```

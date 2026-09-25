@@ -13,6 +13,7 @@ vi.mock("../../config/database.js", () => ({
       findUnique: vi.fn(),
       findFirst: vi.fn(),
       upsert: vi.fn(),
+      update: vi.fn(),
     },
   },
 }));
@@ -25,6 +26,7 @@ const {
   getWalletByPhone,
   getPhoneByWallet,
   linkPhoneToWallet,
+  verifyPhoneLink,
 } = await import("./sessionStore.js");
 
 const mockFindUnique = prisma.ussdSession.findUnique as ReturnType<typeof vi.fn>;
@@ -34,6 +36,9 @@ const mockDelete = prisma.ussdSession.delete as ReturnType<typeof vi.fn>;
 const mockPhoneFindUnique = prisma.phoneLink.findUnique as ReturnType<typeof vi.fn>;
 const mockPhoneFindFirst = prisma.phoneLink.findFirst as ReturnType<typeof vi.fn>;
 const mockPhoneUpsert = prisma.phoneLink.upsert as ReturnType<typeof vi.fn>;
+const mockPhoneUpdate = prisma.phoneLink.update as ReturnType<typeof vi.fn>;
+
+const STELLAR_WALLET = "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA64PWBTRKZA";
 
 const SAMPLE_SESSION = {
   id: "sess-1",
@@ -111,12 +116,12 @@ describe("updateSession", () => {
   it("updates walletAddress", async () => {
     mockUpdate.mockResolvedValueOnce({
       ...SAMPLE_SESSION,
-      walletAddress: "0xabc123",
+      walletAddress: STELLAR_WALLET,
     });
     const result = await updateSession("test-session-1", {
-      walletAddress: "0xabc123",
+      walletAddress: STELLAR_WALLET,
     });
-    expect(result.walletAddress).toBe("0xabc123");
+    expect(result.walletAddress).toBe(STELLAR_WALLET);
   });
 });
 
@@ -134,13 +139,24 @@ describe("deleteSession", () => {
 });
 
 describe("getWalletByPhone", () => {
-  it("returns wallet address when phone is linked", async () => {
+  it("returns wallet address when phone is linked and verified", async () => {
     mockPhoneFindUnique.mockResolvedValueOnce({
       phoneNumber: "+254700000001",
-      walletAddress: "0xabc",
+      walletAddress: STELLAR_WALLET,
+      verifiedAt: new Date(),
     });
-    const result = await getWalletByPhone("+254700000001");
-    expect(result).toBe("0xabc");
+    const result = await getWalletByPhone("+254700000001", true);
+    expect(result).toBe(STELLAR_WALLET);
+  });
+
+  it("returns null when phone is linked but unverified and verification required", async () => {
+    mockPhoneFindUnique.mockResolvedValueOnce({
+      phoneNumber: "+254700000001",
+      walletAddress: STELLAR_WALLET,
+      verifiedAt: null,
+    });
+    const result = await getWalletByPhone("+254700000001", true);
+    expect(result).toBeNull();
   });
 
   it("returns null when phone is not linked", async () => {
@@ -151,33 +167,66 @@ describe("getWalletByPhone", () => {
 });
 
 describe("getPhoneByWallet", () => {
-  it("returns phone number for wallet", async () => {
+  it("returns phone number for wallet when verified", async () => {
     mockPhoneFindFirst.mockResolvedValueOnce({
       phoneNumber: "+254700000001",
-      walletAddress: "0xabc",
+      walletAddress: STELLAR_WALLET,
+      verifiedAt: new Date(),
     });
-    const result = await getPhoneByWallet("0xabc");
+    const result = await getPhoneByWallet(STELLAR_WALLET, true);
     expect(result).toBe("+254700000001");
+  });
+
+  it("returns null when wallet is linked but unverified", async () => {
+    mockPhoneFindFirst.mockResolvedValueOnce({
+      phoneNumber: "+254700000001",
+      walletAddress: STELLAR_WALLET,
+      verifiedAt: null,
+    });
+    const result = await getPhoneByWallet(STELLAR_WALLET, true);
+    expect(result).toBeNull();
   });
 
   it("returns null when wallet has no linked phone", async () => {
     mockPhoneFindFirst.mockResolvedValueOnce(null);
-    const result = await getPhoneByWallet("0xnonexistent");
+    const result = await getPhoneByWallet("GNONEXISTENT");
     expect(result).toBeNull();
   });
 });
 
 describe("linkPhoneToWallet", () => {
-  it("creates a new link", async () => {
+  it("creates an unverified link by default", async () => {
     mockPhoneUpsert.mockResolvedValueOnce({
       phoneNumber: "+254700000001",
-      walletAddress: "0xabc",
+      walletAddress: STELLAR_WALLET,
+      verifiedAt: null,
     });
-    await linkPhoneToWallet("+254700000001", "0xabc");
+    await linkPhoneToWallet("+254700000001", STELLAR_WALLET);
     expect(mockPhoneUpsert).toHaveBeenCalledWith({
       where: { phoneNumber: "+254700000001" },
-      create: { phoneNumber: "+254700000001", walletAddress: "0xabc" },
-      update: { walletAddress: "0xabc" },
+      create: { phoneNumber: "+254700000001", walletAddress: STELLAR_WALLET, verifiedAt: null },
+      update: { walletAddress: STELLAR_WALLET, verifiedAt: null },
+    });
+  });
+
+  it("creates a verified link when specified", async () => {
+    mockPhoneUpsert.mockResolvedValueOnce({});
+    await linkPhoneToWallet("+254700000001", STELLAR_WALLET, true);
+    expect(mockPhoneUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ verifiedAt: expect.any(Date) }),
+      })
+    );
+  });
+});
+
+describe("verifyPhoneLink", () => {
+  it("updates verifiedAt timestamp", async () => {
+    mockPhoneUpdate.mockResolvedValueOnce({});
+    await verifyPhoneLink("+254700000001");
+    expect(mockPhoneUpdate).toHaveBeenCalledWith({
+      where: { phoneNumber: "+254700000001" },
+      data: { verifiedAt: expect.any(Date) },
     });
   });
 });
