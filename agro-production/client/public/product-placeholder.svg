@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500" viewBox="0 0 800 500" role="img" aria-labelledby="title desc">
+  <title id="title">Product image unavailable</title>
+  <desc id="desc">A simple field illustration used when a product image cannot be loaded.</desc>
+  <rect width="800" height="500" fill="#e8f0e5"/>
+  <path d="M0 360 Q180 270 360 350 T800 320 V500 H0Z" fill="#b5cda9"/>
+  <path d="M0 410 Q210 330 410 410 T800 380 V500 H0Z" fill="#8faf82"/>
+  <path d="M400 390 C390 320 400 250 430 180 M430 270 C380 235 350 200 335 160 M420 235 C470 205 510 165 525 120" fill="none" stroke="#47734a" stroke-width="18" stroke-linecap="round"/>
+  <circle cx="335" cy="155" r="28" fill="#6d9c62"/>
+  <circle cx="525" cy="115" r="28" fill="#6d9c62"/>
+</svg>

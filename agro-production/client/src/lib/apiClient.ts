@@ -95,12 +95,21 @@ export class ApiClient {
       }
 
       const controller = new AbortController();
+      const externalSignal = options.signal;
+      const abortListener = externalSignal
+        ? () => controller.abort(externalSignal.reason)
+        : undefined;
+      if (abortListener) {
+        if (externalSignal?.aborted) abortListener();
+        else externalSignal?.addEventListener("abort", abortListener, { once: true });
+      }
       const timer = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
         console.debug(`[api] ${method} ${url}`);
         const res = await fetcher(url, { ...init, signal: controller.signal });
         clearTimeout(timer);
+        if (abortListener) externalSignal?.removeEventListener("abort", abortListener);
 
         const ct = res.headers.get("content-type") ?? "";
         const body = ct.includes("application/json")
@@ -127,6 +136,9 @@ export class ApiClient {
         return body as T;
       } catch (err) {
         clearTimeout(timer);
+        if (abortListener) externalSignal?.removeEventListener("abort", abortListener);
+
+        if (externalSignal?.aborted) throw err;
 
         if (err instanceof ApiError) throw err; // already handled above
 

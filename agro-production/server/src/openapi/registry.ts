@@ -41,6 +41,12 @@ import {
   TransactionStatusUpdateSchema,
   TransactionReconciliationResponseSchema,
 } from "../schemas/transaction.js";
+import {
+  ProductIdParamSchema,
+  ProductListResponseSchema,
+  ProductQuerySchema,
+  ProductSchema,
+} from "../schemas/product.js";
 
 extendZodWithOpenApi(z);
 
@@ -81,6 +87,36 @@ const validationResponse = {
   description: "Request validation failed",
   content: { "application/problem+json": { schema: ValidationErrorSchema } },
 };
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/products",
+  tags: ["Products"],
+  summary: "List sellable marketplace products",
+  request: { query: ProductQuerySchema },
+  responses: {
+    200: {
+      description: "Canonical product summaries",
+      content: { "application/json": { schema: ProductListResponseSchema } },
+    },
+    400: validationResponse,
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/products/{id}",
+  tags: ["Products"],
+  summary: "Get a canonical marketplace product",
+  request: { params: ProductIdParamSchema },
+  responses: {
+    200: {
+      description: "Canonical product detail",
+      content: { "application/json": { schema: ProductSchema } },
+    },
+    404: problemResponse,
+  },
+});
 
 // Authentication endpoints
 registry.registerPath({
