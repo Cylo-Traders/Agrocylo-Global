@@ -25,7 +25,12 @@ async function bootstrap() {
       `[bootstrap]: Contract ID: ${config.contractId ? "configured" : "not configured"}`,
     );
     logger.info(`[bootstrap]: Supabase URL: ${config.supabaseUrl}`);
-    logger.info(`[bootstrap]: Redis URL: ${config.redisUrl}`);
+    logger.info(`[bootstrap]: Redis target: ${(() => {
+      const url = new URL(config.redisUrl);
+      url.username = "";
+      url.password = "";
+      return url.toString();
+    })()}`);
     logger.info(`[bootstrap]: Workers enabled: ${config.runWorkers}`);
     logger.info(
       `[bootstrap]: Contract watcher enabled: ${config.runContractWatcher}`,
