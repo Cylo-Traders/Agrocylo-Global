@@ -4,7 +4,7 @@ import { config } from '../config/index.js';
 import logger from '../config/logger.js';
 import { prisma } from '../db/client.js';
 import { ProductionEventParser } from './parser.js';
-import { EventPersister } from './persister.js';
+import { EventPersister, DependencyMissingError } from './persister.js';
 import { recordPersistError } from './metrics.js';
 import type { RawSorobanEvent } from './types.js';
 import { captureAlert } from '../config/sentry.js';
@@ -114,25 +114,42 @@ async function withRetryJitter<T>(
 
 /**
  * Record a persistently failing event to the dead-letter transaction record
- * so it can be inspected and replayed by an operator.
+ * so it can be inspected and replayed by an operator (issue #1067).
+ *
+ * The row is keyed by the event's unique (ledger, eventIndex) and upserted,
+ * so a dependency-missing event that is retried every poll updates one
+ * replayable dead-letter row instead of creating duplicates.
  */
 async function recordDeadLetter(
   rawEvent: RawSorobanEvent,
   error: unknown,
 ): Promise<void> {
+  const payload = {
+    rawEvent,
+    error: error instanceof Error ? error.message : String(error),
+    failedAt: new Date().toISOString(),
+  } as unknown as Prisma.InputJsonValue;
+
   try {
-    await prisma.transaction.create({
-      data: {
+    await prisma.transaction.upsert({
+      where: {
+        ledger_eventIndex: {
+          ledger: rawEvent.ledger,
+          eventIndex: parseEventIndex(rawEvent.id),
+        },
+      },
+      create: {
         eventType: 'dead_letter',
         status: 'failed',
-        payload: {
-          rawEvent,
-          error: error instanceof Error ? error.message : String(error),
-          failedAt: new Date().toISOString(),
-        } as unknown as Prisma.InputJsonValue,
+        payload,
         ledger: rawEvent.ledger,
         eventIndex: parseEventIndex(rawEvent.id),
         txHash: rawEvent.txHash,
+      },
+      update: {
+        eventType: 'dead_letter',
+        status: 'failed',
+        payload,
       },
     });
     logger.error('Event moved to dead-letter queue', {
@@ -149,6 +166,83 @@ async function recordDeadLetter(
       error: dlErr instanceof Error ? dlErr.message : String(dlErr),
     });
   }
+}
+
+export interface DeadLetterReplayResult {
+  /** Dead letters that were replayed successfully and removed from the queue. */
+  replayed: number;
+  /** Dead letters that are still failing (or had an unparseable payload). */
+  failed: number;
+}
+
+/**
+ * Re-run dead-lettered raw events through the parser and persister
+ * (issue #1067). Rows that project successfully are removed from the queue;
+ * rows that fail again stay queued for the next replay. When
+ * `campaignOnChainId` is given, only child events of that campaign are
+ * replayed — used to replay after the parent campaign has been indexed.
+ *
+ * Called automatically after a `campaign.created` event is indexed, and
+ * exported for operators to replay exhausted events manually.
+ */
+export async function replayDeadLetterEvents(
+  opts?: { campaignOnChainId?: string; limit?: number },
+): Promise<DeadLetterReplayResult> {
+  const limit = Math.max(1, Math.min(opts?.limit ?? 50, 500));
+  const deadLetters = await prisma.transaction.findMany({
+    where: { eventType: 'dead_letter', status: 'failed' },
+    orderBy: [{ ledger: 'asc' }, { eventIndex: 'asc' }],
+    take: limit,
+  });
+
+  let replayed = 0;
+  let failed = 0;
+
+  for (const row of deadLetters) {
+    const payload = row.payload as { rawEvent?: RawSorobanEvent } | null;
+    const rawEvent = payload?.rawEvent;
+    if (!rawEvent) {
+      failed += 1;
+      continue;
+    }
+
+    const parsed = ProductionEventParser.tryParse(rawEvent);
+    if (!parsed) {
+      failed += 1;
+      continue;
+    }
+    if (
+      opts?.campaignOnChainId &&
+      'campaignId' in parsed &&
+      parsed.campaignId !== opts.campaignOnChainId
+    ) {
+      // Not a child of the campaign being indexed — leave it queued.
+      continue;
+    }
+
+    try {
+      // Remove the dead-letter row first: it occupies the event's unique
+      // (ledger, eventIndex) slot that the idempotency preflight checks.
+      await prisma.transaction.delete({ where: { id: row.id } });
+      try {
+        await EventPersister.persist(parsed);
+        replayed += 1;
+      } catch (persistErr) {
+        // Re-arm the dead letter (upsert recreates the row) so the event
+        // is never silently dropped.
+        await recordDeadLetter(rawEvent, persistErr);
+        failed += 1;
+      }
+    } catch (err) {
+      failed += 1;
+      logger.error('Dead-letter replay failed to remove row', {
+        id: row.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  return { replayed, failed };
 }
 
 function parseEventIndex(id: string): number {
@@ -374,6 +468,16 @@ export async function startProductionWatcher(): Promise<
               `EventPersister.persist(${event.action})`,
               3,
             );
+
+            // Issue #1067: once a parent campaign is indexed, replay any
+            // dead-lettered child events (investments, orders) that arrived
+            // out of order before their campaign.
+            if (event.action === 'campaign.created') {
+              await replayDeadLetterEvents({
+                campaignOnChainId: event.campaignId,
+                limit: 20,
+              });
+            }
           } catch (persistErr) {
             recordPersistError();
             await recordDeadLetter(
