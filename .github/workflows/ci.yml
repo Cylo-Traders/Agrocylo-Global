@@ -273,6 +273,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Smoke-test built GraphQL module import
+        run: npm run smoke:graphql-import
+
       - name: Verify server image excludes database credentials
         working-directory: .
         run: ./scripts/verify-server-image-no-database-url.sh

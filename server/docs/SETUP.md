@@ -2,16 +2,22 @@
 
 ## Quick Start (5 minutes)
 
-For a quick local development setup:
+This guide covers the root marketplace server only. From the repository root:
 
 ```bash
 cd server
-npm install
+nvm use
 cp .env.example .env
-# Edit .env with your Supabase credentials
+# Edit .env with DATABASE_URL, Supabase credentials, and required secrets.
+npm ci
+npm run prisma:generate
 npx prisma migrate dev
 npm run dev
 ```
+
+Prisma generation creates local client artifacts and does not change the
+database. `migrate dev` is the separate step that connects to
+`DATABASE_URL` and applies schema changes.
 
 Server will be available at `http://localhost:5000`
 
@@ -19,7 +25,7 @@ Server will be available at `http://localhost:5000`
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| Node.js | 20.x | JavaScript runtime |
+| Node.js | 22.13.x | JavaScript runtime |
 | npm | 10.x | Package manager |
 | PostgreSQL | 15+ | Primary database |
 | Redis | 6.x+ | Caching (optional) |
@@ -34,7 +40,7 @@ brew services start postgresql
 
 **Ubuntu/Debian:**
 ```bash
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs postgresql redis-server
 sudo systemctl start postgresql
 sudo systemctl start redis-server
