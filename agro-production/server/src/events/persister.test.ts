@@ -809,4 +809,80 @@ describe('EventPersister', () => {
       expect(txInvestmentUpsert).not.toHaveBeenCalled();
     });
   });
+
+  // Issue #1068: campaigns become FUNDED when totalRaised reaches or exceeds
+  // the target (contract allows overfunding), compared as BigInt i128 strings.
+  describe('campaign funded boundaries (issue #1068)', () => {
+    async function persistInvestmentWithTotals(
+      totalRaised: string,
+      targetAmount: string,
+    ): Promise<unknown> {
+      const { prisma } = await import('../db/client.js');
+      const txCampaignUpdate = vi.fn().mockResolvedValue({});
+      vi.mocked(prisma.transaction.findUnique).mockResolvedValueOnce(null);
+      vi.mocked(prisma.$transaction).mockImplementationOnce(
+        async (fn: (tx: unknown) => Promise<unknown>) =>
+          fn({
+            user: { upsert: vi.fn().mockResolvedValue({}) },
+            campaign: {
+              findUnique: vi.fn().mockResolvedValue({
+                id: 'camp-uuid',
+                onChainId: '1',
+                targetAmount,
+                totalRaised: '0',
+                totalRevenue: '0',
+                status: 'FUNDING',
+              }),
+              update: txCampaignUpdate,
+            },
+            investment: { upsert: vi.fn().mockResolvedValue({}) },
+            transaction: {
+              findUnique: vi.fn().mockResolvedValue(null),
+              create: vi.fn().mockResolvedValue({}),
+            },
+          }),
+      );
+
+      await EventPersister.persist(
+        makeCampaignInvested({ totalRaised }),
+      );
+
+      const call = txCampaignUpdate.mock.calls[0]?.[0] as
+        | { data: { status?: string } }
+        | undefined;
+      return call?.data?.status;
+    }
+
+    it('keeps the campaign FUNDING when totalRaised is below the target', async () => {
+      const status = await persistInvestmentWithTotals('9999', '10000');
+      expect(status).toBeUndefined();
+    });
+
+    it('marks the campaign FUNDED when totalRaised exactly equals the target', async () => {
+      const status = await persistInvestmentWithTotals('10000', '10000');
+      expect(status).toBe('FUNDED');
+    });
+
+    it('marks an overfunded campaign FUNDED when totalRaised exceeds the target', async () => {
+      const status = await persistInvestmentWithTotals('10001', '10000');
+      expect(status).toBe('FUNDED');
+    });
+
+    it('compares i128 totals without Number precision loss', async () => {
+      // 2^53 + 1 is not representable as a JS number; a Number comparison
+      // would collapse it to 2^53 and flip this boundary incorrectly.
+      const precisionTarget = '9007199254740993';
+      const status = await persistInvestmentWithTotals(
+        '9007199254740992',
+        precisionTarget,
+      );
+      expect(status).toBeUndefined();
+
+      const funded = await persistInvestmentWithTotals(
+        '9007199254740993',
+        precisionTarget,
+      );
+      expect(funded).toBe('FUNDED');
+    });
+  });
 });

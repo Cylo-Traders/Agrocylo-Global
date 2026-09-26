@@ -234,7 +234,15 @@ async function handleCampaignInvested(event: CampaignInvestedEvent) {
       where: { onChainId: event.campaignId },
       data: {
         totalRaised: event.totalRaised,
-        status: event.totalRaised === campaign.targetAmount ? "FUNDED" : undefined,
+        // Issue #1068: totals are string-backed i128 values — compare with
+        // BigInt and >=. The contract accepts overfunding (contributions
+        // beyond the target are not rejected), so the campaign is FUNDED as
+        // soon as totalRaised reaches or exceeds the target; a strict
+        // equality check would strand overshoot campaigns in FUNDING forever.
+        status:
+          BigInt(event.totalRaised) >= BigInt(campaign.targetAmount)
+            ? "FUNDED"
+            : undefined,
       },
     });
 
