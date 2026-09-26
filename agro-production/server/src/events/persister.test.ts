@@ -32,7 +32,17 @@ vi.mock('../db/client.js', () => {
       }),
       update: vi.fn().mockResolvedValue({}),
     },
-    investment: { upsert: vi.fn().mockResolvedValue({}) },
+    investment: {
+      upsert: vi.fn().mockResolvedValue({
+        id: 'inv-uuid',
+        campaignId: 'camp-uuid',
+        investorAddress: 'GINVESTOR0000000000000000000000000000000000000000000000',
+        amount: '5000',
+        ledger: 200,
+        txHash: null,
+        createdAt: new Date('2024-06-01T00:00:00Z'),
+      }),
+    },
     order: {
       upsert: vi.fn().mockResolvedValue({}),
       findUnique: vi.fn().mockResolvedValue({
@@ -387,6 +397,122 @@ describe('EventPersister', () => {
       expect(vi.mocked(logger.warn)).toHaveBeenCalledWith(
         'EventPersister: investment for unknown campaign',
         expect.objectContaining({ campaignId: 'unknown' }),
+      );
+    });
+  });
+
+  describe('campaign.invested funding threshold (issue #1068)', () => {
+    // Builds a tx mock whose campaign row has the given target and captures
+    // the campaign.update call so the status transition can be asserted.
+    async function persistInvestmentAndCaptureUpdate(
+      totalRaised: string,
+      targetAmount = '10000',
+    ) {
+      const { prisma } = await import('../db/client.js');
+      const campaignUpdate = vi.fn().mockResolvedValue({});
+      const tx = {
+        user: { upsert: vi.fn().mockResolvedValue({}) },
+        campaign: {
+          findUnique: vi.fn().mockResolvedValue({
+            id: 'camp-uuid',
+            onChainId: '1',
+            targetAmount,
+            totalRaised: '0',
+            totalRevenue: '0',
+            status: 'FUNDING',
+          }),
+          update: campaignUpdate,
+        },
+        investment: {
+          upsert: vi.fn().mockResolvedValue({
+            id: 'inv-uuid',
+            campaignId: 'camp-uuid',
+            investorAddress: 'GINVESTOR0000000000000000000000000000000000000000000000',
+            amount: '1',
+            ledger: 200,
+            txHash: null,
+            createdAt: new Date('2024-06-01T00:00:00Z'),
+          }),
+        },
+        transaction: {
+          findUnique: vi.fn().mockResolvedValue(null),
+          create: vi.fn().mockResolvedValue({}),
+        },
+      };
+      vi.mocked(prisma.$transaction).mockImplementationOnce(
+        async (fn: (tx: any) => Promise<unknown>) => fn(tx),
+      );
+
+      await EventPersister.persist(makeCampaignInvested({ totalRaised }));
+      return campaignUpdate;
+    }
+
+    it('keeps status unchanged (FUNDING) when totalRaised is below target', async () => {
+      const campaignUpdate = await persistInvestmentAndCaptureUpdate('9999');
+
+      expect(campaignUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ totalRaised: '9999', status: undefined }),
+        }),
+      );
+    });
+
+    it('marks FUNDED when totalRaised equals the target', async () => {
+      const campaignUpdate = await persistInvestmentAndCaptureUpdate('10000');
+
+      expect(campaignUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ totalRaised: '10000', status: 'FUNDED' }),
+        }),
+      );
+    });
+
+    it('marks FUNDED when totalRaised overshoots the target', async () => {
+      const campaignUpdate = await persistInvestmentAndCaptureUpdate('15000');
+
+      expect(campaignUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ totalRaised: '15000', status: 'FUNDED' }),
+        }),
+      );
+    });
+
+    it('compares i128 values as BigInt without Number precision loss', async () => {
+      // 2^53 + 1 vs 2^53: Number() would round both to the same value and
+      // misreport equality; BigInt keeps them distinct.
+      const below = await persistInvestmentAndCaptureUpdate(
+        '9007199254740992',
+        '9007199254740993',
+      );
+      expect(below).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: undefined }),
+        }),
+      );
+
+      const above = await persistInvestmentAndCaptureUpdate(
+        '9007199254740994',
+        '9007199254740993',
+      );
+      expect(above).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: 'FUNDED' }),
+        }),
+      );
+    });
+
+    it('does not throw on malformed amounts and leaves status unchanged', async () => {
+      const logger = (await import('../config/logger.js')).default;
+      const campaignUpdate = await persistInvestmentAndCaptureUpdate('not-a-number');
+
+      expect(campaignUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: undefined }),
+        }),
+      );
+      expect(vi.mocked(logger.warn)).toHaveBeenCalledWith(
+        'EventPersister: malformed funding amounts, leaving status unchanged',
+        expect.objectContaining({ totalRaised: 'not-a-number' }),
       );
     });
   });
