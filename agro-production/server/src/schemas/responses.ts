@@ -152,6 +152,24 @@ export const BasketDetailSchema = BasketSchema.extend({
 });
 
 /**
+ * Wallet-scoped investor portfolio (Issue #1051).
+ *
+ * Units: amounts are Soroban i128 **stroop** strings as stored on-chain
+ * (1 XLM = 10_000_000 stroops). The client formats for display with exact
+ * BigInt arithmetic and must not convert through Number.
+ * The protocol has no fiat leg — amounts are XLM-denominated.
+ */
+export const InvestorPortfolioSummarySchema = z.object({
+  /** The authenticated wallet the data belongs to. */
+  investorAddress: stellarAddress,
+  positions: z.array(InvestmentSchema),
+  /** Invested amount for all listed positions, i128 stroops string. */
+  totalInvested: z.string(),
+  /** Realized returns for listed positions, i128 stroops string ("0" if none). */
+  totalReturned: z.string(),
+});
+
+/**
  * Wallet-scoped investor basket summary (Issue #1050).
  *
  * Units: all monetary amounts are Soroban i128 stroop strings as stored

@@ -1,52 +1,61 @@
 "use client";
 
-import { useState, useEffect } from "react";
+/**
+ * Investor Portfolio page (Issue #1051)
+ *
+ * Data: GET /investor/portfolio through the typed portfolioService —
+ * wallet-scoped via the authenticated ApiClient (no address in the URL).
+ *
+ * Units: the protocol is XLM-denominated; amounts are exact XLM strings
+ * converted from stroops with BigInt arithmetic and rendered as "N XLM".
+ * There is no fiat conversion anywhere in the protocol.
+ */
+
+import { useCallback, useEffect, useState } from "react";
 import { PriceChart } from "@/components/PriceChart";
+import {
+  fetchInvestorPortfolio,
+  type PortfolioSummary,
+} from "@/services/portfolioService";
+import { isApiError, isNetworkError } from "@/lib/apiClient";
 
-interface CampaignInvestment {
-  id: string;
-  campaignName: string;
-  amountInvested: number;
-  currentValue: number;
-  roi: number;
-  status: "active" | "settled";
-  investedAt: string;
-}
-
-interface PortfolioSummary {
-  totalInvested: number;
-  totalReturned: number;
-  overallROI: number;
-}
+type PortfolioPageState =
+  | { kind: "loading" }
+  | { kind: "empty" }
+  | { kind: "unauthorized" }
+  | { kind: "offline" }
+  | { kind: "error"; message: string }
+  | { kind: "ready"; portfolio: PortfolioSummary };
 
 export default function PortfolioPage() {
-  const [investments, setInvestments] = useState<CampaignInvestment[]>([]);
-  const [summary, setSummary] = useState<PortfolioSummary | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [state, setState] = useState<PortfolioPageState>({ kind: "loading" });
+
+  const fetchPortfolio = useCallback(() => {
+    setState({ kind: "loading" });
+    fetchInvestorPortfolio()
+      .then((portfolio) =>
+        setState(
+          portfolio.positions.length > 0
+            ? { kind: "ready", portfolio }
+            : { kind: "empty" },
+        ),
+      )
+      .catch((err: unknown) => {
+        if (isApiError(err) && err.status === 401) setState({ kind: "unauthorized" });
+        else if (isNetworkError(err)) setState({ kind: "offline" });
+        else
+          setState({
+            kind: "error",
+            message: err instanceof Error ? err.message : "An error occurred",
+          });
+      });
+  }, []);
 
   useEffect(() => {
     fetchPortfolio();
-  }, []);
+  }, [fetchPortfolio]);
 
-  const fetchPortfolio = async () => {
-    try {
-      setLoading(true);
-      const response = await fetch("/api/investor/portfolio");
-      if (!response.ok) throw new Error("Failed to fetch portfolio");
-      
-      const data = await response.json();
-      setInvestments(data.investments);
-      setSummary(data.summary);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (loading) {
+  if (state.kind === "loading") {
     return (
       <div className="container mx-auto p-6">
         <div className="animate-pulse space-y-4">
@@ -61,12 +70,28 @@ export default function PortfolioPage() {
     );
   }
 
-  if (error) {
+  if (state.kind === "unauthorized") {
+    return (
+      <div className="container mx-auto p-6">
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+          <h3 className="text-amber-800 font-semibold">Wallet connection required</h3>
+          <p className="text-amber-700 text-sm mt-1">
+            Connect your wallet to view your portfolio. Your data is tied to your
+            wallet address.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.kind === "offline") {
     return (
       <div className="container mx-auto p-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <h3 className="text-red-800 font-semibold">Error</h3>
-          <p className="text-red-600">{error}</p>
+          <h3 className="text-red-800 font-semibold">You appear to be offline</h3>
+          <p className="text-red-600 text-sm mt-1">
+            Check your connection and try again.
+          </p>
           <button
             onClick={fetchPortfolio}
             className="mt-2 text-red-600 underline"
@@ -78,7 +103,24 @@ export default function PortfolioPage() {
     );
   }
 
-  if (!summary || investments.length === 0) {
+  if (state.kind === "error") {
+    return (
+      <div className="container mx-auto p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <h3 className="text-red-800 font-semibold">Error</h3>
+          <p className="text-red-600">{state.message}</p>
+          <button
+            onClick={fetchPortfolio}
+            className="mt-2 text-red-600 underline"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.kind === "empty") {
     return (
       <div className="container mx-auto p-6">
         <h1 className="text-3xl font-bold mb-6">Investment Portfolio</h1>
@@ -89,9 +131,14 @@ export default function PortfolioPage() {
     );
   }
 
+  const { portfolio } = state;
+
+  // Chart input is display-only (PriceChart takes numeric prices); the exact
+  // figures above always render from the string view model.
+  const numeric = (xlm: string) => Number(xlm.replace(/,/g, ""));
   const chartData = [
-    { label: "Invested", value: summary.totalInvested },
-    { label: "Returned", value: summary.totalReturned },
+    { timestamp: "Invested", price: numeric(portfolio.totalInvested) },
+    { timestamp: "Returned", price: numeric(portfolio.totalReturned) },
   ];
 
   return (
@@ -101,17 +148,15 @@ export default function PortfolioPage() {
       <div className="grid gap-6 md:grid-cols-3 mb-8">
         <div className="bg-white border rounded-lg p-6 shadow-sm">
           <h3 className="text-sm text-gray-600 mb-2">Total Invested</h3>
-          <p className="text-2xl font-bold">${summary.totalInvested.toFixed(2)}</p>
+          <p className="text-2xl font-bold">{portfolio.totalInvested} XLM</p>
         </div>
         <div className="bg-white border rounded-lg p-6 shadow-sm">
           <h3 className="text-sm text-gray-600 mb-2">Total Returned</h3>
-          <p className="text-2xl font-bold">${summary.totalReturned.toFixed(2)}</p>
+          <p className="text-2xl font-bold">{portfolio.totalReturned} XLM</p>
         </div>
         <div className="bg-white border rounded-lg p-6 shadow-sm">
-          <h3 className="text-sm text-gray-600 mb-2">Overall ROI</h3>
-          <p className={`text-2xl font-bold ${summary.overallROI >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-            {summary.overallROI >= 0 ? '+' : ''}{summary.overallROI.toFixed(2)}%
-          </p>
+          <h3 className="text-sm text-gray-600 mb-2">Positions</h3>
+          <p className="text-2xl font-bold">{portfolio.positions.length}</p>
         </div>
       </div>
 
@@ -144,42 +189,32 @@ export default function PortfolioPage() {
       <div className="bg-white border rounded-lg p-6 shadow-sm">
         <h2 className="text-xl font-semibold mb-4">Campaign Investments</h2>
         <div className="space-y-4">
-          {investments.map((investment) => (
+          {portfolio.positions.map((position) => (
             <div
-              key={investment.id}
+              key={position.id}
               className="border rounded-lg p-4 hover:bg-gray-50 transition"
             >
               <div className="flex justify-between items-start mb-2">
-                <h3 className="font-semibold">{investment.campaignName}</h3>
-                <span
-                  className={`px-2 py-1 rounded text-xs font-medium ${
-                    investment.status === "active"
-                      ? "bg-green-100 text-green-800"
-                      : "bg-gray-100 text-gray-800"
-                  }`}
-                >
-                  {investment.status}
+                <h3 className="font-semibold">{position.campaignName}</h3>
+                <span className="px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-800">
+                  {position.status}
                 </span>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
                 <div>
                   <p className="text-gray-600">Invested</p>
-                  <p className="font-semibold">${investment.amountInvested.toFixed(2)}</p>
-                </div>
-                <div>
-                  <p className="text-gray-600">Current Value</p>
-                  <p className="font-semibold">${investment.currentValue.toFixed(2)}</p>
-                </div>
-                <div>
-                  <p className="text-gray-600">ROI</p>
-                  <p className={`font-semibold ${investment.roi >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {investment.roi >= 0 ? '+' : ''}{investment.roi.toFixed(2)}%
-                  </p>
+                  <p className="font-semibold">{position.amountInvested} XLM</p>
                 </div>
                 <div>
                   <p className="text-gray-600">Date</p>
                   <p className="font-semibold">
-                    {new Date(investment.investedAt).toLocaleDateString()}
+                    {new Date(position.investedAt).toLocaleDateString()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-600">Ledger</p>
+                  <p className="font-semibold">
+                    {position.id.slice(0, 8)}…
                   </p>
                 </div>
               </div>
