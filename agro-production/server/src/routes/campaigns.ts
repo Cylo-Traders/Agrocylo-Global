@@ -29,11 +29,60 @@ import {
   CampaignMilestonesSchema,
   CampaignSchema,
   InvestmentSchema,
+  InvestorPortfolioSummarySchema,
 } from "../schemas/responses.js";
 import { broadcast } from "../services/wsServer.js";
 import { getCachedResponse, setCachedResponse } from "../middleware/idempotency.js";
 
 const router = Router();
+
+// GET /investor/portfolio — wallet-scoped portfolio summary (Issue #1051)
+//
+// The wallet address is derived from the session, so investors can only ever
+// read their own data. Amounts stay i128 stroop strings end-to-end; totals
+// are summed with BigInt. Realized returns are not indexed per investment
+// (no payout event for direct campaign investments yet), so totalReturned is
+// always "0" for now — the field documents the contract for when that lands.
+router.get(
+  "/investor/portfolio",
+  requireWallet,
+  validateResponse(InvestorPortfolioSummarySchema),
+  async (req: WalletRequest, res: Response) => {
+    const walletAddress = req.walletAddress!;
+
+    const investments = await prisma.investment.findMany({
+      where: { investorAddress: walletAddress },
+      orderBy: { createdAt: "desc" },
+      include: {
+        campaign: {
+          select: {
+            id: true,
+            onChainId: true,
+            farmerAddress: true,
+            tokenAddress: true,
+            targetAmount: true,
+            totalRaised: true,
+            totalRevenue: true,
+            status: true,
+            deadline: true,
+          },
+        },
+      },
+    });
+
+    let totalInvested = 0n;
+    for (const investment of investments) {
+      totalInvested += BigInt(investment.amount || "0");
+    }
+
+    jsonValidated(res, InvestorPortfolioSummarySchema, 200, {
+      investorAddress: walletAddress,
+      positions: investments,
+      totalInvested: totalInvested.toString(),
+      totalReturned: "0",
+    });
+  },
+);
 
 // GET /campaigns — list with optional status filter and pagination
 router.get(
