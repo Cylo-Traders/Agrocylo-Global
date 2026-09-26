@@ -9,142 +9,222 @@ The Express + TypeScript backend for Agrocylo-Global. It exposes a REST API, man
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
-- [Installation](#installation)
-- [Environment Setup](#environment-setup)
-- [Running the Server](#running-the-server)
-- [Running Tests](#running-tests)
+- [Choose the correct backend](#choose-the-correct-backend)
+- [Setup from a clean checkout](#setup-from-a-clean-checkout)
+- [Environment](#environment)
+- [Prisma generation versus migrations](#prisma-generation-versus-migrations)
+- [Running the server](#running-the-server)
+- [Running tests](#running-tests)
+- [Known issues](#known-issues)
+- [PrismaClient export-error recovery](#prismaclient-export-error-recovery)
 - [Architecture Overview](#architecture-overview)
 - [Project Structure](#project-structure)
+- [Integrator API](#integrator-api)
 - [Contributing](#contributing)
 
 ---
 
 ## Prerequisites
 
-| Tool       | Version                       |
-| ---------- | ----------------------------- |
-| Node.js    | >= 20.x                       |
-| npm        | >= 10.x                       |
-| PostgreSQL | >= 15 (or a Supabase project) |
+The root marketplace server is tested with this toolchain:
 
----
+| Tool       | Supported version           |
+| ---------- | --------------------------- |
+| Node.js    | 22.13.x (`>=22.13.0 <23`) |
+| npm        | 10.9.x (`>=10.9.0 <11`)   |
+| PostgreSQL | 15+ (or a Supabase project) |
 
-## Installation
+From `server/`, `nvm use` reads the checked-in `.nvmrc` (`22.13.0`). The install
+and documented npm entry points also run an early version check with an
+actionable error when Node or npm is unsupported.
 
-\`\`\`bash
+### Why this range, and what was tested
 
-# From the repo root
+| Component | Pinned / tested version | Notes |
+| --------- | ----------------------- | ----- |
+| Node.js | 22.13.0 | Also the CI `NODE_VERSION`, `server/.nvmrc`, and `server/Dockerfile` base image |
+| npm | 10.9.2 | `packageManager` pin; `devEngines` equivalent enforced by `engines` |
+| `prisma` (CLI) | 7.10.0 | Pinned exactly so the CLI never drifts below the client |
+| `@prisma/client` | 7.10.0 | |
+| `@prisma/adapter-pg` | 7.10.0 | |
 
+Prisma Client 7.10.0 declares `^20.19 || ^22.12 || >=24.0`. The former
+`server/Dockerfile` base image was `node:20-alpine`, so the container ran a Node
+major that the locked Prisma package rejects. The range above is a subset of
+the locked toolchain's supported range, is what this repository actually
+exercises, and is what `scripts/check-runtime.cjs` enforces.
+
+Verified on this runtime: `npm ls` resolves `prisma`, `@prisma/client`, and
+`@prisma/adapter-pg` to `7.10.0`; `prisma generate` succeeds; the real ESM
+`import { PrismaClient } from "@prisma/client"` succeeds; and
+`npm run smoke:graphql-import` loads a production build under plain Node with no
+test-runner globals. `npx tsc --noEmit` is not yet clean — see
+[Known issues](#known-issues).
+
+Frontend and `agro-production/server` toolchains are tracked separately; this
+policy covers `server/` only.
+
+## Choose the correct backend
+
+This repository has two independent backend applications:
+
+- `server/` is the root marketplace API on port 5000. It has its own
+  `package.json`, `package-lock.json`, Prisma schema, migrations, and install.
+- `agro-production/server/` is the production/campaign API on port 5001. Run
+  its setup commands from that directory and do not use its dependencies or
+  migrations for the root server.
+
+The steps below are only for `server/`. Do not run the repository-root
+frontend install as a substitute for the server-local install.
+
+## Setup from a clean checkout
+
+Run the complete flow from the repository root:
+
+```bash
 cd server
+nvm use
 
-# Install dependencies
-
-npm install
-\`\`\`
-
----
-
-## Environment Setup
-
-Copy the example env file and fill in your values:
-
-\`\`\`bash
+# Prisma reads its config while generating, so create .env first.
 cp .env.example .env
-\`\`\`
+# Edit .env and provide at least a valid DATABASE_URL and required app secrets.
 
-Then edit \`.env\`:
+# Reproduce the server's own lockfile exactly.
+npm ci
 
-| Variable                           | Description                                                                                  |
-| ---------------------------------- | -------------------------------------------------------------------------------------------- |
-| \`PORT\`                           | Port the server listens on. Default: \`5000\`                                                |
-| \`NODE_ENV\`                       | \`development\` or \`production\`                                                            |
-| \`DATABASE_URL\`                   | PostgreSQL connection string, e.g. \`postgresql://USER:PASSWORD@localhost:5432/agrocylo_db\` |
-| \`SUPABASE_URL\`                   | Your Supabase project URL, e.g. \`https://xxxx.supabase.co\`                                 |
-| \`SUPABASE_ANON_KEY\`              | Supabase anonymous/public key                                                                |
-| \`SUPABASE_SERVICE_ROLE_KEY\`      | Supabase service role key (bypasses RLS — keep secret)                                       |
-| \`SUPABASE_PRODUCT_IMAGES_BUCKET\` | Supabase Storage bucket name for product images. Default: \`product-images\`                 |
-| \`PRODUCT_IMAGE_PLACEHOLDER_URL\`  | Fallback image URL shown when no product image exists                                        |
-| \`SUPABASE_JWT_SECRET\`            | JWT secret from your Supabase project settings (used for RLS wallet policies)                |
-| \`JWT_SECRET\`                     | Secret used to sign/verify your own JWTs. Must be at least 32 characters                     |
-| \`CONTRACT_ID\`                    | Stellar Soroban contract address to watch for escrow events                                  |
-| \`RPC_URL\`                        | Stellar RPC endpoint. Default: \`https://soroban-testnet.stellar.org\`                       |
+# Generate code; this does not connect to or change the database schema.
+npm run prisma:generate
 
-> ⚠️ Never commit your \`.env\` file. Only \`.env.example\` (with placeholder values) should be in version control.
-
-### Database Migration
-
-After configuring \`DATABASE_URL\`, apply the Prisma schema to your database:
-
-\`\`\`bash
+# Apply migrations; this connects to DATABASE_URL and changes the dev database.
 npx prisma migrate dev
-\`\`\`
 
-To explore your database visually:
-
-\`\`\`bash
-npx prisma studio
-\`\`\`
-
----
-
-## Running the Server
-
-### Development (with hot reload)
-
-\`\`\`bash
+# RUN_CONTRACT_WATCHER=false and RUN_WORKERS=false are suitable for API-only work.
 npm run dev
-\`\`\`
+```
 
-This uses \`tsx watch\` to automatically restart on file changes. The server starts on the port defined in your \`.env\` (default \`5000\`).
+The API is served at `http://localhost:5000` by default. Keep
+`RUN_CONTRACT_WATCHER=false` for local REST/GraphQL development. Set it to
+`true` only after configuring `CONTRACT_ID` and a reachable `RPC_URL`.
+Likewise, enable `RUN_WORKERS` only when local Redis and background processing
+are required.
 
-### Production
+`npm run setup` is an optional shortcut for only `npm ci` plus
+`npm run prisma:generate`. Run it from `server/` after creating `.env`; it
+does not migrate the database or start the API.
 
-\`\`\`bash
-npm run build # Compiles TypeScript → dist/
-npm start # Runs dist/index.js
-\`\`\`
+### Environment
 
-### Contract Watcher
+The checked-in example documents every expected variable:
 
-The Stellar Soroban contract watcher (\`src/services/contractWatcher.ts\`) is started automatically when the server boots. It polls the RPC endpoint defined by \`RPC_URL\` and listens for escrow events on \`CONTRACT_ID\`.
+```bash
+cp .env.example .env
+```
 
-Requirements for the watcher to function:
+At minimum, replace the example values for `DATABASE_URL`, Supabase
+credentials, and `JWT_SECRET`. See
+[the environment reference](../docs/deployment/environment.md) for required
+values and secret-rotation guidance. Never commit `.env`.
 
-- \`CONTRACT_ID\` must be a valid deployed Soroban contract address.
-- \`RPC_URL\` must be reachable from your environment (testnet or mainnet).
-- Events are ingested via \`escrowEventIngestionService\`, mapped and parsed, then projected into the database.
+### Prisma generation versus migrations
 
-If you only want the REST API without the watcher (e.g. during local UI development), you can temporarily comment out the watcher initialisation in \`src/index.ts\`.
+`npm run prisma:generate` writes the TypeScript/JavaScript Prisma Client under
+`node_modules`; it does not need a reachable database and does not alter the
+schema. Prisma still requires a syntactically valid URL while loading
+`prisma.config.ts), so local generation reads `DATABASE_URL` from `.env`.
+Artifact-only automation may instead set
+`PRISMA_GENERATE_DATABASE_URL=postgresql://prisma-generate:unused@localhost:5432/prisma_generate`.
 
----
+`npx prisma migrate dev` is a separate, state-changing development command. It
+requires the database in `DATABASE_URL` to be available. Deployment automation
+must use `npx prisma migrate deploy`, not `migrate dev` or `db push`.
 
-## Running Tests
+To inspect the configured database after migrations:
 
-\`\`\`bash
+```bash
+npx prisma studio
+```
+
+## Running the server
+
+Development with hot reload:
+
+```bash
+npm run dev
+```
+
+Production build and startup:
+
+```bash
+npm run build
+npm start
+```
+
+## Running tests
+
+```bash
 npm test
-\`\`\`
+```
 
-This runs all tests with [Vitest](https://vitest.dev/). Tests live alongside the source files they cover:
+Use `npx vitest` for watch mode.
 
-| Test file                                                   | What it covers                        |
-| ----------------------------------------------------------- | ------------------------------------- |
-| \`src/controllers/orderController.test.ts\`                 | Order controller unit tests           |
-| \`src/routes/api.integration.test.ts\`                      | API route integration tests           |
-| \`src/services/events/escrowEventIngestionService.test.ts\` | Event ingestion logic                 |
-| \`src/services/events/escrowEventMapper.test.ts\`           | On-chain event → domain model mapping |
-| \`src/services/events/escrowEventParser.test.ts\`           | Raw event payload parsing             |
+## Known issues
 
-To run tests in watch mode during development:
+`npx tsc --noEmit` is not clean yet, so `npm run build` exits non-zero even
+though it does emit `dist/`. The remaining errors are pre-existing and
+unrelated to the toolchain, Prisma, or GraphQL work in this repository — they
+are concentrated in `reconciliationService`, `contractWatcher`,
+`orderMetadataService`, the `ussd/` services, and their tests. Track and fix
+them on their own issue; do not work around them by relaxing `tsconfig.json`.
 
-\`\`\`bash
-npx vitest
-\`\`\`
+`npx eslint .` likewise still reports pre-existing errors. The GraphQL gateway,
+`scripts/`, and toolchain-check files are lint-clean.
+
+## PrismaClient export-error recovery
+
+If ESM reports that `@prisma/client` has no `PrismaClient` export, keep the
+existing import (`import { PrismaClient } from "@prisma/client"`) and diagnose
+from `server/`. `prisma.config.ts` loads `.env`, so create it first (or set
+`PRISMA_GENERATE_DATABASE_URL` to a nonsecret placeholder) before running the
+Prisma steps:
+
+```bash
+# 1. Missing package: all three entries must resolve.
+npm ls prisma @prisma/client @prisma/adapter-pg
+
+# 2. Incompatible CLI/client: declared and locked major versions must agree.
+node ../scripts/check-prisma-versions.js
+npx prisma version
+
+# 3. Missing generated client: this directory should contain generated files.
+ls node_modules/.prisma/client
+
+# 4. Regenerate without changing the database, then verify the real ESM export.
+npm run prisma:generate
+node --input-type=module -e "import('@prisma/client').then(({ PrismaClient }) => console.log(typeof PrismaClient))"
+```
+
+Interpret the result before taking action:
+
+- If `npm ls` reports a missing package, run `npm ci` from `server/`.
+- If the version check fails, align `prisma`, `@prisma/client`, and
+  `@prisma/adapter-pg` in both `server/package.json` and its lockfile. Do not
+  work around it by changing ESM import syntax.
+- If packages resolve but `node_modules/.prisma/client` is absent or the ESM
+  check fails, run `npm run prisma:generate`; no database reset is needed.
+- If generation and the ESM check pass but migration or startup reports
+  `P1001`, `ECONNREFUSED`, DNS, or authentication errors, the client is
+  healthy and the database is unavailable or `DATABASE_URL` is wrong. Start
+  PostgreSQL or correct the URL; do not reinstall Prisma.
+
+Only use `npm install` when intentionally changing dependency versions.
+Normal clean-checkout recovery uses the committed lockfile with `npm ci`.
+Never use `prisma migrate reset` to recover a missing generated client.
 
 ---
 
 ## Architecture Overview
 
-\`\`\`
+```
 HTTP Request
 │
 ▼
@@ -172,16 +252,16 @@ HTTP Request
 │
 ▼
 [ Projection Service ] writes event outcomes (order status changes, etc.) to DB
-\`\`\`
+```
 
 ### Queue & Event Pipeline
 
-The escrow event pipeline in \`src/services/events/\` follows an **ingest → parse → map → project** pattern:
+The escrow event pipeline in `src/services/events/` follows an **ingest → parse → map → project** pattern:
 
-1. **Ingestion** (\`escrowEventIngestionService.ts\`) — polls the Soroban RPC at a set interval and fetches new contract events since the last processed ledger.
-2. **Parsing** (\`escrowEventParser.ts\`) — converts raw event payloads into structured intermediate objects.
-3. **Mapping** (\`escrowEventMapper.ts\`) — translates parsed events to application-level domain types defined in \`src/types/escrowEvent.ts\`.
-4. **Projection** (\`escrowEventProjectionService.ts\`) — applies the domain events to the database (e.g. updating order status, creating notifications).
+1. **Ingestion** (`escrowEventIngestionService.ts`) — polls the Soroban RPC at a set interval and fetches new contract events since the last processed ledger.
+2. **Parsing** (`escrowEventParser.ts`) — converts raw event payloads into structured intermediate objects.
+3. **Mapping** (`escrowEventMapper.ts`) — translates parsed events to application-level domain types defined in `src/types/escrowEvent.ts`.
+4. **Projection** (`escrowEventProjectionService.ts`) — applies the domain events to the database (e.g. updating order status, creating notifications).
 
 This separation keeps each concern testable in isolation, which is why each stage has its own test file.
 
@@ -189,7 +269,7 @@ This separation keeps each concern testable in isolation, which is why each stag
 
 ## Project Structure
 
-\`\`\`
+```
 server/
 ├── src/
 │ ├── index.ts # Entry point — starts Express + contract watcher
@@ -218,7 +298,7 @@ server/
 ├── openapi.yaml # OpenAPI 3 spec for all API endpoints
 ├── package.json
 └── tsconfig.json
-\`\`\`
+```
 
 ---
 
@@ -257,22 +337,22 @@ To request an integrator API key:
 
 Include your API key in the `x-integrator-api-key` header:
 
-\`\`\`bash
+```bash
 curl -H "x-integrator-api-key: YOUR_API_KEY" \\
 "https://api.agrocylo.com/integrator/v1/reports/farmers?limit=100&format=json"
-\`\`\`
+```
 
 #### Available Endpoints
 
 | Endpoint                               | Description                              | Formats   |
 | -------------------------------------- | ---------------------------------------- | --------- |
-| \`GET /integrator/v1/reports/farmers\` | Aggregated farmer data within your scope | JSON, CSV |
-| \`GET /integrator/v1/reports/orders\`  | Aggregated order transaction data        | JSON, CSV |
+| `GET /integrator/v1/reports/farmers` | Aggregated farmer data within your scope | JSON, CSV |
+| `GET /integrator/v1/reports/orders`  | Aggregated order transaction data        | JSON, CSV |
 
 **Parameters:**
 
-- \`limit\` (optional): Max records to return (default: 100, max: 500)
-- \`format\` (optional): Response format, either \`json\` or \`csv\` (default: json)
+- `limit` (optional): Max records to return (default: 100, max: 500)
+- `format` (optional): Response format, either `json` or `csv` (default: json)
 
 **Rate Limits:**
 
@@ -280,7 +360,7 @@ curl -H "x-integrator-api-key: YOUR_API_KEY" \\
 
 #### Example Response (JSON)
 
-\`\`\`json
+```json
 {
 "data": [
 {
@@ -292,11 +372,11 @@ curl -H "x-integrator-api-key: YOUR_API_KEY" \\
 ],
 "count": 1
 }
-\`\`\`
+```
 
 #### CSV Export
 
-Add \`?format=csv\` to download reports as CSV files for use in Excel, Google Sheets, or data analysis tools.
+Add `?format=csv` to download reports as CSV files for use in Excel, Google Sheets, or data analysis tools.
 
 ### Security & Privacy
 
@@ -321,46 +401,44 @@ See [openapi.yaml](openapi.yaml) for complete endpoint specifications, request/r
 
 ## Contributing
 
-### Contributor Setup Checklist
+### Contributor setup checklist
 
-Before running `npm run build` or `npm test`, complete these steps or they will fail:
+Use the single [clean-checkout setup](#setup-from-a-clean-checkout) above. In
+short, work from `server/`, create `.env` before Prisma reads its config,
+install from `server/package-lock.json`, generate the client, then migrate:
 
 ```bash
-# 1. Install dependencies
-npm install
-
-# 2. Generate the Prisma client (required before build/test)
-npx prisma generate
-
-# 3. Copy and fill in environment variables
 cp .env.example .env
-# Edit .env with your DATABASE_URL, JWT_SECRET, etc.
-
-# 4. Apply database migrations
+# Edit .env before continuing.
+npm ci
+npm run prisma:generate
 npx prisma migrate dev
+npm run dev
 ```
 
-> **Shortcut:** `npm run setup` runs steps 1 and 2 for you.
+`npm run setup` replaces only the `npm ci` and generation lines. Generation
+creates client code; migration is the separate command that changes the
+database.
 
 ### Fixing a Server Issue
 
-1. **Reproduce** — run \`npm run dev\` and confirm the bug locally.
+1. **Reproduce** — run `npm run dev` and confirm the bug locally.
 2. **Locate** — use the project structure above to find the relevant service or controller.
-3. **Test first** — add or update a test in the appropriate \`\*.test.ts\` file before changing logic.
-4. **Fix** — make your change and verify \`npm test\` passes.
-5. **Build check** — run \`npm run build\` to ensure no TypeScript errors.
-6. **PR** — open a pull request against \`main\` referencing the issue number.
+3. **Test first** — add or update a test in the appropriate `\*.test.ts` file before changing logic.
+4. **Fix** — make your change and verify `npm test` passes.
+5. **Build check** — run `npm run build` to ensure no TypeScript errors.
+6. **PR** — open a pull request against `main` referencing the issue number.
 
 ### Adding a New Route
 
-1. Create a service in \`src/services/\`.
-2. Create a controller in \`src/controllers/\`.
-3. Add a router file in \`src/routes/\` and register it in \`src/app.ts\`.
-4. Document the endpoint in \`openapi.yaml\`.
+1. Create a service in `src/services/`.
+2. Create a controller in `src/controllers/`.
+3. Add a router file in `src/routes/` and register it in `src/app.ts`.
+4. Document the endpoint in `openapi.yaml`.
 
 ### Useful Commands
 
-\`\`\`bash
+```bash
 npm run dev # Start dev server with hot reload
 npm run build # Compile TypeScript
 npm start # Run compiled output
@@ -368,4 +446,4 @@ npm test # Run all tests
 npx vitest # Run tests in watch mode
 npx prisma migrate dev # Apply schema changes to DB
 npx prisma studio # Open Prisma visual DB explorer
-\`\`\`
+```

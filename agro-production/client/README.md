@@ -39,7 +39,18 @@ Available root commands
 - `npm run build --workspace=agro-production/client` — production build
 - `npm run test --workspace=agro-production/client` — Vitest suite
 - `npm run lint --workspace=agro-production/client` — ESLint
+- `npm run test:e2e --workspace=agro-production/client` — Playwright journey, including the wallet picker
+- `npm run smoke:wallets --workspace=agro-production/client` — testnet Soroban signing/submission through the kit with two wallet-family signer modules (see [docs/WALLETS.md](docs/WALLETS.md))
+
+## Wallets
+
+Wallet connectivity runs entirely through
+[Stellar Wallets Kit](https://github.com/Creit-Tech/Stellar-Wallets-Kit) v2
+behind the `WalletAdapter` boundary in `src/lib/wallets/`. The supported
+browser/mobile/web/hardware matrix, the reviewed module set, WalletConnect
+opt-in, the test suites, and the testnet smoke test are documented in
+[`docs/WALLETS.md`](docs/WALLETS.md).
 
 Notes for developers
 - API calls are centralized in `src/lib/apiClient.ts` and wrapped by the service modules in `src/services/*`.
-- Wallet context and signer code are in `src/context/WalletContext.tsx` and `src/lib/signTransaction.ts`.
+- Wallet context is in `src/context/WalletContext.tsx`; everything wallet-specific lives in `src/lib/wallets/`. No feature code should branch on a provider name.

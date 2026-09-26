@@ -1,20 +1,42 @@
 "use client";
 
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { DEFAULT_WALLET_ID, WALLET_ADAPTERS, getWalletAdapter } from "@/lib/wallets/registry";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+} from "react";
+import {
+  connectWithWalletModal,
+  DEFAULT_WALLET_ID,
+  disconnectWallet,
+  getWalletAdapter,
+  initializeWalletKit,
+  refreshWalletAvailability,
+  WALLET_ADAPTERS,
+} from "@/lib/wallets/registry";
+import type { WalletPlatform } from "@/lib/wallets/types";
 import {
   clearWalletSession,
   loadWalletSession,
   saveWalletSession,
 } from "@/lib/walletSession";
 
-export type WalletState = "unavailable" | "disconnected" | "wrong_network" | "connected";
+export type WalletState =
+  | "unavailable"
+  | "disconnected"
+  | "wrong_network"
+  | "connected";
 
 export interface WalletOption {
   id: string;
   name: string;
-  installed: boolean;
+  available: boolean | null;
   installUrl: string;
+  iconUrl: string;
+  platforms: WalletPlatform[];
+  supportsDeepLink: boolean;
 }
 
 interface WalletContextType {
@@ -27,8 +49,20 @@ interface WalletContextType {
   walletId: string;
   wallets: WalletOption[];
   connect: (walletId?: string) => Promise<string | null>;
-  disconnect: () => void;
+  disconnect: () => Promise<void>;
   selectWallet: (walletId: string) => void;
+}
+
+function baseWalletOptions(): WalletOption[] {
+  return WALLET_ADAPTERS.map((adapter) => ({
+    id: adapter.id,
+    name: adapter.name,
+    available: null,
+    installUrl: adapter.installUrl,
+    iconUrl: adapter.iconUrl,
+    platforms: adapter.platforms,
+    supportsDeepLink: adapter.supportsDeepLink,
+  }));
 }
 
 const defaultCtx: WalletContextType = {
@@ -39,21 +73,25 @@ const defaultCtx: WalletContextType = {
   error: null,
   walletState: "disconnected",
   walletId: DEFAULT_WALLET_ID,
-  wallets: [],
+  wallets: baseWalletOptions(),
   connect: async () => null,
-  disconnect: () => {},
+  disconnect: async () => {},
   selectWallet: () => {},
 };
 
 export const WalletContext = createContext<WalletContextType>(defaultCtx);
 
-function listWallets(): WalletOption[] {
-  return WALLET_ADAPTERS.map((adapter) => ({
-    id: adapter.id,
-    name: adapter.name,
-    installed: adapter.isAvailable(),
-    installUrl: adapter.installUrl,
-  }));
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+  return String(error);
 }
 
 export function WalletProvider({ children }: { children: React.ReactNode }) {
@@ -63,11 +101,40 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [reconnecting, setReconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [walletId, setWalletId] = useState<string>(DEFAULT_WALLET_ID);
-  const [wallets, setWallets] = useState<WalletOption[]>([]);
+  const [wallets, setWallets] = useState<WalletOption[]>(baseWalletOptions);
+
+  const computeWallets = useCallback(async (): Promise<WalletOption[]> => {
+    try {
+      const availability = await refreshWalletAvailability();
+      const byId = new Map(
+        availability.map(({ id, available }) => [id, available]),
+      );
+      return baseWalletOptions().map((wallet) => ({
+        ...wallet,
+        available: byId.get(wallet.id) ?? false,
+      }));
+    } catch {
+      return baseWalletOptions().map((wallet) => ({
+        ...wallet,
+        available: false,
+      }));
+    }
+  }, []);
+
+  const refreshWallets = useCallback(async () => {
+    setWallets(await computeWallets());
+  }, [computeWallets]);
 
   useEffect(() => {
-    setWallets(listWallets());
-  }, []);
+    let cancelled = false;
+    initializeWalletKit(loadWalletSession()?.walletId);
+    void computeWallets().then((options) => {
+      if (!cancelled) setWallets(options);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [computeWallets]);
 
   const applyConnection = useCallback((pub: string, id: string) => {
     setAddress(pub);
@@ -95,7 +162,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       setWalletId(id);
       setReconnecting(true);
       try {
-        const pub = await getWalletAdapter(id).getPublicKey();
+        initializeWalletKit(id);
+        const pub = await getWalletAdapter(id).getPublicKey({ silent: true });
         if (cancelled) return;
 
         if (!pub) {
@@ -119,40 +187,57 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
   const connect = useCallback(
     async (requestedWalletId?: string) => {
-      const id = requestedWalletId ?? walletId;
       setLoading(true);
       setError(null);
       try {
-        const pub = await getWalletAdapter(id).getPublicKey();
-        if (!pub) throw new Error(`Could not get public key from ${getWalletAdapter(id).name}`);
-        applyConnection(pub, id);
+        if (!requestedWalletId) {
+          const result = await connectWithWalletModal();
+          applyConnection(result.address, result.walletId);
+          void refreshWallets();
+          return result.address;
+        }
+
+        const adapter = getWalletAdapter(requestedWalletId);
+        const pub = await adapter.getPublicKey();
+        if (!pub) {
+          throw new Error(`Could not get public key from ${adapter.name}`);
+        }
+        applyConnection(pub, adapter.id);
+        void refreshWallets();
         return pub;
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        setError(errMsg);
+        setError(errorMessage(err));
         setConnected(false);
         setAddress(null);
+        void refreshWallets();
         return null;
       } finally {
         setLoading(false);
       }
     },
-    [applyConnection, walletId],
+    [applyConnection, refreshWallets],
   );
 
-  const disconnect = useCallback(() => {
-    clearConnection();
-  }, [clearConnection]);
+  const disconnect = useCallback(async () => {
+    try {
+      await disconnectWallet();
+    } finally {
+      clearConnection();
+      void refreshWallets();
+    }
+  }, [clearConnection, refreshWallets]);
 
   const selectWallet = useCallback((id: string) => {
+    initializeWalletKit(id);
     setWalletId(id);
   }, []);
 
-  const walletState: WalletState = !connected
-    ? address
-      ? "wrong_network"
-      : "disconnected"
-    : "connected";
+  const activeWallet = wallets.find((wallet) => wallet.id === walletId);
+  const walletState: WalletState = connected
+    ? "connected"
+    : error && activeWallet?.available === false
+      ? "unavailable"
+      : "disconnected";
 
   return (
     <WalletContext.Provider

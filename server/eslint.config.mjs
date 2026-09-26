@@ -27,4 +27,12 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // `preinstall`/`postinstall` hooks have to run before dependencies exist,
+    // so a CommonJS file is the only option in this `"type": "module"` package.
+    files: ['**/*.cjs'],
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
 );

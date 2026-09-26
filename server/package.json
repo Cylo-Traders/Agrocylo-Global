@@ -5,10 +5,10 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "setup": "npm install && npx prisma generate",
-    "dev": "npx prisma generate && tsx watch src/index.ts",
-    "worker:dev": "npx prisma generate && tsx watch src/worker.ts",
-    "build": "npx prisma generate && tsc",
+    "setup": "npm ci && npm run prisma:generate",
+    "dev": "npm run prisma:generate && tsx watch src/index.ts",
+    "worker:dev": "npm run prisma:generate && tsx watch src/worker.ts",
+    "build": "npm run prisma:generate && tsc",
     "start": "node dist/index.js",
     "worker:start": "node dist/worker.js",
     "test": "vitest run",
@@ -17,7 +17,14 @@
     "lint": "eslint .",
     "lint:fix": "eslint --fix .",
     "format": "prettier --write 'src/**/*.ts'",
-    "format:check": "prettier --check 'src/**/*.ts'"
+    "format:check": "prettier --check 'src/**/*.ts'",
+    "preinstall": "node scripts/check-runtime.cjs",
+    "check:runtime": "node scripts/check-runtime.cjs",
+    "prisma:generate": "prisma generate",
+    "predev": "npm run check:runtime",
+    "prebuild": "npm run check:runtime",
+    "prestart": "npm run check:runtime",
+    "smoke:graphql-import": "node scripts/check-graphql-module.mjs"
   },
   "lint-staged": {
     "src/**/*.ts": [
@@ -29,12 +36,13 @@
   "author": "",
   "license": "ISC",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13.0 <23",
+    "npm": ">=10.9.0 <11"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.1",
-    "@prisma/adapter-pg": "^7.5.0",
-    "@prisma/client": "^7.5.0",
+    "@prisma/adapter-pg": "7.10.0",
+    "@prisma/client": "7.10.0",
     "@sentry/node": "^10.75.2",
     "@stellar/stellar-sdk": "^17.1.0",
     "@supabase/supabase-js": "^2.100.0",
@@ -75,11 +83,12 @@
     "husky": "^9.0.0",
     "lint-staged": "^15.0.0",
     "prettier": "^3.0.0",
-    "prisma": "^6.19.3",
+    "prisma": "7.10.0",
     "supertest": "^7.2.2",
     "tsx": "^4.21.0",
     "typescript": "^5.4.0",
     "typescript-eslint": "^8.0.0",
     "vitest": "^4.1.1"
-  }
+  },
+  "packageManager": "npm@10.9.2"
 }

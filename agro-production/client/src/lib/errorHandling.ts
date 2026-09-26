@@ -1,5 +1,6 @@
 import { ApiError, NetworkError } from "@/lib/apiClient";
 import { captureError } from "@/lib/errorTracking";
+import { isWalletError } from "@/lib/wallets/errors";
 
 export type ErrorCategory = "wallet" | "network" | "contract" | "validation" | "unknown";
 
@@ -30,7 +31,7 @@ function classifyCategory(error: unknown, fallbackMessage?: string): ErrorCatego
   if (error instanceof NetworkError || error instanceof ApiError || message.includes("network") || message.includes("timed out") || message.includes("fetch")) {
     return "network";
   }
-  if (message.includes("freighter") || message.includes("wallet") || message.includes("rejected by wallet") || message.includes("user declined")) {
+  if (isWalletError(error, fallbackMessage ?? toMessage(error))) {
     return "wallet";
   }
   if (message.includes("invalid") || message.includes("required") || message.includes("must be") || message.includes("format")) {

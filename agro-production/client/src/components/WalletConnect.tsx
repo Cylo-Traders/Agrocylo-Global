@@ -12,14 +12,9 @@ interface WalletConnectProps {
   className?: string;
 }
 
-const NETWORK_NAME = process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE === "Public Global Stellar Network ; September 2015"
-  ? "Stellar Public Network"
-  : "Stellar Test Network";
-
 export default function WalletConnect({ className = "" }: WalletConnectProps) {
   const {
     address,
-    connected,
     loading,
     reconnecting,
     error,
@@ -32,7 +27,7 @@ export default function WalletConnect({ className = "" }: WalletConnectProps) {
   } = useWallet();
   const busy = loading || reconnecting;
   const [showWalletList, setShowWalletList] = useState(false);
-  const activeWallet = wallets.find((w) => w.id === walletId);
+  const activeWallet = wallets.find((wallet) => wallet.id === walletId);
 
   async function handleConnect(id?: string) {
     if (id) selectWallet(id);
@@ -41,9 +36,9 @@ export default function WalletConnect({ className = "" }: WalletConnectProps) {
     if (addr) trackWalletConnected(addr);
   }
 
-  function handleDisconnect() {
+  async function handleDisconnect() {
     trackWalletDisconnected();
-    disconnect();
+    await disconnect();
   }
 
   if (walletState === "connected" && address) {
@@ -57,7 +52,7 @@ export default function WalletConnect({ className = "" }: WalletConnectProps) {
           {shortAddr(address)}
         </span>
         <button
-          onClick={handleDisconnect}
+          onClick={() => void handleDisconnect()}
           aria-label="Disconnect wallet"
           className="text-sm text-muted hover:text-foreground border border-border px-2.5 py-1.5 rounded-lg transition-colors"
         >
@@ -67,38 +62,10 @@ export default function WalletConnect({ className = "" }: WalletConnectProps) {
     );
   }
 
-  if (walletState === "wrong_network") {
-    return (
-      <div className={`flex flex-col items-start gap-1 ${className}`}>
-        <p className="text-xs text-yellow-700 max-w-xs" role="alert">
-          Connected to wrong network — switch to {NETWORK_NAME} in Freighter
-        </p>
-      </div>
-    );
-  }
-
-  if (walletState === "unavailable") {
-    return (
-      <div className={`flex flex-col items-start gap-1 ${className}`}>
-        <p className="text-xs text-red-600 max-w-xs" role="alert">
-          Freighter extension not found.{" "}
-          <a
-            href="https://freighter.app"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline hover:text-red-700"
-          >
-            Install Freighter
-          </a>
-        </p>
-      </div>
-    );
-  }
-
   return (
     <div className={`flex flex-col items-start gap-1 ${className}`}>
       <button
-        onClick={() => handleConnect()}
+        onClick={() => void handleConnect()}
         disabled={busy}
         aria-label={busy ? "Connecting wallet" : "Connect wallet"}
         className="bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-700 disabled:opacity-50 transition-colors"
@@ -107,32 +74,56 @@ export default function WalletConnect({ className = "" }: WalletConnectProps) {
           ? "Reconnecting…"
           : loading
             ? "Connecting…"
-            : `Connect ${activeWallet?.name ?? "Wallet"}`}
+            : "Connect Wallet"}
       </button>
 
-      {wallets.length > 1 && !busy && (
+      {wallets.length > 0 && !busy && (
         <div className="relative">
           <button
-            onClick={() => setShowWalletList((v) => !v)}
+            onClick={() => setShowWalletList((visible) => !visible)}
             aria-expanded={showWalletList}
+            aria-haspopup="menu"
             className="text-xs text-muted hover:text-foreground underline"
           >
-            Use a different wallet
+            Choose a wallet
           </button>
           {showWalletList && (
-            <ul className="absolute z-10 mt-1 bg-white border border-border rounded-lg shadow-sm py-1 min-w-[10rem]">
+            <ul
+              role="menu"
+              aria-label="Stellar wallets"
+              className="absolute z-10 mt-1 bg-white border border-border rounded-lg shadow-sm py-1 min-w-[15rem] max-h-80 overflow-y-auto"
+            >
               {wallets.map((wallet) => (
-                <li key={wallet.id}>
-                  <button
-                    onClick={() => handleConnect(wallet.id)}
-                    aria-label={`Connect ${wallet.name}${wallet.installed ? "" : " (not installed, opens install page)"}`}
-                    className="w-full text-left px-3 py-1.5 text-sm hover:bg-primary-50 flex items-center justify-between gap-2"
-                  >
-                    <span>{wallet.name}</span>
-                    {!wallet.installed && (
-                      <span className="text-xs text-muted">Install</span>
-                    )}
-                  </button>
+                <li key={wallet.id} role="none">
+                  {wallet.available === false ? (
+                    <a
+                      role="menuitem"
+                      href={wallet.installUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`Install or open ${wallet.name}`}
+                      className="w-full px-3 py-2 text-sm hover:bg-primary-50 flex items-center justify-between gap-3"
+                    >
+                      <span>{wallet.name}</span>
+                      <span className="text-xs text-muted">
+                        {wallet.supportsDeepLink ? "Open / install" : "Install"}
+                      </span>
+                    </a>
+                  ) : (
+                    <button
+                      role="menuitem"
+                      onClick={() => void handleConnect(wallet.id)}
+                      aria-label={`Connect ${wallet.name}`}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-primary-50 flex items-center justify-between gap-3"
+                    >
+                      <span>{wallet.name}</span>
+                      <span className="text-xs text-muted">
+                        {wallet.available === null
+                          ? "Checking…"
+                          : wallet.platforms.join(" · ")}
+                      </span>
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -140,8 +131,25 @@ export default function WalletConnect({ className = "" }: WalletConnectProps) {
         </div>
       )}
 
-      {error && (
-        <p className="text-xs text-red-600 max-w-xs" role="alert">{error}</p>
+      {walletState === "unavailable" && activeWallet && (
+        <p className="text-xs text-red-600 max-w-xs" role="alert">
+          {activeWallet.name} is unavailable in this browser.{" "}
+          <a
+            href={activeWallet.installUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-red-700"
+          >
+            {activeWallet.supportsDeepLink ? "Open or install it" : "Install it"}
+          </a>
+          , then try again.
+        </p>
+      )}
+
+      {error && walletState !== "unavailable" && (
+        <p className="text-xs text-red-600 max-w-xs" role="alert">
+          {error}
+        </p>
       )}
     </div>
   );

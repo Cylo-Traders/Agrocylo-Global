@@ -4,7 +4,7 @@
 
 | Layer | Technology |
 |-------|------------|
-| Runtime | Node.js 20, TypeScript |
+| Runtime | Node.js 22.13, TypeScript |
 | Framework | Express 4 |
 | ORM | Prisma 7 + pg |
 | Auth | Stellar SDK + JWT |
