@@ -425,8 +425,9 @@ model FeeCredit {
   walletAddress String    @map("wallet_address")
   amount        String
   reason        String
-  sourceReferralId String? @map("source_referral_id")
+  sourceReferralId String?   @unique @map("source_referral_id")
   consumedAt    DateTime? @map("consumed_at")
+  revokedAt     DateTime? @map("revoked_at")
   createdAt     DateTime  @default(now()) @map("created_at")
 
   @@index([walletAddress])
