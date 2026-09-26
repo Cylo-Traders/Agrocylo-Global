@@ -177,7 +177,9 @@ jobs:
   # ── Deploy to Fly.io ───────────────────────────────────────────────────────
   deploy:
     name: Deploy · ${{ needs.resolve-env.outputs.environment }}
-    needs: [resolve-env, build-images]
+    # Migration is a release gate: no Fly machine is updated until both
+    # databases have accepted the committed migration history.
+    needs: [resolve-env, migrate]
     runs-on: ubuntu-latest
     environment:
       name: ${{ needs.resolve-env.outputs.environment }}
@@ -249,7 +251,10 @@ jobs:
   # ── Run migrations ─────────────────────────────────────────────────────────
   migrate:
     name: Run migrations
-    needs: [resolve-env, deploy]
+    # Build the exact release images first, then migrate, then promote those
+    # images in the deploy job below. The application never starts before its
+    # schema is ready, and a failed migration blocks rollout.
+    needs: [resolve-env, build-images]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
