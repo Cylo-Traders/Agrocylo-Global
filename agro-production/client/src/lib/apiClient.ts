@@ -187,6 +187,15 @@ export class ApiClient {
     return this.request<T>(path, { ...options, method: "POST", headers, body: JSON.stringify(data) });
   }
 
+  /**
+   * Multipart upload (#1053): sends a FormData body as-is so the browser
+   * sets the `multipart/form-data` boundary itself (never set Content-Type
+   * manually for FormData). Auth is attached like any other request.
+   */
+  upload<T = unknown>(path: string, data: FormData, options: RequestOptions = {}) {
+    return this.request<T>(path, { ...options, method: "POST", body: data });
+  }
+
   put<T = unknown>(path: string, data?: unknown, options?: RequestOptions) {
     const headers = { "Content-Type": "application/json", ...(options?.headers as Record<string, string>) };
     return this.request<T>(path, { ...options, method: "PUT", headers, body: JSON.stringify(data) });
