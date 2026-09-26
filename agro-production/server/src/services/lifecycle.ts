@@ -29,14 +29,24 @@ export function getWatchers(): WatcherHandle[] {
   return watchers;
 }
 
+/**
+ * Stops every watcher registered via {@link registerWatcher}.
+ *
+ * Exported so test teardown can release watcher `setInterval` handles without
+ * running the full {@link shutdown} sequence (issue #1064).
+ */
+export function stopRegisteredWatchers(): void {
+  stopAllWatchers();
+}
+
 function stopAllWatchers(): void {
   for (const handle of watchers) {
     if (
       typeof handle === 'object' &&
       'stop' in handle &&
-      typeof (handle as { stop: () => void }).stop === 'function'
+      typeof handle.stop === 'function'
     ) {
-      (handle as { stop: () => void }).stop();
+      handle.stop();
     } else {
       clearInterval(handle as ReturnType<typeof setInterval>);
     }
@@ -61,10 +71,15 @@ export function getShutdownSignal(): string | null {
   return shutdownSignal;
 }
 
-function promisifyServerClose(s: http.Server, timeoutMs: number): Promise<void> {
+function promisifyServerClose(
+  s: http.Server,
+  timeoutMs: number,
+): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
-      logger.warn(`HTTP server close timed out after ${timeoutMs}ms, forcing close`);
+      logger.warn(
+        `HTTP server close timed out after ${timeoutMs}ms, forcing close`,
+      );
       s.closeAllConnections?.();
       resolve();
     }, timeoutMs);

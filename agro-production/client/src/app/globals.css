@@ -3,6 +3,8 @@
 :root {
   --color-primary-50: #f0fdf4;
   --color-primary-100: #dcfce7;
+  --color-primary-200: #bbf7d0;
+  --color-primary-400: #4ade80;
   --color-primary-500: #22c55e;
   --color-primary-600: #16a34a;
   --color-primary-700: #15803d;
@@ -11,8 +13,10 @@
   --color-neutral-50: #fafaf9;
   --color-neutral-100: #f5f5f4;
   --color-neutral-200: #e7e5e4;
+  --color-neutral-300: #d6d3d1;
   --color-neutral-400: #a8a29e;
   --color-neutral-500: #78716c;
+  --color-neutral-600: #57534e;
   --color-neutral-700: #44403c;
   --color-neutral-800: #292524;
   --color-neutral-900: #1c1917;
@@ -26,24 +30,45 @@
   --color-muted: var(--color-neutral-500);
   --color-border: var(--color-neutral-200);
   --color-surface: var(--color-neutral-50);
+  color-scheme: light;
 }
 
+/*
+ * The OS preference is a default, not an override (issue #1055).
+ *
+ * `:not(.light):not(.dark)` means this block only applies while the visitor
+ * has *not* made an explicit choice. Without that guard a dark-mode OS keeps
+ * re-applying the dark palette after the visitor picks light, because
+ * `ThemeContext` can only remove a class, never outrank the media query.
+ */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not(.light):not(.dark) {
     --color-background: var(--color-neutral-950);
     --color-foreground: var(--color-neutral-50);
     --color-muted: var(--color-neutral-400);
     --color-border: var(--color-neutral-700);
     --color-surface: var(--color-neutral-900);
+    color-scheme: dark;
   }
 }
 
-.dark {
+/* Explicit choice always wins over the OS preference, in both directions. */
+:root.light {
+  --color-background: #ffffff;
+  --color-foreground: var(--color-neutral-900);
+  --color-muted: var(--color-neutral-500);
+  --color-border: var(--color-neutral-200);
+  --color-surface: var(--color-neutral-50);
+  color-scheme: light;
+}
+
+:root.dark {
   --color-background: var(--color-neutral-950);
   --color-foreground: var(--color-neutral-50);
   --color-muted: var(--color-neutral-400);
   --color-border: var(--color-neutral-700);
   --color-surface: var(--color-neutral-900);
+  color-scheme: dark;
 }
 
 @theme inline {
