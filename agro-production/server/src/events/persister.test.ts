@@ -563,4 +563,190 @@ describe('EventPersister', () => {
       ).rejects.toThrow('DB connection lost');
     });
   });
+
+  // Issue #1066: every broadcasting handler must capture its payload inside
+  // the transaction and emit only after prisma.$transaction resolves, so a
+  // rolled-back write never emits an event.
+  describe('post-commit broadcast ordering (issue #1066)', () => {
+    function buildTx(): Record<string, any> {
+      return {
+        user: { upsert: vi.fn().mockResolvedValue({}) },
+        campaign: {
+          upsert: vi.fn().mockResolvedValue({ id: 'camp-uuid' }),
+          findUnique: vi.fn().mockResolvedValue({
+            id: 'camp-uuid',
+            onChainId: '1',
+            targetAmount: '10000',
+            totalRaised: '5000',
+            totalRevenue: '0',
+            status: 'FUNDING',
+          }),
+          update: vi.fn().mockResolvedValue({}),
+        },
+        investment: {
+          upsert: vi.fn().mockResolvedValue({
+            id: 'inv-uuid',
+            investorAddress: 'GINVESTOR0000000000000000000000000000000000000000000000',
+            amount: '5000',
+            ledger: 200,
+            txHash: null,
+            createdAt: new Date('2024-06-01T00:00:00Z'),
+          }),
+        },
+        order: {
+          upsert: vi.fn().mockResolvedValue({}),
+          findUnique: vi.fn().mockResolvedValue({
+            id: 'order-uuid',
+            onChainId: '10',
+            campaignId: 'camp-uuid',
+            amount: '500',
+          }),
+          update: vi.fn().mockResolvedValue({}),
+        },
+        dispute: {
+          upsert: vi.fn().mockResolvedValue({ id: 'dispute-uuid' }),
+          findMany: vi.fn().mockResolvedValue([
+            { id: 'dispute-uuid', campaignId: 'camp-uuid', status: 'Open' },
+          ]),
+          update: vi.fn().mockResolvedValue({}),
+        },
+        disputeAuditEntry: { create: vi.fn().mockResolvedValue({}) },
+        disputeEvidence: { create: vi.fn().mockResolvedValue({}) },
+        basket: {
+          upsert: vi.fn().mockResolvedValue({ id: 'basket-uuid' }),
+          findUnique: vi.fn().mockResolvedValue({
+            id: 'basket-uuid',
+            onChainId: '1',
+            totalDeposited: '1000',
+            status: 'OPEN',
+          }),
+          update: vi.fn().mockResolvedValue({}),
+        },
+        basketDeposit: {
+          upsert: vi.fn().mockResolvedValue({}),
+          findUnique: vi.fn().mockResolvedValue({
+            id: 'deposit-uuid',
+            basketId: 'basket-uuid',
+            depositorAddress: 'GDEPOSITOR',
+            amount: '500',
+          }),
+          update: vi.fn().mockResolvedValue({}),
+        },
+        transaction: {
+          findUnique: vi.fn().mockResolvedValue(null),
+          create: vi.fn().mockResolvedValue({}),
+        },
+      };
+    }
+
+    /** $transaction mock that runs the handler writes and then fails to commit. */
+    async function runAgainstRollback(run: () => Promise<unknown>): Promise<void> {
+      const { prisma } = await import('../db/client.js');
+      vi.mocked(prisma.$transaction).mockImplementationOnce(
+        async (fn: (tx: unknown) => Promise<unknown>) => {
+          await fn(buildTx());
+          throw new Error('simulated commit failure');
+        },
+      );
+
+      await expect(run()).rejects.toThrow('simulated commit failure');
+    }
+
+    it.each([
+      ['campaign.invested', () => EventPersister.persist(makeCampaignInvested())],
+      ['campaign.settled', () => EventPersister.persist(makeCampaignSettled())],
+      ['order.created', () => EventPersister.persist(makeOrderCreated())],
+      ['order.confirmed', () => EventPersister.persist(makeOrderConfirmed())],
+      [
+        'dispute.opened',
+        () =>
+          EventPersister.persist({
+            ...baseEvent,
+            action: 'dispute.opened',
+            campaignId: '1',
+            initiatorAddress: 'GINITIATOR000000000000000000000000000000000000000000',
+            respondentAddress: 'GRESPONDENT00000000000000000000000000000000000000000',
+            orderId: '10',
+          } as never),
+      ],
+      [
+        'dispute.evidence_submitted',
+        () =>
+          EventPersister.persist({
+            ...baseEvent,
+            action: 'dispute.evidence_submitted',
+            disputeId: 'dispute-uuid',
+            submitterAddress: 'GSUBMITTER000000000000000000000000000000000000000000',
+            evidenceUrl: 'https://example.com/evidence',
+            evidenceHash: 'hash-1',
+          } as never),
+      ],
+      [
+        'dispute.resolved',
+        () =>
+          EventPersister.persist({
+            ...baseEvent,
+            action: 'dispute.resolved',
+            disputeId: 'dispute-uuid',
+            resolutionOutcome: 'resolved_for_buyer',
+            resolutionNotes: 'notes',
+          } as never),
+      ],
+      [
+        'dispute.dismissed',
+        () =>
+          EventPersister.persist({
+            ...baseEvent,
+            action: 'dispute.dismissed',
+            disputeId: 'dispute-uuid',
+            dismissalReason: 'frivolous',
+          } as never),
+      ],
+      ['basket.deposit', () => EventPersister.persist(makeBasketDeposit())],
+      ['basket.funded', () => EventPersister.persist(makeBasketFunded())],
+      ['basket.withdrawn', () => EventPersister.persist(makeBasketWithdrawn())],
+      ['basket.claimed', () => EventPersister.persist(makeBasketClaimed())],
+    ])('emits zero events when the %s transaction rolls back', async (_action, run) => {
+      const { broadcast } = await import('../services/wsServer.js');
+
+      await runAgainstRollback(run);
+
+      expect(vi.mocked(broadcast)).not.toHaveBeenCalled();
+    });
+
+    it('emits the captured payloads after the transaction commits', async () => {
+      const { prisma } = await import('../db/client.js');
+      const { broadcast } = await import('../services/wsServer.js');
+      vi.mocked(prisma.$transaction).mockImplementationOnce(
+        async (fn: (tx: unknown) => Promise<unknown>) => fn(buildTx()),
+      );
+
+      await EventPersister.persist(makeOrderCreated());
+
+      expect(broadcast).toHaveBeenCalledOnce();
+      expect(broadcast).toHaveBeenCalledWith(
+        'order.created',
+        expect.objectContaining({
+          orderId: '10',
+          campaignId: 'camp-uuid',
+          buyerAddress: 'GBUYER000000000000000000000000000000000000000000000000AA',
+          status: 'PENDING',
+        }),
+      );
+    });
+
+    it('emits nothing for a duplicate event that skips inside the transaction', async () => {
+      const { prisma } = await import('../db/client.js');
+      const { broadcast } = await import('../services/wsServer.js');
+      const tx = buildTx();
+      tx.transaction.findUnique = vi.fn().mockResolvedValue({ id: 'tx-inside' });
+      vi.mocked(prisma.$transaction).mockImplementationOnce(
+        async (fn: (txArg: unknown) => Promise<unknown>) => fn(tx),
+      );
+
+      await EventPersister.persist(makeCampaignInvested());
+
+      expect(broadcast).not.toHaveBeenCalled();
+    });
+  });
 });
