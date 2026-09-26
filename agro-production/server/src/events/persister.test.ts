@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { EventPersister } from './persister.js';
+import { EventPersister, DependencyMissingError } from './persister.js';
 import type {
   CampaignCreatedEvent,
   CampaignInvestedEvent,
@@ -747,6 +747,66 @@ describe('EventPersister', () => {
       await EventPersister.persist(makeCampaignInvested());
 
       expect(broadcast).not.toHaveBeenCalled();
+    });
+  });
+
+  // Issue #1067: events whose parent campaign has not been indexed yet must
+  // fail retryably instead of being logged and silently consumed.
+  describe('missing parent dependencies (issue #1067)', () => {
+    function missingCampaignTx(): Record<string, unknown> {
+      return {
+        user: { upsert: vi.fn().mockResolvedValue({}) },
+        campaign: { findUnique: vi.fn().mockResolvedValue(null) },
+        investment: { upsert: vi.fn() },
+        transaction: {
+          findUnique: vi.fn().mockResolvedValue(null),
+          create: vi.fn().mockResolvedValue({}),
+        },
+      };
+    }
+
+    it.each([
+      ['campaign.invested', () => EventPersister.persist(makeCampaignInvested())],
+      ['campaign.settled', () => EventPersister.persist(makeCampaignSettled())],
+      ['order.created', () => EventPersister.persist(makeOrderCreated())],
+    ])(
+      'rejects %s with a retryable DependencyMissingError for an unknown campaign',
+      async (_action, run) => {
+        const { prisma } = await import('../db/client.js');
+        vi.mocked(prisma.transaction.findUnique).mockResolvedValueOnce(null);
+        vi.mocked(prisma.$transaction).mockImplementationOnce(
+          async (fn: (tx: unknown) => Promise<unknown>) => fn(missingCampaignTx()),
+        );
+
+        await expect(run()).rejects.toMatchObject({
+          name: 'DependencyMissingError',
+          dependency: 'campaign',
+          dependencyOnChainId: '1',
+        });
+      },
+    );
+
+    it('rolls back all writes for an investment whose campaign is missing', async () => {
+      const { prisma } = await import('../db/client.js');
+      const txInvestmentUpsert = vi.fn().mockResolvedValue({});
+      vi.mocked(prisma.transaction.findUnique).mockResolvedValueOnce(null);
+      vi.mocked(prisma.$transaction).mockImplementationOnce(
+        async (fn: (tx: unknown) => Promise<unknown>) =>
+          fn({
+            user: { upsert: vi.fn().mockResolvedValue({}) },
+            campaign: { findUnique: vi.fn().mockResolvedValue(null) },
+            investment: { upsert: txInvestmentUpsert },
+            transaction: {
+              findUnique: vi.fn().mockResolvedValue(null),
+              create: vi.fn().mockResolvedValue({}),
+            },
+          }),
+      );
+
+      await expect(
+        EventPersister.persist(makeCampaignInvested()),
+      ).rejects.toBeInstanceOf(DependencyMissingError);
+      expect(txInvestmentUpsert).not.toHaveBeenCalled();
     });
   });
 });

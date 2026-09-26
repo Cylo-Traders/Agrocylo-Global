@@ -23,6 +23,24 @@ import type {
 } from "./types.js";
 
 /**
+ * Raised when an event references a parent entity (e.g. a campaign) that has
+ * not been indexed yet (issue #1067). The watcher treats it as retryable:
+ * the event is retried, dead-lettered for replay, and projected once the
+ * parent arrives — the cursor never silently skips it.
+ */
+export class DependencyMissingError extends Error {
+  constructor(
+    public readonly dependency: 'campaign',
+    public readonly dependencyOnChainId: string,
+  ) {
+    super(
+      `${dependency} ${dependencyOnChainId} has not been indexed yet; event is retryable`,
+    );
+    this.name = 'DependencyMissingError';
+  }
+}
+
+/**
  * Persists a parsed event to the database. All writes are idempotent — safe to
  * replay if the indexer restarts or re-processes the same ledger range.
  */
@@ -206,10 +224,10 @@ async function handleCampaignInvested(event: CampaignInvestedEvent) {
       where: { onChainId: event.campaignId },
     });
     if (!campaign) {
-      logger.warn("EventPersister: investment for unknown campaign", {
-        campaignId: event.campaignId,
-      });
-      return;
+      // Issue #1067: a missing parent campaign is a retryable dependency, not
+      // a skip — throwing rolls this write back and lets the watcher retry,
+      // dead-letter and replay the event once the campaign is indexed.
+      throw new DependencyMissingError('campaign', event.campaignId);
     }
 
     await tx.campaign.update({
@@ -293,10 +311,8 @@ async function handleCampaignSettled(event: CampaignSettledEvent) {
       where: { onChainId: event.campaignId },
     });
     if (!campaign) {
-      logger.warn("EventPersister: settled event for unknown campaign", {
-        campaignId: event.campaignId,
-      });
-      return;
+      // Issue #1067: retryable dependency — see handleCampaignInvested.
+      throw new DependencyMissingError('campaign', event.campaignId);
     }
 
     await tx.campaign.update({
@@ -352,10 +368,8 @@ async function handleOrderCreated(event: OrderCreatedEvent) {
       where: { onChainId: event.campaignId },
     });
     if (!campaign) {
-      logger.warn("EventPersister: order for unknown campaign", {
-        campaignId: event.campaignId,
-      });
-      return;
+      // Issue #1067: retryable dependency — see handleCampaignInvested.
+      throw new DependencyMissingError('campaign', event.campaignId);
     }
 
     await tx.order.upsert({

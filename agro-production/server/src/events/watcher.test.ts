@@ -8,6 +8,9 @@ const {
   mockEventCursorFindUnique,
   mockEventCursorUpsert,
   mockTransactionCreate,
+  mockTransactionUpsert,
+  mockTransactionFindMany,
+  mockTransactionDelete,
   mockTransactionDeleteMany,
   mockGetEvents,
   mockGetLatestLedger,
@@ -16,6 +19,9 @@ const {
   mockEventCursorFindUnique: vi.fn().mockResolvedValue(null),
   mockEventCursorUpsert: vi.fn().mockResolvedValue({}),
   mockTransactionCreate: vi.fn().mockResolvedValue({}),
+  mockTransactionUpsert: vi.fn().mockResolvedValue({}),
+  mockTransactionFindMany: vi.fn().mockResolvedValue([]),
+  mockTransactionDelete: vi.fn().mockResolvedValue({}),
   mockTransactionDeleteMany: vi.fn().mockResolvedValue({ count: 0 }),
   mockGetEvents: vi.fn().mockResolvedValue({ events: [] }),
   mockGetLatestLedger: vi.fn().mockResolvedValue({ sequence: 500 }),
@@ -30,6 +36,9 @@ vi.mock("../db/client.js", () => ({
     },
     transaction: {
       create: mockTransactionCreate,
+      upsert: mockTransactionUpsert,
+      findMany: mockTransactionFindMany,
+      delete: mockTransactionDelete,
       deleteMany: mockTransactionDeleteMany,
     },
   },
@@ -52,6 +61,16 @@ vi.mock("./parser.js", () => ({
 
 vi.mock("./persister.js", () => ({
   EventPersister: { persist: vi.fn().mockResolvedValue(undefined) },
+  DependencyMissingError: class DependencyMissingError extends Error {
+    dependency: string;
+    dependencyOnChainId: string;
+    constructor(dependency: string, dependencyOnChainId: string) {
+      super(`${dependency} ${dependencyOnChainId} has not been indexed yet`);
+      this.name = "DependencyMissingError";
+      this.dependency = dependency;
+      this.dependencyOnChainId = dependencyOnChainId;
+    }
+  },
 }));
 
 vi.mock("@stellar/stellar-sdk", () => ({
@@ -67,7 +86,8 @@ vi.mock("@stellar/stellar-sdk", () => ({
 // ---------------------------------------------------------------------------
 // After all mocks are declared we can import the module under test.
 // ---------------------------------------------------------------------------
-import { startProductionWatcher } from "./watcher.js";
+import { startProductionWatcher, replayDeadLetterEvents } from "./watcher.js";
+import { DependencyMissingError } from "./persister.js";
 import { ProductionEventParser } from "./parser.js";
 import { EventPersister } from "./persister.js";
 import logger from "../config/logger.js";
@@ -316,10 +336,11 @@ describe("startProductionWatcher", () => {
       // Advance past poll interval (5s) plus retry delays (~2.8s total)
       await vi.advanceTimersByTimeAsync(10_000);
 
-      // Should record dead-letter
-      expect(mockTransactionCreate).toHaveBeenCalledWith(
+      // Should record a deduplicated, replayable dead-letter row (issue #1067)
+      expect(mockTransactionUpsert).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
+          where: { ledger_eventIndex: { ledger: 501, eventIndex: 0 } },
+          create: expect.objectContaining({
             eventType: "dead_letter",
             status: "failed",
             ledger: 501,
@@ -329,6 +350,180 @@ describe("startProductionWatcher", () => {
 
       // Cursor should NOT have advanced past the failed event
       expect(mockEventCursorUpsert).not.toHaveBeenCalled();
+    });
+
+    it("dead-letters a dependency-missing event and stores it for replay (issue #1067)", async () => {
+      mockEventCursorFindUnique.mockResolvedValueOnce({
+        contractId: "CTEST",
+        ledger: 300,
+        eventIndex: 0,
+      });
+      mockGetLatestLedger.mockResolvedValue({ sequence: 500 });
+
+      const rawEvent = {
+        ledger: 302,
+        id: "302-0",
+        type: "contract",
+        ledgerClosedAt: new Date().toISOString(),
+        contractId: "CTEST",
+        topic: [],
+        value: "",
+      };
+      const parsedEvent = {
+        action: "campaign.invested" as const,
+        ledger: 302,
+        eventIndex: 0,
+        timestamp: new Date(),
+        rawId: "302-0",
+        campaignId: "7",
+        investor: "GINVESTOR0000000000000000000000000000000000000000000000",
+        amount: "100",
+        totalRaised: "100",
+      };
+
+      mockGetEvents.mockResolvedValueOnce({ events: [rawEvent] });
+      vi.mocked(ProductionEventParser.tryParse).mockReturnValueOnce(parsedEvent);
+      vi.mocked(EventPersister.persist).mockRejectedValue(
+        new DependencyMissingError("campaign", "7"),
+      );
+
+      await startProductionWatcher();
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      // The event is stored as a replayable dead letter instead of being
+      // silently skipped.
+      expect(mockTransactionUpsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { ledger_eventIndex: { ledger: 302, eventIndex: 0 } },
+          create: expect.objectContaining({
+            eventType: "dead_letter",
+            ledger: 302,
+          }),
+        }),
+      );
+
+      // Cursor should NOT have advanced past the missing-dependency event.
+      expect(mockEventCursorUpsert).not.toHaveBeenCalled();
+    });
+
+    it("replays dead-lettered child events after the parent campaign is indexed (issue #1067)", async () => {
+      mockEventCursorFindUnique.mockResolvedValueOnce({
+        contractId: "CTEST",
+        ledger: 300,
+        eventIndex: 0,
+      });
+      mockGetLatestLedger.mockResolvedValue({ sequence: 500 });
+
+      const parentRaw = {
+        ledger: 302,
+        id: "302-0",
+        type: "contract",
+        ledgerClosedAt: new Date().toISOString(),
+        contractId: "CTEST",
+        topic: [],
+        value: "",
+      };
+      const childRaw = {
+        ledger: 301,
+        id: "301-0",
+        type: "contract",
+        ledgerClosedAt: new Date().toISOString(),
+        contractId: "CTEST",
+        topic: [],
+        value: "",
+      };
+      const parentEvent = {
+        action: "campaign.created" as const,
+        ledger: 302,
+        eventIndex: 0,
+        timestamp: new Date(),
+        rawId: "302-0",
+        campaignId: "7",
+        farmer: "GFARMER",
+        token: "GTOKEN",
+        targetAmount: "1000",
+        deadline: "9999999",
+      };
+      const childEvent = {
+        action: "campaign.invested" as const,
+        ledger: 301,
+        eventIndex: 0,
+        timestamp: new Date(),
+        rawId: "301-0",
+        campaignId: "7",
+        investor: "GINVESTOR0000000000000000000000000000000000000000000000",
+        amount: "100",
+        totalRaised: "100",
+      };
+
+      mockGetEvents.mockResolvedValueOnce({ events: [parentRaw] });
+      vi.mocked(ProductionEventParser.tryParse)
+        .mockReturnValueOnce(parentEvent)
+        .mockReturnValueOnce(childEvent);
+
+      // A previously dead-lettered investment whose parent has now arrived.
+      mockTransactionFindMany.mockResolvedValueOnce([
+        {
+          id: "dl-1",
+          eventType: "dead_letter",
+          status: "failed",
+          payload: { rawEvent: childRaw },
+          ledger: 301,
+          eventIndex: 0,
+        },
+      ]);
+
+      await startProductionWatcher();
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      // campaign.created persisted, then the dead-lettered child replayed.
+      expect(EventPersister.persist).toHaveBeenCalledTimes(2);
+      expect(EventPersister.persist).toHaveBeenLastCalledWith(childEvent);
+      // The dead-letter row is removed on successful replay.
+      expect(mockTransactionDelete).toHaveBeenCalledWith({ where: { id: "dl-1" } });
+    });
+
+    it("re-arms the dead letter when a replay still fails (issue #1067)", async () => {
+      const row = {
+        id: "dl-1",
+        eventType: "dead_letter",
+        status: "failed",
+        payload: {
+          rawEvent: {
+            ledger: 301,
+            id: "301-0",
+            type: "contract",
+            ledgerClosedAt: new Date().toISOString(),
+            contractId: "CTEST",
+            topic: [],
+            value: "",
+          },
+        },
+        ledger: 301,
+        eventIndex: 0,
+      };
+      mockTransactionFindMany.mockResolvedValueOnce([row]);
+      vi.mocked(ProductionEventParser.tryParse).mockReturnValueOnce({
+        action: "campaign.invested" as const,
+        ledger: 301,
+        eventIndex: 0,
+        timestamp: new Date(),
+        rawId: "301-0",
+        campaignId: "7",
+        investor: "GINVESTOR0000000000000000000000000000000000000000000000",
+        amount: "100",
+        totalRaised: "100",
+      });
+      vi.mocked(EventPersister.persist).mockRejectedValueOnce(
+        new DependencyMissingError("campaign", "7"),
+      );
+
+      const result = await replayDeadLetterEvents();
+
+      expect(result).toEqual({ replayed: 0, failed: 1 });
+      // The row was deleted and then re-armed via the deduplicated upsert.
+      expect(mockTransactionDelete).toHaveBeenCalledWith({ where: { id: "dl-1" } });
+      expect(mockTransactionUpsert).toHaveBeenCalled();
     });
 
     it("respects confirmation depth and skips unconfirmed events", async () => {
