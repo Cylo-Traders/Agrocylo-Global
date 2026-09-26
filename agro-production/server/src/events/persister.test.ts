@@ -32,7 +32,17 @@ vi.mock('../db/client.js', () => {
       }),
       update: vi.fn().mockResolvedValue({}),
     },
-    investment: { upsert: vi.fn().mockResolvedValue({}) },
+    investment: {
+      upsert: vi.fn().mockResolvedValue({
+        id: 'inv-uuid',
+        campaignId: 'camp-uuid',
+        investorAddress: 'GINVESTOR0000000000000000000000000000000000000000000000',
+        amount: '5000',
+        ledger: 200,
+        txHash: null,
+        createdAt: new Date('2024-06-01T00:00:00Z'),
+      })
+    },
     order: {
       upsert: vi.fn().mockResolvedValue({}),
       findUnique: vi.fn().mockResolvedValue({

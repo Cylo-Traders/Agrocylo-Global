@@ -254,3 +254,10 @@ export function validateOrderData(data: {
 
   return { valid: errors.length === 0, sanitized, errors };
 }
+
+export function safePercentage(numerator: number, denominator: number): number {
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator)) return 0;
+  if (denominator <= 0) return 0;
+  const result = (numerator / denominator) * 100;
+  return Number.isFinite(result) ? Math.min(Math.max(result, 0), 100) : 0;
+}

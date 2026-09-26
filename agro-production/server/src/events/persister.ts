@@ -264,7 +264,7 @@ async function handleCampaignInvested(event: CampaignInvestedEvent) {
         amount: inv.amount,
         ledger: inv.ledger,
         txHash: inv.txHash ?? undefined,
-        createdAt: inv.createdAt.toISOString(),
+        createdAt: inv.createdAt ? inv.createdAt.toISOString() : new Date().toISOString(),
       },
     };
   });
