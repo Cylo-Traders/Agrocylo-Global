@@ -173,6 +173,28 @@ function logDuplicateSkip(event: ParsedEvent, stage: string) {
   });
 }
 
+/**
+ * Returns true when the raised total has reached or exceeded the campaign
+ * target. Both values are on-chain i128 amounts serialized as decimal
+ * strings, so compare with BigInt to avoid Number precision loss above 2^53.
+ *
+ * Overfunding policy: the contract executes the investment before the event
+ * is emitted, so an overshoot cannot be rejected by the indexer — any
+ * totalRaised >= targetAmount marks the campaign FUNDED. Malformed amounts
+ * are logged and treated as "target not reached" rather than throwing.
+ */
+function hasReachedTarget(totalRaised: string, targetAmount: string): boolean {
+  try {
+    return BigInt(totalRaised) >= BigInt(targetAmount);
+  } catch {
+    logger.warn("EventPersister: malformed funding amounts, leaving status unchanged", {
+      totalRaised,
+      targetAmount,
+    });
+    return false;
+  }
+}
+
 async function handleCampaignInvested(event: CampaignInvestedEvent) {
   // Idempotency: investment upsert key includes campaign/investor/ledger.
   // Broadcast payloads are captured inside the transaction but sent only after
@@ -216,7 +238,9 @@ async function handleCampaignInvested(event: CampaignInvestedEvent) {
       where: { onChainId: event.campaignId },
       data: {
         totalRaised: event.totalRaised,
-        status: event.totalRaised === campaign.targetAmount ? "FUNDED" : undefined,
+        status: hasReachedTarget(event.totalRaised, campaign.targetAmount)
+          ? "FUNDED"
+          : undefined,
       },
     });
 
