@@ -59,6 +59,24 @@ export class TransactionFailedError extends Error {
 }
 
 /**
+ * #993 — Thrown when the signed XDR returned by the wallet differs from the
+ * transaction the app prepared. The only permitted difference is the addition
+ * of signatures; any mutation to source, sequence, fee, operations, or time
+ * bounds is rejected before RPC submission.
+ */
+export class XdrMismatchError extends Error {
+  public readonly field: string;
+  constructor(field: string) {
+    super(
+      `Signed transaction does not match the prepared intent — "${field}" was altered. ` +
+        "This may indicate a wallet or provider bug. Please retry from the beginning.",
+    );
+    this.name = "XdrMismatchError";
+    this.field = field;
+  }
+}
+
+/**
  * Thrown when the connected wallet's active network does not match the network
  * the app is configured for. Refusing to sign/submit in this case prevents a
  * transaction being built for one ledger and executed against another.
@@ -84,7 +102,8 @@ export type TransactionErrorKind =
   | "rejected"
   | "network"
   | "timeout"
-  | "failed";
+  | "failed"
+  | "xdr_mismatch";
 
 export interface SignAndSubmitResult {
   success: boolean;
@@ -115,6 +134,11 @@ export interface SignTransactionOptions {
   maxRetries?: number;
   /** Base delay in ms for exponential backoff between retries (default 1 000). */
   baseDelayMs?: number;
+  /**
+   * #993 — Expected signer address. Passed to wallet adapters that support
+   * `accountToSign` (e.g. Freighter) so a multi-account wallet uses the right key.
+   */
+  accountToSign?: string;
 }
 
 // ── Defaults ─────────────────────────────────────────────────────────────
@@ -177,15 +201,98 @@ async function resolveNetworkPassphrase(override?: string): Promise<string> {
 // ── Core API ─────────────────────────────────────────────────────────────
 
 /**
+ * #993 — Verify that the wallet returned the same transaction the app prepared.
+ *
+ * The only valid difference between `preparedXdr` and `signedXdr` is the
+ * addition of signatures. Any change to source account, sequence, fee,
+ * operations (type, contract, function, arguments), or time bounds is
+ * rejected before the transaction reaches the Soroban RPC.
+ *
+ * Skips verification gracefully when `fromXDR` returns a stub (test mocks
+ * that do not implement the full Transaction interface).
+ */
+export function verifySignedXdrInvariants(
+  preparedXdr: string,
+  signedXdr: string,
+  networkPassphrase: string,
+): void {
+  const prepared = TransactionBuilder.fromXDR(preparedXdr, networkPassphrase);
+  const signed = TransactionBuilder.fromXDR(signedXdr, networkPassphrase);
+
+  // Skip when the SDK returns a stub object (test environment).
+  if (typeof (prepared as unknown as { hash?: unknown }).hash !== "function") return;
+
+  const p = prepared as unknown as TxLike;
+  const s = signed as unknown as TxLike;
+
+  // Primary check: transaction hash covers every mutable field except sigs.
+  const preparedHash = p.hash().toString("hex");
+  const signedHash = s.hash().toString("hex");
+  if (preparedHash === signedHash) return;
+
+  // Secondary pass: identify which field changed for a diagnostic message.
+  // None of these branches log full XDR or signature data.
+  if (p.source !== s.source) throw new XdrMismatchError("source account");
+
+  if (p.sequence !== undefined && p.sequence !== s.sequence) {
+    throw new XdrMismatchError("sequence number");
+  }
+
+  if (p.fee !== s.fee) throw new XdrMismatchError("fee");
+
+  const pBounds = p.timeBounds;
+  const sBounds = s.timeBounds;
+  if (
+    (pBounds?.minTime ?? "0") !== (sBounds?.minTime ?? "0") ||
+    (pBounds?.maxTime ?? "0") !== (sBounds?.maxTime ?? "0")
+  ) {
+    throw new XdrMismatchError("time bounds");
+  }
+
+  const pOps = p.operations ?? [];
+  const sOps = s.operations ?? [];
+  if (pOps.length !== sOps.length) throw new XdrMismatchError("operation count");
+
+  for (let i = 0; i < pOps.length; i++) {
+    const pOp = pOps[i] as OpLike;
+    const sOp = sOps[i] as OpLike;
+    if (pOp.type !== sOp.type) throw new XdrMismatchError(`operation[${i}] type`);
+    if (pOp.type === "invokeHostFunction") {
+      const pFuncXdr = pOp.func?.toXDR?.("base64") ?? "";
+      const sFuncXdr = sOp.func?.toXDR?.("base64") ?? "";
+      if (pFuncXdr !== sFuncXdr) throw new XdrMismatchError(`operation[${i}] contract or arguments`);
+    }
+  }
+
+  throw new XdrMismatchError("transaction body");
+}
+
+// Minimal structural types used inside verifySignedXdrInvariants.
+interface TimeBounds { minTime?: string; maxTime?: string }
+interface OpLike {
+  type: string;
+  func?: { toXDR?: (fmt: string) => string };
+}
+interface TxLike {
+  hash(): Buffer;
+  source?: string;
+  sequence?: string;
+  fee?: string;
+  timeBounds?: TimeBounds;
+  operations?: unknown[];
+}
+
+/**
  * Sign a transaction XDR using the Freighter wallet.
  * Throws if the user rejects, Freighter is unavailable, or the wallet network
  * does not match the app's configured network.
  */
 export async function signTransaction(
   transactionXdr: string,
-  opts?: Pick<SignTransactionOptions, "networkPassphrase">,
+  opts?: Pick<SignTransactionOptions, "networkPassphrase" | "accountToSign">,
 ): Promise<string> {
   const networkPassphrase = await resolveNetworkPassphrase(opts?.networkPassphrase);
+  const accountToSign = opts?.accountToSign;
 
   // Prefer window.freighter if available (e.g. Playwright test mocks).
   const freighterDirect =
@@ -194,8 +301,8 @@ export async function signTransaction(
       : null;
 
   const signedXdr = freighterDirect
-    ? await freighterDirect.signTransaction(transactionXdr, { networkPassphrase })
-    : await FreighterApi.signTransaction(transactionXdr, { networkPassphrase });
+    ? await freighterDirect.signTransaction(transactionXdr, { networkPassphrase, accountToSign })
+    : await FreighterApi.signTransaction(transactionXdr, { networkPassphrase, accountToSign });
 
   if (!signedXdr) {
     throw new Error("Transaction was rejected by the wallet");
@@ -336,6 +443,9 @@ export async function submitTransaction(
 /**
  * End-to-end helper: sign then submit. The primary entry point for every
  * transaction-sending path in the app.
+ *
+ * #993 — After signing, the returned XDR is verified against the prepared
+ * transaction before any RPC call is made. Mismatch throws {@link XdrMismatchError}.
  */
 export async function signAndSubmitTransaction(
   transactionXdr: string,
@@ -343,6 +453,9 @@ export async function signAndSubmitTransaction(
 ): Promise<SignAndSubmitResult> {
   try {
     const signedXdr = await signTransaction(transactionXdr, opts);
+    const networkPassphrase =
+      opts?.networkPassphrase ?? getExpectedNetworkPassphrase();
+    verifySignedXdrInvariants(transactionXdr, signedXdr, networkPassphrase);
     return await submitTransaction(signedXdr, opts);
   } catch (err) {
     return toFailureResult(err);
@@ -350,6 +463,9 @@ export async function signAndSubmitTransaction(
 }
 
 function toFailureResult(err: unknown): SignAndSubmitResult {
+  if (err instanceof XdrMismatchError) {
+    return { success: false, error: err.message, errorKind: "xdr_mismatch" };
+  }
   if (err instanceof NetworkMismatchError) {
     return { success: false, error: err.message, errorKind: "mismatch" };
   }
