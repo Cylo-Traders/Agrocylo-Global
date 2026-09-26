@@ -10,6 +10,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { safePercentage } from "@/lib/validation";
 
 interface BasketPosition {
   campaignId: string;
@@ -146,10 +147,9 @@ export default function BasketPage() {
                       }`}
                     >
                       {pos.currentValue >= pos.allocatedAmount ? "+" : ""}
-                      {(
-                        ((pos.currentValue - pos.allocatedAmount) /
-                          pos.allocatedAmount) *
-                        100
+                      {safePercentage(
+                        pos.currentValue - pos.allocatedAmount,
+                        pos.allocatedAmount,
                       ).toFixed(1)}
                       %
                     </p>
