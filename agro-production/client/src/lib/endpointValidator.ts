@@ -1,22 +1,13 @@
-/**
- * Endpoint URL validator for Next.js config evaluation.
- *
- * Validates NEXT_PUBLIC_SOROBAN_RPC_URL and NEXT_PUBLIC_HORIZON_URL before
- * they are passed to `new URL()` for headers / image remotePatterns.
- *
- * Goals:
- *  - Fail predictably with variable-specific remediation instead of generic `Invalid URL`.
- *  - Validate scheme and format; allow http only for localhost development.
- *  - Report all invalid variables at once with actionable guidance.
- *  - Never echo credentials, query tokens, or full endpoint values in diagnostics.
- */
-
 export const ALLOWED_PROTOCOLS = ["https:", "http:"] as const;
+export const ALLOWED_WS_PROTOCOLS = ["wss:", "ws:"] as const;
+const INSECURE_PROTOCOLS = new Set(["http:", "ws:"]);
 export const LOCALHOST_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
 
 export interface SingleValidationResult {
   varName: string;
   hostname: string | null;
+  /** scheme + host + port only (no path/query/credentials) — safe to place verbatim in a CSP source list. */
+  origin: string | null;
   error: string | null;
   /** Effective fallback hostname when value is absent and not required (null = no fallback). */
   fallbackUsed: boolean;
@@ -32,12 +23,14 @@ function isLocalhost(hostname: string): boolean {
  * @param varName - Environment variable name (e.g. NEXT_PUBLIC_SOROBAN_RPC_URL)
  * @param rawValue - Raw env value (may be undefined / empty / malformed)
  * @param options.required - When true, missing/empty is an error. When false, missing returns fallbackUsed=true.
+ * @param options.allowedProtocols - Defaults to https:/http:. Pass ALLOWED_WS_PROTOCOLS for ws/wss endpoints.
  */
 export function validateEndpointUrl(
   varName: string,
   rawValue: string | undefined | null,
-  options: { required: boolean }
+  options: { required: boolean; allowedProtocols?: readonly string[] }
 ): SingleValidationResult {
+  const allowedProtocols = options.allowedProtocols ?? ALLOWED_PROTOCOLS;
   const trimmed = typeof rawValue === "string" ? rawValue.trim() : "";
 
   if (!trimmed) {
@@ -45,6 +38,7 @@ export function validateEndpointUrl(
       return {
         varName,
         hostname: null,
+        origin: null,
         fallbackUsed: false,
         error:
           `${varName} is missing or empty. ` +
@@ -54,7 +48,7 @@ export function validateEndpointUrl(
           `Do not include credentials, tokens, or query strings.`,
       };
     }
-    return { varName, hostname: null, error: null, fallbackUsed: true };
+    return { varName, hostname: null, origin: null, error: null, fallbackUsed: true };
   }
 
   let url: URL;
@@ -64,36 +58,38 @@ export function validateEndpointUrl(
     return {
       varName,
       hostname: null,
+      origin: null,
       fallbackUsed: false,
       error:
-        `${varName} is malformed. ` +
-        `Expected a valid URL with https:// scheme (http:// allowed only for localhost development, e.g., http://localhost:8000). ` +
+        `${varName} is not a valid URL (e.g., http://localhost:8000). ` +
         `Check your .env.local or deployment environment and remove any credentials, tokens, or query strings. ` +
         `See docs/deployment/environment.md and client/.env.example.`,
     };
   }
 
-  if (!ALLOWED_PROTOCOLS.includes(url.protocol as typeof ALLOWED_PROTOCOLS[number])) {
+  if (!allowedProtocols.includes(url.protocol as typeof allowedProtocols[number])) {
     return {
       varName,
       hostname: null,
+      origin: null,
       fallbackUsed: false,
       error:
         `${varName} uses an unsupported scheme "${url.protocol}". ` +
-        `Supported schemes are https: (http: allowed only for localhost development). ` +
-        `Set ${varName} to a valid https:// URL. See docs/deployment/environment.md.`,
+        `Supported schemes are ${allowedProtocols.join(", ")}. ` +
+        `Set ${varName} to a valid URL using one of those schemes. See docs/deployment/environment.md.`,
     };
   }
 
-  if (url.protocol === "http:" && !isLocalhost(url.hostname)) {
+  if (INSECURE_PROTOCOLS.has(url.protocol) && !isLocalhost(url.hostname)) {
     return {
       varName,
       hostname: null,
+      origin: null,
       fallbackUsed: false,
       error:
-        `${varName} uses http:// for a non-local host. ` +
-        `Use https:// for remote endpoints; http:// is only allowed for localhost/127.0.0.1 development. ` +
-        `Set ${varName} to a valid https:// URL. See docs/deployment/environment.md.`,
+        `${varName} uses ${url.protocol} for a non-local host. ` +
+        `Use a secure scheme (https:/wss:) for remote endpoints; ${url.protocol} is only allowed for localhost/127.0.0.1 development. ` +
+        `Set ${varName} to a valid secure URL. See docs/deployment/environment.md.`,
     };
   }
 
@@ -101,6 +97,7 @@ export function validateEndpointUrl(
     return {
       varName,
       hostname: null,
+      origin: null,
       fallbackUsed: false,
       error:
         `${varName} is malformed (missing hostname). ` +
@@ -113,6 +110,7 @@ export function validateEndpointUrl(
     return {
       varName,
       hostname: null,
+      origin: null,
       fallbackUsed: false,
       error:
         `${varName} must not contain embedded credentials (username/password). ` +
@@ -121,8 +119,8 @@ export function validateEndpointUrl(
     };
   }
 
-  // hostname is safe to expose; full URL / query / port is not echoed
-  return { varName, hostname: url.hostname, error: null, fallbackUsed: false };
+  // hostname/origin is safe to expose; full URL / query / path is not echoed
+  return { varName, hostname: url.hostname, origin: url.origin, error: null, fallbackUsed: false };
 }
 
 export interface EndpointsEnv {
@@ -238,4 +236,96 @@ export function assertEndpointsValid(
     sorobanRpc: result.hostnames.sorobanRpc!,
     horizon: result.hostnames.horizon!,
   };
+}
+
+export interface ApiWsEnv {
+  NEXT_PUBLIC_API_URL?: string;
+  NEXT_PUBLIC_WS_URL?: string;
+  NODE_ENV?: string;
+}
+
+export interface ApiWsValidationResult {
+  errors: string[];
+  invalidVars: string[];
+  origins: {
+    api: string | null;
+    ws: string | null;
+  };
+}
+
+/**
+ * Validate the separately-hosted API/WebSocket endpoints (Issue #1001).
+ * Both are optional: a same-origin deployment sets neither and relies on 'self'.
+ * When set, they must be well-formed and — outside localhost — use a secure scheme.
+ */
+export function validateApiWsOrigins(
+  env: ApiWsEnv,
+  options: { isProduction: boolean }
+): ApiWsValidationResult {
+  const apiResult = validateEndpointUrl("NEXT_PUBLIC_API_URL", env.NEXT_PUBLIC_API_URL, {
+    required: false,
+    allowedProtocols: ALLOWED_PROTOCOLS,
+  });
+  const wsResult = validateEndpointUrl("NEXT_PUBLIC_WS_URL", env.NEXT_PUBLIC_WS_URL, {
+    required: false,
+    allowedProtocols: ALLOWED_WS_PROTOCOLS,
+  });
+
+  const errors: string[] = [];
+  const invalidVars: string[] = [];
+  if (apiResult.error) {
+    errors.push(apiResult.error);
+    invalidVars.push(apiResult.varName);
+  }
+  if (wsResult.error) {
+    errors.push(wsResult.error);
+    invalidVars.push(wsResult.varName);
+  }
+
+  // In production, if a scheme was provided it must already be secure (enforced above);
+  // this just guards against a http:// value slipping through as "valid" for a remote host.
+  if (options.isProduction) {
+    if (apiResult.origin && apiResult.origin.startsWith("http://") && !apiResult.origin.includes("localhost")) {
+      errors.push(`NEXT_PUBLIC_API_URL must use https:// in production.`);
+      invalidVars.push("NEXT_PUBLIC_API_URL");
+    }
+    if (wsResult.origin && wsResult.origin.startsWith("ws://") && !wsResult.origin.includes("localhost")) {
+      errors.push(`NEXT_PUBLIC_WS_URL must use wss:// in production.`);
+      invalidVars.push("NEXT_PUBLIC_WS_URL");
+    }
+  }
+
+  return {
+    errors,
+    invalidVars,
+    origins: { api: apiResult.origin, ws: wsResult.origin },
+  };
+}
+
+/**
+ * Validate and throw for the API/WS pair, mirroring assertEndpointsValid.
+ * Returns exact origins (scheme+host+port, no path/query/credentials) ready
+ * to drop into a CSP connect-src list.
+ */
+export function assertApiWsOriginsValid(
+  env: ApiWsEnv,
+  options: { isProduction: boolean }
+): { apiOrigin: string | null; wsOrigin: string | null } {
+  const result = validateApiWsOrigins(env, options);
+  if (result.errors.length > 0) {
+    const header =
+      `Invalid API/WebSocket endpoint configuration (${result.invalidVars.join(", ")}). ` +
+      `Fix the listed variable(s) in your .env.local or deployment environment. ` +
+      `Do not include credentials, tokens, or query strings in endpoint values.`;
+    const body = result.errors.map((e, i) => `${i + 1}. ${e}`).join("\n");
+    const guidance =
+      `\nActionable guidance:\n` +
+      `- Leave NEXT_PUBLIC_API_URL / NEXT_PUBLIC_WS_URL unset for same-origin deployments.\n` +
+      `- For a separately hosted API/WS, use exact origins (e.g., https://api.example.com, wss://ws.example.com).\n` +
+      `- Local development may use http://localhost:5001 / ws://localhost:5001.\n` +
+      `- Diagnostic output intentionally omits endpoint values to avoid leaking secrets.`;
+
+    throw new Error(`${header}\n${body}${guidance}`);
+  }
+  return { apiOrigin: result.origins.api, wsOrigin: result.origins.ws };
 }
