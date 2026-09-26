@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertEndpointsValid } from "./src/lib/endpointValidator";
+import { assertEndpointsValid, assertApiWsOriginsValid } from "./src/lib/endpointValidator";
 import { getAllowedProductImageHosts, getAllowedProductImageOrigins } from "./src/lib/productImagePolicy";
 
 // ── Resolve repository root for Turbopack ────────────────────────────────
@@ -82,6 +82,18 @@ const { sorobanRpc, horizon: horizonHostname } = assertEndpointsValid(
   { isProduction: process.env.NODE_ENV === "production" }
 );
 
+// Issue #1001: allow a separately hosted API/WebSocket origin (e.g. localhost:5001
+// in dev, or a dedicated api./ws. host in production) through the CSP connect-src.
+// Both are optional -- same-origin deployments leave them unset and rely on 'self'.
+const { apiOrigin, wsOrigin } = assertApiWsOriginsValid(
+  {
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
+    NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL,
+    NODE_ENV: process.env.NODE_ENV,
+  },
+  { isProduction: process.env.NODE_ENV === "production" }
+);
+
 const productImageHosts = getAllowedProductImageHosts();
 const productImageOrigins = getAllowedProductImageOrigins();
 const productImagePatterns = productImageOrigins.map((origin) => {
@@ -102,7 +114,8 @@ const nextConfig: NextConfig = {
   async headers() {
     const imageHosts = ["ipfs.io", "gateway.pinata.cloud", sorobanRpc, horizonHostname, ...productImageHosts].filter(Boolean);
     const cspImageSources = [...new Set([...imageHosts.map((h) => `https://${h}`), ...productImageOrigins])].join(" ");
-    const cspConnectSources = [`https://${sorobanRpc}`, `https://${horizonHostname}`, "https://freighter.app"].join(" ");
+    const apiWsOrigins = [apiOrigin, wsOrigin].filter((o): o is string => Boolean(o));
+    const cspConnectSources = [`https://${sorobanRpc}`, `https://${horizonHostname}`, "https://freighter.app", ...new Set(apiWsOrigins)].join(" ");
     return [
       {
         source: "/:path*",
