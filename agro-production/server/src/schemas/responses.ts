@@ -151,6 +151,41 @@ export const BasketDetailSchema = BasketSchema.extend({
   deposits: z.array(BasketDepositSchema).optional(),
 });
 
+/**
+ * Wallet-scoped investor basket summary (Issue #1050).
+ *
+ * Units: all monetary amounts are Soroban i128 stroop strings as stored
+ * on-chain (1 XLM = 10_000_000 stroops); the client converts for display and
+ * must keep the string form to retain precision.
+ *
+ * "Active basket" rule: the basket owning the investor's most recent
+ * deposit (largest createdAt). Positions aggregate that basket only.
+ */
+export const InvestorBasketPositionSchema = z.object({
+  basketId: uuidParam,
+  onChainId: z.string(),
+  depositorAddress: stellarAddress,
+  /** Outstanding deposit for this position, i128 stroops string. */
+  amount: z.string(),
+  claimed: z.boolean(),
+  withdrawn: z.boolean(),
+  /** Set once claim_basket_returns is indexed; i128 stroops string. */
+  payoutAmount: z.string().nullable().optional(),
+  ledger: z.number().int(),
+  txHash: z.string().nullable().optional(),
+  createdAt: dateField,
+  updatedAt: dateField,
+});
+
+export const InvestorBasketSummarySchema = z.object({
+  basket: BasketSchema,
+  positions: z.array(InvestorBasketPositionSchema),
+  /** Sum of position amounts, i128 stroops string ("0" when empty). */
+  totalAllocated: z.string(),
+  /** Sum of realized payouts for claimed positions, i128 stroops string. */
+  totalReturned: z.string(),
+});
+
 export const ValidationErrorSchema = z.object({
   type: z.string().url(),
   title: z.literal("Validation Failed"),
