@@ -80,6 +80,7 @@ describe("startProductionWatcher", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.clearAllTimers();
   });
 
   describe("cursor loading", () => {
@@ -454,9 +455,10 @@ describe("startProductionWatcher", () => {
       await vi.advanceTimersByTimeAsync(5_000);
 
       // Verify rollback occurred before any re-projection would happen
-      expect(mockTransactionDeleteMany).toHaveBeenCalledBefore(
-        mockEventCursorUpsert as any,
-      );
+      // using invocationCallOrder from the mock call history
+      const deleteCallOrder = mockTransactionDeleteMany.mock.invocationCallOrder[0];
+      const upsertCallOrder = mockEventCursorUpsert.mock.invocationCallOrder[0];
+      expect(deleteCallOrder).toBeLessThan(upsertCallOrder);
     });
   });
 });
