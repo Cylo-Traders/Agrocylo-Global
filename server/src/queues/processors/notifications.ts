@@ -132,10 +132,8 @@ export async function processNotifications(job: Job): Promise<void> {
         await handleSendWebSocket(job);
         break;
       default:
-        logger.warn('Unknown notification job name', {
-          jobId: job.id,
-          name: job.name,
-        });
+        // Fail loudly so unsupported jobs are not silently marked complete.
+        throw new Error(`Unknown notification job name: ${job.name}`);
     }
   } catch (error) {
     logger.error('Notification job failed', error, {

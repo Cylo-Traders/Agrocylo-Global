@@ -1,9 +1,9 @@
-import { prisma } from "../config/database.js";
-import { ApiError } from "../http/errors.js";
-import logger from "../config/logger.js";
-import { NotificationEventType } from "../enums/notificationEventType.js";
-import { buildNotificationMessage } from "../utils/notificationTemplates.js";
-import { wsManager } from "./wsManager.js";
+import { prisma } from '../config/database.js';
+import { ApiError } from '../http/errors.js';
+import logger from '../config/logger.js';
+import { NotificationEventType } from '../enums/notificationEventType.js';
+import { buildNotificationMessage } from '../utils/notificationTemplates.js';
+import { wsManager } from './wsManager.js';
 
 export interface NotificationRecord {
   id: string;
@@ -18,6 +18,13 @@ export interface NotificationRecord {
 export interface ListNotificationsOptions {
   unreadOnly?: boolean;
   limit?: number;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ListNotificationsResult {
+  items: NotificationRecord[];
+  total: number;
 }
 
 type NotificationPayload = {
@@ -49,13 +56,14 @@ function clampLimit(limit?: number): number {
   return Math.min(Math.max(Math.trunc(limit), 1), 50);
 }
 
+function clampPage(page?: number): number {
+  if (!Number.isFinite(page) || !page) return 1;
+  return Math.max(Math.trunc(page), 1);
+}
+
 function walletCandidates(walletAddress: string): string[] {
   return Array.from(
-    new Set([
-      walletAddress,
-      walletAddress.toLowerCase(),
-      walletAddress.toUpperCase(),
-    ]),
+    new Set([walletAddress, walletAddress.toLowerCase(), walletAddress.toUpperCase()])
   );
 }
 
@@ -66,10 +74,7 @@ function walletCandidates(walletAddress: string): string[] {
  * - "confirmed" → DELIVERY_CONFIRMED (farmer)
  * - "refunded"  → REFUND_ISSUED (buyer)
  */
-const actionToNotifications: Record<
-  string,
-  (p: EscrowEventPayload) => MappedNotification[]
-> = {
+const actionToNotifications: Record<string, (p: EscrowEventPayload) => MappedNotification[]> = {
   created: ({ buyerAddress, farmerAddress }) => [
     ...(buyerAddress
       ? [
@@ -110,21 +115,34 @@ const actionToNotifications: Record<
 
 export async function listNotifications(
   walletAddress: string,
-  options: ListNotificationsOptions = {},
-): Promise<NotificationRecord[]> {
-  return prisma.notification.findMany({
-    where: {
-      walletAddress: { in: walletCandidates(walletAddress) },
-      ...((options.unreadOnly ?? true) ? { isRead: false } : {}),
-    },
-    orderBy: { createdAt: "desc" },
-    take: clampLimit(options.limit),
-  });
+  options: ListNotificationsOptions = {}
+): Promise<ListNotificationsResult> {
+  const candidates = walletCandidates(walletAddress);
+  const where = {
+    walletAddress: { in: candidates },
+    ...((options.unreadOnly ?? true) ? { isRead: false } : {}),
+  };
+
+  const page = clampPage(options.page);
+  const pageSize = clampLimit(options.pageSize ?? options.limit);
+  const skip = (page - 1) * pageSize;
+
+  const [items, total] = await Promise.all([
+    prisma.notification.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: pageSize,
+    }),
+    prisma.notification.count({ where }),
+  ]);
+
+  return { items, total };
 }
 
 export async function markNotificationsRead(
   walletAddress: string,
-  ids: string[],
+  ids: string[]
 ): Promise<{ count: number }> {
   if (ids.length === 0) return { count: 0 };
 
@@ -134,25 +152,16 @@ export async function markNotificationsRead(
   });
 
   if (notifications.length !== ids.length) {
-    throw new ApiError(
-      404,
-      "Not Found",
-      "One or more notifications were not found",
-    );
+    throw new ApiError(404, 'Not Found', 'One or more notifications were not found');
   }
 
   const walletMatches = walletCandidates(walletAddress);
   if (
     notifications.some(
-      (n: { id: string; walletAddress: string }) =>
-        !walletMatches.includes(n.walletAddress),
+      (n: { id: string; walletAddress: string }) => !walletMatches.includes(n.walletAddress)
     )
   ) {
-    throw new ApiError(
-      403,
-      "Forbidden",
-      "You cannot modify these notifications",
-    );
+    throw new ApiError(403, 'Forbidden', 'You cannot modify these notifications');
   }
 
   const result = await prisma.notification.updateMany({
@@ -160,6 +169,32 @@ export async function markNotificationsRead(
     data: { isRead: true },
   });
 
+  return { count: result.count };
+}
+
+export async function deleteNotification(
+  walletAddress: string,
+  notificationId: string
+): Promise<void> {
+  const notification = await prisma.notification.findUnique({
+    where: { id: notificationId },
+    select: { walletAddress: true },
+  });
+  if (!notification) {
+    throw new ApiError(404, 'Not Found', 'Notification not found');
+  }
+  const candidates = walletCandidates(walletAddress);
+  if (!candidates.includes(notification.walletAddress)) {
+    throw new ApiError(403, 'Forbidden', 'You cannot delete this notification');
+  }
+  await prisma.notification.delete({ where: { id: notificationId } });
+}
+
+export async function deleteAllNotifications(walletAddress: string): Promise<{ count: number }> {
+  const candidates = walletCandidates(walletAddress);
+  const result = await prisma.notification.deleteMany({
+    where: { walletAddress: { in: candidates } },
+  });
   return { count: result.count };
 }
 
@@ -187,20 +222,18 @@ export class NotificationService {
         },
       });
 
-      wsManager.broadcastTo(payload.walletAddress, "notification:new", {
+      wsManager.broadcastTo(payload.walletAddress, 'notification:new', {
         id: record.id,
         type: payload.type,
         message,
         orderId: payload.orderId ?? null,
       });
     } catch (error) {
-      logger.error("Failed to create notification", error);
+      logger.error('Failed to create notification', error);
     }
   }
 
-  static async notifyFromEscrowEvent(
-    payload: EscrowEventPayload,
-  ): Promise<void> {
+  static async notifyFromEscrowEvent(payload: EscrowEventPayload): Promise<void> {
     const mapper = actionToNotifications[payload.action];
     if (!mapper) return;
 
@@ -212,8 +245,8 @@ export class NotificationService {
           orderId: payload.orderId,
           amount: payload.amount,
           token: payload.token,
-        }),
-      ),
+        })
+      )
     );
   }
 

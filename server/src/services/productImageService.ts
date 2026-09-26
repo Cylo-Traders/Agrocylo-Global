@@ -7,7 +7,7 @@ import { config } from '../config/index.js';
 export class HttpError extends Error {
   constructor(
     public readonly status: number,
-    message: string,
+    message: string
   ) {
     super(message);
     this.name = 'HttpError';
@@ -64,7 +64,10 @@ async function getProduct(productId: string): Promise<ProductRow | null> {
   };
 }
 
-async function assertProductOwnership(productId: string, walletAddress: string): Promise<ProductRow> {
+async function assertProductOwnership(
+  productId: string,
+  walletAddress: string
+): Promise<ProductRow> {
   const product = await getProduct(productId);
   if (!product) {
     throw new HttpError(404, 'Product not found.');
@@ -85,11 +88,13 @@ async function renderThumbnail(buffer: Buffer, size: 400 | 800): Promise<Buffer>
 
 async function uploadVariant(path: string, body: Buffer, contentType: string): Promise<void> {
   const supabaseAdmin = getSupabaseAdmin();
-  const { error } = await supabaseAdmin.storage.from(config.productImagesBucket).upload(path, body, {
-    contentType,
-    upsert: true,
-    cacheControl: '3600',
-  });
+  const { error } = await supabaseAdmin.storage
+    .from(config.productImagesBucket)
+    .upload(path, body, {
+      contentType,
+      upsert: true,
+      cacheControl: '3600',
+    });
   if (error) {
     throw new HttpError(500, `Storage upload failed: ${error.message}`);
   }
@@ -116,11 +121,11 @@ export async function uploadProductImage(params: {
   const basePath = `${farmerWallet}/${productId}`;
 
   const originalPath = `${basePath}/original-${randomUUID()}.${ext}`;
-  const thumb400Path = `${basePath}/thumbnail_400x400.webp`;
-  const thumb800Path = `${basePath}/thumbnail_800x800.webp`;
+  const version = randomUUID();
+  const thumb400Path = `${basePath}/thumbnail_400x400-${version}.webp`;
+  const thumb800Path = `${basePath}/thumbnail_800x800-${version}.webp`;
   const uploadedPaths: UploadedPaths = { originalPath, thumb400Path, thumb800Path };
 
-  // Delete existing paths under this product folder so stale variants are not left behind.
   const oldPrefix = basePath;
   const supabaseAdmin = getSupabaseAdmin();
   const { data: existingFiles, error: listError } = await supabaseAdmin.storage
@@ -129,40 +134,43 @@ export async function uploadProductImage(params: {
   if (listError) {
     throw new HttpError(500, `Storage list failed: ${listError.message}`);
   }
-  if (existingFiles.length > 0) {
-    const existingPaths = existingFiles.map((item) => `${oldPrefix}/${item.name}`);
-    const { error: removeExistingError } = await supabaseAdmin.storage
-      .from(config.productImagesBucket)
-      .remove(existingPaths);
-    if (removeExistingError) {
-      throw new HttpError(500, `Storage cleanup failed: ${removeExistingError.message}`);
-    }
-  }
-
-  const [thumb400, thumb800] = await Promise.all([
-    renderThumbnail(fileBuffer, 400),
-    renderThumbnail(fileBuffer, 800),
-  ]);
-
-  await uploadVariant(uploadedPaths.originalPath, fileBuffer, mimeType);
-  await uploadVariant(uploadedPaths.thumb400Path, thumb400, 'image/webp');
-  await uploadVariant(uploadedPaths.thumb800Path, thumb800, 'image/webp');
-
-  const nextImageUrl = publicUrlForPath(uploadedPaths.thumb800Path);
+  const existingPaths = existingFiles.map((item) => `${oldPrefix}/${item.name}`);
 
   try {
+    const [thumb400, thumb800] = await Promise.all([
+      renderThumbnail(fileBuffer, 400),
+      renderThumbnail(fileBuffer, 800),
+    ]);
+
+    await uploadVariant(uploadedPaths.originalPath, fileBuffer, mimeType);
+    await uploadVariant(uploadedPaths.thumb400Path, thumb400, 'image/webp');
+    await uploadVariant(uploadedPaths.thumb800Path, thumb800, 'image/webp');
+
+    const nextImageUrl = publicUrlForPath(uploadedPaths.thumb800Path);
+
     await prisma.product.update({
       where: { id: product.id },
       data: { imageUrl: nextImageUrl },
     });
+
+    if (existingPaths.length > 0) {
+      const { error: removeExistingError } = await supabaseAdmin.storage
+        .from(config.productImagesBucket)
+        .remove(existingPaths);
+      if (removeExistingError) {
+        // The new pointer is valid even if deferred old-object cleanup fails.
+        console.error(`Failed to remove old product image objects: ${removeExistingError.message}`);
+      }
+    }
+
+    return { imageUrl: nextImageUrl };
   } catch (error) {
     await supabaseAdmin.storage
       .from(config.productImagesBucket)
-      .remove([uploadedPaths.originalPath, uploadedPaths.thumb400Path, uploadedPaths.thumb800Path]);
+      .remove([uploadedPaths.originalPath, uploadedPaths.thumb400Path, uploadedPaths.thumb800Path])
+      .catch(() => undefined);
     throw error;
   }
-
-  return { imageUrl: nextImageUrl };
 }
 
 export async function deleteProductImage(params: {
@@ -175,9 +183,11 @@ export async function deleteProductImage(params: {
   const prefix = `${farmerWallet}/${productId}`;
   const supabaseAdmin = getSupabaseAdmin();
 
-  const { data, error } = await supabaseAdmin.storage.from(config.productImagesBucket).list(prefix, {
-    limit: 100,
-  });
+  const { data, error } = await supabaseAdmin.storage
+    .from(config.productImagesBucket)
+    .list(prefix, {
+      limit: 100,
+    });
   if (error) {
     throw new HttpError(500, `Storage list failed: ${error.message}`);
   }

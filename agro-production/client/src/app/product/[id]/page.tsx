@@ -15,6 +15,7 @@ import { classifyError, logErrorWithContext } from "@/lib/errorHandling";
 import { isNetworkError } from "@/lib/apiClient";
 import { ButtonSpinner } from "@/components/Skeletons";
 import type { Product, Order } from "@/types";
+import { ProductImage } from "@/components/ProductImage";
 
 export default function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -125,18 +126,16 @@ export default function ProductDetailPage() {
         <span className="text-foreground" aria-current="page">{product.name}</span>
       </nav>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <div className="h-64 md:h-auto bg-neutral-100 rounded-xl flex items-center justify-center text-6xl" role="img" aria-label={product.imageUrl ? `Image of ${product.name}` : `Placeholder for ${product.name}`}>
-          {product.imageUrl ? (<img src={product.imageUrl} alt={product.name} className="w-full h-full object-cover rounded-xl" />) : (<span aria-hidden="true">🌱</span>)}
-        </div>
+        <ProductImage name={product.name} imageUrl={product.imageUrl} className="h-64 md:h-auto rounded-xl" />
         <div className="space-y-5">
           <div>
             <span className="text-xs bg-primary-50 text-primary-700 px-2 py-0.5 rounded-full">{product.category}</span>
             <h1 className="text-2xl font-bold text-foreground mt-2">{product.name}</h1>
-            <p className="text-sm text-muted mt-1">{product.description}</p>
+            <p className="text-sm text-muted mt-1">{product.description ?? "No description provided."}</p>
           </div>
           <div className="space-y-1">
             <p className="text-2xl font-semibold text-foreground">{formatPrice(product.pricePerUnit)} XLM<span className="text-sm font-normal text-muted"> / {product.unit}</span></p>
-            <p className="text-sm text-muted">{product.quantity} {product.unit}(s) available · {product.location}</p>
+            <p className="text-sm text-muted">{product.quantity} {product.unit}(s) available · {product.location ?? "Location unavailable"}</p>
             <p className="text-xs font-mono text-muted">Farmer: {product.farmerAddress.slice(0, 6)}…{product.farmerAddress.slice(-4)}</p>
           </div>
           {connected && address ? (

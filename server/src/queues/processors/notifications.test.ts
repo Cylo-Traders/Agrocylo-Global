@@ -255,13 +255,11 @@ describe('processNotifications', () => {
     });
   });
 
-  describe('unknown job name', () => {
-    it('should log a warning for unrecognized job names', async () => {
-      const job = makeJob('unknown-notification', { some: 'data' });
+  describe("unknown job name", () => {
+    it("should reject unrecognized job names", async () => {
+      const job = makeJob("unknown-notification", { some: "data" });
 
-      await processNotifications(job);
-
-      expect(logger.warn).toHaveBeenCalledWith('Unknown notification job name', expect.any(Object));
+      await expect(processNotifications(job)).rejects.toThrow("Unknown notification job name");
     });
   });
 });

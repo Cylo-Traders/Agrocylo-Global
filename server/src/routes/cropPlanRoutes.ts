@@ -1,12 +1,12 @@
-import { Router } from "express";
-import type { Request, Response, NextFunction } from "express";
-import { prisma } from "../config/database.js";
-import { ApiError } from "../http/errors.js";
+import { Router } from 'express';
+import type { Request, Response, NextFunction } from 'express';
+import { prisma } from '../config/database.js';
+import { ApiError } from '../http/errors.js';
 
 const router = Router();
 
 // Create a new CropPlan
-router.post("/crop-plans", async (req: Request, res: Response, next: NextFunction) => {
+router.post('/crop-plans', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const {
       farmerWallet,
@@ -21,8 +21,18 @@ router.post("/crop-plans", async (req: Request, res: Response, next: NextFunctio
       reminderDaysBefore = 7,
     } = req.body;
 
-    if (!farmerWallet || !cropName || !plantedDate || !expectedHarvestStart || !expectedHarvestEnd) {
-      throw new ApiError(400, "Validation Error", "farmerWallet, cropName, plantedDate, expectedHarvestStart, and expectedHarvestEnd are required");
+    if (
+      !farmerWallet ||
+      !cropName ||
+      !plantedDate ||
+      !expectedHarvestStart ||
+      !expectedHarvestEnd
+    ) {
+      throw new ApiError(
+        400,
+        'Validation Error',
+        'farmerWallet, cropName, plantedDate, expectedHarvestStart, and expectedHarvestEnd are required'
+      );
     }
 
     const pDate = new Date(plantedDate);
@@ -30,15 +40,23 @@ router.post("/crop-plans", async (req: Request, res: Response, next: NextFunctio
     const hEnd = new Date(expectedHarvestEnd);
 
     if (isNaN(pDate.getTime()) || isNaN(hStart.getTime()) || isNaN(hEnd.getTime())) {
-      throw new ApiError(400, "Invalid Date", "Provided dates are invalid");
+      throw new ApiError(400, 'Invalid Date', 'Provided dates are invalid');
     }
 
     if (pDate > hStart) {
-      throw new ApiError(400, "Invalid Date Range", "Planted date cannot be after expected harvest start date");
+      throw new ApiError(
+        400,
+        'Invalid Date Range',
+        'Planted date cannot be after expected harvest start date'
+      );
     }
 
     if (hStart > hEnd) {
-      throw new ApiError(400, "Invalid Date Range", "Expected harvest start date cannot be after harvest end date");
+      throw new ApiError(
+        400,
+        'Invalid Date Range',
+        'Expected harvest start date cannot be after harvest end date'
+      );
     }
 
     const cropPlan = await prisma.cropPlan.create({
@@ -63,7 +81,7 @@ router.post("/crop-plans", async (req: Request, res: Response, next: NextFunctio
 });
 
 // List farmer crop plans
-router.get("/crop-plans", async (req: Request, res: Response, next: NextFunction) => {
+router.get('/crop-plans', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { farmerWallet, region } = req.query;
 
@@ -73,7 +91,7 @@ router.get("/crop-plans", async (req: Request, res: Response, next: NextFunction
 
     const cropPlans = await prisma.cropPlan.findMany({
       where,
-      orderBy: { expectedHarvestStart: "asc" },
+      orderBy: { expectedHarvestStart: 'asc' },
     });
 
     res.json(cropPlans);
@@ -83,7 +101,7 @@ router.get("/crop-plans", async (req: Request, res: Response, next: NextFunction
 });
 
 // Non-PII aggregate harvest volume view for buyers
-router.get("/crop-plans/aggregate", async (req: Request, res: Response, next: NextFunction) => {
+router.get('/crop-plans/aggregate', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { region, cropName, month, year } = req.query;
 
@@ -109,24 +127,36 @@ router.get("/crop-plans/aggregate", async (req: Request, res: Response, next: Ne
       },
     });
 
-    const summary = cropPlans.reduce((acc, plan) => {
-      const key = `${plan.cropName}_${plan.unit || "units"}`;
-      if (!acc[key]) {
-        acc[key] = {
-          cropName: plan.cropName,
-          totalExpectedVolume: 0,
-          unit: plan.unit || "units",
-          region: plan.region,
-          planCount: 0,
-        };
-      }
-      acc[key].totalExpectedVolume += plan.expectedVolume || 0;
-      acc[key].planCount += 1;
-      return acc;
-    }, {} as Record<string, { cropName: string; totalExpectedVolume: number; unit: string; region: string | null; planCount: number }>);
+    const summary = cropPlans.reduce(
+      (acc, plan) => {
+        const key = `${plan.cropName}_${plan.unit || 'units'}`;
+        if (!acc[key]) {
+          acc[key] = {
+            cropName: plan.cropName,
+            totalExpectedVolume: 0,
+            unit: plan.unit || 'units',
+            region: plan.region,
+            planCount: 0,
+          };
+        }
+        acc[key].totalExpectedVolume += plan.expectedVolume || 0;
+        acc[key].planCount += 1;
+        return acc;
+      },
+      {} as Record<
+        string,
+        {
+          cropName: string;
+          totalExpectedVolume: number;
+          unit: string;
+          region: string | null;
+          planCount: number;
+        }
+      >
+    );
 
     res.json({
-      region: region || "All Regions",
+      region: region || 'All Regions',
       aggregates: Object.values(summary),
     });
   } catch (err) {
@@ -135,37 +165,44 @@ router.get("/crop-plans/aggregate", async (req: Request, res: Response, next: Ne
 });
 
 // Trigger/check harvest reminder for a crop plan
-router.post("/crop-plans/:id/reminder", async (req: Request, res: Response, next: NextFunction) => {
+router.post('/crop-plans/:id/reminder', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
 
     const plan = await prisma.cropPlan.findUnique({ where: { id } });
     if (!plan) {
-      throw new ApiError(404, "Not Found", "Crop plan not found");
+      throw new ApiError(404, 'Not Found', 'Crop plan not found');
     }
 
     const now = new Date();
-    const daysUntilHarvest = Math.ceil((plan.expectedHarvestStart.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    const daysUntilHarvest = Math.ceil(
+      (plan.expectedHarvestStart.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+    );
 
     let reminderTriggered = false;
-    if (daysUntilHarvest <= plan.reminderDaysBefore && !plan.reminderSent) {
-      reminderTriggered = true;
-      await prisma.cropPlan.update({
-        where: { id },
-        data: { reminderSent: true },
-      });
+    let reminderStatus: 'sent' | 'already-sent' | 'pending' = plan.reminderSent
+      ? 'already-sent'
+      : 'pending';
 
-      try {
-        await prisma.notification.create({
+    if (daysUntilHarvest <= plan.reminderDaysBefore && !plan.reminderSent) {
+      const result = await prisma.$transaction(async (tx) => {
+        const claim = await tx.cropPlan.updateMany({
+          where: { id, reminderSent: false },
+          data: { reminderSent: true },
+        });
+        if (claim.count !== 1) return false;
+
+        await tx.notification.create({
           data: {
             walletAddress: plan.farmerWallet,
             message: `Reminder: Your ${plan.cropName} harvest is expected in ${daysUntilHarvest} days. Consider listing your produce or opening a campaign now!`,
-            type: "HARVEST_REMINDER",
+            type: 'HARVEST_REMINDER',
           },
         });
-      } catch {
-        // Notification creation fallback
-      }
+        return true;
+      });
+      reminderTriggered = result;
+      reminderStatus = result ? 'sent' : 'already-sent';
     }
 
     res.json({
@@ -173,6 +210,7 @@ router.post("/crop-plans/:id/reminder", async (req: Request, res: Response, next
       daysUntilHarvest,
       reminderTriggered,
       reminderSent: plan.reminderSent || reminderTriggered,
+      reminderStatus,
     });
   } catch (err) {
     next(err);

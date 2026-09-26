@@ -1,130 +1,143 @@
 import { Router, type Request, type Response } from 'express';
-import { z } from 'zod';
-import { jsonValidated, validateParams, validateResponse } from '../middleware/validate.js';
+import {
+  jsonValidated,
+  validateParams,
+  validateResponse,
+} from '../middleware/validate.js';
 import { problemDetail } from '../middleware/errors.js';
+import { prisma } from '../db/client.js';
+import {
+  ProductListResponseSchema,
+  ProductQuerySchema,
+  ProductSchema,
+  ProductIdParamSchema,
+} from '../schemas/product.js';
 
 const router = Router();
 
-const ProductCategoryEnum = z.enum([
-  'GRAINS',
-  'VEGETABLES',
-  'FRUITS',
-  'LIVESTOCK',
-  'DAIRY',
-  'OTHER',
-]);
-
-const ProductSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  description: z.string(),
-  category: ProductCategoryEnum,
-  pricePerUnit: z.string(),
-  unit: z.string(),
-  quantity: z.number(),
-  location: z.string(),
-  farmerAddress: z.string(),
-  campaignId: z.string().optional(),
-  imageUrl: z.string().optional(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
-
-const ProductListResponseSchema = z.object({
-  data: z.array(ProductSchema),
-  meta: z.object({
-    total: z.number(),
-    page: z.number(),
-    limit: z.number(),
-  }),
-});
-
-const ProductIdParamSchema = z.object({
-  id: z.string(),
-});
-
-const inMemoryProducts = [
-  {
-    id: 'prod-001',
-    name: 'Premium Maize',
-    description: 'High-quality maize seeds for optimal yield',
-    category: 'GRAINS' as const,
-    pricePerUnit: '500000',
-    unit: 'bag',
-    quantity: 100,
-    location: 'Umuahia, Abia State',
-    farmerAddress: 'GBRPFJUCMVXQFMQN7WAWGHNBOGX64YIQVZ5AOOOCFZ4Y5O3A2FG4AQQ',
-    imageUrl: 'https://via.placeholder.com/300x200?text=Maize',
-    createdAt: new Date('2024-01-15').toISOString(),
-    updatedAt: new Date('2024-06-01').toISOString(),
-  },
-  {
-    id: 'prod-002',
-    name: 'Organic Tomatoes',
-    description: 'Fresh organic tomatoes from local farms',
-    category: 'VEGETABLES' as const,
-    pricePerUnit: '200000',
-    unit: 'crate',
-    quantity: 50,
-    location: 'Ibadan, Oyo State',
-    farmerAddress: 'GBRPFJUCMVXQFMQN7WAWGHNBOGX64YIQVZ5AOOOCFZ4Y5O3A2FG4AQQ',
-    imageUrl: 'https://via.placeholder.com/300x200?text=Tomatoes',
-    createdAt: new Date('2024-02-10').toISOString(),
-    updatedAt: new Date('2024-06-05').toISOString(),
-  },
-  {
-    id: 'prod-003',
-    name: 'Fresh Strawberries',
-    description: 'Sweet and ripe strawberries',
-    category: 'FRUITS' as const,
-    pricePerUnit: '800000',
-    unit: 'kg',
-    quantity: 25,
-    location: 'Jos, Plateau State',
-    farmerAddress: 'GBRPFJUCMVXQFMQN7WAWGHNBOGX64YIQVZ5AOOOCFZ4Y5O3A2FG4AQQ',
-    imageUrl: 'https://via.placeholder.com/300x200?text=Strawberries',
-    createdAt: new Date('2024-03-20').toISOString(),
-    updatedAt: new Date('2024-06-10').toISOString(),
-  },
-  {
-    id: 'prod-004',
-    name: 'Free-Range Chicken',
-    description: 'Healthy free-range chicken products',
-    category: 'LIVESTOCK' as const,
-    pricePerUnit: '5000000',
-    unit: 'bird',
-    quantity: 30,
-    location: 'Enugu, Enugu State',
-    farmerAddress: 'GBRPFJUCMVXQFMQN7WAWGHNBOGX64YIQVZ5AOOOCFZ4Y5O3A2FG4AQQ',
-    imageUrl: 'https://via.placeholder.com/300x200?text=Chicken',
-    createdAt: new Date('2024-04-05').toISOString(),
-    updatedAt: new Date('2024-06-08').toISOString(),
-  },
-  {
-    id: 'prod-005',
-    name: 'Fresh Milk',
-    description: 'Pure fresh milk from grass-fed cows',
-    category: 'DAIRY' as const,
-    pricePerUnit: '300000',
-    unit: 'liter',
-    quantity: 200,
-    location: 'Kaduna, Kaduna State',
-    farmerAddress: 'GBRPFJUCMVXQFMQN7WAWGHNBOGX64YIQVZ5AOOOCFZ4Y5O3A2FG4AQQ',
-    imageUrl: 'https://via.placeholder.com/300x200?text=Milk',
-    createdAt: new Date('2024-05-12').toISOString(),
-    updatedAt: new Date('2024-06-12').toISOString(),
-  },
-];
+function toProductDto(product: {
+  id: string;
+  name: string;
+  description: string;
+  imageUrl: string | null;
+  priceTokens: bigint;
+  campaignId: string | null;
+  inventoryCount: number;
+  category: string;
+  isActive: boolean;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+  campaign?: {
+    id: string;
+    onChainId: string;
+    farmerAddress: string;
+    status: string;
+  } | null;
+}) {
+  const quantity = product.inventoryCount;
+  return {
+    id: product.id,
+    name: product.name,
+    description: product.description,
+    category: product.category,
+    pricePerUnit: product.priceTokens.toString(),
+    amountUnit: 'stroops' as const,
+    currency: 'XLM' as const,
+    unit: 'unit',
+    quantity,
+    location: null,
+    farmerAddress: product.campaign?.farmerAddress ?? '',
+    campaignId: product.campaignId,
+    imageUrl: product.imageUrl,
+    isActive: product.isActive,
+    isSellable: product.isActive && quantity > 0,
+    campaign: product.campaign
+      ? {
+          id: product.campaign.id,
+          onChainId: product.campaign.onChainId,
+          farmerAddress: product.campaign.farmerAddress,
+          status: product.campaign.status,
+        }
+      : null,
+    createdAt:
+      product.createdAt instanceof Date
+        ? product.createdAt.toISOString()
+        : product.createdAt,
+    updatedAt:
+      product.updatedAt instanceof Date
+        ? product.updatedAt.toISOString()
+        : product.updatedAt,
+  };
+}
 
 router.get(
   '/products',
   validateResponse(ProductListResponseSchema),
-  async (_req: Request, res: Response) => {
-    const total = inMemoryProducts.length;
-    jsonValidated(res, ProductListResponseSchema, 200, {
-      data: inMemoryProducts,
-      meta: { total, page: 1, limit: 50 },
-    });
+  (req: Request, res: Response, next) => {
+    void (async () => {
+      const parsed = ProductQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        problemDetail(
+          res,
+          req,
+          400,
+          'Invalid Product Filters',
+          'Use valid category, location, minPrice, and maxPrice values',
+        );
+        return;
+      }
+      const { category, campaignId, isActive, location } = parsed.data;
+      const minPrice = parsed.data.minPrice ?? parsed.data.priceMin;
+      const maxPrice = parsed.data.maxPrice ?? parsed.data.priceMax;
+      const page = Math.max(Number(parsed.data.page ?? '1'), 1);
+      const limit = Math.min(
+        Math.max(Number(parsed.data.limit ?? '50'), 1),
+        100,
+      );
+      const where = {
+        ...(category ? { category } : {}),
+        ...(campaignId ? { campaignId } : {}),
+        ...(isActive === undefined ? {} : { isActive }),
+        ...(location
+          ? {
+              campaign: {
+                farmerAddress: {
+                  contains: location,
+                  mode: 'insensitive' as const,
+                },
+              },
+            }
+          : {}),
+        ...(minPrice || maxPrice
+          ? {
+              priceTokens: {
+                ...(minPrice ? { gte: BigInt(minPrice) } : {}),
+                ...(maxPrice ? { lte: BigInt(maxPrice) } : {}),
+              },
+            }
+          : {}),
+      };
+      const [total, products] = await Promise.all([
+        prisma.product.count({ where }),
+        prisma.product.findMany({
+          where,
+          include: { campaign: true },
+          orderBy: { createdAt: 'desc' },
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+      ]);
+      jsonValidated(res, ProductListResponseSchema, 200, {
+        data: products.map(toProductDto),
+        meta: {
+          total,
+          page,
+          limit,
+          serviceVersion: 'products-v1',
+          readiness: 'ready',
+        },
+      });
+    })().catch(next);
   },
 );
 
@@ -132,16 +145,27 @@ router.get(
   '/products/:id',
   validateParams(ProductIdParamSchema),
   validateResponse(ProductSchema),
-  async (req: Request, res: Response) => {
-    const { id } = req.params;
-    const product = inMemoryProducts.find((p) => p.id === id);
+  (req: Request, res: Response, next) => {
+    void (async () => {
+      const { id } = req.params;
+      const product = await prisma.product.findUnique({
+        where: { id },
+        include: { campaign: true },
+      });
 
-    if (!product) {
-      problemDetail(res, req, 404, 'Product Not Found', `No product with id ${id}`);
-      return;
-    }
+      if (!product) {
+        problemDetail(
+          res,
+          req,
+          404,
+          'Product Not Found',
+          `No product with id ${id}`,
+        );
+        return;
+      }
 
-    jsonValidated(res, ProductSchema, 200, product);
+      jsonValidated(res, ProductSchema, 200, toProductDto(product));
+    })().catch(next);
   },
 );
 

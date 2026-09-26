@@ -1,0 +1,109 @@
+name: E2E - Agro marketplace
+
+on:
+  pull_request:
+    paths:
+      - "agro-production/client/**"
+      - "agro-production/server/src/routes/products.ts"
+      - "agro-production/server/src/schemas/product.ts"
+      - "agro-production/server/prisma/**"
+      - ".github/workflows/agro-marketplace-e2e.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  marketplace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: agrocylo
+          POSTGRES_PASSWORD: agrocylo123
+          POSTGRES_DB: agrocylo_production
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U agrocylo -d agrocylo_production"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      DATABASE_URL: postgresql://agrocylo:agrocylo123@127.0.0.1:5433/agrocylo_production
+      RPC_URL: https://soroban-testnet.stellar.org
+      JWT_SECRET: ci-marketplace-secret-that-is-long-enough
+      REGISTRY_CONTRACT_ID: CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      PRODUCTION_CONTRACT_ID: CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      PRODUCTION_ESCROW_CONTRACT_ID: CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      ESCROW_CONTRACT_ID: CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      BASKET_CONTRACT_ID: CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      SUPABASE_URL: https://placeholder.supabase.co
+      SUPABASE_ANON_KEY: placeholder-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: placeholder-service-role-key
+      SUPABASE_JWT_SECRET: placeholder-jwt-secret
+      RUN_WORKERS: "false"
+      RUN_CONTRACT_WATCHER: "false"
+      RUN_RECONCILIATION_SWEEP: "false"
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:5001/api/v1
+      NEXT_PUBLIC_AGRO_PRODUCTION_ENABLED: "true"
+      NEXT_PUBLIC_SOROBAN_RPC_URL: https://soroban-testnet.stellar.org
+      NEXT_PUBLIC_NETWORK_PASSPHRASE: Test SDF Network ; September 2015
+      PLAYWRIGHT_BASE_URL: http://127.0.0.1:3001
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Enable pinned npm
+        run: corepack enable
+      - name: Install workspace dependencies
+        run: corepack npm ci --ignore-scripts
+      - name: Install server dependencies
+        working-directory: agro-production/server
+        run: corepack npm install --ignore-scripts
+      - name: Generate Prisma client and schema
+        working-directory: agro-production/server
+        run: |
+          corepack npm run db:generate
+          corepack npm run db:push -- --skip-generate
+          corepack npm exec -- tsx scripts/seed-marketplace.ts
+      - name: Start API
+        working-directory: agro-production/server
+        run: corepack npm run dev > "$RUNNER_TEMP/agro-api.log" 2>&1 &
+      - name: Wait for API
+        run: |
+          for attempt in {1..30}; do
+            curl --fail --silent http://127.0.0.1:5001/health && exit 0
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/agro-api.log"
+          exit 1
+      - name: Start production client
+        working-directory: agro-production/client
+        run: corepack npm run dev > "$RUNNER_TEMP/agro-client.log" 2>&1 &
+      - name: Wait for client
+        run: |
+          for attempt in {1..30}; do
+            curl --fail --silent http://127.0.0.1:3001/home && exit 0
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/agro-client.log"
+          exit 1
+      - name: Install Chromium
+        run: corepack npm exec -- playwright install --with-deps chromium
+      - name: Run marketplace journey
+        working-directory: agro-production/client
+        run: corepack npm run test:e2e
+      - name: Upload browser logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agro-marketplace-logs
+          path: ${{ runner.temp }}/agro-*.log

@@ -188,10 +188,8 @@ export async function processAnalytics(job: Job): Promise<void> {
         await handleAggregatePriceIndex(job);
         break;
       default:
-        logger.warn("Unknown analytics job name", {
-          jobId: job.id,
-          name: job.name,
-        });
+        // Fail loudly so unsupported jobs are not silently marked complete.
+        throw new Error(`Unknown analytics job name: ${job.name}`);
     }
   } catch (error) {
     logger.error("Analytics job failed", error, {

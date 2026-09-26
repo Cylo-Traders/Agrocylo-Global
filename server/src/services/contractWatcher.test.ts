@@ -24,7 +24,11 @@ vi.mock("../config/database.js", () => ({
   },
 }));
 vi.mock("./notificationService.js", () => ({
-  NotificationService: { notify: vi.fn(), notifyFromEscrowEvent: vi.fn(), notifyOrderEvent: vi.fn() },
+  NotificationService: {
+    notify: vi.fn(async () => undefined),
+    notifyFromEscrowEvent: vi.fn(async () => undefined),
+    notifyOrderEvent: vi.fn(async () => undefined),
+  },
 }));
 vi.mock("./wsManager.js", () => ({
   // Issue #756 fix: this mock predated `dispatchEvent`'s use of
@@ -38,6 +42,11 @@ vi.mock("./events/blockchainEventIngestionService.js", () => ({
 }));
 vi.mock("./events/escrowEventIngestionService.js", () => ({
   EscrowEventIngestionService: { ingestEvent: vi.fn() },
+}));
+vi.mock("./promMetrics.js", () => ({
+  contractWatcherEventsPerPoll: { observe: vi.fn() },
+  contractWatcherPagesPerPoll: { observe: vi.fn() },
+  contractWatcherUnhandledTotal: { inc: vi.fn() },
 }));
 vi.mock("../config/sentry.js", () => ({
   captureAlert: vi.fn(),

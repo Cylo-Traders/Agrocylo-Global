@@ -40,6 +40,9 @@ vi.mock("../middleware/walletAuth.js", () => ({
 }));
 
 vi.mock("../middleware/rateLimit.js", () => ({
+  authLimiter: (_req: Request, _res: Response, next: Function) => {
+    next();
+  },
   writeLimiter: (_req: Request, _res: Response, next: Function) => {
     next();
   },

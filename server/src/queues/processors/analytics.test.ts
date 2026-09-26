@@ -323,12 +323,10 @@ describe("processAnalytics", () => {
   });
 
   describe("unknown job name", () => {
-    it("should log a warning for unrecognized job names", async () => {
+    it("should reject unrecognized job names", async () => {
       const job = makeJob("unknown-job", { some: "data" });
 
-      await processAnalytics(job);
-
-      expect(logger.warn).toHaveBeenCalledWith("Unknown analytics job name", expect.any(Object));
+      await expect(processAnalytics(job)).rejects.toThrow("Unknown analytics job name");
     });
   });
 });

@@ -10,7 +10,19 @@ export interface IntegratorScope {
   scopedRegion: string | null;
 }
 
+/** Bounded report pagination: limit + stable keyset cursor over farmer wallets. */
+export interface ReportQuery {
+  limit?: number;
+  cursor?: string;
+}
+
+export interface ReportResult {
+  rows: Array<Record<string, unknown>>;
+  next_cursor: string | null;
+}
+
 const MAX_PAGE_SIZE = 200;
+const DEFAULT_REPORT_LIMIT = 100;
 const DEFAULT_KEY_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000;
 
 function generateRawKey(): string {
@@ -89,10 +101,11 @@ export class IntegratorService {
   }
 
   static async getUsageLog(keyId: string, limit = 100) {
+    const validated = ensureNotOverPageLimit(limit);
     return prisma.integratorApiKeyUsage.findMany({
       where: { apiKeyId: keyId },
       orderBy: { requestedAt: "desc" },
-      take: Math.min(limit, MAX_PAGE_SIZE),
+      take: validated,
     });
   }
 
@@ -101,20 +114,37 @@ export class IntegratorService {
    * organization is entitled to: farmer identity + region, and coarse
    * production activity counts — no wallet-level financial detail such as
    * individual order amounts or campaign investment balances (Issue #662).
+   * Pagination is applied in the database (Issue #969): only the requested
+   * page of profiles is loaded and campaign counts are fetched for that page's
+   * wallets alone, so a small page never streams the whole org into memory.
    */
-  static async getFarmerReport(scope: IntegratorScope) {
+  static async getFarmerReport(scope: IntegratorScope, query: ReportQuery = {}): Promise<ReportResult> {
+    const limit = ensureNotOverPageLimit(query.limit ?? DEFAULT_REPORT_LIMIT);
+    const cursor = query.cursor;
     const wallets = await resolveScopedWallets(scope);
-    if (wallets.length === 0) return [];
+    if (wallets.length === 0) return { rows: [], next_cursor: null };
 
-    const [profiles, campaigns] = await Promise.all([
-      prisma.profile.findMany({
-        where: { walletAddress: { in: wallets }, role: "FARMER" },
-        include: { location: true },
-      }),
-      prisma.campaign.findMany({
-        where: { creatorAddress: { in: wallets } },
-      }),
-    ]);
+    const profiles = await prisma.profile.findMany({
+      where: {
+        walletAddress: { in: wallets, ...(cursor ? { gt: cursor } : {}) },
+        role: "FARMER",
+      },
+      include: { location: true },
+      orderBy: { walletAddress: "asc" },
+      take: limit + 1,
+    });
+
+    const hasMore = profiles.length > limit;
+    const pageProfiles = profiles.slice(0, limit);
+
+    const pageWallets = pageProfiles.map((p) => (p as any).walletAddress ?? (p as any).wallet_address);
+
+    let campaigns: Awaited<ReturnType<typeof prisma.campaign.findMany>> = [];
+    if (pageWallets.length > 0) {
+      campaigns = await prisma.campaign.findMany({
+        where: { creatorAddress: { in: pageWallets } },
+      });
+    }
 
     const campaignsByFarmer = new Map<string, typeof campaigns>();
     for (const c of campaigns) {
@@ -123,10 +153,11 @@ export class IntegratorService {
       campaignsByFarmer.set(c.creatorAddress, list);
     }
 
-    return profiles.map((p) => {
-      const farmerCampaigns = campaignsByFarmer.get((p as any).walletAddress ?? (p as any).wallet_address) ?? [];
+    const rows = pageProfiles.map((p) => {
+      const farmerWallet = (p as any).walletAddress ?? (p as any).wallet_address;
+      const farmerCampaigns = campaignsByFarmer.get(farmerWallet) ?? [];
       return {
-        farmerWallet: (p as any).walletAddress ?? (p as any).wallet_address,
+        farmerWallet,
         displayName: p.name ?? null,
         region: p.location ? [p.location.city, p.location.country].filter(Boolean).join(", ") : null,
         totalCampaigns: farmerCampaigns.length,
@@ -134,37 +165,78 @@ export class IntegratorService {
         activeCampaigns: farmerCampaigns.filter((c) => c.status === CampaignStatus.ACTIVE).length,
       };
     });
+
+    const last = rows.at(-1);
+
+    return {
+      rows,
+      next_cursor: hasMore && last ? String(last.farmerWallet) : null,
+    };
   }
 
   /**
    * Aggregate, org-scoped order report. Counts and status breakdown only —
    * no buyer identity or per-order monetary amount, consistent with "no
    * PII/wallet-level financial detail beyond what the scoping organization
-   * is entitled to" (Issue #662).
+   * is entitled to" (Issue #662). The distinct seller list is paged with a
+   * stable keyset cursor in the database and status counts are aggregated
+   * server-side via groupBy (Issue #969).
    */
-  static async getOrderReport(scope: IntegratorScope) {
+  static async getOrderReport(scope: IntegratorScope, query: ReportQuery = {}): Promise<ReportResult> {
+    const limit = ensureNotOverPageLimit(query.limit ?? DEFAULT_REPORT_LIMIT);
+    const cursor = query.cursor;
     const wallets = await resolveScopedWallets(scope);
-    if (wallets.length === 0) return [];
+    if (wallets.length === 0) return { rows: [], next_cursor: null };
 
-    const orders = await prisma.order.findMany({
-      where: { sellerAddress: { in: wallets } },
-      select: { sellerAddress: true, status: true, createdAt: true },
+    const sellers = await prisma.order.findMany({
+      where: {
+        sellerAddress: { in: wallets, ...(cursor ? { gt: cursor } : {}) },
+      },
+      distinct: ["sellerAddress"],
+      orderBy: { sellerAddress: "asc" },
+      take: limit + 1,
     });
 
-    const bySeller = new Map<string, { total: number; completed: number; refunded: number; pending: number }>();
-    for (const o of orders) {
-      const entry = bySeller.get(o.sellerAddress) ?? { total: 0, completed: 0, refunded: 0, pending: 0 };
-      entry.total += 1;
-      if (o.status === OrderStatus.COMPLETED) entry.completed += 1;
-      else if (o.status === OrderStatus.REFUNDED) entry.refunded += 1;
-      else entry.pending += 1;
-      bySeller.set(o.sellerAddress, entry);
+    const hasMore = sellers.length > limit;
+    const pageSellers = sellers.slice(0, limit);
+    const sellerAddresses = pageSellers.map((o) => o.sellerAddress);
+
+    type StatusCount = { sellerAddress: string; status: string; count: number };
+    let counts: StatusCount[] = [];
+    if (sellerAddresses.length > 0) {
+      const grouped = await prisma.order.groupBy({
+        by: ["sellerAddress", "status"],
+        where: { sellerAddress: { in: sellerAddresses } },
+        _count: { _all: true },
+      });
+      counts = grouped.map((g) => ({
+        sellerAddress: g.sellerAddress,
+        status: g.status,
+        count: g._count._all,
+      }));
     }
 
-    return Array.from(bySeller.entries()).map(([farmerWallet, stats]) => ({
-      farmerWallet,
-      ...stats,
+    const bySeller = new Map<string, { total: number; completed: number; refunded: number; pending: number }>();
+    for (const c of counts) {
+      const entry = bySeller.get(c.sellerAddress) ?? { total: 0, completed: 0, refunded: 0, pending: 0 };
+      entry.total += c.count;
+      if (c.status === OrderStatus.COMPLETED) entry.completed += c.count;
+      else if (c.status === OrderStatus.REFUNDED) entry.refunded += c.count;
+      else entry.pending += c.count;
+      bySeller.set(c.sellerAddress, entry);
+    }
+
+    const rows = sellerAddresses.map((sellerAddress) => ({
+      farmerWallet: sellerAddress,
+      ...(bySeller.get(sellerAddress) ?? { total: 0, completed: 0, refunded: 0, pending: 0 }),
     }));
+
+    const last = rows.at(-1);
+
+    return {
+      rows,
+      next_cursor: hasMore && last ? String(last.farmerWallet) : null,
+    };
   }
 }
 
@@ -198,16 +270,27 @@ async function resolveScopedWallets(scope: IntegratorScope): Promise<string[]> {
     .map((l) => (l as any).walletAddress ?? (l as any).wallet_address);
 }
 
+/**
+ * Spreadsheet formula injection prefixes (Issue #968): =, +, -, @ and leading
+ * tab/CR. Cells starting with any of these are neutralized to plain text so
+ * opening a partner report in a spreadsheet cannot interpret farmer-supplied
+ * names or locations as formulas/macros.
+ */
+const SPREADSHEET_FORMULA_PREFIX = /^[=+\-@\t\r]/;
+
 /** Serializes a list of flat records to CSV (Issue #662: CSV + JSON output). */
 export function toCsv(rows: Array<Record<string, unknown>>): string {
   if (rows.length === 0) return "";
   const headers = Object.keys(rows[0] as Record<string, unknown>);
   const escape = (value: unknown): string => {
+    // Legitimate numeric report fields keep their numeric meaning.
+    if (typeof value === "number") return String(value);
     const str = value === null || value === undefined ? "" : String(value);
-    if (/[",\n]/.test(str)) {
-      return `"${str.replace(/"/g, '""')}"`;
+    const sanitized = SPREADSHEET_FORMULA_PREFIX.test(str) ? `'${str}` : str;
+    if (/[",\n]/.test(sanitized)) {
+      return `"${sanitized.replace(/"/g, '""')}"`;
     }
-    return str;
+    return sanitized;
   };
   const lines = [headers.join(",")];
   for (const row of rows) {
@@ -216,8 +299,12 @@ export function toCsv(rows: Array<Record<string, unknown>>): string {
   return lines.join("\n");
 }
 
-export function ensureNotOverPageLimit(limit: number): void {
+export function ensureNotOverPageLimit(limit: number): number {
+  if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit <= 0) {
+    throw new ApiError(400, "Bad Request", "limit must be a positive integer");
+  }
   if (limit > MAX_PAGE_SIZE) {
     throw new ApiError(400, "Bad Request", `limit cannot exceed ${MAX_PAGE_SIZE}`);
   }
+  return limit;
 }
