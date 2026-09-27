@@ -315,6 +315,10 @@ router.post(
       problemDetail(res, req, 404, "Campaign Not Found", `No campaign with id ${req.params.id}`);
       return;
     }
+    // Issue #1068 overfunding policy: the contract accepts contributions
+    // beyond the target, and the watcher marks a campaign FUNDED once
+    // totalRaised >= targetAmount. Late intents are therefore rejected here
+    // only after the funding event has been indexed and status flipped.
     if (campaign.status !== "FUNDING") {
       problemDetail(
         res,

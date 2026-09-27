@@ -23,6 +23,24 @@ import type {
 } from "./types.js";
 
 /**
+ * Raised when an event references a parent entity (e.g. a campaign) that has
+ * not been indexed yet (issue #1067). The watcher treats it as retryable:
+ * the event is retried, dead-lettered for replay, and projected once the
+ * parent arrives — the cursor never silently skips it.
+ */
+export class DependencyMissingError extends Error {
+  constructor(
+    public readonly dependency: 'campaign',
+    public readonly dependencyOnChainId: string,
+  ) {
+    super(
+      `${dependency} ${dependencyOnChainId} has not been indexed yet; event is retryable`,
+    );
+    this.name = 'DependencyMissingError';
+  }
+}
+
+/**
  * Persists a parsed event to the database. All writes are idempotent — safe to
  * replay if the indexer restarts or re-processes the same ledger range.
  */
@@ -206,17 +224,25 @@ async function handleCampaignInvested(event: CampaignInvestedEvent) {
       where: { onChainId: event.campaignId },
     });
     if (!campaign) {
-      logger.warn("EventPersister: investment for unknown campaign", {
-        campaignId: event.campaignId,
-      });
-      return;
+      // Issue #1067: a missing parent campaign is a retryable dependency, not
+      // a skip — throwing rolls this write back and lets the watcher retry,
+      // dead-letter and replay the event once the campaign is indexed.
+      throw new DependencyMissingError('campaign', event.campaignId);
     }
 
     await tx.campaign.update({
       where: { onChainId: event.campaignId },
       data: {
         totalRaised: event.totalRaised,
-        status: event.totalRaised === campaign.targetAmount ? "FUNDED" : undefined,
+        // Issue #1068: totals are string-backed i128 values — compare with
+        // BigInt and >=. The contract accepts overfunding (contributions
+        // beyond the target are not rejected), so the campaign is FUNDED as
+        // soon as totalRaised reaches or exceeds the target; a strict
+        // equality check would strand overshoot campaigns in FUNDING forever.
+        status:
+          BigInt(event.totalRaised) >= BigInt(campaign.targetAmount)
+            ? "FUNDED"
+            : undefined,
       },
     });
 
@@ -277,16 +303,24 @@ async function handleCampaignInvested(event: CampaignInvestedEvent) {
 
 async function handleCampaignSettled(event: CampaignSettledEvent) {
   // Idempotency: status/revenue overwrite plus transaction uniqueness prevents duplication.
+  // Issue #1066: the broadcast payload is captured inside the transaction and
+  // emitted only after prisma.$transaction resolves, so a rolled-back write
+  // never emits an event.
+  type PostCommitPayload = {
+    campaignId: string;
+    onChainId: string;
+    totalRevenue: string;
+  };
+  let post: PostCommitPayload | null = null;
+
   await prisma.$transaction(async (tx) => {
     if (await skipDuplicateInTransaction(tx, event)) return;
     const campaign = await tx.campaign.findUnique({
       where: { onChainId: event.campaignId },
     });
     if (!campaign) {
-      logger.warn("EventPersister: settled event for unknown campaign", {
-        campaignId: event.campaignId,
-      });
-      return;
+      // Issue #1067: retryable dependency — see handleCampaignInvested.
+      throw new DependencyMissingError('campaign', event.campaignId);
     }
 
     await tx.campaign.update({
@@ -297,11 +331,11 @@ async function handleCampaignSettled(event: CampaignSettledEvent) {
       },
     });
 
-    broadcast("campaign.settled", {
+    post = {
       campaignId: campaign.id,
       onChainId: event.campaignId,
       totalRevenue: event.totalRevenue,
-    });
+    };
 
     await tx.transaction.create({
       data: {
@@ -314,10 +348,26 @@ async function handleCampaignSettled(event: CampaignSettledEvent) {
       },
     });
   });
+
+  if (post) {
+    broadcast("campaign.settled", post as PostCommitPayload);
+  }
 }
 
 async function handleOrderCreated(event: OrderCreatedEvent) {
   // Idempotency: order upsert by onChainId makes duplicate create events safe.
+  // Issue #1066: broadcast deferred until after the transaction commits.
+  type PostCommitPayload = {
+    orderId: string;
+    campaignId: string;
+    buyerAddress: string;
+    farmerAddress: string;
+    amount: string;
+    status: string;
+    txHash: string | undefined;
+  };
+  let post: PostCommitPayload | null = null;
+
   await prisma.$transaction(async (tx) => {
     if (await skipDuplicateInTransaction(tx, event)) return;
     await upsertUser(tx, event.buyer, "BUYER");
@@ -326,10 +376,8 @@ async function handleOrderCreated(event: OrderCreatedEvent) {
       where: { onChainId: event.campaignId },
     });
     if (!campaign) {
-      logger.warn("EventPersister: order for unknown campaign", {
-        campaignId: event.campaignId,
-      });
-      return;
+      // Issue #1067: retryable dependency — see handleCampaignInvested.
+      throw new DependencyMissingError('campaign', event.campaignId);
     }
 
     await tx.order.upsert({
@@ -346,7 +394,7 @@ async function handleOrderCreated(event: OrderCreatedEvent) {
       update: {},
     });
 
-    broadcast("order.created", {
+    post = {
       orderId: event.orderId,
       campaignId: campaign.id,
       buyerAddress: event.buyer,
@@ -354,7 +402,7 @@ async function handleOrderCreated(event: OrderCreatedEvent) {
       amount: event.amount,
       status: "PENDING",
       txHash: event.txHash,
-    });
+    };
 
     await tx.transaction.create({
       data: {
@@ -367,10 +415,24 @@ async function handleOrderCreated(event: OrderCreatedEvent) {
       },
     });
   });
+
+  if (post) {
+    broadcast("order.created", post as PostCommitPayload);
+  }
 }
 
 async function handleOrderConfirmed(event: OrderConfirmedEvent) {
   // Idempotency: duplicate confirms are dropped before order/revenue mutation.
+  // Issue #1066: broadcast deferred until after the transaction commits.
+  type PostCommitPayload = {
+    orderId: string;
+    campaignId: string;
+    buyerAddress: string;
+    status: string;
+    txHash: string | undefined;
+  };
+  let post: PostCommitPayload | null = null;
+
   await prisma.$transaction(async (tx) => {
     if (await skipDuplicateInTransaction(tx, event)) return;
     const order = await tx.order.findUnique({
@@ -400,13 +462,13 @@ async function handleOrderConfirmed(event: OrderConfirmedEvent) {
       });
     }
 
-    broadcast("order.confirmed", {
+    post = {
       orderId: event.orderId,
       campaignId: order.campaignId,
       buyerAddress: event.buyer,
       status: "CONFIRMED",
       txHash: event.txHash,
-    });
+    };
 
     await tx.transaction.create({
       data: {
@@ -419,6 +481,10 @@ async function handleOrderConfirmed(event: OrderConfirmedEvent) {
       },
     });
   });
+
+  if (post) {
+    broadcast("order.confirmed", post as PostCommitPayload);
+  }
 }
 
 async function updateCampaignStatus(
@@ -486,6 +552,18 @@ async function upsertUser(
 
 async function handleDisputeOpened(event: DisputeOpenedEvent) {
   // Idempotency: dispute upsert by transactionHash makes duplicate events safe.
+  // Issue #1066: broadcast deferred until after the transaction commits.
+  type PostCommitPayload = {
+    disputeId: string;
+    campaignId: string;
+    orderId: string | null | undefined;
+    initiatorAddress: string;
+    respondentAddress: string;
+    status: string;
+    txHash: string | undefined;
+  };
+  let post: PostCommitPayload | null = null;
+
   await prisma.$transaction(async (tx) => {
     if (await skipDuplicateInTransaction(tx, event)) return;
 
@@ -523,7 +601,7 @@ async function handleDisputeOpened(event: DisputeOpenedEvent) {
       },
     });
 
-    broadcast("dispute.opened", {
+    post = {
       disputeId: dispute.id,
       campaignId: campaign.id,
       orderId: event.orderId,
@@ -531,7 +609,7 @@ async function handleDisputeOpened(event: DisputeOpenedEvent) {
       respondentAddress: event.respondentAddress,
       status: "Open",
       txHash: event.txHash,
-    });
+    };
 
     await tx.transaction.create({
       data: {
@@ -544,10 +622,23 @@ async function handleDisputeOpened(event: DisputeOpenedEvent) {
       },
     });
   });
+
+  if (post) {
+    broadcast("dispute.opened", post as PostCommitPayload);
+  }
 }
 
 async function handleDisputeEvidenceSubmitted(event: DisputeEvidenceSubmittedEvent) {
   // Idempotency: evidence upsert by transactionHash + evidence_submitted action.
+  // Issue #1066: broadcast deferred until after the transaction commits.
+  type PostCommitPayload = {
+    disputeId: string;
+    submitterAddress: string;
+    status: string;
+    txHash: string | undefined;
+  };
+  let post: PostCommitPayload | null = null;
+
   await prisma.$transaction(async (tx) => {
     if (await skipDuplicateInTransaction(tx, event)) return;
 
@@ -594,12 +685,12 @@ async function handleDisputeEvidenceSubmitted(event: DisputeEvidenceSubmittedEve
       },
     });
 
-    broadcast("dispute.evidence_submitted", {
+    post = {
       disputeId: currentDispute.id,
       submitterAddress: event.submitterAddress,
       status: "EvidenceSubmitted",
       txHash: event.txHash,
-    });
+    };
 
     await tx.transaction.create({
       data: {
@@ -612,10 +703,23 @@ async function handleDisputeEvidenceSubmitted(event: DisputeEvidenceSubmittedEve
       },
     });
   });
+
+  if (post) {
+    broadcast("dispute.evidence_submitted", post as PostCommitPayload);
+  }
 }
 
 async function handleDisputeResolved(event: DisputeResolvedEvent) {
   // Idempotency: status update is idempotent.
+  // Issue #1066: broadcast deferred until after the transaction commits.
+  type PostCommitPayload = {
+    disputeId: string;
+    status: string;
+    resolutionOutcome: string;
+    txHash: string | undefined;
+  };
+  let post: PostCommitPayload | null = null;
+
   await prisma.$transaction(async (tx) => {
     if (await skipDuplicateInTransaction(tx, event)) return;
 
@@ -653,12 +757,12 @@ async function handleDisputeResolved(event: DisputeResolvedEvent) {
       },
     });
 
-    broadcast("dispute.resolved", {
+    post = {
       disputeId: currentDispute.id,
       status: "Resolved",
       resolutionOutcome: event.resolutionOutcome,
       txHash: event.txHash,
-    });
+    };
 
     await tx.transaction.create({
       data: {
@@ -671,10 +775,22 @@ async function handleDisputeResolved(event: DisputeResolvedEvent) {
       },
     });
   });
+
+  if (post) {
+    broadcast("dispute.resolved", post as PostCommitPayload);
+  }
 }
 
 async function handleDisputeDismissed(event: DisputeDismissedEvent) {
   // Idempotency: status update is idempotent.
+  // Issue #1066: broadcast deferred until after the transaction commits.
+  type PostCommitPayload = {
+    disputeId: string;
+    status: string;
+    txHash: string | undefined;
+  };
+  let post: PostCommitPayload | null = null;
+
   await prisma.$transaction(async (tx) => {
     if (await skipDuplicateInTransaction(tx, event)) return;
 
@@ -708,11 +824,11 @@ async function handleDisputeDismissed(event: DisputeDismissedEvent) {
       },
     });
 
-    broadcast("dispute.dismissed", {
+    post = {
       disputeId: currentDispute.id,
       status: "Dismissed",
       txHash: event.txHash,
-    });
+    };
 
     await tx.transaction.create({
       data: {
@@ -725,6 +841,10 @@ async function handleDisputeDismissed(event: DisputeDismissedEvent) {
       },
     });
   });
+
+  if (post) {
+    broadcast("dispute.dismissed", post as PostCommitPayload);
+  }
 }
 
 async function handleBasketCreated(event: BasketCreatedEvent) {
@@ -757,6 +877,16 @@ async function handleBasketCreated(event: BasketCreatedEvent) {
 async function handleBasketDeposit(event: BasketDepositEvent) {
   // Idempotency: per-depositor position is upserted and accumulated only
   // once per (basket, depositor), guarded by the ledger/eventIndex dedupe.
+  // Issue #1066: broadcast deferred until after the transaction commits.
+  type PostCommitPayload = {
+    basketId: string;
+    depositorAddress: string;
+    amount: string;
+    totalDeposited: string;
+    txHash: string | undefined;
+  };
+  let post: PostCommitPayload | null = null;
+
   await prisma.$transaction(async (tx) => {
     if (await skipDuplicateInTransaction(tx, event)) return;
     await upsertUser(tx, event.depositor, "INVESTOR");
@@ -798,13 +928,13 @@ async function handleBasketDeposit(event: BasketDepositEvent) {
       data: { totalDeposited: updatedTotal },
     });
 
-    broadcast("basket.deposit", {
+    post = {
       basketId: basket.id,
       depositorAddress: event.depositor,
       amount: event.amount,
       totalDeposited: updatedTotal,
       txHash: event.txHash,
-    });
+    };
 
     await tx.transaction.create({
       data: {
@@ -816,10 +946,21 @@ async function handleBasketDeposit(event: BasketDepositEvent) {
       },
     });
   });
+
+  if (post) {
+    broadcast("basket.deposit", post as PostCommitPayload);
+  }
 }
 
 async function handleBasketFunded(event: BasketFundedEvent) {
   // Idempotency: status/total overwrite plus transaction uniqueness prevents duplication.
+  // Issue #1066: broadcast deferred until after the transaction commits.
+  type PostCommitPayload = {
+    basketId: string;
+    totalDeposited: string;
+  };
+  let post: PostCommitPayload | null = null;
+
   await prisma.$transaction(async (tx) => {
     if (await skipDuplicateInTransaction(tx, event)) return;
 
@@ -834,10 +975,10 @@ async function handleBasketFunded(event: BasketFundedEvent) {
       data: { totalDeposited: event.totalDeposit, status: "FUNDED" },
     });
 
-    broadcast("basket.funded", {
+    post = {
       basketId: basket.id,
       totalDeposited: event.totalDeposit,
-    });
+    };
 
     await tx.transaction.create({
       data: {
@@ -849,10 +990,23 @@ async function handleBasketFunded(event: BasketFundedEvent) {
       },
     });
   });
+
+  if (post) {
+    broadcast("basket.funded", post as PostCommitPayload);
+  }
 }
 
 async function handleBasketWithdrawn(event: BasketWithdrawnEvent) {
   // Idempotency: position update is deterministic for replayed withdraw events.
+  // Issue #1066: broadcast deferred until after the transaction commits.
+  type PostCommitPayload = {
+    basketId: string;
+    depositorAddress: string;
+    depositAmount: string;
+    txHash: string | undefined;
+  };
+  let post: PostCommitPayload | null = null;
+
   await prisma.$transaction(async (tx) => {
     if (await skipDuplicateInTransaction(tx, event)) return;
 
@@ -886,12 +1040,12 @@ async function handleBasketWithdrawn(event: BasketWithdrawnEvent) {
       data: { totalDeposited: updatedTotal },
     });
 
-    broadcast("basket.withdrawn", {
+    post = {
       basketId: basket.id,
       depositorAddress: event.depositor,
       depositAmount: event.depositAmount,
       txHash: event.txHash,
-    });
+    };
 
     await tx.transaction.create({
       data: {
@@ -903,10 +1057,23 @@ async function handleBasketWithdrawn(event: BasketWithdrawnEvent) {
       },
     });
   });
+
+  if (post) {
+    broadcast("basket.withdrawn", post as PostCommitPayload);
+  }
 }
 
 async function handleBasketClaimed(event: BasketClaimedEvent) {
   // Idempotency: position update is deterministic for replayed claim events.
+  // Issue #1066: broadcast deferred until after the transaction commits.
+  type PostCommitPayload = {
+    basketId: string;
+    depositorAddress: string;
+    payout: string;
+    txHash: string | undefined;
+  };
+  let post: PostCommitPayload | null = null;
+
   await prisma.$transaction(async (tx) => {
     if (await skipDuplicateInTransaction(tx, event)) return;
 
@@ -939,12 +1106,12 @@ async function handleBasketClaimed(event: BasketClaimedEvent) {
       },
     });
 
-    broadcast("basket.claimed", {
+    post = {
       basketId: basket.id,
       depositorAddress: event.depositor,
       payout: event.payout,
       txHash: event.txHash,
-    });
+    };
 
     await tx.transaction.create({
       data: {
@@ -956,6 +1123,10 @@ async function handleBasketClaimed(event: BasketClaimedEvent) {
       },
     });
   });
+
+  if (post) {
+    broadcast("basket.claimed", post as PostCommitPayload);
+  }
 }
 
 /**
