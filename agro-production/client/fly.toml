@@ -21,3 +21,13 @@ primary = "iad"
 [[vm]]
   size = "shared-cpu-1x"
   memory = "512mb"
+
+# Issue #1038: the production feature gate. A production build is served only
+# when this is exactly the string "true"; any other value renders the
+# "This build is not available" page. Declared here so the intended value is
+# explicit in deployment configuration rather than implied by absence.
+#
+# Flip to "true" in the production app once the deployment is ready to serve
+# the app to users.
+[env]
+  NEXT_PUBLIC_AGRO_PRODUCTION_ENABLED = "false"
