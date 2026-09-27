@@ -14,7 +14,10 @@
     "mainClient": "Return to Main Marketplace",
     "switchToLight": "Switch to light mode",
     "switchToDark": "Switch to dark mode",
-    "language": "Language"
+    "language": "Language",
+    "main": "Main navigation",
+    "openMenu": "Open navigation menu",
+    "closeMenu": "Close navigation menu"
   },
   "campaigns": {
     "title": "Production Campaigns",

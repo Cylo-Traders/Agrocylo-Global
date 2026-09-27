@@ -2,17 +2,25 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { trackThemeToggled } from "@/lib/analytics";
+import {
+  type Theme,
+  getMatchMedia,
+  readStoredTheme,
+  readSystemTheme,
+  applyThemeClass,
+  persistTheme,
+  resolveInitialTheme,
+} from "@/theme/theme";
 
-type Theme = "dark" | "light";
+export type { Theme };
 
 interface ThemeContextType {
+  /** The active choice, whether persisted or inherited from the OS. */
   theme: Theme;
   toggleTheme: () => void;
   setTheme: (theme: Theme) => void;
-  resolvedTheme: "dark" | "light";
+  resolvedTheme: Theme;
 }
-
-const STORAGE_KEY = "ap_theme";
 
 const defaultCtx: ThemeContextType = {
   theme: "light",
@@ -23,69 +31,59 @@ const defaultCtx: ThemeContextType = {
 
 export const ThemeContext = createContext<ThemeContextType>(defaultCtx);
 
-function getSystemPreference(): Theme {
-  if (typeof window === "undefined") return "light";
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-}
-
-function getStoredTheme(): Theme | null {
-  if (typeof window === "undefined") return null;
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored === "dark" || stored === "light") return stored;
-  return null;
-}
-
-function applyTheme(theme: Theme) {
-  if (typeof document === "undefined") return;
-  const root = document.documentElement;
-  if (theme === "dark") {
-    root.classList.add("dark");
-  } else {
-    root.classList.remove("dark");
-  }
-}
-
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>("light");
-  const [resolvedTheme, setResolvedTheme] = useState<Theme>("light");
+  // Seeded synchronously instead of in an effect: the bootstrap script in
+  // `layout.tsx` has already put the right class on `<html>`, so the very first
+  // client render agrees with the DOM and there is no flash or hydration
+  // mismatch. Falling back to storage/OS keeps the provider correct when it is
+  // mounted without the script (tests, Storybook).
+  const [theme, setThemeState] = useState<Theme>(() => {
+    if (typeof document === "undefined") return "light";
+    const root = document.documentElement;
+    if (root.classList.contains("dark")) return "dark";
+    if (root.classList.contains("light")) return "light";
+    return resolveInitialTheme();
+  });
+
+  // `<html>` is the external system here: keep its classes in step with state
+  // on every change, including the first one, so the palette never lags behind
+  // what the toggle says is active.
+  useEffect(() => {
+    applyThemeClass(document.documentElement, theme);
+  }, [theme]);
 
   useEffect(() => {
-    const stored = getStoredTheme();
-    const system = getSystemPreference();
-    const initial = stored ?? system;
-    setThemeState(initial);
-    setResolvedTheme(initial);
-    applyTheme(initial);
-  }, []);
+    const mq = getMatchMedia();
+    if (!mq) return;
 
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = () => {
-      const stored = getStoredTheme();
-      if (!stored) {
-        const sys = mq.matches ? "dark" : "light";
-        setResolvedTheme(sys);
-        applyTheme(sys);
-      }
+      // A persisted choice is a deliberate override, so the OS must not
+      // overwrite it.
+      if (readStoredTheme()) return;
+      setThemeState(readSystemTheme(mq));
     };
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
+
+    if (typeof mq.addEventListener === "function") {
+      mq.addEventListener("change", handler);
+      return () => mq.removeEventListener?.("change", handler);
+    }
+    // Safari < 14 only has the deprecated listener API.
+    mq.addListener?.(handler);
+    return () => mq.removeListener?.(handler);
   }, []);
 
   const setTheme = useCallback((newTheme: Theme) => {
     setThemeState(newTheme);
-    setResolvedTheme(newTheme);
-    localStorage.setItem(STORAGE_KEY, newTheme);
-    applyTheme(newTheme);
+    persistTheme(newTheme);
     trackThemeToggled(newTheme);
   }, []);
 
   const toggleTheme = useCallback(() => {
-    setTheme(resolvedTheme === "dark" ? "light" : "dark");
-  }, [resolvedTheme, setTheme]);
+    setTheme(theme === "dark" ? "light" : "dark");
+  }, [theme, setTheme]);
 
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme, setTheme, resolvedTheme }}>
+    <ThemeContext.Provider value={{ theme, toggleTheme, setTheme, resolvedTheme: theme }}>
       {children}
     </ThemeContext.Provider>
   );

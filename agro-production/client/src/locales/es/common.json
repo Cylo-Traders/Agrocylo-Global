@@ -14,7 +14,10 @@
     "mainClient": "Volver al Mercado Principal",
     "switchToLight": "Cambiar a modo claro",
     "switchToDark": "Cambiar a modo oscuro",
-    "language": "Idioma"
+    "language": "Idioma",
+    "main": "Navegacion principal",
+    "openMenu": "Abrir menu de navegacion",
+    "closeMenu": "Cerrar menu de navegacion"
   },
   "campaigns": {
     "title": "Campañas de Producción",
