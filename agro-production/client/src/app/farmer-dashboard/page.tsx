@@ -160,7 +160,7 @@ export default function FarmerDashboardPage() {
 
   useWebSocket(
     useCallback((message: WsMessage) => {
-      if (message.event === "order.created" || message.event === "order.confirmed") {
+      if (message.type === "order.created" || message.type === "order.confirmed") {
         void loadOrders();
       }
     }, [loadOrders]),

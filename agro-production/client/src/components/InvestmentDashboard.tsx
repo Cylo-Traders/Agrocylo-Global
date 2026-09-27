@@ -50,9 +50,9 @@ export default function InvestmentDashboard({ investorAddress, role = 'investor'
     useCallback(
       (msg: WsMessage) => {
         if (
-          msg.event === "campaign.invested" ||
-          msg.event === "campaign.settled" ||
-          msg.event === "campaign.created"
+          msg.type === "campaign.invested" ||
+          msg.type === "campaign.settled" ||
+          msg.type === "campaign.created"
         ) {
           setLastUpdate(msg.timestamp);
           load();
