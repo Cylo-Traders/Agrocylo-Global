@@ -12,6 +12,11 @@
     "agro-production/client",
     "packages/*"
   ],
+  "//overrides": "Issue #1041: both workspaces pin react/react-dom 19.2.3, but npm also installed a hoisted root react/react-dom 19.2.8 (peer: true, pulled in to satisfy hoisted peer dependencies such as @testing-library/react). Two React copies means two ReactCurrentDispatcher objects, so a hook called by a component from one copy and a renderer from the other throws 'Invalid hook call'. Overriding both to the version the workspaces already declare collapses the tree onto one copy. NOTE: package-lock.json still records the pre-override tree; regenerate it with 'npm install' (scripts/check-react-runtime.js fails until then).",
+  "overrides": {
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
   "scripts": {
     "preinstall": "node scripts/check-toolchain.cjs",
     "check:toolchain": "node scripts/check-toolchain.cjs",
@@ -24,6 +29,7 @@
     "test": "turbo run test",
     "test:dev-launcher": "node --test scripts/dev-frontend.test.cjs",
     "check:versions": "node scripts/check-shared-versions.js",
+    "check:react-runtime": "node scripts/check-react-runtime.js",
     "prepare": "husky || true",
     "dev:client": "npm run dev --workspace client",
     "dev:agro": "npm run dev --workspace agro-production/client",
