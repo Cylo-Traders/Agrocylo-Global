@@ -3,6 +3,7 @@ import { prisma } from "../db/client.js";
 import logger from "../config/logger.js";
 import { broadcast, type WsEventType } from "../services/wsServer.js";
 import { recordEventProcessed, recordEventDuplicate } from "./metrics.js";
+import { isValidTransition } from "../services/campaignStatusService.js";
 import type {
   CampaignCreatedEvent,
   CampaignInvestedEvent,
@@ -492,12 +493,23 @@ async function updateCampaignStatus(
   status: CampaignStatus,
 ) {
   // Idempotency: status transitions are deterministic for replayed lifecycle events.
+  // Validates canonical allowed transitions before updating.
   await prisma.$transaction(async (tx) => {
     if (await skipDuplicateInTransaction(tx, event)) return;
     const campaign = await tx.campaign.findUnique({
       where: { onChainId: event.campaignId },
     });
     if (!campaign) return;
+
+    if (!isValidTransition(campaign.status as CampaignStatus, status)) {
+      logger.warn("EventPersister: invalid status transition rejected", {
+        campaignId: event.campaignId,
+        from: campaign.status,
+        to: status,
+        eventAction: event.action,
+      });
+      return;
+    }
 
     let trancheReleased = campaign.trancheReleased;
     if (status === "IN_PRODUCTION") {

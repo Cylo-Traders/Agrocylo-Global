@@ -102,7 +102,14 @@ export const MilestoneItemSchema = z.object({
 export const CampaignMilestonesSchema = z.object({
   campaignId: z.string(),
   onChainId: z.string(),
-  status: campaignStatusEnum,
+  status: z.union([
+    campaignStatusEnum,
+    z.object({
+      machine: campaignStatusEnum,
+      display: z.string(),
+      isTerminal: z.boolean(),
+    }),
+  ]),
   percentageReleased: z.number(),
   trancheReleased: z.string(),
   currentMilestone: z.string(),
