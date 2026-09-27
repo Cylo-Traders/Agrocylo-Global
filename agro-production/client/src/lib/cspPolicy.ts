@@ -1,5 +1,5 @@
 /**
- * Content-Security-Policy construction (issue #1039).
+ * Content-Security-Policy construction (issues #1039, #1040).
  *
  * Extracted from the inline template in `next.config.ts` so the policy is a
  * pure, testable function rather than a string literal evaluated at config load.
@@ -13,9 +13,11 @@
  *    alternative (hash-based CSP) cannot work here because the inline script
  *    bodies vary per render.
  *
- * `buildContentSecurityPolicy` also accepts pre-validated
- * `observabilitySources`, which `next.config.ts` supplies; #1040 adds the
- * parsing that produces them.
+ * 2. **Observability (#1040).** Sentry and first-party telemetry are
+ *    configured via env but were never added to `connect-src`, so their
+ *    requests were blocked in production. `observabilityConnectSources` parses
+ *    them into validated HTTPS origins, and only when the corresponding
+ *    feature is actually enabled — an unset variable must not widen the policy.
  */
 
 export type CspOptions = {
@@ -97,11 +99,58 @@ export type ObservabilityEnv = {
 };
 
 /**
- * Placeholder until #1040 lands the observability origins. Returning nothing
- * keeps `connect-src` at its pre-#1040 width.
+ * Parse the Sentry DSN and telemetry URL into `connect-src` origins (#1040).
+ *
+ * The client exposes both via env, but `connect-src` listed only RPC, Horizon,
+ * Freighter, API and WebSocket origins, so a configured Sentry ingest or
+ * telemetry endpoint was blocked by the production CSP.
+ *
+ * - HTTPS is required, except `http://localhost` outside production.
+ * - Only the origin is kept. `url.origin` already drops the path, the DSN's
+ *   project id and any query/fragment, none of which belong in a CSP list.
+ * - A DSN carrying userinfo is rejected: `connect-src` takes origins, and
+ *   credentials in one would be published in every response header.
+ * - `NEXT_PUBLIC_TELEMETRY_ENABLED` must be exactly `true`. When it is unset
+ *   or false the telemetry URL is inert, and including it would widen the
+ *   policy for a feature that is not running.
+ * - Malformed input is dropped and *named* by variable, never by value: a
+ *   malformed DSN may still contain a public key, and this function must not
+ *   be the thing that prints it.
  */
 export function observabilityConnectSources(
-  _env: ObservabilityEnv = process.env,
+  env: ObservabilityEnv = process.env,
 ): { origins: string[]; rejected: string[] } {
-  return { origins: [], rejected: [] };
+  const isProduction = env.NODE_ENV === "production";
+  const origins: string[] = [];
+  const rejected: string[] = [];
+
+  const accept = (value: string | undefined, label: string): void => {
+    if (!value) return;
+    const raw = value.trim();
+    if (!raw) return;
+    try {
+      const url = new URL(raw);
+      const isLocalhost =
+        url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+      if (url.protocol !== "https:" && !(isLocalhost && !isProduction)) {
+        rejected.push(label);
+        return;
+      }
+      if (url.username || url.password) {
+        rejected.push(label);
+        return;
+      }
+      origins.push(url.origin);
+    } catch {
+      rejected.push(label);
+    }
+  };
+
+  accept(env.NEXT_PUBLIC_SENTRY_DSN, "NEXT_PUBLIC_SENTRY_DSN");
+
+  if (env.NEXT_PUBLIC_TELEMETRY_ENABLED === "true") {
+    accept(env.NEXT_PUBLIC_TELEMETRY_URL, "NEXT_PUBLIC_TELEMETRY_URL");
+  }
+
+  return { origins: unique(origins), rejected };
 }
