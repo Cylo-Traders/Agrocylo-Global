@@ -30,11 +30,29 @@ import { useEffect, useRef, useState, useCallback } from "react";
  * reconnect, so session changes cannot produce a reconnect storm.
  */
 
+/**
+ * Derive a WebSocket URL with the following priority:
+ *
+ * 1. NEXT_PUBLIC_WS_URL — explicit override (required in production).
+ * 2. SSR / test (no `window`) — fall back to the dev server default.
+ * 3. HTTP localhost — connect to port 5001 so local dev still works without
+ *    the env var.
+ * 4. Everything else (HTTPS / non-localhost HTTP) — use the same origin on
+ *    the standard TLS port (wss://host/ws).  Forcing port 5001 here breaks
+ *    HTTPS deployments where the WS endpoint is exposed via the same reverse
+ *    proxy as the page (issue #1044).
+ */
 function getWebSocketUrl(): string {
   if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
   if (typeof window === "undefined") return "ws://localhost:5001/ws";
-  const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${scheme}://${window.location.hostname}:5001/ws`;
+  const { protocol, hostname } = window.location;
+  const isLocalDev =
+    hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  if (isLocalDev && protocol !== "https:") {
+    return "ws://localhost:5001/ws";
+  }
+  const scheme = protocol === "https:" ? "wss" : "ws";
+  return `${scheme}://${hostname}/ws`;
 }
 
 const BACKOFF_BASE_MS = 1_000;

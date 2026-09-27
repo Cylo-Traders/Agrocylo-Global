@@ -147,16 +147,44 @@ describe("useWebSocket", () => {
     // Mock window.location.protocol as https
     const originalLocation = window.location;
     delete (window as any).location;
-    window.location = { ...originalLocation, protocol: "https:" } as any;
+    window.location = { ...originalLocation, protocol: "https:", hostname: "myapp.example.com" } as any;
 
     const onMessage = vi.fn();
     renderHook(() => useWebSocket(onMessage));
 
     const ws = webSocketInstances[0];
-    expect(ws.url).toContain("wss://");
+    // Should be same-origin, no port 5001 (issue #1044)
+    expect(ws.url).toBe("wss://myapp.example.com/ws");
 
     // Restore location
     window.location = originalLocation;
+  });
+
+  it("ws://localhost:5001/ws is used when running locally on http", () => {
+    const originalLocation = window.location;
+    delete (window as any).location;
+    window.location = { ...originalLocation, protocol: "http:", hostname: "localhost" } as any;
+
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket(onMessage));
+
+    const ws = webSocketInstances[0];
+    expect(ws.url).toBe("ws://localhost:5001/ws");
+
+    window.location = originalLocation;
+  });
+
+  it("uses an explicit NEXT_PUBLIC_WS_URL override when set", () => {
+    const original = process.env.NEXT_PUBLIC_WS_URL;
+    process.env.NEXT_PUBLIC_WS_URL = "wss://custom.example.com/ws";
+
+    const onMessage = vi.fn();
+    renderHook(() => useWebSocket(onMessage));
+
+    const ws = webSocketInstances[0];
+    expect(ws.url).toBe("wss://custom.example.com/ws");
+
+    process.env.NEXT_PUBLIC_WS_URL = original;
   });
 
   it("initial status is connecting", () => {
