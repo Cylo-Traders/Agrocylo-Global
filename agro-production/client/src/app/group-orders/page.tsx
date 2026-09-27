@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useWebSocket } from "@/hooks/useWebSocket";
+import { useState, useEffect, useCallback } from "react";
+import { useWebSocket, type WsMessage } from "@/hooks/useWebSocket";
 import { safePercentage } from "@/lib/validation";
 
 interface GroupOrder {
@@ -14,20 +14,50 @@ interface GroupOrder {
   status: "open" | "expired" | "completed";
 }
 
+interface GroupOrderUpdatePayload {
+  orderId: string;
+  currentQuantity: number;
+}
+
 export default function GroupOrdersPage() {
   const [groupOrders, setGroupOrders] = useState<GroupOrder[]>([]);
   const [loading, setLoading] = useState(true);
-  const { lastMessage } = useWebSocket();
+
+  const updateGroupOrderProgress = useCallback(
+    (data: GroupOrderUpdatePayload) => {
+      setGroupOrders((prev) =>
+        prev.map((order) =>
+          order.id === data.orderId
+            ? { ...order, currentQuantity: data.currentQuantity }
+            : order,
+        ),
+      );
+    },
+    [],
+  );
+
+  useWebSocket(
+    useCallback(
+      (message: WsMessage) => {
+        if (message.type === "group_order.updated") {
+          // Ignore messages with an unrecognised version or malformed payload.
+          if (message.version !== "1") return;
+          const payload = message.payload as GroupOrderUpdatePayload;
+          if (
+            typeof payload?.orderId === "string" &&
+            typeof payload?.currentQuantity === "number"
+          ) {
+            updateGroupOrderProgress(payload);
+          }
+        }
+      },
+      [updateGroupOrderProgress],
+    ),
+  );
 
   useEffect(() => {
     fetchGroupOrders();
   }, []);
-
-  useEffect(() => {
-    if (lastMessage && lastMessage.type === "group_order_update") {
-      updateGroupOrderProgress(lastMessage.data);
-    }
-  }, [lastMessage]);
 
   const fetchGroupOrders = async () => {
     try {
@@ -39,16 +69,6 @@ export default function GroupOrdersPage() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const updateGroupOrderProgress = (data: any) => {
-    setGroupOrders((prev) =>
-      prev.map((order) =>
-        order.id === data.orderId
-          ? { ...order, currentQuantity: data.currentQuantity }
-          : order
-      )
-    );
   };
 
   const joinPool = async (orderId: string) => {
