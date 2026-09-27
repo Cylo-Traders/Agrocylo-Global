@@ -8,6 +8,7 @@ import AnalyticsInit from "@/components/AnalyticsInit";
 import HandoffConsumer from "@/components/HandoffConsumer";
 import PendingTransactionsResolver from "@/components/PendingTransactionsResolver";
 import { redirect } from "next/navigation";
+import { themeBootstrapScript } from "@/theme/theme";
 
 export const metadata: Metadata = {
   title: "Agro Production",
@@ -22,6 +23,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   }
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        {/*
+          Issue #1055: resolve the theme before the first paint. The script is
+          inline and synchronous on purpose; moving it into an effect or an
+          external file would let the light `:root` palette paint first.
+        */}
+        <script dangerouslySetInnerHTML={{ __html: themeBootstrapScript }} />
+      </head>
       <body className="min-h-screen bg-background text-foreground antialiased">
         <I18nProvider>
           <ThemeProvider>
