@@ -5,6 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useWallet } from "@/context/WalletContext";
 import { createCampaign, type CreateCampaignRequest, type CampaignCreationPhase } from "@/services/campaignService";
+import {
+  uploadCampaignImage,
+  saveRetryState,
+  clearRetryState,
+  type CampaignImageUploadState,
+} from "@/services/campaignImageService";
 import { parseXlmToStroops } from "@/lib/validation";
 
 const STEPS = ["Details", "Deadline", "Image", "Review"];
@@ -25,6 +31,11 @@ export default function CreateCampaignPage() {
   const [deadlineError, setDeadlineError] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
+  // Post-creation upload state (#1053): the campaign exists by the time this
+  // matters, so failure is a partial success with Retry/Skip — never a
+  // recreation of the campaign.
+  const [imageUpload, setImageUpload] = useState<CampaignImageUploadState | null>(null);
+  const [createdCampaignId, setCreatedCampaignId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function handleFundingGoalChange(raw: string) {
@@ -105,20 +116,35 @@ export default function CreateCampaignPage() {
         return;
       }
 
-      // Upload image after campaign is created
+      // Upload image after campaign is created (#1053): a retryable
+      // post-creation phase through the authenticated API. Failure is
+      // surfaced with Retry/Skip instead of being silently logged — the
+      // campaign itself is already live.
       setPhase({ phase: "registering" });
       if (imageFile && result.campaignId) {
-        const formData = new FormData();
-        formData.append("image", imageFile);
-
-        const imageResponse = await fetch(`/api/campaigns/${result.campaignId}/image`, {
-          method: "POST",
-          body: formData,
+        setCreatedCampaignId(result.campaignId);
+        saveRetryState({
+          campaignId: result.campaignId,
+          fileName: imageFile.name,
+          fileSize: imageFile.size,
+          createdAt: Date.now(),
         });
 
-        if (!imageResponse.ok) {
-          console.warn("Image upload failed, continuing with campaign creation");
+        const uploadState = await uploadCampaignImage(result.campaignId, imageFile);
+        setImageUpload(uploadState);
+
+        if (uploadState.kind === "uploaded" || uploadState.kind === "skipped") {
+          clearRetryState();
+          setPhase({ phase: "success" });
+          setTimeout(() => {
+            router.push("/campaigns");
+          }, 2000);
+          return;
         }
+        // Upload failed: stop here, the UI below offers Retry / Skip and
+        // the campaign stays created.
+        setPhase({ phase: "success" });
+        return;
       }
 
       setPhase({ phase: "success" });
@@ -133,6 +159,28 @@ export default function CreateCampaignPage() {
       setLoading(false);
     }
   }, [address, isStep1Valid, isStep2Valid, isStep3Valid, tokenAddress, fundingGoalResult.stroops, deadline, imageFile, router]);
+
+  const handleRetryImageUpload = useCallback(async () => {
+    if (!createdCampaignId || !imageFile) return;
+    setLoading(true);
+    const uploadState = await uploadCampaignImage(createdCampaignId, imageFile);
+    setImageUpload(uploadState);
+    if (uploadState.kind === "uploaded" || uploadState.kind === "skipped") {
+      clearRetryState();
+      setTimeout(() => {
+        router.push("/campaigns");
+      }, 1500);
+    }
+    setLoading(false);
+  }, [createdCampaignId, imageFile, router]);
+
+  const handleSkipImageUpload = useCallback(() => {
+    clearRetryState();
+    setImageUpload({ kind: "skipped" });
+    setTimeout(() => {
+      router.push("/campaigns");
+    }, 1500);
+  }, [router]);
 
   if (!connected) {
     return (
@@ -383,6 +431,45 @@ export default function CreateCampaignPage() {
               {phase.txHash && (
                 <p className="text-xs text-primary-700 mt-2 font-mono break-all">
                   TX: {phase.txHash}
+                </p>
+              )}
+            </div>
+          )}
+
+          {imageUpload && imageUpload.kind !== "uploaded" && imageUpload.kind !== "skipped" && (
+            <div role="alert" className="border border-amber-200 bg-amber-50 rounded p-4 text-sm">
+              <p className="text-amber-900 font-medium">
+                Campaign created — but the image didn&apos;t upload
+              </p>
+              <p className="text-amber-800 text-xs mt-1">
+                {imageUpload.kind === "unauthorized" &&
+                  "Your wallet session was rejected (401). Reconnect and retry."}
+                {imageUpload.kind === "unsupported_media" &&
+                  "The file was rejected as media (400/415). Use a jpg, png or webp image."}
+                {imageUpload.kind === "too_large" &&
+                  "The file is too large (413). Choose a smaller image."}
+                {imageUpload.kind === "offline" &&
+                  "You appear to be offline. Check your connection and retry."}
+                {imageUpload.kind === "error" && imageUpload.message}
+              </p>
+              <div className="flex gap-3 mt-3">
+                <button
+                  onClick={handleRetryImageUpload}
+                  disabled={loading}
+                  className="border border-amber-300 text-amber-900 px-4 py-1.5 rounded hover:bg-amber-100 disabled:opacity-50"
+                >
+                  Retry upload
+                </button>
+                <button
+                  onClick={handleSkipImageUpload}
+                  className="border border-border text-foreground px-4 py-1.5 rounded hover:bg-surface"
+                >
+                  Skip for now
+                </button>
+              </div>
+              {imageUpload.kind === "skipped" && (
+                <p className="text-amber-700 text-xs mt-2">
+                  You can add an image to the campaign later.
                 </p>
               )}
             </div>

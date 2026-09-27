@@ -5,6 +5,8 @@
    - Retries use exponential backoff and only apply to network errors and 5xx responses on safe methods
 */
 
+import { getAccessToken } from "./authToken";
+
 /** Thrown when no response is received (DNS failure, timeout, offline, etc.) */
 export class NetworkError extends Error {
   constructor(message: string, public readonly cause?: unknown) {
@@ -55,6 +57,12 @@ export interface RequestOptions extends RequestInit {
   timeoutMs?: number;
   /** Max retry attempts on network error or 5xx (default: 3) */
   retries?: number;
+  /**
+   * Set false to omit the Authorization header (e.g. for routes that must
+   * work without a session). Default: attach the wallet access token
+   * (getAccessToken) as `Authorization: Bearer …` when one exists.
+   */
+  auth?: boolean;
 }
 
 export interface ApiClientOptions {
@@ -84,6 +92,17 @@ export class ApiClient {
     const url = path.startsWith("http") ? path : `${this.baseUrl}${path}`;
     const method = init.method ?? "GET";
     const fetcher = this.fetchImpl ?? fetch.bind(globalThis);
+
+    // Central wallet auth (#1052): attach the stored access token unless the
+    // caller opted out, without clobbering an explicitly-provided header.
+    const headers = { ...(init.headers as Record<string, string> | undefined) };
+    if (options.auth !== false && !headers["Authorization"]) {
+      const token = getAccessToken();
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+    }
+    init.headers = headers;
 
     let lastError: unknown;
 
@@ -166,6 +185,15 @@ export class ApiClient {
   post<T = unknown>(path: string, data?: unknown, options?: RequestOptions) {
     const headers = { "Content-Type": "application/json", ...(options?.headers as Record<string, string>) };
     return this.request<T>(path, { ...options, method: "POST", headers, body: JSON.stringify(data) });
+  }
+
+  /**
+   * Multipart upload (#1053): sends a FormData body as-is so the browser
+   * sets the `multipart/form-data` boundary itself (never set Content-Type
+   * manually for FormData). Auth is attached like any other request.
+   */
+  upload<T = unknown>(path: string, data: FormData, options: RequestOptions = {}) {
+    return this.request<T>(path, { ...options, method: "POST", body: data });
   }
 
   put<T = unknown>(path: string, data?: unknown, options?: RequestOptions) {

@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { prisma } from "../db/client.js";
+import { requireWallet, type WalletRequest } from "../middleware/walletAuth.js";
 import { jsonValidated, validateParams, validateQuery, validateResponse } from "../middleware/validate.js";
 import { problemDetail } from "../middleware/errors.js";
 import {
@@ -10,7 +11,12 @@ import {
   type ListBasketDepositsQuery,
   type ListBasketsQuery,
 } from "../schemas/basket.js";
-import { BasketDepositSchema, BasketDetailSchema, BasketListResponseSchema } from "../schemas/responses.js";
+import {
+  BasketDepositSchema,
+  BasketDetailSchema,
+  BasketListResponseSchema,
+  InvestorBasketSummarySchema,
+} from "../schemas/responses.js";
 
 const router = Router();
 
@@ -88,6 +94,73 @@ router.get(
     });
 
     jsonValidated(res, z.array(BasketDepositSchema), 200, deposits);
+  },
+);
+
+// GET /investor/basket — wallet-scoped summary of the investor's active basket (Issue #1050)
+//
+// The investor's wallet address is derived from the session, never from the
+// query string, so an investor can only ever read their own data. The active
+// basket is the basket owning the most recent deposit; amounts are i128
+// stroop strings exactly as indexed on-chain.
+router.get(
+  "/investor/basket",
+  requireWallet,
+  validateResponse(InvestorBasketSummarySchema),
+  async (req: WalletRequest, res: Response) => {
+    const walletAddress = req.walletAddress!;
+
+    const deposits = await prisma.basketDeposit.findMany({
+      where: { depositorAddress: walletAddress },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (deposits.length === 0) {
+      problemDetail(
+        res,
+        req,
+        404,
+        "Basket Not Found",
+        `No basket deposits found for ${walletAddress}`,
+      );
+      return;
+    }
+
+    // Active-basket selection: the basket owning the most recent deposit.
+    const basket = await prisma.basket.findUnique({
+      where: { id: deposits[0]!.basketId },
+    });
+
+    if (!basket) {
+      problemDetail(
+        res,
+        req,
+        404,
+        "Basket Not Found",
+        `No basket with id ${deposits[0]!.basketId}`,
+      );
+      return;
+    }
+
+    const positions = deposits.filter((d) => d.basketId === basket.id);
+
+    // Totals: BigInt sum, re-serialized as i128 stroop strings so precision
+    // survives the round trip (parsers must not route these through Number).
+    let totalAllocated = 0n;
+    let totalReturned = 0n;
+    for (const position of positions) {
+      totalAllocated += BigInt(position.amount || "0");
+      if (position.claimed && position.payoutAmount) {
+        totalReturned += BigInt(position.payoutAmount);
+      }
+    }
+
+    jsonValidated(res, InvestorBasketSummarySchema, 200, {
+      basket,
+      positions,
+      totalAllocated: totalAllocated.toString(),
+      totalReturned: totalReturned.toString(),
+    });
   },
 );
 
