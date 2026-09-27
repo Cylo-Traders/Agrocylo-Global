@@ -15,8 +15,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { fetchInvestorBasket } from "@/services/basketService";
-import { isApiError, isNetworkError } from "@/lib/apiClient";
+import { safePercentage } from "@/lib/validation";
 
 type BasketPageState =
   | { kind: "loading" }
@@ -161,10 +160,23 @@ export default function BasketPage() {
                     </p>
                   </div>
                   <div className="text-right shrink-0 ml-4">
-                    <p className="font-medium text-foreground">{pos.currentValue} XLM</p>
-                    {pos.claimed && (
-                      <p className="text-xs mt-0.5 text-primary-600">Claimed</p>
-                    )}
+                    <p className="font-medium text-foreground">
+                      {pos.currentValue.toLocaleString()} XLM
+                    </p>
+                    <p
+                      className={`text-xs mt-0.5 ${
+                        pos.currentValue >= pos.allocatedAmount
+                          ? "text-primary-600"
+                          : "text-red-500"
+                      }`}
+                    >
+                      {pos.currentValue >= pos.allocatedAmount ? "+" : ""}
+                      {safePercentage(
+                        pos.currentValue - pos.allocatedAmount,
+                        pos.allocatedAmount,
+                      ).toFixed(1)}
+                      %
+                    </p>
                   </div>
                 </div>
               ))}

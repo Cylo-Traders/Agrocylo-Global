@@ -9,8 +9,10 @@ import * as Sentry from "@sentry/nextjs";
  */
 export default function GlobalError({
   error,
+  reset,
 }: {
   error: Error & { digest?: string };
+  reset: () => void;
 }) {
   useEffect(() => {
     Sentry.captureException(error);
@@ -22,6 +24,21 @@ export default function GlobalError({
         <div style={{ padding: "2rem", textAlign: "center", fontFamily: "sans-serif" }}>
           <h1>Something went wrong</h1>
           <p>The error has been reported. Please try again.</p>
+          <button
+            onClick={reset}
+            style={{
+              marginTop: "1rem",
+              padding: "0.5rem 1rem",
+              backgroundColor: "#007bff",
+              color: "white",
+              border: "none",
+              borderRadius: "0.25rem",
+              cursor: "pointer",
+              fontSize: "1rem",
+            }}
+          >
+            Try again
+          </button>
         </div>
       </body>
     </html>

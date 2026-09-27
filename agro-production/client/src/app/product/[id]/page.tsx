@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { notFound } from "next/navigation";
 import { fetchProduct, formatPrice } from "@/services/productService";
 import { useTransaction } from "@/hooks/useTransaction";
 import { buildCreateOrder } from "@/lib/contractService";
@@ -61,7 +62,7 @@ export default function ProductDetailPage() {
   }
 
   if (error) return (<div className="border border-red-200 bg-red-50 rounded-xl p-6 text-red-700 text-sm" role="alert">{error}</div>);
-  if (!product) return null;
+  if (!product) notFound();
 
   const unitPrice = BigInt(product.pricePerUnit || "0");
   const totalPrice = unitPrice * BigInt(quantity);

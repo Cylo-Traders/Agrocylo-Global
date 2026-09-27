@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { notFound } from "next/navigation";
 import { fetchCampaign, fundingProgress, formatAmount } from "@/services/campaignService";
 import { trackCampaignViewed } from "@/lib/analytics";
 import { classifyError, logErrorWithContext } from "@/lib/errorHandling";
@@ -60,7 +61,7 @@ export default function CampaignDetailPage() {
   if (loading) return <CampaignDetailSkeleton />;
 
   if (error) return (<div className="border border-red-200 bg-red-50 rounded-xl p-6 text-red-700 text-sm" role="alert">{error}</div>);
-  if (!campaign) return null;
+  if (!campaign) notFound();
 
   const pct = fundingProgress(campaign);
   const deadline = new Date(campaign.deadline);

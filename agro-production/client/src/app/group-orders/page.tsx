@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useWebSocket } from "@/hooks/useWebSocket";
+import { safePercentage } from "@/lib/validation";
 
 interface GroupOrder {
   id: string;
@@ -60,7 +61,7 @@ export default function GroupOrdersPage() {
   };
 
   const calculateProgress = (order: GroupOrder) => {
-    return (order.currentQuantity / order.targetQuantity) * 100;
+    return safePercentage(order.currentQuantity, order.targetQuantity);
   };
 
   if (loading) {
