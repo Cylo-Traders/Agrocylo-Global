@@ -32,6 +32,7 @@ import {
 } from "../schemas/responses.js";
 import { broadcast } from "../services/wsServer.js";
 import { getCachedResponse, setCachedResponse } from "../middleware/idempotency.js";
+import { getStatusMetadata } from "../services/campaignStatusService.js";
 
 const router = Router();
 
@@ -150,10 +151,16 @@ router.get(
     const harvestTx = campaign.transactions.find((t) => t.eventType === "campaign.harvest");
     const settledTx = campaign.transactions.find((t) => t.eventType === "campaign.settled");
 
+    const statusMetadata = getStatusMetadata(campaign.status as any);
+
     const milestoneState = {
       campaignId: campaign.id,
       onChainId: campaign.onChainId,
-      status: campaign.status,
+      status: {
+        machine: statusMetadata.machineStatus,
+        display: statusMetadata.displayLabel,
+        isTerminal: statusMetadata.isTerminal,
+      },
       percentageReleased,
       trancheReleased: campaign.trancheReleased,
       currentMilestone,

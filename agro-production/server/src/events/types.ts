@@ -42,7 +42,8 @@ interface BaseEvent {
   rawId: string;
   /** Preserved so API read models can be tied back to the confirmed ledger tx. */
   txHash?: string;
-  schemaVersion?: string;
+  /** Canonical schema version for this event (e.g., "1.0.0"). */
+  schemaVersion: string;
 }
 
 export interface CampaignCreatedEvent extends BaseEvent {
