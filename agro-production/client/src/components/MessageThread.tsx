@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useWebSocket, type WsMessage } from "@/hooks/useWebSocket";
 import type { Conversation, Message } from "@/services/conversationService";
 import { sendMessage as sendMessageApi } from "@/services/conversationService";
@@ -42,7 +42,11 @@ export default function MessageThread({
     }
   }, [conversation.id]);
 
-  useWebSocket(handleWebSocketMessage, { token: sessionToken });
+  // Issue #1043: keep the options identity tied to the session token so a
+  // re-auth is driven by the token itself and not by a fresh object literal.
+  const socketOptions = useMemo(() => ({ token: sessionToken }), [sessionToken]);
+
+  useWebSocket(handleWebSocketMessage, socketOptions);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
