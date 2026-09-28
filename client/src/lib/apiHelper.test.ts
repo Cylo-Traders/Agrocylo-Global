@@ -61,16 +61,18 @@ describe("apiRequest error classification", () => {
     expect(error).toMatchObject({ code: "SERVER_ERROR", status: 500 });
   });
 
-  it("keeps successful JSON and 204 behavior", async () => {
+  it("keeps successful JSON and 204/205 behavior", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ ok: true }), { status: 200 }),
       )
-      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 205 }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(apiRequest("/ok")).resolves.toEqual({ ok: true });
     await expect(apiRequest("/empty")).resolves.toBeUndefined();
+    await expect(apiRequest("/reset")).resolves.toBeUndefined();
   });
 
   it("authenticates protected requests and clears an expired session on 401", async () => {
