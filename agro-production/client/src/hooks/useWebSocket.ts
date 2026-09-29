@@ -59,6 +59,12 @@ const BACKOFF_BASE_MS = 1_000;
 const BACKOFF_MAX_MS = 30_000;
 const MAX_QUEUE_SIZE = 100;
 
+/** Equal jitter: spreads reconnects across [delay/2, delay] instead of a fixed
+ *  interval, so a server restart doesn't get hit by every client at once. */
+function withJitter(delayMs: number): number {
+  return delayMs / 2 + Math.random() * (delayMs / 2);
+}
+
 export type WsMessage = {
   version: "1";
   type: string;
@@ -66,7 +72,7 @@ export type WsMessage = {
   timestamp: string;
 };
 
-export type WsStatus = "connecting" | "open" | "closed" | "error";
+export type WsStatus = "connecting" | "reconnecting" | "open" | "closed" | "error";
 
 type Handler = (msg: WsMessage) => void;
 
@@ -78,6 +84,7 @@ export interface UseWebSocketOptions {
 export interface UseWebSocketReturn {
   send: (data: string) => void;
   status: WsStatus;
+  reconnectAttempt: number;
 }
 
 function portfolioChannelMessage(type: "subscribe" | "unsubscribe", portfolioId: string): string {
@@ -97,6 +104,7 @@ export function useWebSocket(onMessage: Handler, options?: UseWebSocketOptions):
   const unmountedRef = useRef(false);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [status, setStatus] = useState<WsStatus>("connecting");
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
 
   // Latest render values, read from the socket callbacks so a re-render never
   // has to rebuild the transport.
@@ -167,7 +175,10 @@ export function useWebSocket(onMessage: Handler, options?: UseWebSocketOptions):
 
     ws.onopen = () => {
       attemptRef.current = 0;
-      if (!unmountedRef.current) setStatus("open");
+      if (!unmountedRef.current) {
+        setStatus("open");
+        setReconnectAttempt(0);
+      }
 
       applyAuth(ws, tokenRef.current);
 
@@ -190,11 +201,12 @@ export function useWebSocket(onMessage: Handler, options?: UseWebSocketOptions):
       if (unmountedRef.current) return;
       setStatus("closed");
       const attempt = attemptRef.current;
-      const delay = Math.min(BACKOFF_BASE_MS * 2 ** attempt, BACKOFF_MAX_MS);
+      const delay = withJitter(Math.min(BACKOFF_BASE_MS * 2 ** attempt, BACKOFF_MAX_MS));
       attemptRef.current = attempt + 1;
+      setReconnectAttempt(attempt + 1);
       reconnectTimerRef.current = setTimeout(() => {
         if (unmountedRef.current) return;
-        setStatus("connecting");
+        setStatus("reconnecting");
         connectRef.current();
       }, delay);
     };
@@ -214,10 +226,10 @@ export function useWebSocket(onMessage: Handler, options?: UseWebSocketOptions):
     const ws = socketRef.current;
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(data);
+    } else if (messageQueueRef.current.length < MAX_QUEUE_SIZE) {
+      messageQueueRef.current.push(data);
     } else {
-      if (messageQueueRef.current.length < MAX_QUEUE_SIZE) {
-        messageQueueRef.current.push(data);
-      }
+      console.warn("[useWebSocket] Message queue full; dropping message");
     }
   }, []);
 
@@ -253,5 +265,5 @@ export function useWebSocket(onMessage: Handler, options?: UseWebSocketOptions):
     }
   }, [token, portfolioId, applyAuth, applySubscription]);
 
-  return { send, status };
+  return { send, status, reconnectAttempt };
 }

@@ -76,14 +76,60 @@ describe("useWebSocket", () => {
     });
 
     expect(result.current.status).toBe("closed");
+    expect(result.current.reconnectAttempt).toBe(1);
 
-    // Wait for reconnect timer to fire
+    // Wait for reconnect timer to fire (base delay is 1000ms; jitter only ever
+    // shortens it, so 1100ms comfortably covers the full range).
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 1100));
     });
 
-    // Second WebSocket should be created
+    // Second WebSocket should be created, and the status reflects a retry
+    // rather than the initial connect.
     expect(webSocketInstances.length).toBeGreaterThan(1);
+    expect(result.current.status).toBe("reconnecting");
+  });
+
+  it("reconnect backoff delay includes jitter within [delay/2, delay]", () => {
+    vi.useFakeTimers();
+    try {
+      const randomSpy = vi.spyOn(Math, "random");
+      const setTimeoutSpy = vi.spyOn(global, "setTimeout");
+
+      const onMessage = vi.fn();
+      renderHook(() => useWebSocket(onMessage));
+      const ws = webSocketInstances[0];
+
+      act(() => {
+        ws.readyState = mockWebSocket.OPEN;
+        ws.onopen?.();
+      });
+
+      randomSpy.mockReturnValue(0);
+      act(() => {
+        ws.readyState = mockWebSocket.CLOSED;
+        ws.onclose?.();
+      });
+      const minDelay = setTimeoutSpy.mock.calls.at(-1)?.[1];
+      expect(minDelay).toBe(500); // 1000 / 2 + 0 * (1000 / 2)
+
+      randomSpy.mockReturnValue(1);
+      act(() => {
+        vi.advanceTimersByTime(minDelay as number);
+      });
+      const secondWs = webSocketInstances[1];
+      act(() => {
+        secondWs.readyState = mockWebSocket.CLOSED;
+        secondWs.onclose?.();
+      });
+      const maxDelay = setTimeoutSpy.mock.calls.at(-1)?.[1];
+      expect(maxDelay).toBe(2000); // 2000 / 2 + 1 * (2000 / 2)
+
+      randomSpy.mockRestore();
+      setTimeoutSpy.mockRestore();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("reconnect is cancelled on unmount", async () => {
@@ -240,6 +286,54 @@ describe("useWebSocket", () => {
     });
 
     expect(ws.send).toHaveBeenCalledWith("test message");
+  });
+
+  it("warns and drops messages once the queue is full", () => {
+    const onMessage = vi.fn();
+    const { result } = renderHook(() => useWebSocket(onMessage));
+    const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    act(() => {
+      for (let i = 0; i < 101; i++) {
+        result.current.send(`message-${i}`);
+      }
+    });
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[useWebSocket] Message queue full; dropping message",
+    );
+
+    consoleSpy.mockRestore();
+  });
+
+  it("resets reconnectAttempt to 0 once the socket reopens", () => {
+    vi.useFakeTimers();
+    try {
+      const onMessage = vi.fn();
+      const { result } = renderHook(() => useWebSocket(onMessage));
+
+      const first = webSocketInstances[0];
+      act(() => {
+        first.readyState = mockWebSocket.CLOSED;
+        first.onclose?.();
+      });
+      expect(result.current.reconnectAttempt).toBe(1);
+
+      act(() => {
+        vi.advanceTimersByTime(1_000); // jitter never exceeds the 1000ms base delay
+      });
+
+      const second = webSocketInstances[1];
+      act(() => {
+        second.readyState = mockWebSocket.OPEN;
+        second.onopen?.();
+      });
+
+      expect(result.current.reconnectAttempt).toBe(0);
+      expect(result.current.status).toBe("open");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("calls onMessage handler for valid JSON messages", () => {
