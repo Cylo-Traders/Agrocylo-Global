@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback  } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 
@@ -64,6 +64,7 @@ export function WeatherAdvisoryWidget({ farmerId, location }: WeatherAdvisoryWid
     fetchAdvisories(controller.signal);
     return () => controller.abort();
   }, [fetchAdvisories]);
+
 
   const getSeverityColor = (severity: string) => {
     const colors = {

@@ -16,6 +16,7 @@ import userRoutes from './routes/users.js';
 import conversationRoutes from './routes/conversations.js';
 import adminReconciliationRoutes from './routes/adminReconciliation.js';
 import indexerRoutes from './routes/indexer.js';
+import weatherRoutes from './routes/weather.js';
 import { globalErrorHandler } from './middleware/errors.js';
 import { HealthResponseSchema, LivezResponseSchema, ReadyzResponseSchema } from './schemas/health.js';
 import { serveOpenApiDocument } from './openapi/document.js';
@@ -68,6 +69,7 @@ app.use('/api/v1', userRoutes);
 app.use('/api/v1', conversationRoutes);
 app.use('/api/v1', adminReconciliationRoutes);
 app.use('/api/v1/indexer', indexerRoutes);
+app.use('/api/v1', weatherRoutes);
 
 app.get('/health', (_req: Request, res: Response) => {
   logger.info('Health check endpoint hit');
