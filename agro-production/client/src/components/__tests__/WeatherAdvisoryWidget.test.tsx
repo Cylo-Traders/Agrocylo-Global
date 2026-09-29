@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { WeatherAdvisoryWidget } from "../WeatherAdvisoryWidget";
+import userEvent from "@testing-library/user-event";
 
 vi.mock("next/dynamic", () => ({
   default: (fn: any) => {
@@ -21,6 +22,10 @@ describe("WeatherAdvisoryWidget", () => {
     vi.clearAllMocks();
   });
 
+    afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("renders loading state", () => {
     (global.fetch as any).mockImplementation(() => new Promise(() => {}));
     render(<WeatherAdvisoryWidget />);
@@ -32,7 +37,7 @@ describe("WeatherAdvisoryWidget", () => {
 
     render(<WeatherAdvisoryWidget />);
     await waitFor(() => {
-      expect(screen.getByText(/failed to load weather data/i)).toBeInTheDocument();
+      expect(screen.getByText(/failed to fetch/i)).toBeInTheDocument();
     });
   });
 
@@ -97,5 +102,83 @@ describe("WeatherAdvisoryWidget", () => {
       expect(screen.queryByText("Expired Advisory")).not.toBeInTheDocument();
       expect(screen.getByText(/no active weather advisories/i)).toBeInTheDocument();
     });
+  });
+
+  it("retries on button click after failure", async () => {
+    const user = userEvent.setup();
+
+    (global.fetch as any).mockResolvedValueOnce({ ok: false });
+    render(<WeatherAdvisoryWidget />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Retry")).toBeInTheDocument();
+    });
+
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      json: async () => [
+        {
+          id: "1",
+          severity: "moderate",
+          type: "New Alert",
+          description: "Test",
+          location: { lat: 10, lng: 20, name: "Farm" },
+          issuedAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 86400000).toISOString(),
+        },
+      ],
+    });
+
+    await user.click(screen.getByText("Retry"));
+
+    await waitFor(() => {
+      expect(screen.getByText("New Alert")).toBeInTheDocument();
+    });
+  });
+
+  it("calls the correct API endpoint", async () => {
+    (global.fetch as any).mockResolvedValue({
+      ok: true,
+      json: async () => [],
+    });
+
+    render(<WeatherAdvisoryWidget farmerId="farmer-1" location={{ lat: 6.5, lng: 3.4 }} />);
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalled();
+    });
+
+    const calledUrl = (global.fetch as any).mock.calls[0][0] as string;
+    expect(calledUrl).toContain("/api/v1/weather/advisories");
+    expect(calledUrl).toContain("farmerId=farmer-1");
+    expect(calledUrl).toContain("lat=6.5");
+    expect(calledUrl).toContain("lng=3.4");
+  });
+
+  it("View All link points to /notifications", async () => {
+    (global.fetch as any).mockResolvedValue({
+      ok: true,
+      json: async () => [],
+    });
+
+    render(<WeatherAdvisoryWidget />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/no active weather advisories/i)).toBeInTheDocument();
+    });
+
+    const link = screen.getByRole("link", { name: /view all notifications/i });
+    expect(link).toHaveAttribute("href", "/notifications");
+  });
+
+  it("cancels the fetch on unmount", () => {
+    const abortSpy = vi.spyOn(AbortController.prototype, "abort");
+
+    (global.fetch as any).mockImplementation(() => new Promise(() => {}));
+    const { unmount } = render(<WeatherAdvisoryWidget />);
+    unmount();
+
+    expect(abortSpy).toHaveBeenCalled();
+    abortSpy.mockRestore();
   });
 });
