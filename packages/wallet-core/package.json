@@ -7,7 +7,7 @@
   "types": "src/index.ts",
   "scripts": {
     "lint": "tsc --noEmit",
-    "build": "tsc --noEmit",
+    "build": "node init && tsc --noEmit",
     "test": "echo \"no tests yet\" && exit 0"
   },
   "devDependencies": {

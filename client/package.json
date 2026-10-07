@@ -7,9 +7,9 @@
     "npm": ">=10.9.0 <11"
   },
   "scripts": {
-    "dev": "next dev --port 3000",
-    "build": "next build",
-    "start": "next start",
+    "dev": "node init && next dev --port 3000",
+    "build": "node init && next build",
+    "start": "node init && next start",
     "lint": "eslint",
     "test": "vitest",
     "test:ui": "vitest --ui",
