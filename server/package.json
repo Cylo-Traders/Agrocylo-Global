@@ -6,10 +6,10 @@
   "main": "dist/index.js",
   "scripts": {
     "setup": "npm ci && npm run prisma:generate",
-    "dev": "npm run prisma:generate && tsx watch src/index.ts",
+    "dev": "node init && npm run prisma:generate && tsx watch src/index.ts",
     "worker:dev": "npm run prisma:generate && tsx watch src/worker.ts",
-    "build": "npm run prisma:generate && tsc",
-    "start": "node dist/index.js",
+    "build": "node init && npm run prisma:generate && tsc",
+    "start": "node init && node dist/index.js",
     "worker:start": "node dist/worker.js",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
