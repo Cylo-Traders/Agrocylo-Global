@@ -1,8 +1,8 @@
-import { prisma } from "../config/database.js";
-import { ApiError, NotFoundError } from "../http/errors.js";
-import logger from "../config/logger.js";
-import { toClientProfile, toClientRole } from "../lib/profileDto.js";
-import { OrderStatus } from "../constants/status.js";
+import { prisma } from '../config/database.js';
+import { ApiError, NotFoundError } from '../http/errors.js';
+import logger from '../config/logger.js';
+import { toClientProfile, toClientRole } from '../lib/profileDto.js';
+import { OrderStatus } from '../constants/status.js';
 
 const ORDER_INCLUDE = {
   product: true,
@@ -10,7 +10,7 @@ const ORDER_INCLUDE = {
   sellerUser: true,
 } as const;
 
-const ORDER_BY_CREATED_DESC = { createdAt: "desc" } as const;
+const ORDER_BY_CREATED_DESC = { createdAt: 'desc' } as const;
 
 export class OrderService {
   static async getAll() {
@@ -20,8 +20,8 @@ export class OrderService {
         orderBy: ORDER_BY_CREATED_DESC,
       });
     } catch (error) {
-      logger.error("Failed to fetch orders", { error });
-      throw new ApiError(500, "Internal Server Error", "Failed to fetch orders");
+      logger.error('Failed to fetch orders', { error });
+      throw new ApiError(500, 'Internal Server Error', 'Failed to fetch orders');
     }
   }
 
@@ -29,17 +29,14 @@ export class OrderService {
     try {
       return await prisma.order.findMany({
         where: {
-          OR: [
-            { buyerAddress: walletAddress },
-            { sellerAddress: walletAddress },
-          ],
+          OR: [{ buyerAddress: walletAddress }, { sellerAddress: walletAddress }],
         },
         include: ORDER_INCLUDE,
         orderBy: ORDER_BY_CREATED_DESC,
       });
     } catch (error) {
-      logger.error("Failed to fetch orders for wallet", { error, walletAddress });
-      throw new ApiError(500, "Internal Server Error", "Failed to fetch orders");
+      logger.error('Failed to fetch orders for wallet', { error, walletAddress });
+      throw new ApiError(500, 'Internal Server Error', 'Failed to fetch orders');
     }
   }
 
@@ -49,14 +46,11 @@ export class OrderService {
         where: { orderIdOnChain },
         include: ORDER_INCLUDE,
       });
-      if (!order) {
-        throw new NotFoundError("Order", orderIdOnChain);
-      }
       return order;
     } catch (error) {
       if (error instanceof ApiError) throw error;
-      logger.error("Failed to fetch order by ID", { error, orderIdOnChain });
-      throw new ApiError(500, "Internal Server Error", "Failed to fetch order");
+      logger.error('Failed to fetch order by ID', { error, orderIdOnChain });
+      throw new ApiError(500, 'Internal Server Error', 'Failed to fetch order');
     }
   }
 
@@ -68,8 +62,8 @@ export class OrderService {
         orderBy: ORDER_BY_CREATED_DESC,
       });
     } catch (error) {
-      logger.error("Failed to fetch orders by buyer", { error, buyerAddress });
-      throw new ApiError(500, "Internal Server Error", "Failed to fetch buyer orders");
+      logger.error('Failed to fetch orders by buyer', { error, buyerAddress });
+      throw new ApiError(500, 'Internal Server Error', 'Failed to fetch buyer orders');
     }
   }
 
@@ -81,24 +75,23 @@ export class OrderService {
         orderBy: ORDER_BY_CREATED_DESC,
       });
     } catch (error) {
-      logger.error("Failed to fetch orders by farmer", { error, sellerAddress });
-      throw new ApiError(500, "Internal Server Error", "Failed to fetch farmer orders");
+      logger.error('Failed to fetch orders by farmer', { error, sellerAddress });
+      throw new ApiError(500, 'Internal Server Error', 'Failed to fetch farmer orders');
     }
   }
 
   static async getSellerStats(sellerAddress: string) {
     try {
-      const [totalOrders, completedCount, refundedCount, disputedCount] =
-        await Promise.all([
-          prisma.order.count({ where: { sellerAddress } }),
-          prisma.order.count({ where: { sellerAddress, status: OrderStatus.COMPLETED } }),
-          prisma.order.count({ where: { sellerAddress, status: OrderStatus.REFUNDED } }),
-          prisma.dispute.count({
-            where: {
-              order: { sellerAddress },
-            },
-          }),
-        ]);
+      const [totalOrders, completedCount, refundedCount, disputedCount] = await Promise.all([
+        prisma.order.count({ where: { sellerAddress } }),
+        prisma.order.count({ where: { sellerAddress, status: OrderStatus.COMPLETED } }),
+        prisma.order.count({ where: { sellerAddress, status: OrderStatus.REFUNDED } }),
+        prisma.dispute.count({
+          where: {
+            order: { sellerAddress },
+          },
+        }),
+      ]);
 
       if (totalOrders === 0) {
         return {
@@ -116,8 +109,8 @@ export class OrderService {
         refundRatio: (refundedCount / totalOrders) * 100,
       };
     } catch (error) {
-      logger.error("Failed to fetch seller stats", { error, sellerAddress });
-      throw new ApiError(500, "Internal Server Error", "Failed to fetch seller statistics");
+      logger.error('Failed to fetch seller stats', { error, sellerAddress });
+      throw new ApiError(500, 'Internal Server Error', 'Failed to fetch seller statistics');
     }
   }
 
@@ -130,7 +123,7 @@ export class OrderService {
             include: {
               farmer: true,
               priceHistory: {
-                orderBy: { timestamp: "desc" },
+                orderBy: { timestamp: 'desc' },
               },
             },
           },
@@ -140,7 +133,7 @@ export class OrderService {
       });
 
       if (!order) {
-        throw new NotFoundError("Order", orderIdOnChain);
+        throw new NotFoundError('Order', orderIdOnChain);
       }
 
       const [buyerProfile, sellerProfile] = await Promise.all([
@@ -153,26 +146,26 @@ export class OrderService {
         buyer: buyerProfile
           ? toClientProfile(buyerProfile)
           : {
-              wallet_address: order.buyerAddress ?? "",
-              role: toClientRole((order.buyerUser as any)?.role ?? "BUYER"),
-              display_name: order.buyerAddress ?? "",
+              wallet_address: order.buyerAddress ?? '',
+              role: toClientRole((order.buyerUser as any)?.role ?? 'BUYER'),
+              display_name: order.buyerAddress ?? '',
               bio: null,
               avatar_url: null,
             },
         seller: sellerProfile
           ? toClientProfile(sellerProfile)
           : {
-              wallet_address: order.sellerAddress ?? "",
-              role: toClientRole((order.sellerUser as any)?.role ?? "BUYER"),
-              display_name: order.sellerAddress ?? "",
+              wallet_address: order.sellerAddress ?? '',
+              role: toClientRole((order.sellerUser as any)?.role ?? 'BUYER'),
+              display_name: order.sellerAddress ?? '',
               bio: null,
               avatar_url: null,
             },
       };
     } catch (error) {
       if (error instanceof ApiError) throw error;
-      logger.error("Failed to fetch graph order", { error, orderIdOnChain });
-      throw new ApiError(500, "Internal Server Error", "Failed to fetch order");
+      logger.error('Failed to fetch graph order', { error, orderIdOnChain });
+      throw new ApiError(500, 'Internal Server Error', 'Failed to fetch order');
     }
   }
 }

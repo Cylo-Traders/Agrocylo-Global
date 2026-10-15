@@ -149,8 +149,8 @@ services:
 
   client:
     build:
-      context: ./client
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: client/Dockerfile
     container_name: agrocylo-client
     environment:
       NODE_ENV: development
@@ -166,8 +166,8 @@ services:
 
   agro-client:
     build:
-      context: ./agro-production/client
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: agro-production/client/Dockerfile
     container_name: agrocylo-agro-client
     environment:
       NODE_ENV: development
@@ -178,7 +178,7 @@ services:
       NEXT_PUBLIC_NETWORK_PASSPHRASE: ${NEXT_PUBLIC_NETWORK_PASSPHRASE:-"Test SDF Network ; September 2015"}
       NEXT_PUBLIC_MAIN_CLIENT_URL: http://localhost:3000
     ports:
-      - "3001:3000"
+      - "3001:3001"
     depends_on:
       agro-backend:
         condition: service_healthy

@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import CartDrawer from './CartDrawer';
 
@@ -75,9 +75,10 @@ describe('CartDrawer Component', () => {
 
     // Verify calculations with formatted minor units (7 decimals)
     // 10,000,000 base = 1 USDC, fee 300,000 = 0.03, net 9,700,000 = 0.97
-    expect(screen.getByText('1 USDC')).toBeInTheDocument();
-    expect(screen.getByText('0.03 USDC')).toBeInTheDocument();
-    expect(screen.getByText('0.97 USDC')).toBeInTheDocument();
+    const totals = within(screen.getByTestId("group-totals"));
+    expect(totals.getByText('1 USDC')).toBeInTheDocument();
+    expect(totals.getByText('0.03 USDC')).toBeInTheDocument();
+    expect(totals.getByText('0.97 USDC')).toBeInTheDocument();
   });
 
   it('progresses through checkout steps', async () => {

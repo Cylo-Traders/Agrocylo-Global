@@ -118,8 +118,8 @@ export default function MessagesPage({ initialConversationId }: MessagesPageProp
           <DialogHeader>
             <DialogTitle>Block User</DialogTitle>
             <DialogDescription>
-              Block {blockConfirmUser?.name}? You won't receive messages from
-              them.
+              Block {blockConfirmUser?.name}? You won&apos;t receive messages
+              from them.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

@@ -23,6 +23,8 @@ const eslintConfig = defineConfig([
       "react-hooks/set-state-in-effect": "warn",
       "react-hooks/preserve-manual-memoization": "warn",
       "react-hooks/static-components": "warn",
+      "react-hooks/refs": "warn",
+      "react-hooks/immutability": "warn",
       "no-unreachable": "error",
     },
   },

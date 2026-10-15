@@ -1,13 +1,11 @@
-import { WebSocketServer, WebSocket, type RawData } from "ws";
-import { z } from "zod";
-import type { Server } from "node:http";
-import jwt from "jsonwebtoken";
-import logger from "../config/logger.js";
-import { config } from "../config/index.js";
-import { HANDOFF_AUDIENCE } from "./authService.js";
-import { websocketConnections } from "./promMetrics.js";
-
-
+import { WebSocketServer, WebSocket, type RawData } from 'ws';
+import { z } from 'zod';
+import type { Server } from 'node:http';
+import jwt from 'jsonwebtoken';
+import logger from '../config/logger.js';
+import { config } from '../config/index.js';
+import { HANDOFF_AUDIENCE } from './authService.js';
+import { websocketConnections } from './promMetrics.js';
 
 interface ClientSocket {
   ws: WebSocket;
@@ -80,17 +78,17 @@ export class WsManager {
 
     this.heartbeatTimer = setInterval(() => this.runHeartbeat(), HEARTBEAT_INTERVAL_MS);
 
-    this.wss.on("close", () => {
+    this.wss.on('close', () => {
       if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     });
 
-    this.wss.on("error", (err: Error) => {
-      logger.error("WebSocket server error", err);
+    this.wss.on('error', (err: Error) => {
+      logger.error('WebSocket server error', err);
     });
 
-    this.wss.on("connection", (ws: WebSocket) => {
+    this.wss.on('connection', (ws: WebSocket) => {
       if (this.clients.size >= MAX_CONNECTIONS) {
-        ws.close(1013, "Server overloaded");
+        ws.close(1013, 'Server overloaded');
         logger.warn(`WebSocket connection rejected: limit of ${MAX_CONNECTIONS} reached`);
         return;
       }
@@ -100,29 +98,39 @@ export class WsManager {
       websocketConnections.set(this.clients.size);
       logger.info(`WebSocket client connected (total: ${this.clients.size})`);
 
-      ws.on("pong", () => {
+      ws.on('pong', () => {
         client.isAlive = true;
       });
 
-      ws.on("message", (raw: RawData) => {
+      ws.on('message', (raw: RawData) => {
         let parsed: unknown;
         try {
           parsed = JSON.parse(raw.toString());
         } catch {
-          logger.warn("WebSocket received non-JSON message; closing connection");
-          ws.close(4001, "Bad Request");
+          logger.warn('WebSocket received non-JSON message; closing connection');
+          ws.close(4001, 'Bad Request');
           return;
         }
 
         const AuthMessageSchema = z.object({
-          type: z.literal("auth"),
+          type: z.literal('auth'),
           token: z.string().min(1),
         });
 
+        // Only "auth" frames are actionable. Unrelated frames (e.g. client
+        // heartbeats) must not tear down an otherwise-healthy connection.
+        const isAuthMessage =
+          typeof parsed === 'object' &&
+          parsed !== null &&
+          (parsed as { type?: unknown }).type === 'auth';
+        if (!isAuthMessage) return;
+
         const parseResult = AuthMessageSchema.safeParse(parsed);
         if (!parseResult.success) {
-          logger.warn(`WebSocket received malformed auth message: ${parseResult.error.message}; closing connection`);
-          ws.close(4001, "Bad Request");
+          logger.warn(
+            `WebSocket received malformed auth message: ${parseResult.error.message}; closing connection`
+          );
+          ws.close(4001, 'Bad Request');
           return;
         }
         const msg = parseResult.data;
@@ -134,31 +142,27 @@ export class WsManager {
           };
           // A cross-app SSO handoff token (Issue #686) may only be redeemed
           // via POST /auth/handoff, never used directly as a session credential.
-          if (payload.aud === HANDOFF_AUDIENCE) throw new Error("handoff token");
+          if (payload.aud === HANDOFF_AUDIENCE) throw new Error('handoff token');
           client.wallet = payload.walletAddress;
           logger.info(`WebSocket client authenticated: ${client.wallet}`);
         } catch {
-          logger.warn("WebSocket auth token invalid; closing connection");
-          ws.close(4001, "Unauthorized");
+          logger.warn('WebSocket auth token invalid; closing connection');
+          ws.close(4001, 'Unauthorized');
         }
       });
 
-      ws.on("close", () => {
+      ws.on('close', () => {
         this.clients.delete(ws);
-        logger.info(
-          `WebSocket client disconnected (total: ${this.clients.size})`,
-        );
+        logger.info(`WebSocket client disconnected (total: ${this.clients.size})`);
       });
 
-      ws.on("error", (err: Error) => {
-        logger.error("WebSocket client error", err);
+      ws.on('error', (err: Error) => {
+        logger.error('WebSocket client error', err);
         this.clients.delete(ws);
       });
     });
 
-    logger.info(
-      `WebSocket server listening on path ${config.wsPath}`,
-    );
+    logger.info(`WebSocket server listening on path ${config.wsPath}`);
   }
 
   private runHeartbeat(): void {
@@ -175,7 +179,7 @@ export class WsManager {
     }
     if (terminated > 0) {
       logger.info(
-        `[WsManager] Heartbeat: terminated ${terminated} stale client(s) (total: ${this.clients.size})`,
+        `[WsManager] Heartbeat: terminated ${terminated} stale client(s) (total: ${this.clients.size})`
       );
     }
     // Reconciles the gauge against every deletion path (close/error/timeout),
@@ -196,7 +200,7 @@ export class WsManager {
     try {
       ws.send(message);
     } catch (err) {
-      logger.error("WebSocket send failed; dropping client", err);
+      logger.error('WebSocket send failed; dropping client', err);
       this.droppedMessages++;
       this.clients.delete(ws);
     }

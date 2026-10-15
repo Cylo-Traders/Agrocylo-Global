@@ -60,7 +60,7 @@ describe('EscrowTransaction Component', () => {
     const submitBtn = screen.getByText('Create Escrow Order');
     fireEvent.click(submitBtn);
 
-    expect(await screen.findByText('Please select a delivery deadline')).toBeInTheDocument();
+    expect(await screen.findByText(/Please select a delivery deadline/)).toBeInTheDocument();
   });
 
   it('disables the create button while the wallet network is mismatched', () => {

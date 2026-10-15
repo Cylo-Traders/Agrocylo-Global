@@ -151,7 +151,7 @@ export default function GroupOrdersPage() {
               </div>
 
               <div className="space-y-2 text-sm">
-                <p>Price: ${order.pricePerUnit}/unit</p>
+                <p>Price: {order.pricePerUnit}/unit</p>
                 <p>
                   Expires:{" "}
                   {new Date(order.expiresAt).toLocaleDateString()}

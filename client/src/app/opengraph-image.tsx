@@ -93,6 +93,8 @@ export default function OgImage() {
         {/* Headline */}
         <div
           style={{
+            display: "flex",
+            flexDirection: "column",
             fontSize: "64px",
             fontWeight: "800",
             color: "#ffffff",
@@ -102,9 +104,11 @@ export default function OgImage() {
             maxWidth: "800px",
           }}
         >
-          Fair Trade.{" "}
-          <span style={{ color: "#4ade80" }}>On-chain.</span>
-          {"\n"}For Every Farmer.
+          <div style={{ display: "flex" }}>
+            Fair Trade.&nbsp;
+            <span style={{ color: "#4ade80" }}>On-chain.</span>
+          </div>
+          <div style={{ display: "flex" }}>For Every Farmer.</div>
         </div>
 
         {/* Description */}

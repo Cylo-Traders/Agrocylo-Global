@@ -1,9 +1,18 @@
-import { rpc, Account, Address, Contract, nativeToScVal, scValToNative as sdkScValToNative, TransactionBuilder, xdr } from "@stellar/stellar-sdk";
-import { prisma } from "../config/database.js";
-import { config } from "../config/index.js";
-import logger from "../config/logger.js";
-import { amountsEqual, canonicalizeAmount } from "../lib/money.js";
-import { captureAlert } from "../config/sentry.js";
+import {
+  rpc,
+  Account,
+  Contract,
+  nativeToScVal,
+  scValToNative as sdkScValToNative,
+  TransactionBuilder,
+  xdr,
+} from '@stellar/stellar-sdk';
+import type { Prisma } from '@prisma/client';
+import { prisma } from '../config/database.js';
+import { config } from '../config/index.js';
+import logger from '../config/logger.js';
+import { amountsEqual, canonicalizeAmount } from '../lib/money.js';
+import { captureAlert } from '../config/sentry.js';
 import {
   ACTIVE_CAMPAIGN_STATUSES_ESCROW,
   CampaignStatus,
@@ -13,24 +22,24 @@ import {
   fromContractCampaignStatus,
   fromContractOrderStatus,
   normalizeOrderStatus,
-} from "../constants/status.js";
+} from '../constants/status.js';
 import {
   reconciliationDriftTotal,
   reconciliationErrorsTotal,
   reconciliationRunDurationSeconds,
-} from "./promMetrics.js";
+} from './promMetrics.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export interface DriftFinding {
-  entityType: "order" | "campaign" | "dispute";
+  entityType: 'order' | 'campaign' | 'dispute';
   entityId: string;
-  contractSet: "escrow";
-  driftType: "status_mismatch" | "amount_mismatch" | "missing_on_chain" | "missing_in_db";
-  dbValue: Record<string, unknown>;
-  chainValue: Record<string, unknown>;
+  contractSet: 'escrow';
+  driftType: 'status_mismatch' | 'amount_mismatch' | 'missing_on_chain' | 'missing_in_db';
+  dbValue: Prisma.InputJsonValue;
+  chainValue: Prisma.InputJsonValue;
 }
 
 export interface ReconciliationReport {
@@ -52,19 +61,19 @@ async function simulateContractFn(
   server: rpc.Server,
   contractId: string,
   method: string,
-  args: xdr.ScVal[],
+  args: xdr.ScVal[]
 ): Promise<xdr.ScVal | null> {
   const contract = new Contract(contractId);
   const sourceAccount = new Account(
-    "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    "0",
+    'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    '0'
   );
   const tx = new TransactionBuilder(sourceAccount, {
-    fee: "100",
+    fee: '100',
     networkPassphrase:
-      config.nodeEnv === "production"
-        ? "Public Global Stellar Network ; September 2015"
-        : "Test SDF Network ; September 2015",
+      config.nodeEnv === 'production'
+        ? 'Public Global Stellar Network ; September 2015'
+        : 'Test SDF Network ; September 2015',
     timebounds: { minTime: 0, maxTime: 0 },
   })
     .addOperation(contract.call(method, ...args))
@@ -72,14 +81,11 @@ async function simulateContractFn(
     .build();
 
   const result = await server.simulateTransaction(tx);
-  if (
-    "error" in result &&
-    result.error
-  ) {
+  if ('error' in result && result.error) {
     logger.warn(`[Reconciliation] Contract call ${method} failed: ${result.error}`);
     return null;
   }
-  if ("result" in result && result.result) {
+  if ('result' in result && result.result) {
     return result.result.retval;
   }
   return null;
@@ -97,9 +103,12 @@ function scValToString(val: xdr.ScVal): unknown {
 // Helpers for chain→DB scan
 // ---------------------------------------------------------------------------
 
-async function getOnChainOrderCount(server: rpc.Server, contractId: string): Promise<number | null> {
+async function getOnChainOrderCount(
+  server: rpc.Server,
+  contractId: string
+): Promise<number | null> {
   try {
-    const res = await simulateContractFn(server, contractId, "get_order_count", []);
+    const res = await simulateContractFn(server, contractId, 'get_order_count', []);
     if (res === null) return null;
     const native = scValToString(res);
     const num = Number(native);
@@ -112,18 +121,18 @@ async function getOnChainOrderCount(server: rpc.Server, contractId: string): Pro
 async function getOnChainOrderDetails(
   server: rpc.Server,
   contractId: string,
-  orderIdNum: number,
+  orderIdNum: number
 ): Promise<{ status: string; amount: string; buyer: string; farmer: string } | null> {
   try {
-    const args = [nativeToScVal(orderIdNum, { type: "u64" })];
-    const result = await simulateContractFn(server, contractId, "get_order_details", args);
+    const args = [nativeToScVal(orderIdNum, { type: 'u64' })];
+    const result = await simulateContractFn(server, contractId, 'get_order_details', args);
     if (result === null) return null;
     const native = scValToString(result) as Record<string, unknown> | null;
-    if (!native || typeof native !== "object") return null;
-    const chainStatus = fromContractOrderStatus(Number(native["status"]), "escrow");
-    const chainAmount = String(native["amount"] ?? "");
-    const chainBuyer = String(native["buyer"] ?? "");
-    const chainFarmer = String(native["farmer"] ?? "");
+    if (!native || typeof native !== 'object') return null;
+    const chainStatus = fromContractOrderStatus(Number(native['status']), 'escrow');
+    const chainAmount = String(native['amount'] ?? '');
+    const chainBuyer = String(native['buyer'] ?? '');
+    const chainFarmer = String(native['farmer'] ?? '');
     return { status: chainStatus, amount: chainAmount, buyer: chainBuyer, farmer: chainFarmer };
   } catch {
     return null;
@@ -136,7 +145,7 @@ async function getOnChainOrderDetails(
 
 async function reconcileOrders(
   server: rpc.Server,
-  contractId: string,
+  contractId: string
 ): Promise<{ checked: number; findings: DriftFinding[]; errors: string[] }> {
   const findings: DriftFinding[] = [];
   const errors: string[] = [];
@@ -146,7 +155,7 @@ async function reconcileOrders(
   const orders = await prisma.order.findMany({
     where: { status: { in: openStatuses } },
     take: 200,
-    orderBy: { createdAt: "desc" },
+    orderBy: { createdAt: 'desc' },
   });
 
   for (const order of orders) {
@@ -157,51 +166,54 @@ async function reconcileOrders(
     }
 
     try {
-      const args = [nativeToScVal(orderIdNum, { type: "u64" })];
-      const result = await simulateContractFn(server, contractId, "get_order_details", args);
+      const args = [nativeToScVal(orderIdNum, { type: 'u64' })];
+      const result = await simulateContractFn(server, contractId, 'get_order_details', args);
 
       if (result === null) {
         findings.push({
-          entityType: "order",
+          entityType: 'order',
           entityId: order.orderIdOnChain,
-          contractSet: "escrow",
-          driftType: "missing_on_chain",
-          dbValue: { status: order.status, amount: order.amount, buyer: order.buyerAddress, seller: order.sellerAddress },
-          chainValue: { error: "contract call returned null" },
+          contractSet: 'escrow',
+          driftType: 'missing_on_chain',
+          dbValue: {
+            status: order.status,
+            amount: order.amount,
+            buyer: order.buyerAddress,
+            seller: order.sellerAddress,
+          },
+          chainValue: { error: 'contract call returned null' },
         });
         checked++;
         continue;
       }
 
       const native = scValToString(result) as Record<string, unknown> | null;
-      if (!native || typeof native !== "object") {
+      if (!native || typeof native !== 'object') {
         errors.push(`Order ${order.orderIdOnChain}: unexpected contract response`);
         checked++;
         continue;
       }
 
-      const chainStatus = fromContractOrderStatus(Number(native["status"]), "escrow");
+      const chainStatus = fromContractOrderStatus(Number(native['status']), 'escrow');
       // Canonicalize chain amount: on-chain i128 may render as number/bigint; normalize to canonical string
-      let chainAmount = "";
+      let chainAmount = '';
       try {
-        const rawAmt = native["amount"];
-        if (rawAmt !== undefined && rawAmt !== null && String(rawAmt).trim() !== "") {
+        const rawAmt = native['amount'];
+        if (rawAmt !== undefined && rawAmt !== null && String(rawAmt).trim() !== '') {
           chainAmount = canonicalizeAmount(String(rawAmt));
         }
       } catch {
-        chainAmount = String(native["amount"] ?? "").trim();
+        chainAmount = String(native['amount'] ?? '').trim();
       }
-      const chainBuyer = String(native["buyer"] ?? "");
-      const chainFarmer = String(native["farmer"] ?? "");
 
       // Status drift
       const dbStatusNorm = normalizeOrderStatus(order.status);
       if (chainStatus !== dbStatusNorm) {
         findings.push({
-          entityType: "order",
+          entityType: 'order',
           entityId: order.orderIdOnChain,
-          contractSet: "escrow",
-          driftType: "status_mismatch",
+          contractSet: 'escrow',
+          driftType: 'status_mismatch',
           dbValue: { status: order.status },
           chainValue: { status: chainStatus },
         });
@@ -211,16 +223,18 @@ async function reconcileOrders(
       // Equivalent canonical values must not register as drift (e.g. "1000" vs "1000.0")
       if (chainAmount && !amountsEqual(chainAmount, order.amount)) {
         findings.push({
-          entityType: "order",
+          entityType: 'order',
           entityId: order.orderIdOnChain,
-          contractSet: "escrow",
-          driftType: "amount_mismatch",
+          contractSet: 'escrow',
+          driftType: 'amount_mismatch',
           dbValue: { amount: order.amount },
           chainValue: { amount: chainAmount },
         });
       }
     } catch (err) {
-      errors.push(`Order ${order.orderIdOnChain}: ${err instanceof Error ? err.message : String(err)}`);
+      errors.push(
+        `Order ${order.orderIdOnChain}: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
 
     checked++;
@@ -241,12 +255,17 @@ async function reconcileOrders(
         const chainData = await getOnChainOrderDetails(server, contractId, id);
         if (!chainData) continue; // no order at this id on chain
         findings.push({
-          entityType: "order",
+          entityType: 'order',
           entityId: idStr,
-          contractSet: "escrow",
-          driftType: "missing_in_db",
-          dbValue: { error: "missing in DB" },
-          chainValue: { status: chainData.status, amount: chainData.amount, buyer: chainData.buyer, farmer: chainData.farmer },
+          contractSet: 'escrow',
+          driftType: 'missing_in_db',
+          dbValue: { error: 'missing in DB' },
+          chainValue: {
+            status: chainData.status,
+            amount: chainData.amount,
+            buyer: chainData.buyer,
+            farmer: chainData.farmer,
+          },
         });
       }
     }
@@ -263,7 +282,7 @@ async function reconcileOrders(
 
 async function reconcileCampaigns(
   server: rpc.Server,
-  contractId: string,
+  contractId: string
 ): Promise<{ checked: number; findings: DriftFinding[]; errors: string[] }> {
   const findings: DriftFinding[] = [];
   const errors: string[] = [];
@@ -273,7 +292,7 @@ async function reconcileCampaigns(
   const campaigns = await prisma.campaign.findMany({
     where: { status: { in: activeStatuses } },
     take: 200,
-    orderBy: { createdAt: "desc" },
+    orderBy: { createdAt: 'desc' },
   });
 
   for (const campaign of campaigns) {
@@ -285,56 +304,60 @@ async function reconcileCampaigns(
 
     try {
       // Try production_escrow get_campaign first, then escrow fallback (which will return null)
-      const args = [nativeToScVal(campaignIdNum, { type: "u64" })];
-      let result = await simulateContractFn(server, contractId, "get_campaign", args);
+      const args = [nativeToScVal(campaignIdNum, { type: 'u64' })];
+      const result = await simulateContractFn(server, contractId, 'get_campaign', args);
       // If get_campaign not available, try get_campaign_details or skip
       if (result === null) {
         // Escrow contract doesn't expose campaign view — log and treat as checked but no drift
-        logger.debug(`[Reconciliation] Campaign ${campaign.campaignIdOnChain}: get_campaign not available on contract ${contractId}, skipping drift check`);
+        logger.debug(
+          `[Reconciliation] Campaign ${campaign.campaignIdOnChain}: get_campaign not available on contract ${contractId}, skipping drift check`
+        );
         checked++;
         continue;
       }
 
       const native = scValToString(result) as Record<string, unknown> | null;
-      if (!native || typeof native !== "object") {
+      if (!native || typeof native !== 'object') {
         errors.push(`Campaign ${campaign.campaignIdOnChain}: unexpected contract response`);
         checked++;
         continue;
       }
 
       // Map on-chain status (could be escrow Active/Settled or production Funding...Disputed)
-      const chainStatusRaw = native["status"];
-      const chainStatus = fromContractCampaignStatus(Number(chainStatusRaw), "escrow");
+      const chainStatusRaw = native['status'];
+      const chainStatus = fromContractCampaignStatus(Number(chainStatusRaw), 'escrow');
       const chainDbNormalized = campaign.status.toUpperCase();
 
       if (chainStatus !== chainDbNormalized) {
         findings.push({
-          entityType: "campaign",
+          entityType: 'campaign',
           entityId: campaign.campaignIdOnChain,
-          contractSet: "escrow",
-          driftType: "status_mismatch",
+          contractSet: 'escrow',
+          driftType: 'status_mismatch',
           dbValue: { status: campaign.status },
           chainValue: { status: chainStatus },
         });
       }
 
       // Amount drift if available (total_invested or goalAmount)
-      const chainInvested = String(native["total_invested"] ?? native["totalRaised"] ?? "");
+      const chainInvested = String(native['total_invested'] ?? native['totalRaised'] ?? '');
       if (chainInvested && chainInvested !== campaign.goalAmount) {
         // Only flag if both are numeric and differ
-        if (chainInvested !== "0" && campaign.goalAmount !== "0") {
+        if (chainInvested !== '0' && campaign.goalAmount !== '0') {
           findings.push({
-            entityType: "campaign",
+            entityType: 'campaign',
             entityId: campaign.campaignIdOnChain,
-            contractSet: "escrow",
-            driftType: "amount_mismatch",
+            contractSet: 'escrow',
+            driftType: 'amount_mismatch',
             dbValue: { goalAmount: campaign.goalAmount },
             chainValue: { totalInvested: chainInvested },
           });
         }
       }
     } catch (err) {
-      errors.push(`Campaign ${campaign.campaignIdOnChain}: ${err instanceof Error ? err.message : String(err)}`);
+      errors.push(
+        `Campaign ${campaign.campaignIdOnChain}: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
 
     checked++;
@@ -344,7 +367,7 @@ async function reconcileCampaigns(
   // For escrow, we don't have enumeration; skip but still count as checked coverage
   // This explicit handling ensures reconcileCampaigns is never a silent no-op
   if (campaigns.length === 0) {
-    logger.debug("[Reconciliation] No active campaigns to check, campaign sweep completed");
+    logger.debug('[Reconciliation] No active campaigns to check, campaign sweep completed');
   }
 
   return { checked, findings, errors };
@@ -356,16 +379,20 @@ async function reconcileCampaigns(
 
 async function reconcileDisputes(
   server: rpc.Server,
-  contractId: string,
+  contractId: string
 ): Promise<{ checked: number; findings: DriftFinding[]; errors: string[] }> {
   const findings: DriftFinding[] = [];
   const errors: string[] = [];
   let checked = 0;
 
   const openDisputes = await prisma.dispute.findMany({
-    where: { status: { in: [DisputeStatus.OPEN, DisputeStatus.IN_REVIEW, DisputeStatus.EVIDENCE_SUBMITTED] } },
+    where: {
+      status: {
+        in: [DisputeStatus.OPEN, DisputeStatus.IN_REVIEW, DisputeStatus.EVIDENCE_SUBMITTED],
+      },
+    },
     take: 200,
-    orderBy: { createdAt: "desc" },
+    orderBy: { createdAt: 'desc' },
   });
 
   for (const dispute of openDisputes) {
@@ -376,30 +403,30 @@ async function reconcileDisputes(
     }
 
     try {
-      const args = [nativeToScVal(orderIdNum, { type: "u64" })];
-      const result = await simulateContractFn(server, contractId, "get_dispute", args);
+      const args = [nativeToScVal(orderIdNum, { type: 'u64' })];
+      const result = await simulateContractFn(server, contractId, 'get_dispute', args);
 
       if (result === null) {
         findings.push({
-          entityType: "dispute",
+          entityType: 'dispute',
           entityId: dispute.orderIdOnChain,
-          contractSet: "escrow",
-          driftType: "missing_on_chain",
+          contractSet: 'escrow',
+          driftType: 'missing_on_chain',
           dbValue: { status: dispute.status, raisedBy: dispute.raisedBy },
-          chainValue: { error: "contract call returned null" },
+          chainValue: { error: 'contract call returned null' },
         });
         checked++;
         continue;
       }
 
       const native = scValToString(result) as Record<string, unknown> | null;
-      if (!native || typeof native !== "object") {
+      if (!native || typeof native !== 'object') {
         errors.push(`Dispute ${dispute.orderIdOnChain}: unexpected contract response`);
         checked++;
         continue;
       }
 
-      const chainResolved = Boolean(native["resolved"]);
+      const chainResolved = Boolean(native['resolved']);
       const dbResolved =
         dispute.status === DisputeStatus.RESOLVED ||
         dispute.status === DisputeStatus.RESOLVED_BUYER ||
@@ -407,16 +434,18 @@ async function reconcileDisputes(
 
       if (chainResolved !== dbResolved) {
         findings.push({
-          entityType: "dispute",
+          entityType: 'dispute',
           entityId: dispute.orderIdOnChain,
-          contractSet: "escrow",
-          driftType: "status_mismatch",
+          contractSet: 'escrow',
+          driftType: 'status_mismatch',
           dbValue: { status: dispute.status, resolved: dbResolved },
           chainValue: { resolved: chainResolved },
         });
       }
     } catch (err) {
-      errors.push(`Dispute ${dispute.orderIdOnChain}: ${err instanceof Error ? err.message : String(err)}`);
+      errors.push(
+        `Dispute ${dispute.orderIdOnChain}: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
 
     checked++;
@@ -436,24 +465,32 @@ interface AutoRepairResult {
 
 async function attemptAutoRepair(finding: DriftFinding): Promise<AutoRepairResult> {
   try {
-    if (finding.driftType === "missing_in_db") {
+    if (finding.driftType === 'missing_in_db') {
       // Safe class: on-chain record exists but DB is missing it — re-derive row transactionally
-      if (finding.entityType === "order") {
+      if (finding.entityType === 'order') {
         const orderIdOnChain = finding.entityId;
         const chain = finding.chainValue as Record<string, unknown>;
-        const status = String(chain["status"] ?? OrderStatus.PENDING);
-        const amount = String(chain["amount"] ?? "0");
-        const buyer = String(chain["buyer"] ?? "");
-        const farmer = String(chain["farmer"] ?? "");
+        const status = String(chain['status'] ?? OrderStatus.PENDING);
+        const amount = String(chain['amount'] ?? '0');
+        const buyer = String(chain['buyer'] ?? '');
+        const farmer = String(chain['farmer'] ?? '');
 
         try {
           await prisma.$transaction(async (tx) => {
             // Ensure users exist
             if (buyer) {
-              await tx.user.upsert({ where: { walletAddress: buyer }, update: {}, create: { walletAddress: buyer } });
+              await tx.user.upsert({
+                where: { walletAddress: buyer },
+                update: {},
+                create: { walletAddress: buyer },
+              });
             }
             if (farmer) {
-              await tx.user.upsert({ where: { walletAddress: farmer }, update: {}, create: { walletAddress: farmer } });
+              await tx.user.upsert({
+                where: { walletAddress: farmer },
+                update: {},
+                create: { walletAddress: farmer },
+              });
             }
             await tx.order.create({
               data: {
@@ -461,7 +498,7 @@ async function attemptAutoRepair(finding: DriftFinding): Promise<AutoRepairResul
                 buyerAddress: buyer,
                 sellerAddress: farmer,
                 amount,
-                token: String(chain["token"] ?? ""),
+                token: String(chain['token'] ?? ''),
                 status,
               },
             });
@@ -480,26 +517,32 @@ async function attemptAutoRepair(finding: DriftFinding): Promise<AutoRepairResul
           // Also verify re-check would be clean: re-query DB
           const recheck = await prisma.order.findUnique({ where: { orderIdOnChain } });
           if (recheck) {
-            return { success: true, message: `Auto-repaired missing order ${orderIdOnChain} from chain` };
+            return {
+              success: true,
+              message: `Auto-repaired missing order ${orderIdOnChain} from chain`,
+            };
           }
-          return { success: false, message: "Auto-repair insert verification failed" };
+          return { success: false, message: 'Auto-repair insert verification failed' };
         } catch (err) {
-          return { success: false, message: `Auto-repair transaction failed: ${err instanceof Error ? err.message : String(err)}` };
+          return {
+            success: false,
+            message: `Auto-repair transaction failed: ${err instanceof Error ? err.message : String(err)}`,
+          };
         }
       }
 
-      if (finding.entityType === "campaign") {
+      if (finding.entityType === 'campaign') {
         const campaignIdOnChain = finding.entityId;
         const chain = finding.chainValue as Record<string, unknown>;
-        const status = String(chain["status"] ?? CampaignStatus.ACTIVE);
+        const status = String(chain['status'] ?? CampaignStatus.ACTIVE);
         try {
           await prisma.$transaction(async (tx) => {
             await tx.campaign.create({
               data: {
                 campaignIdOnChain,
-                creatorAddress: String(chain["creator"] ?? chain["farmer"] ?? ""),
-                goalAmount: String(chain["goalAmount"] ?? chain["total_invested"] ?? "0"),
-                token: String(chain["token"] ?? ""),
+                creatorAddress: String(chain['creator'] ?? chain['farmer'] ?? ''),
+                goalAmount: String(chain['goalAmount'] ?? chain['total_invested'] ?? '0'),
+                token: String(chain['token'] ?? ''),
                 status,
               },
             });
@@ -517,24 +560,31 @@ async function attemptAutoRepair(finding: DriftFinding): Promise<AutoRepairResul
           });
           return { success: true, message: `Auto-repaired missing campaign ${campaignIdOnChain}` };
         } catch (err) {
-          return { success: false, message: `Campaign auto-repair failed: ${err instanceof Error ? err.message : String(err)}` };
+          return {
+            success: false,
+            message: `Campaign auto-repair failed: ${err instanceof Error ? err.message : String(err)}`,
+          };
         }
       }
 
-      return { success: false, message: "Auto-repair not supported for this entity type" };
+      return { success: false, message: 'Auto-repair not supported for this entity type' };
     }
 
-    if (finding.driftType === "status_mismatch") {
+    if (finding.driftType === 'status_mismatch') {
       // Status mismatches require manual review — never auto-repair without human verification
-      return { success: false, message: "Status mismatch requires manual investigation" };
+      return { success: false, message: 'Status mismatch requires manual investigation' };
     }
 
-    if (finding.driftType === "amount_mismatch") {
-      return { success: false, message: "Amount mismatch requires manual verification" };
+    if (finding.driftType === 'amount_mismatch') {
+      return { success: false, message: 'Amount mismatch requires manual verification' };
     }
 
-    if (finding.driftType === "missing_on_chain") {
-      return { success: false, message: "Missing on-chain record requires manual review (possible deleted or not yet indexed)" };
+    if (finding.driftType === 'missing_on_chain') {
+      return {
+        success: false,
+        message:
+          'Missing on-chain record requires manual review (possible deleted or not yet indexed)',
+      };
     }
 
     return { success: false, message: `Unknown drift type: ${finding.driftType}` };
@@ -554,17 +604,17 @@ async function persistAlerts(findings: DriftFinding[]): Promise<void> {
   for (const finding of findings) {
     try {
       // For missing_in_db, attempt auto-repair first; it will persist its own alert on success
-      if (finding.driftType === "missing_in_db") {
+      if (finding.driftType === 'missing_in_db') {
         const repairResult = await attemptAutoRepair(finding);
         if (repairResult.success) {
-          logger.info("[Reconciliation] Auto-repair succeeded", {
+          logger.info('[Reconciliation] Auto-repair succeeded', {
             entityType: finding.entityType,
             entityId: finding.entityId,
             driftType: finding.driftType,
           });
           continue; // alert already persisted transactionally
         }
-        logger.debug("[Reconciliation] Auto-repair not applied", {
+        logger.debug('[Reconciliation] Auto-repair not applied', {
           entityType: finding.entityType,
           entityId: finding.entityId,
           driftType: finding.driftType,
@@ -596,18 +646,20 @@ async function persistAlerts(findings: DriftFinding[]): Promise<void> {
           driftType: finding.driftType,
           dbValue: finding.dbValue,
           chainValue: finding.chainValue,
-          notes: autoRepaired ? `Auto-repaired: ${repairResult.message}` : `Requires review: ${repairResult.message}`,
+          notes: autoRepaired
+            ? `Auto-repaired: ${repairResult.message}`
+            : `Requires review: ${repairResult.message}`,
         },
       });
 
       if (autoRepaired) {
-        logger.info("[Reconciliation] Auto-repair succeeded", {
+        logger.info('[Reconciliation] Auto-repair succeeded', {
           entityType: finding.entityType,
           entityId: finding.entityId,
           driftType: finding.driftType,
         });
       } else {
-        logger.debug("[Reconciliation] Auto-repair not applied", {
+        logger.debug('[Reconciliation] Auto-repair not applied', {
           entityType: finding.entityType,
           entityId: finding.entityId,
           driftType: finding.driftType,
@@ -615,7 +667,7 @@ async function persistAlerts(findings: DriftFinding[]): Promise<void> {
         });
       }
     } catch (err) {
-      logger.error("[Reconciliation] Failed to persist alert", {
+      logger.error('[Reconciliation] Failed to persist alert', {
         error: err instanceof Error ? err.message : String(err),
         finding,
       });
@@ -645,12 +697,12 @@ export function emitReconciliationMetric(metric: ReconciliationMetric): void {
   }
   if (metric.driftsFound > 0) {
     // Increment per-drift counter with generic labels (overall drift)
-    reconciliationDriftTotal.inc({ entity_type: "all", drift_type: "any" }, metric.driftsFound);
+    reconciliationDriftTotal.inc({ entity_type: 'all', drift_type: 'any' }, metric.driftsFound);
   }
 
   // Structured log for legacy consumers
-  logger.info("[Reconciliation] Drift metric", {
-    metric_name: "reconciliation_drift",
+  logger.info('[Reconciliation] Drift metric', {
+    metric_name: 'reconciliation_drift',
     metric_value: metric.driftsFound,
     timestamp: metric.timestamp.toISOString(),
     ordersChecked: metric.ordersChecked,
@@ -661,13 +713,13 @@ export function emitReconciliationMetric(metric: ReconciliationMetric): void {
 
   // Sentry alert on non-zero drift
   if (metric.driftsFound > 0) {
-    logger.warn("[Reconciliation] Non-zero drift detected - alert should fire", {
-      metric_name: "reconciliation_drift",
+    logger.warn('[Reconciliation] Non-zero drift detected - alert should fire', {
+      metric_name: 'reconciliation_drift',
       alert_threshold: 0,
       current_value: metric.driftsFound,
     });
     captureAlert(
-      "reconciliation_drift_detected",
+      'reconciliation_drift_detected',
       `Reconciliation detected ${metric.driftsFound} drift(s): ${metric.ordersChecked} orders, ${metric.campaignsChecked} campaigns, ${metric.disputesChecked} disputes checked`,
       {
         driftsFound: metric.driftsFound,
@@ -675,7 +727,7 @@ export function emitReconciliationMetric(metric: ReconciliationMetric): void {
         campaignsChecked: metric.campaignsChecked,
         disputesChecked: metric.disputesChecked,
         durationMs: metric.durationMs,
-      },
+      }
     );
   }
 }
@@ -686,7 +738,7 @@ export function emitReconciliationMetric(metric: ReconciliationMetric): void {
 
 export async function runReconciliation(): Promise<ReconciliationReport> {
   const startedAt = new Date();
-  logger.info("[Reconciliation] Starting scheduled reconciliation run");
+  logger.info('[Reconciliation] Starting scheduled reconciliation run');
 
   const server = new rpc.Server(config.rpcUrl);
   const contractId = config.contractId;
@@ -722,7 +774,8 @@ export async function runReconciliation(): Promise<ReconciliationReport> {
       for (const f of campaignResult.findings) {
         reconciliationDriftTotal.inc({ entity_type: f.entityType, drift_type: f.driftType });
       }
-      if (campaignResult.errors.length > 0) reconciliationErrorsTotal.inc(campaignResult.errors.length);
+      if (campaignResult.errors.length > 0)
+        reconciliationErrorsTotal.inc(campaignResult.errors.length);
     } catch (err) {
       const msg = `Campaign reconciliation failed: ${err instanceof Error ? err.message : String(err)}`;
       allErrors.push(msg);
@@ -737,14 +790,15 @@ export async function runReconciliation(): Promise<ReconciliationReport> {
       for (const f of disputeResult.findings) {
         reconciliationDriftTotal.inc({ entity_type: f.entityType, drift_type: f.driftType });
       }
-      if (disputeResult.errors.length > 0) reconciliationErrorsTotal.inc(disputeResult.errors.length);
+      if (disputeResult.errors.length > 0)
+        reconciliationErrorsTotal.inc(disputeResult.errors.length);
     } catch (err) {
       const msg = `Dispute reconciliation failed: ${err instanceof Error ? err.message : String(err)}`;
       allErrors.push(msg);
       reconciliationErrorsTotal.inc();
     }
   } else {
-    allErrors.push("No CONTRACT_ID configured — skipping reconciliation");
+    allErrors.push('No CONTRACT_ID configured — skipping reconciliation');
   }
 
   if (allFindings.length > 0) {
@@ -777,8 +831,8 @@ export async function runReconciliation(): Promise<ReconciliationReport> {
   });
 
   // Audit logging: log the full reconciliation run for audit trail
-  logger.info("[Reconciliation] Run completed - audit record", {
-    audit_event: "reconciliation_completed",
+  logger.info('[Reconciliation] Run completed - audit record', {
+    audit_event: 'reconciliation_completed',
     startedAt: startedAt.toISOString(),
     completedAt: completedAt.toISOString(),
     ordersChecked,
@@ -787,18 +841,18 @@ export async function runReconciliation(): Promise<ReconciliationReport> {
     driftsFound: allFindings.length,
     errors: allErrors.length,
     durationMs,
-    status: allErrors.length > 0 ? "completed_with_errors" : "completed_successfully",
+    status: allErrors.length > 0 ? 'completed_with_errors' : 'completed_successfully',
   });
 
   if (allFindings.length > 0) {
-    logger.warn("[Reconciliation] Drift detected", {
+    logger.warn('[Reconciliation] Drift detected', {
       driftsFound: allFindings.length,
       ordersChecked,
       disputesChecked,
       durationMs,
     });
   } else {
-    logger.info("[Reconciliation] No drift detected", {
+    logger.info('[Reconciliation] No drift detected', {
       ordersChecked,
       campaignsChecked,
       disputesChecked,
@@ -817,7 +871,7 @@ export async function runReconciliation(): Promise<ReconciliationReport> {
 export async function reconcileSingleOrder(orderIdOnChain: string): Promise<DriftFinding[]> {
   const server = new rpc.Server(config.rpcUrl);
   const contractId = config.contractId;
-  if (!contractId) throw new Error("CONTRACT_ID not configured");
+  if (!contractId) throw new Error('CONTRACT_ID not configured');
 
   const order = await prisma.order.findUnique({ where: { orderIdOnChain } });
   if (!order) throw new Error(`Order ${orderIdOnChain} not found in database`);
@@ -826,44 +880,44 @@ export async function reconcileSingleOrder(orderIdOnChain: string): Promise<Drif
   const orderIdNum = parseInt(orderIdOnChain, 10);
   if (isNaN(orderIdNum)) throw new Error(`Invalid on-chain order ID: ${orderIdOnChain}`);
 
-  const args = [nativeToScVal(orderIdNum, { type: "u64" })];
-  const result = await simulateContractFn(server, contractId, "get_order_details", args);
+  const args = [nativeToScVal(orderIdNum, { type: 'u64' })];
+  const result = await simulateContractFn(server, contractId, 'get_order_details', args);
 
   if (result === null) {
     findings.push({
-      entityType: "order",
+      entityType: 'order',
       entityId: orderIdOnChain,
-      contractSet: "escrow",
-      driftType: "missing_on_chain",
+      contractSet: 'escrow',
+      driftType: 'missing_on_chain',
       dbValue: { status: order.status, amount: order.amount },
-      chainValue: { error: "contract call returned null" },
+      chainValue: { error: 'contract call returned null' },
     });
     return findings;
   }
 
   const native = scValToString(result) as Record<string, unknown> | null;
-  if (!native || typeof native !== "object") {
-    throw new Error("Unexpected contract response format");
+  if (!native || typeof native !== 'object') {
+    throw new Error('Unexpected contract response format');
   }
 
-  const chainStatus = fromContractOrderStatus(Number(native["status"]), "escrow");
-  let chainAmount = "";
+  const chainStatus = fromContractOrderStatus(Number(native['status']), 'escrow');
+  let chainAmount = '';
   try {
-    const rawAmt = native["amount"];
-    if (rawAmt !== undefined && rawAmt !== null && String(rawAmt).trim() !== "") {
+    const rawAmt = native['amount'];
+    if (rawAmt !== undefined && rawAmt !== null && String(rawAmt).trim() !== '') {
       chainAmount = canonicalizeAmount(String(rawAmt));
     }
   } catch {
-    chainAmount = String(native["amount"] ?? "").trim();
+    chainAmount = String(native['amount'] ?? '').trim();
   }
   const dbStatusNorm = normalizeOrderStatus(order.status);
 
   if (chainStatus !== dbStatusNorm) {
     findings.push({
-      entityType: "order",
+      entityType: 'order',
       entityId: orderIdOnChain,
-      contractSet: "escrow",
-      driftType: "status_mismatch",
+      contractSet: 'escrow',
+      driftType: 'status_mismatch',
       dbValue: { status: order.status },
       chainValue: { status: chainStatus },
     });
@@ -871,10 +925,10 @@ export async function reconcileSingleOrder(orderIdOnChain: string): Promise<Drif
 
   if (chainAmount && !amountsEqual(chainAmount, order.amount)) {
     findings.push({
-      entityType: "order",
+      entityType: 'order',
       entityId: orderIdOnChain,
-      contractSet: "escrow",
-      driftType: "amount_mismatch",
+      contractSet: 'escrow',
+      driftType: 'amount_mismatch',
       dbValue: { amount: order.amount },
       chainValue: { amount: chainAmount },
     });
@@ -885,10 +939,10 @@ export async function reconcileSingleOrder(orderIdOnChain: string): Promise<Drif
 
 export async function detectMissingInDb(
   server: rpc.Server,
-  contractId: string,
+  contractId: string
 ): Promise<DriftFinding[]> {
   const { findings } = await reconcileOrders(server, contractId);
-  return findings.filter((f) => f.driftType === "missing_in_db");
+  return findings.filter((f) => f.driftType === 'missing_in_db');
 }
 
 export { attemptAutoRepair };

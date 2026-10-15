@@ -179,7 +179,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const connect = useCallback(async (adapterId?: string) => {
     const generation = ++connectGenerationRef.current;
-    let cancelled = false;
+    const cancelled = false;
     // Ensure mounted true for StrictMode remount; connect is user-initiated so should be true
     mountedRef.current = true;
     setLoading(true);

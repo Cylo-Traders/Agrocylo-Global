@@ -7,14 +7,20 @@ const createSchema = z.object({
   description: z.string().min(1),
 });
 
-function walletsMatch(a: string, b: string): boolean {
+function walletsMatch(a: string, b: string | null | undefined): boolean {
+  if (!b) return false;
   return a.toLowerCase() === b.toLowerCase();
 }
 
 export async function createOrderMetadata(body: unknown, requester: string) {
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) {
-    throw new ApiError(400, 'Bad Request', parsed.error.message, 'https://cylos.io/errors/validation');
+    throw new ApiError(
+      400,
+      'Bad Request',
+      parsed.error.message,
+      'https://cylos.io/errors/validation'
+    );
   }
 
   const { on_chain_order_id, description } = parsed.data;
@@ -28,15 +34,14 @@ export async function createOrderMetadata(body: unknown, requester: string) {
   }
 
   const isParticipant =
-    walletsMatch(requester, order.buyerAddress) ||
-    walletsMatch(requester, order.sellerAddress);
+    walletsMatch(requester, order.buyerAddress) || walletsMatch(requester, order.sellerAddress);
 
   if (!isParticipant) {
     throw new ApiError(
       403,
       'Forbidden',
       'Only buyer or farmer can create order metadata',
-      'https://cylos.io/errors/forbidden',
+      'https://cylos.io/errors/forbidden'
     );
   }
 
@@ -44,8 +49,8 @@ export async function createOrderMetadata(body: unknown, requester: string) {
     data: {
       on_chain_order_id,
       description,
-      farmer_address: order.sellerAddress,
-      buyer_address: order.buyerAddress,
+      farmer_address: order.sellerAddress ?? '',
+      buyer_address: order.buyerAddress ?? '',
     },
   });
 }
@@ -53,7 +58,12 @@ export async function createOrderMetadata(body: unknown, requester: string) {
 export async function getOrderMetadata(on_chain_order_id: string, requester: string) {
   const metadata = await prisma.orderMetadata.findUnique({ where: { on_chain_order_id } });
   if (!metadata) {
-    throw new ApiError(404, 'Not Found', 'Order metadata not found', 'https://cylos.io/errors/not-found');
+    throw new ApiError(
+      404,
+      'Not Found',
+      'Order metadata not found',
+      'https://cylos.io/errors/not-found'
+    );
   }
 
   const order = await prisma.order.findUnique({
@@ -62,17 +72,26 @@ export async function getOrderMetadata(on_chain_order_id: string, requester: str
 
   if (order) {
     const isParticipant =
-      walletsMatch(requester, order.buyerAddress) ||
-      walletsMatch(requester, order.sellerAddress);
+      walletsMatch(requester, order.buyerAddress) || walletsMatch(requester, order.sellerAddress);
     if (!isParticipant) {
-      throw new ApiError(403, 'Forbidden', 'Only buyer or farmer can access this order', 'https://cylos.io/errors/forbidden');
+      throw new ApiError(
+        403,
+        'Forbidden',
+        'Only buyer or farmer can access this order',
+        'https://cylos.io/errors/forbidden'
+      );
     }
   } else {
     const isParticipant =
       walletsMatch(requester, metadata.farmer_address) ||
       walletsMatch(requester, metadata.buyer_address);
     if (!isParticipant) {
-      throw new ApiError(403, 'Forbidden', 'Only buyer or farmer can access this order', 'https://cylos.io/errors/forbidden');
+      throw new ApiError(
+        403,
+        'Forbidden',
+        'Only buyer or farmer can access this order',
+        'https://cylos.io/errors/forbidden'
+      );
     }
   }
 

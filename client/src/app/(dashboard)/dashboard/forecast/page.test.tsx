@@ -18,6 +18,7 @@ import ForecastDashboardPage from "./page";
 import { useMyProducts } from "@/hooks/queries/useProducts";
 
 const mockUseMyProducts = vi.mocked(useMyProducts);
+type MyProductsResult = ReturnType<typeof useMyProducts>;
 
 describe("ForecastDashboardPage", () => {
   beforeEach(() => {
@@ -28,7 +29,7 @@ describe("ForecastDashboardPage", () => {
     mockUseMyProducts.mockReturnValue({
       data: undefined,
       isLoading: true,
-    } as any);
+    } as unknown as MyProductsResult);
 
     const { container } = render(<ForecastDashboardPage />);
     expect(screen.getByText("Yield & price forecast")).toBeInTheDocument();
@@ -39,7 +40,7 @@ describe("ForecastDashboardPage", () => {
     mockUseMyProducts.mockReturnValue({
       data: { items: [] },
       isLoading: false,
-    } as any);
+    } as unknown as MyProductsResult);
 
     render(<ForecastDashboardPage />);
     expect(screen.getByText(/Sparse regional data/i)).toBeInTheDocument();
@@ -60,7 +61,7 @@ describe("ForecastDashboardPage", () => {
         ],
       },
       isLoading: false,
-    } as any);
+    } as unknown as MyProductsResult);
 
     render(<ForecastDashboardPage />);
     expect(screen.getByText("Price-index trend")).toBeInTheDocument();

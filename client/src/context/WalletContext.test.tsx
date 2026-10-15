@@ -50,13 +50,11 @@ describe("WalletContext — restore flow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    // @ts-ignore
     window.freighter = mockFreighter;
   });
 
   afterEach(() => {
     localStorage.clear();
-    // @ts-ignore
     delete window.freighter;
   });
 
@@ -125,7 +123,6 @@ describe("WalletContext — networkMismatch", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    // @ts-ignore
     window.freighter = mockFreighter;
     vi.stubEnv("NEXT_PUBLIC_STELLAR_ENV", "mainnet");
     vi.stubEnv(
@@ -140,7 +137,6 @@ describe("WalletContext — networkMismatch", () => {
   afterEach(() => {
     localStorage.clear();
     vi.unstubAllEnvs();
-    // @ts-ignore
     delete window.freighter;
   });
 

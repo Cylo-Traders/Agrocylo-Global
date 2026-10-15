@@ -196,23 +196,26 @@ async function submitTransaction(
 // ── Decode helpers ───────────────────────────────────────────────────────
 
 function decodeOrderStatus(val: StellarSdk.xdr.ScVal): string {
-  const vec = val.vec();
-  if (vec && vec.length > 0) {
-    return vec[0].sym().toString();
+  if (val.type === "scvVec" && val.vec && val.vec.length > 0) {
+    const first = val.vec[0];
+    if (first.type === "scvSymbol") return first.value;
+    return String(StellarSdk.scValToNative(first));
   }
   return "Unknown";
 }
 
 function decodeOrder(val: StellarSdk.xdr.ScVal): Order {
-  const fields = val.map();
-  if (!fields) throw new Error("Expected map value for order");
+  if (val.type !== "scvMap" || !val.map) {
+    throw new Error("Expected map value for order");
+  }
+  const fields = val.map;
 
   const get = (key: string): StellarSdk.xdr.ScVal => {
     const entry = fields.find(
-      (e) => e.key().sym().toString() === key
+      (e) => e.key.type === "scvSymbol" && e.key.value === key,
     );
     if (!entry) throw new Error(`Missing field: ${key}`);
-    return entry.val();
+    return entry.val;
   };
 
   return {

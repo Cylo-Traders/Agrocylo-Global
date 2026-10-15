@@ -10,7 +10,7 @@ export const PriceIndexEntrySchema = z.object({
   minPrice: z.number(),
   maxPrice: z.number(),
   sampleCount: z.number().int(),
-  sourceCounts: z.record(z.number().int()),
+  sourceCounts: z.record(z.string(), z.number().int()),
 });
 
 export const PriceIndexResponseSchema = z.object({
@@ -26,7 +26,7 @@ export function validateResponse<T>(
 ): T {
   const result = schema.safeParse(data);
   if (!result.success) {
-    const messages = result.error.errors
+    const messages = result.error.issues
       .map((e) => `${e.path.join(".")}: ${e.message}`)
       .join("; ");
     throw new Error(`Response validation failed: ${messages}`);

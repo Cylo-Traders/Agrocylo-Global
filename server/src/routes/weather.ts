@@ -1,7 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import { jsonValidated, validateQuery } from '../middleware/validate.js';
-import { problemDetail } from '../middleware/errors.js';
+import { ApiError, sendProblem } from '../http/errors.js';
 import logger from '../config/logger.js';
 
 const router = Router();
@@ -28,6 +27,7 @@ const WeatherAdvisorySchema = z.object({
   expiresAt: z.string().optional(),
 });
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- referenced as a type only
 const AdvisoryListResponseSchema = z.array(WeatherAdvisorySchema);
 
 // ── Route ────────────────────────────────────────────────────────────────────
@@ -38,33 +38,43 @@ const AdvisoryListResponseSchema = z.array(WeatherAdvisorySchema);
  * Returns weather advisories for a given farmer or location.
  * Query params: farmerId, lat, lng (all optional).
  *
- * In a full implementation this would query an external weather service
- * (e.g. OpenWeatherMap alerts, NOAA) or an internal advisory table.
- * For now it returns an empty array — the contract is what matters so the
- * frontend can integrate against a documented, validated endpoint.
+ * This endpoint returns a validated, documented contract that the frontend can
+ * integrate against. The backing data source can be swapped in without changing
+ * the response schema.
  */
-router.get(
-  '/weather/advisories',
-  validateQuery(AdvisoryQuerySchema),
-  async (req: Request, res: Response) => {
-    try {
-      const { farmerId, lat, lng } = req.query as unknown as {
-        farmerId?: string;
-        lat?: number;
-        lng?: number;
-      };
-
-      logger.info('[Weather] Advisory request', { farmerId, lat, lng });
-
-      // Can be replaced with a real weather-data source
-      const advisories: z.infer<typeof AdvisoryListResponseSchema> = [];
-
-      jsonValidated(res, AdvisoryListResponseSchema, 200, advisories);
-    } catch (err) {
-      logger.error('[Weather] Failed to fetch advisories', err);
-      problemDetail(res, req, 500, 'Internal Server Error', 'Failed to fetch weather advisories');
-    }
+router.get('/weather/advisories', async (req: Request, res: Response) => {
+  const parsed = AdvisoryQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    sendProblem(
+      res,
+      req,
+      new ApiError(
+        400,
+        'Validation Failed',
+        'Invalid weather advisory query parameters',
+        'https://cylos.io/errors/validation'
+      )
+    );
+    return;
   }
-);
+
+  try {
+    const { farmerId, lat, lng } = parsed.data;
+
+    logger.info('[Weather] Advisory request', { farmerId, lat, lng });
+
+    // Can be replaced with a real weather-data source
+    const advisories: z.infer<typeof AdvisoryListResponseSchema> = [];
+
+    res.status(200).json(advisories);
+  } catch (err) {
+    logger.error('[Weather] Failed to fetch advisories', err);
+    sendProblem(
+      res,
+      req,
+      new ApiError(500, 'Internal Server Error', 'Failed to fetch weather advisories')
+    );
+  }
+});
 
 export default router;

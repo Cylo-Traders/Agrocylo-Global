@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
-import AdminLayout from "../layout";
+import AdminLayout from "./layout";
 import { useWallet } from "@/hooks/useWallet";
 import { useProfile } from "@/context/ProfileContext";
 
@@ -30,15 +30,15 @@ vi.mock("@/components/shared/skip-link", () => ({
   SkipLink: () => null,
 }));
 
-vi.mock("../_components/admin-sidebar", () => ({
+vi.mock("./_components/admin-sidebar", () => ({
   AdminSidebar: () => <nav />,
 }));
 
-vi.mock("../_components/admin-header", () => ({
+vi.mock("./_components/admin-header", () => ({
   AdminHeader: () => <header />,
 }));
 
-vi.mock("../_components/audit-degraded-banner", () => ({
+vi.mock("./_components/audit-degraded-banner", () => ({
   AuditDegradedBanner: () => null,
 }));
 

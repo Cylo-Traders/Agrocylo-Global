@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback  } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 
-const FarmerMap = dynamic(() => import("./FarmerMap").then((mod) => ({ default: mod.default })), {
+const FarmerMap = dynamic(() => import("./map/FarmerMap").then((mod) => ({ default: mod.default })), {
   ssr: false,
 });
 
@@ -176,15 +176,10 @@ export function WeatherAdvisoryWidget({ farmerId, location }: WeatherAdvisoryWid
           {location && (
             <div className="mt-4 h-48 rounded-lg overflow-hidden">
               <FarmerMap
-                farmers={[
-                  {
-                    id: farmerId || "current",
-                    name: "Your Location",
-                    location,
-                  },
-                ]}
-                center={location}
-                zoom={10}
+                farmers={[]}
+                userLat={location.lat}
+                userLng={location.lng}
+                radiusKm={0}
               />
             </div>
           )}

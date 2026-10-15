@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+// Resolve the repository root from this file (client/src/lib) rather than
+// process.cwd(), which is client/ when vitest runs and would double the prefix.
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
 /**
  * Path-resolution regression (Issue #918).
@@ -70,7 +75,7 @@ describe("Turbopack workspace root resolution (Issue #918)", () => {
     // shared TS source is compiled in the production client.
     const fs = await import("node:fs");
     const content = fs.readFileSync(
-      path.resolve(process.cwd(), "agro-production/client/next.config.ts"),
+      path.join(repoRoot, "agro-production/client/next.config.ts"),
       "utf8"
     );
     expect(content).toContain("@agrocylo/wallet-core");
@@ -79,7 +84,7 @@ describe("Turbopack workspace root resolution (Issue #918)", () => {
 
   it("client next.config does not contain literal Windows separator fallback", async () => {
     const fs = await import("node:fs");
-    const content = fs.readFileSync(path.resolve(process.cwd(), "client/next.config.ts"), "utf8");
+    const content = fs.readFileSync(path.join(repoRoot, "client/next.config.ts"), "utf8");
     // Old bug: `${process.cwd()}\\client` literal backslash
     expect(content).not.toContain("\\client");
     expect(content).not.toMatch(/process\.cwd\(\)\.replace/);
@@ -87,8 +92,8 @@ describe("Turbopack workspace root resolution (Issue #918)", () => {
 
   it("both configs set turbopack.root to repository root", async () => {
     const fs = await import("node:fs");
-    const client = fs.readFileSync(path.resolve(process.cwd(), "client/next.config.ts"), "utf8");
-    const agro = fs.readFileSync(path.resolve(process.cwd(), "agro-production/client/next.config.ts"), "utf8");
+    const client = fs.readFileSync(path.join(repoRoot, "client/next.config.ts"), "utf8");
+    const agro = fs.readFileSync(path.join(repoRoot, "agro-production/client/next.config.ts"), "utf8");
     expect(client).toMatch(/turbopack:\s*\{\s*root:\s*repoRoot/);
     expect(agro).toMatch(/turbopack:\s*\{\s*root:\s*repoRoot/);
     expect(client).toContain("getRepoRoot");

@@ -14,7 +14,7 @@ import {
 
 /** Active cart for the connected wallet. */
 export function useActiveCart() {
-  const { address, connected } = useWallet();
+  const { address, connected, authenticated } = useWallet();
   const qc = useQueryClient();
   // Remove previous wallet's private cache when wallet changes or disconnects
   const prevWalletRef = React.useRef<string | null>(null);

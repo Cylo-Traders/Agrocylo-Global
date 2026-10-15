@@ -83,7 +83,7 @@ jobs:
       - name: Install system dependencies for stellar-cli
         run: |
           sudo apt-get update
-          sudo apt-get install -y libdbus-1-dev pkg-config
+          sudo apt-get install -y libdbus-1-dev libudev-dev pkg-config
 
       - name: Install Rust 1.89.0 + wasm target
         run: |
@@ -124,18 +124,22 @@ jobs:
         include:
           - app: server
             context: ./server
+            file: ./server/Dockerfile
             image: agrocylo-server
             port: "5000"
           - app: client
-            context: ./client
+            context: .
+            file: ./client/Dockerfile
             image: agrocylo-client
             port: "3000"
           - app: agro-server
             context: ./agro-production/server
+            file: ./agro-production/server/Dockerfile
             image: agrocylo-agro-server
             port: "5001"
           - app: agro-client
-            context: ./agro-production/client
+            context: .
+            file: ./agro-production/client/Dockerfile
             image: agrocylo-agro-client
             port: "3001"
 
@@ -168,6 +172,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

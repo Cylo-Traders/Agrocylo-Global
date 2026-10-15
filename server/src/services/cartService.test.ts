@@ -92,16 +92,21 @@ describe('cartService quantity validation (issue #958)', () => {
     ['1.234', 'unsupported precision (3 decimals)'],
   ] as const;
 
-  it.each(invalid)('addItem rejects %s (%s), leaving the cart unchanged', async (quantity, _label) => {
-    await expect(addItem('BUYER_WALLET', { product_id: 'product-1', quantity })).rejects.toMatchObject({
-      statusCode: 400,
-    });
-    expect(mockTransaction).not.toHaveBeenCalled();
-  });
+  it.each(invalid)(
+    'addItem rejects %s (%s), leaving the cart unchanged',
+    async (quantity, _label) => {
+      await expect(
+        addItem('BUYER_WALLET', { product_id: 'product-1', quantity })
+      ).rejects.toMatchObject({
+        status: 400,
+      });
+      expect(mockTransaction).not.toHaveBeenCalled();
+    }
+  );
 
   it.each(invalid)('updateItemQuantity rejects %s (%s)', async (quantity, _label) => {
     await expect(updateItemQuantity('BUYER_WALLET', 'item-1', quantity)).rejects.toMatchObject({
-      statusCode: 400,
+      status: 400,
     });
     expect(mockTransaction).not.toHaveBeenCalled();
   });
@@ -146,7 +151,7 @@ describe('cartService concurrency (issue #959)', () => {
         findFirst: vi.fn(async ({ where }: any) =>
           where.status === 'active' && tx.cart.create.mock.calls.length > 0
             ? { id: 'winner-cart', status: 'active' }
-            : null,
+            : null
         ),
         create: vi.fn().mockRejectedValue(Object.assign(new Error('unique'), { code: 'P2002' })),
       },
@@ -156,8 +161,9 @@ describe('cartService concurrency (issue #959)', () => {
     };
     mockTransaction.mockImplementation((cb: any) => cb(tx));
 
-    await expect(addItem('BUYER_WALLET', { product_id: 'product-1', quantity: '1' }))
-      .rejects.toThrow('Product not found');
+    await expect(
+      addItem('BUYER_WALLET', { product_id: 'product-1', quantity: '1' })
+    ).rejects.toThrow('Product not found');
     expect(tx.cart.create).toHaveBeenCalledTimes(1);
   });
 
@@ -166,7 +172,7 @@ describe('cartService concurrency (issue #959)', () => {
     (tx.cart.updateMany as any).mockResolvedValue({ count: 0 });
     mockTransaction.mockImplementation((cb: any) => cb(tx));
 
-    await expect(checkout('BUYER_WALLET')).rejects.toMatchObject({ statusCode: 409 });
+    await expect(checkout('BUYER_WALLET')).rejects.toMatchObject({ status: 409 });
   });
 
   it('new additions use a unique upsert key so one row exists per product', async () => {

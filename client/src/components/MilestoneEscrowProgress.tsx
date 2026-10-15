@@ -127,7 +127,7 @@ export function MilestoneEscrowProgress({
       <CardHeader>
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-base">Milestone Progress</CardTitle>
-          <Badge variant={isComplete ? "success" : "secondary"} className="gap-1.5">
+          <Badge variant={isComplete ? "success" : "secondary"} className="gap-1.5" data-testid="milestone-current-status">
             {isComplete ? (
               <CheckCircle2 className="size-3.5" />
             ) : null}

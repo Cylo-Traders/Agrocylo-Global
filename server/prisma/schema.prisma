@@ -674,7 +674,7 @@ model GroupOrderContribution {
 model PhoneLink {
   phoneNumber   String   @id
   walletAddress String   @map("wallet_address")
-  verifiedAt    DateTime @default(now()) @map("verified_at")
+  verifiedAt    DateTime? @map("verified_at")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 

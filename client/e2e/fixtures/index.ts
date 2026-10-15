@@ -25,6 +25,15 @@ function freighterMockScript(options: WalletMockOptions = {}): string {
   `;
 }
 
+type FreighterLike = {
+  signTransaction: (xdr: string) => Promise<{ signedTxXdr: string }>;
+};
+
+type WindowWithMocks = Window & {
+  freighter: { signTransaction: FreighterLike["signTransaction"] };
+  __originalFetch?: typeof fetch;
+};
+
 function apiMockScript(): string {
   return `
     window.__agrocyloMocks = {
@@ -90,7 +99,7 @@ export const test = base.extend<E2EFixtures>({
 
       const rejectSignature = async (page: Page) => {
         await page.evaluate(() => {
-          (window as any).freighter.signTransaction = () =>
+          (window as unknown as WindowWithMocks).freighter.signTransaction = () =>
             Promise.reject(new Error("User rejected signature"));
         });
       };
@@ -98,8 +107,9 @@ export const test = base.extend<E2EFixtures>({
       const restoreSignature = async (page: Page) => {
         const addr = FIXTURE_BUYER;
         await page.evaluate((address) => {
-          (window as any).freighter.signTransaction = (xdr: string) =>
-            Promise.resolve({ signedTxXdr: xdr });
+          ((window as unknown as WindowWithMocks).freighter.signTransaction) = (
+            xdr: string,
+          ) => Promise.resolve({ signedTxXdr: xdr });
         }, addr);
       };
 
@@ -119,23 +129,23 @@ export const test = base.extend<E2EFixtures>({
     async ({}, use) => {
       const simulateBackendUnavailable = async (page: Page) => {
         await page.evaluate(() => {
-          const origFetch = (window as any).fetch;
-          (window as any).fetch = (...args: any[]) => {
+          const origFetch = window.fetch;
+          window.fetch = (...args: Parameters<typeof fetch>) => {
             const url =
               typeof args[0] === "string" ? args[0] : args[0]?.url ?? "";
             if (url.includes("/api/") || url.includes("localhost")) {
               return Promise.reject(new TypeError("Failed to fetch"));
             }
-            return origFetch.apply(window as any, args);
+            return origFetch.apply(window, args);
           };
         });
       };
 
       const resetBackend = async (page: Page) => {
         await page.evaluate(() => {
-          const origFetch = (window as any).__originalFetch;
+          const origFetch = (window as unknown as WindowWithMocks).__originalFetch;
           if (origFetch) {
-            (window as any).fetch = origFetch;
+            window.fetch = origFetch;
           }
         });
       };

@@ -1,20 +1,15 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 
 export function useAbortController(): AbortController {
-  const controllerRef = useRef<AbortController | null>(null);
-
-  if (!controllerRef.current) {
-    controllerRef.current = new AbortController();
-  }
+  const [controller] = useState(() => new AbortController());
 
   useEffect(() => {
-    const controller = controllerRef.current;
     return () => {
-      if (controller && !controller.signal.aborted) {
+      if (!controller.signal.aborted) {
         controller.abort();
       }
     };
-  }, []);
+  }, [controller]);
 
-  return controllerRef.current;
+  return controller;
 }

@@ -29,7 +29,10 @@ describe("useSocket Hook", () => {
       onmessage: null,
     };
 
-    webSocketCtor = vi.fn(() => mockWs as unknown as WebSocket);
+    webSocketCtor = vi.fn(function () {
+      return mockWs as unknown as WebSocket;
+    });
+    Object.assign(webSocketCtor, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
     global.WebSocket = webSocketCtor as unknown as typeof WebSocket;
   });
 

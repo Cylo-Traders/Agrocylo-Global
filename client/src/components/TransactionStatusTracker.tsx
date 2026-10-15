@@ -147,7 +147,7 @@ export function TransactionStatusTracker({
             >
               {wsConnected ? <Wifi className="size-3" /> : <WifiOff className="size-3" />}
             </span>
-            <Badge variant={current.badge} className="gap-1.5">
+            <Badge variant={current.badge} className="gap-1.5" data-testid="current-status">
               <current.Icon className="size-3.5" />
               {current.label}
             </Badge>

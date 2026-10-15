@@ -196,8 +196,8 @@ export default function AdminProductsPage() {
           <DialogHeader>
             <DialogTitle>Delist Product</DialogTitle>
             <DialogDescription>
-              Permanently delist "{confirmDelistProduct?.name}"? This cannot be
-              undone.
+              Permanently delist &ldquo;{confirmDelistProduct?.name}&rdquo;? This
+              cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

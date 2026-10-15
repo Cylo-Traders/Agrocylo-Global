@@ -1,4 +1,4 @@
-import type Redis from 'ioredis';
+import type { Redis } from 'ioredis';
 import logger from '../config/logger.js';
 
 export interface RateLimitOptions {
@@ -68,12 +68,10 @@ export function createRateLimitStore(redisClient: Redis) {
           incrWithExpireScript,
           1,
           key,
-          String(windowMs),
+          String(windowMs)
         )) as [number, number];
 
-        const resetTime = pttl > 0
-          ? new Date(Date.now() + pttl)
-          : new Date(Date.now() + windowMs);
+        const resetTime = pttl > 0 ? new Date(Date.now() + pttl) : new Date(Date.now() + windowMs);
 
         return {
           totalHits: count,
@@ -102,12 +100,10 @@ export function createRateLimitStore(redisClient: Redis) {
           return {tonumber(current), pttl}
           `,
           1,
-          key,
+          key
         )) as [number, number];
 
-        const resetTime = pttl > 0
-          ? new Date(Date.now() + pttl)
-          : undefined;
+        const resetTime = pttl > 0 ? new Date(Date.now() + pttl) : undefined;
 
         return {
           totalHits: count,
@@ -152,5 +148,3 @@ export function createRateLimitStore(redisClient: Redis) {
     },
   };
 }
-
-

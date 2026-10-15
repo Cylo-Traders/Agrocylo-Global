@@ -245,8 +245,8 @@ export default function FarmerProductsDashboard() {
           <DialogHeader>
             <DialogTitle>Delete Product</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete "{confirmDeleteProduct?.name}"?
-              This will soft-delete the product.
+              Are you sure you want to delete &ldquo;{confirmDeleteProduct?.name}
+              &rdquo;? This will soft-delete the product.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

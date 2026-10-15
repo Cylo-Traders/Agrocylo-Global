@@ -1,9 +1,12 @@
 import { describe, it, expect } from "vitest";
+import { rpc } from "@stellar/stellar-sdk";
 import { buildFeeForTransaction } from "./contractService";
 
 // Minimal mock of SimulateTransactionSuccessResponse
 function makeSim(minResourceFee: string | number) {
-  return { minResourceFee: String(minResourceFee) } as any;
+  return {
+    minResourceFee: String(minResourceFee),
+  } as unknown as rpc.Api.SimulateTransactionSuccessResponse;
 }
 
 describe("buildFeeForTransaction", () => {

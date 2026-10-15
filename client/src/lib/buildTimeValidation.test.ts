@@ -309,11 +309,11 @@ describe("Network build-time validation :: endpointValidator (actual validator)"
     });
 
     it("malformed URL error does not leak the malformed value", () => {
-      const bad = "https://user:pass@host?token=leakme";
+      const bad = "https://user:s3cr3tPw@host?token=leakme";
       const res = validateEndpointUrl("NEXT_PUBLIC_HORIZON_URL", bad, { required: false });
       // Credential-bearing URL is rejected, but error must not echo user:pass or token
       if (res.error) {
-        expect(res.error).not.toContain("pass");
+        expect(res.error).not.toContain("s3cr3tPw");
         expect(res.error).not.toContain("leakme");
       }
     });

@@ -66,7 +66,9 @@ function makeNotification(id: string, orderId = "42") {
 
 describe("NotificationPoller", () => {
   beforeEach(() => {
-    vi.useFakeTimers();
+    // shouldAdvanceTime keeps @testing-library's waitFor polling working while
+    // the component's setInterval-based poller stays under our control.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
     walletState.address = WALLET_A;
     walletState.connected = true;

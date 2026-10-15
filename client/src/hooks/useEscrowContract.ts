@@ -67,8 +67,8 @@ export function useEscrowContract() {
         const submitResult = await signAndSubmit(result.data);
         if (!submitResult.success) {
           const errInfo = classifySubmitError(submitResult.error ?? "Transaction failed");
-          setCreateState({ isLoading: false, error: errInfo.message, blockchainError: errInfo });
-          throw new Error(errInfo.message);
+          setCreateState({ isLoading: false, error: submitResult.error ?? errInfo.message, blockchainError: errInfo });
+          throw new Error(submitResult.error ?? errInfo.message);
         }
         setCreateState({ isLoading: false, error: null, blockchainError: null });
         return submitResult;
@@ -105,8 +105,8 @@ export function useEscrowContract() {
         const submitResult = await signAndSubmit(result.data);
         if (!submitResult.success) {
           const errInfo = classifySubmitError(submitResult.error ?? "Transaction failed");
-          setConfirmState({ isLoading: false, error: errInfo.message, blockchainError: errInfo });
-          throw new Error(errInfo.message);
+          setConfirmState({ isLoading: false, error: submitResult.error ?? errInfo.message, blockchainError: errInfo });
+          throw new Error(submitResult.error ?? errInfo.message);
         }
         setConfirmState({ isLoading: false, error: null, blockchainError: null });
         return submitResult;
@@ -134,8 +134,8 @@ export function useEscrowContract() {
         const submitResult = await signAndSubmit(result.data);
         if (!submitResult.success) {
           const errInfo = classifySubmitError(submitResult.error ?? "Transaction failed");
-          setRefundState({ isLoading: false, error: errInfo.message, blockchainError: errInfo });
-          throw new Error(errInfo.message);
+          setRefundState({ isLoading: false, error: submitResult.error ?? errInfo.message, blockchainError: errInfo });
+          throw new Error(submitResult.error ?? errInfo.message);
         }
         setRefundState({ isLoading: false, error: null, blockchainError: null });
         return submitResult;
@@ -163,8 +163,8 @@ export function useEscrowContract() {
         const submitResult = await signAndSubmit(result.data);
         if (!submitResult.success) {
           const errInfo = classifySubmitError(submitResult.error ?? "Transaction failed");
-          setDisputeState({ isLoading: false, error: errInfo.message, blockchainError: errInfo });
-          throw new Error(errInfo.message);
+          setDisputeState({ isLoading: false, error: submitResult.error ?? errInfo.message, blockchainError: errInfo });
+          throw new Error(submitResult.error ?? errInfo.message);
         }
         setDisputeState({ isLoading: false, error: null, blockchainError: null });
         return submitResult;
@@ -192,8 +192,8 @@ export function useEscrowContract() {
         const submitResult = await signAndSubmit(result.data);
         if (!submitResult.success) {
           const errInfo = classifySubmitError(submitResult.error ?? "Transaction failed");
-          setResolveState({ isLoading: false, error: errInfo.message, blockchainError: errInfo });
-          throw new Error(errInfo.message);
+          setResolveState({ isLoading: false, error: submitResult.error ?? errInfo.message, blockchainError: errInfo });
+          throw new Error(submitResult.error ?? errInfo.message);
         }
         setResolveState({ isLoading: false, error: null, blockchainError: null });
         return submitResult;
@@ -219,8 +219,8 @@ export function useEscrowContract() {
         const submitResult = await signAndSubmit(result.data);
         if (!submitResult.success) {
           const errInfo = classifySubmitError(submitResult.error ?? "Transaction failed");
-          setSplitState({ isLoading: false, error: errInfo.message, blockchainError: errInfo });
-          throw new Error(errInfo.message);
+          setSplitState({ isLoading: false, error: submitResult.error ?? errInfo.message, blockchainError: errInfo });
+          throw new Error(submitResult.error ?? errInfo.message);
         }
         setSplitState({ isLoading: false, error: null, blockchainError: null });
         return submitResult;

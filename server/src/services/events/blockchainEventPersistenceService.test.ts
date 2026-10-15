@@ -1,11 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock("../../config/logger.js", () => ({
+vi.mock('../../config/logger.js', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-import { BlockchainEventPersistenceService } from "./blockchainEventPersistenceService.js";
-import type { IndexedEvent } from "../../types/indexedEvent.js";
+import { BlockchainEventPersistenceService } from './blockchainEventPersistenceService.js';
+import type { IndexedEvent } from '../../types/indexedEvent.js';
 
 const mockDeadLetterUpsert = vi.fn();
 const mockOrderFindUniqueOutside = vi.fn();
@@ -18,7 +18,8 @@ function makeTxMock() {
   return {
     blockchainTransaction: {
       findUnique: vi.fn(async ({ where }: any) => {
-        if (where.sourceEventId) return txsStore.has(where.sourceEventId) ? { sourceEventId: where.sourceEventId } : null;
+        if (where.sourceEventId)
+          return txsStore.has(where.sourceEventId) ? { sourceEventId: where.sourceEventId } : null;
         if (where.ledger_eventIndex) {
           // not used in this mock path
           return null;
@@ -50,8 +51,8 @@ function makeTxMock() {
       update: vi.fn(async ({ where, data }: any) => {
         const existing = ordersStore.get(where.orderIdOnChain);
         if (!existing) {
-          const err: any = new Error("Not found");
-          err.code = "P2025";
+          const err: any = new Error('Not found');
+          err.code = 'P2025';
           throw err;
         }
         const updated = { ...existing, ...data };
@@ -60,7 +61,7 @@ function makeTxMock() {
       }),
     },
     campaign: {
-      upsert: vi.fn(async ({ where, create, update }: any) => {
+      upsert: vi.fn(async ({ create, update }: any) => {
         // not needed for order tests, just return
         return { ...create, ...update };
       }),
@@ -85,16 +86,16 @@ const transactionMock = vi.fn(async (cb: any) => {
 });
 
 const findUniqueMock = vi.fn(async ({ where }: any) => {
-  if (txsStore.has(where.sourceEventId)) return { id: "existing" };
+  if (txsStore.has(where.sourceEventId)) return { id: 'existing' };
   return null;
 });
 
-vi.mock("../../config/database.js", () => ({
+vi.mock('../../config/database.js', () => ({
   prisma: {
     blockchainTransaction: {
-      findUnique: (...args: any[]) => findUniqueMock(...args),
+      findUnique: (...args: any[]) => (findUniqueMock as any)(...args),
     },
-    $transaction: (...args: any[]) => transactionMock(...args),
+    $transaction: (...args: any[]) => (transactionMock as any)(...args),
     deadLetter: {
       upsert: (...args: any[]) => mockDeadLetterUpsert(...args),
     },
@@ -104,20 +105,20 @@ vi.mock("../../config/database.js", () => ({
   },
 }));
 
-vi.mock("../../services/identityService.js", () => ({
+vi.mock('../../services/identityService.js', () => ({
   IdentityService: {
     ensureUsersForEvent: vi.fn(async () => {}),
     canonicalize: (s: string) => s.toLowerCase(),
   },
 }));
 
-vi.mock("../referralService.js", () => ({
+vi.mock('../referralService.js', () => ({
   ReferralService: {
     triggerRewardOnConfirmedActivity: vi.fn(async () => {}),
   },
 }));
 
-describe("BlockchainEventPersistenceService", () => {
+describe('BlockchainEventPersistenceService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ordersStore = new Map();
@@ -126,88 +127,99 @@ describe("BlockchainEventPersistenceService", () => {
       return ordersStore.get(where.orderIdOnChain) ?? null;
     });
     findUniqueMock.mockImplementation(async ({ where }: any) => {
-      if (txsStore.has(where.sourceEventId)) return { id: "existing" };
+      if (txsStore.has(where.sourceEventId)) return { id: 'existing' };
       return null;
     });
   });
 
-  it("projects campaign.created and campaign.settled with canonical CampaignStatus", async () => {
+  it('projects campaign.created and campaign.settled with canonical CampaignStatus', async () => {
     const base = {
-      entity: "campaign",
+      entity: 'campaign',
       timestamp: new Date(),
       payload: [],
-      campaignIdOnChain: "camp-1",
-      actorAddress: "GFARMER",
-      token: "TOKEN",
+      campaignIdOnChain: 'camp-1',
+      actorAddress: 'GFARMER',
+      token: 'TOKEN',
     } as const;
     await BlockchainEventPersistenceService.persist({
-      ...base, sourceEventId: "30-1", eventType: "campaign.created", action: "created", ledger: 30, eventIndex: 1, amount: "1000",
+      ...base,
+      sourceEventId: '30-1',
+      eventType: 'campaign.created',
+      action: 'created',
+      ledger: 30,
+      eventIndex: 1,
+      amount: '1000',
     } as IndexedEvent);
     expect(lastTxMock.campaign.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ create: expect.objectContaining({ status: "ACTIVE" }) }),
+      expect.objectContaining({ create: expect.objectContaining({ status: 'ACTIVE' }) })
     );
 
     await BlockchainEventPersistenceService.persist({
-      ...base, sourceEventId: "31-1", eventType: "campaign.settled", action: "settled", ledger: 31, eventIndex: 1,
+      ...base,
+      sourceEventId: '31-1',
+      eventType: 'campaign.settled',
+      action: 'settled',
+      ledger: 31,
+      eventIndex: 1,
     } as IndexedEvent);
     expect(lastTxMock.campaign.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ update: { status: "SETTLED" } }),
+      expect.objectContaining({ update: { status: 'SETTLED' } })
     );
   });
 
-  it("skips persistence when event already exists", async () => {
-    txsStore.add("12-1");
+  it('skips persistence when event already exists', async () => {
+    txsStore.add('12-1');
     const event: IndexedEvent = {
-      sourceEventId: "12-1",
-      eventType: "order.created",
-      entity: "order",
-      action: "created",
+      sourceEventId: '12-1',
+      eventType: 'order.created',
+      entity: 'order',
+      action: 'created',
       ledger: 12,
       eventIndex: 1,
       timestamp: new Date(),
       payload: [],
-      orderIdOnChain: "order-1",
+      orderIdOnChain: 'order-1',
     };
     await BlockchainEventPersistenceService.persist(event);
     expect(transactionMock).not.toHaveBeenCalled();
   });
 
-  it("out-of-order: refunded before created does not throw and final row is correct", async () => {
-    const buyer = "GBUYER123";
-    const seller = "GSELLER123";
-    const orderId = "order-42";
-    const amount = "1000";
-    const token = "USDC";
+  it('out-of-order: refunded before created does not throw and final row is correct', async () => {
+    const buyer = 'GBUYER123';
+    const seller = 'GSELLER123';
+    const orderId = 'order-42';
+    const amount = '1000';
+    const token = 'USDC';
 
     const refundedEvent: IndexedEvent = {
-      sourceEventId: "10-2",
-      eventType: "order.refunded",
-      entity: "order",
-      action: "refunded",
+      sourceEventId: '10-2',
+      eventType: 'order.refunded',
+      entity: 'order',
+      action: 'refunded',
       ledger: 10,
       eventIndex: 2,
-      timestamp: new Date("2024-01-02"),
+      timestamp: new Date('2024-01-02'),
       payload: [orderId, buyer],
       orderIdOnChain: orderId,
       actorAddress: buyer,
-      status: "REFUNDED",
+      status: 'REFUNDED',
     };
 
     const createdEvent: IndexedEvent = {
-      sourceEventId: "10-1",
-      eventType: "order.created",
-      entity: "order",
-      action: "created",
+      sourceEventId: '10-1',
+      eventType: 'order.created',
+      entity: 'order',
+      action: 'created',
       ledger: 10,
       eventIndex: 1,
-      timestamp: new Date("2024-01-01"),
+      timestamp: new Date('2024-01-01'),
       payload: [orderId, buyer, seller, amount, token],
       orderIdOnChain: orderId,
       actorAddress: buyer,
       secondaryAddress: seller,
       amount,
       token,
-      status: "PENDING",
+      status: 'PENDING',
     };
 
     // Feed in reverse order (refunded first)
@@ -215,10 +227,10 @@ describe("BlockchainEventPersistenceService", () => {
     // After refunded, placeholder should exist with needsBackfill true and seller null (not "")
     const placeholder = ordersStore.get(orderId);
     expect(placeholder).toBeDefined();
-    expect(placeholder.status).toBe("REFUNDED");
+    expect(placeholder.status).toBe('REFUNDED');
     expect(placeholder.sellerAddress).toBeNull(); // not empty string
     expect(placeholder.buyerAddress).toBe(buyer.toLowerCase());
-    expect(placeholder.amount).toBe("0");
+    expect(placeholder.amount).toBe('0');
     expect(placeholder.needsBackfill).toBe(true);
 
     // Now created arrives
@@ -233,22 +245,22 @@ describe("BlockchainEventPersistenceService", () => {
     expect(final.sellerAddress).toBe(seller.toLowerCase());
     expect(final.needsBackfill).toBe(false);
     // Status should remain REFUNDED (not downgraded to PENDING)
-    expect(final.status).toBe("REFUNDED");
+    expect(final.status).toBe('REFUNDED');
     // No empty string counterparty
-    expect(final.sellerAddress).not.toBe("");
-    expect(final.buyerAddress).not.toBe("");
+    expect(final.sellerAddress).not.toBe('');
+    expect(final.buyerAddress).not.toBe('');
     // Should not have thrown or halted
   });
 
-  it("confirmed before created also backfills correctly", async () => {
-    const buyer = "GBUYER2";
-    const seller = "GSELLER2";
-    const orderId = "order-99";
+  it('confirmed before created also backfills correctly', async () => {
+    const buyer = 'GBUYER2';
+    const seller = 'GSELLER2';
+    const orderId = 'order-99';
     const confirmedEvent: IndexedEvent = {
-      sourceEventId: "11-3",
-      eventType: "order.confirmed",
-      entity: "order",
-      action: "confirmed",
+      sourceEventId: '11-3',
+      eventType: 'order.confirmed',
+      entity: 'order',
+      action: 'confirmed',
       ledger: 11,
       eventIndex: 3,
       timestamp: new Date(),
@@ -256,44 +268,44 @@ describe("BlockchainEventPersistenceService", () => {
       orderIdOnChain: orderId,
       actorAddress: buyer,
       secondaryAddress: seller,
-      status: "COMPLETED",
+      status: 'COMPLETED',
     };
     const createdEvent: IndexedEvent = {
-      sourceEventId: "11-1",
-      eventType: "order.created",
-      entity: "order",
-      action: "created",
+      sourceEventId: '11-1',
+      eventType: 'order.created',
+      entity: 'order',
+      action: 'created',
       ledger: 11,
       eventIndex: 1,
       timestamp: new Date(),
-      payload: [orderId, buyer, seller, "5000", "USDC"],
+      payload: [orderId, buyer, seller, '5000', 'USDC'],
       orderIdOnChain: orderId,
       actorAddress: buyer,
       secondaryAddress: seller,
-      amount: "5000",
-      token: "USDC",
-      status: "PENDING",
+      amount: '5000',
+      token: 'USDC',
+      status: 'PENDING',
     };
     await BlockchainEventPersistenceService.persist(confirmedEvent);
-    expect(ordersStore.get(orderId)?.status).toBe("COMPLETED");
+    expect(ordersStore.get(orderId)?.status).toBe('COMPLETED');
     expect(ordersStore.get(orderId)?.needsBackfill).toBe(true);
 
     await BlockchainEventPersistenceService.persist(createdEvent);
     const final = ordersStore.get(orderId);
-    expect(final.amount).toBe("5000");
-    expect(final.status).toBe("COMPLETED"); // not downgraded
+    expect(final.amount).toBe('5000');
+    expect(final.status).toBe('COMPLETED'); // not downgraded
     expect(final.needsBackfill).toBe(false);
   });
 
-  it("delivered before created handles both addresses", async () => {
-    const buyer = "GBUYER3";
-    const farmer = "GFARMER3";
-    const orderId = "order-delivered";
+  it('delivered before created handles both addresses', async () => {
+    const buyer = 'GBUYER3';
+    const farmer = 'GFARMER3';
+    const orderId = 'order-delivered';
     const deliveredEvent: IndexedEvent = {
-      sourceEventId: "12-2",
-      eventType: "order.delivered",
-      entity: "order",
-      action: "delivered",
+      sourceEventId: '12-2',
+      eventType: 'order.delivered',
+      entity: 'order',
+      action: 'delivered',
       ledger: 12,
       eventIndex: 2,
       timestamp: new Date(),
@@ -301,49 +313,49 @@ describe("BlockchainEventPersistenceService", () => {
       orderIdOnChain: orderId,
       actorAddress: farmer,
       secondaryAddress: buyer,
-      status: "DELIVERED",
+      status: 'DELIVERED',
     };
     const createdEvent: IndexedEvent = {
-      sourceEventId: "12-1",
-      eventType: "order.created",
-      entity: "order",
-      action: "created",
+      sourceEventId: '12-1',
+      eventType: 'order.created',
+      entity: 'order',
+      action: 'created',
       ledger: 12,
       eventIndex: 1,
       timestamp: new Date(),
-      payload: [orderId, buyer, farmer, "2000", "USDC"],
+      payload: [orderId, buyer, farmer, '2000', 'USDC'],
       orderIdOnChain: orderId,
       actorAddress: buyer,
       secondaryAddress: farmer,
-      amount: "2000",
-      token: "USDC",
-      status: "PENDING",
+      amount: '2000',
+      token: 'USDC',
+      status: 'PENDING',
     };
     await BlockchainEventPersistenceService.persist(deliveredEvent);
     await BlockchainEventPersistenceService.persist(createdEvent);
     const final = ordersStore.get(orderId);
-    expect(final.amount).toBe("2000");
+    expect(final.amount).toBe('2000');
     expect(final.buyerAddress).toBe(buyer.toLowerCase());
     expect(final.sellerAddress).toBe(farmer.toLowerCase());
-    expect(final.status).toBe("DELIVERED");
+    expect(final.status).toBe('DELIVERED');
   });
 
-  it("replaying same event twice is idempotent (no duplicate rows)", async () => {
+  it('replaying same event twice is idempotent (no duplicate rows)', async () => {
     const event: IndexedEvent = {
-      sourceEventId: "20-1",
-      eventType: "order.created",
-      entity: "order",
-      action: "created",
+      sourceEventId: '20-1',
+      eventType: 'order.created',
+      entity: 'order',
+      action: 'created',
       ledger: 20,
       eventIndex: 1,
       timestamp: new Date(),
-      payload: ["order-replay", "GBUYER", "GSELLER", "1000", "USDC"],
-      orderIdOnChain: "order-replay",
-      actorAddress: "GBUYER",
-      secondaryAddress: "GSELLER",
-      amount: "1000",
-      token: "USDC",
-      status: "PENDING",
+      payload: ['order-replay', 'GBUYER', 'GSELLER', '1000', 'USDC'],
+      orderIdOnChain: 'order-replay',
+      actorAddress: 'GBUYER',
+      secondaryAddress: 'GSELLER',
+      amount: '1000',
+      token: 'USDC',
+      status: 'PENDING',
     };
     await BlockchainEventPersistenceService.persist(event);
     const sizeAfterFirst = ordersStore.size;
@@ -355,49 +367,49 @@ describe("BlockchainEventPersistenceService", () => {
     expect(txsStore.size).toBe(txCountAfterFirst);
   });
 
-  it("canonicalizes amount: chain renders as scientific notation still equivalent", async () => {
-    const orderId = "order-canonical";
+  it('canonicalizes amount: chain renders as scientific notation still equivalent', async () => {
+    const orderId = 'order-canonical';
     const event: IndexedEvent = {
-      sourceEventId: "30-1",
-      eventType: "order.created",
-      entity: "order",
-      action: "created",
+      sourceEventId: '30-1',
+      eventType: 'order.created',
+      entity: 'order',
+      action: 'created',
       ledger: 30,
       eventIndex: 1,
       timestamp: new Date(),
-      payload: [orderId, "GBUYER", "GSELLER", "1e3", "USDC"],
+      payload: [orderId, 'GBUYER', 'GSELLER', '1e3', 'USDC'],
       orderIdOnChain: orderId,
-      actorAddress: "GBUYER",
-      secondaryAddress: "GSELLER",
-      amount: "1e3", // non-canonical, should be stored as "1000"
-      token: "USDC",
-      status: "PENDING",
+      actorAddress: 'GBUYER',
+      secondaryAddress: 'GSELLER',
+      amount: '1e3', // non-canonical, should be stored as "1000"
+      token: 'USDC',
+      status: 'PENDING',
     };
     await BlockchainEventPersistenceService.persist(event);
-    expect(ordersStore.get(orderId).amount).toBe("1000");
+    expect(ordersStore.get(orderId).amount).toBe('1000');
   });
 
-  it("handles ledger replay with in-transaction dedup (second call with same ledger+index is no-op)", async () => {
+  it('handles ledger replay with in-transaction dedup (second call with same ledger+index is no-op)', async () => {
     const ev1: IndexedEvent = {
-      sourceEventId: "40-1",
-      eventType: "order.created",
-      entity: "order",
-      action: "created",
+      sourceEventId: '40-1',
+      eventType: 'order.created',
+      entity: 'order',
+      action: 'created',
       ledger: 40,
       eventIndex: 1,
       timestamp: new Date(),
-      payload: ["order-40", "GB1", "GS1", "100", "USDC"],
-      orderIdOnChain: "order-40",
-      actorAddress: "GB1",
-      secondaryAddress: "GS1",
-      amount: "100",
-      token: "USDC",
-      status: "PENDING",
+      payload: ['order-40', 'GB1', 'GS1', '100', 'USDC'],
+      orderIdOnChain: 'order-40',
+      actorAddress: 'GB1',
+      secondaryAddress: 'GS1',
+      amount: '100',
+      token: 'USDC',
+      status: 'PENDING',
     };
     const ev2: IndexedEvent = {
       ...ev1,
-      sourceEventId: "40-1-dup",
-      payload: ["order-40", "GB1", "GS1", "100", "USDC"],
+      sourceEventId: '40-1-dup',
+      payload: ['order-40', 'GB1', 'GS1', '100', 'USDC'],
     };
     // First persist
     await BlockchainEventPersistenceService.persist(ev1);
@@ -407,6 +419,6 @@ describe("BlockchainEventPersistenceService", () => {
     // For this test we just ensure no throw and second still results in one order
     await BlockchainEventPersistenceService.persist(ev2);
     // At least no exception halts batch
-    expect(ordersStore.get("order-40")).toBeDefined();
+    expect(ordersStore.get('order-40')).toBeDefined();
   });
 });

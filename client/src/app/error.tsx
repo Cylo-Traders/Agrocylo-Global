@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect } from "react";
+import { Button } from "@/components/ui/button";
 import { AlertTriangle } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { logger } from "@/lib/logger";
 
 export default function Error({
@@ -47,7 +48,7 @@ export default function Error({
           Try again
         </Button>
         <Button asChild>
-          <a href="/">Go home</a>
+          <Link href="/">Go home</Link>
         </Button>
       </div>
     </div>

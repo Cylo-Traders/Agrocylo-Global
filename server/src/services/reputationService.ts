@@ -1,6 +1,6 @@
-import { prisma } from "../config/database.js";
-import logger from "../config/logger.js";
-import { getReviewSummary } from "./reviewService.js";
+import { prisma } from '../config/database.js';
+import logger from '../config/logger.js';
+import { getReviewSummary } from './reviewService.js';
 
 export interface ReputationSnapshot {
   walletAddress: string;
@@ -62,7 +62,7 @@ function computeCompositeScore(params: {
   return clamp(
     Math.round(onChainComponent * 0.55 + reviewComponent * 0.35 + volumeBonus - disputePenalty),
     0,
-    100,
+    100
   );
 }
 
@@ -79,14 +79,14 @@ async function loadOnChainSignals(walletAddress: string): Promise<{
   // Only count orders above the anti-gaming floor (#694).
   const qualifiedFilter = {
     ...participantFilter,
-    amount: { gte: MIN_ORDER_AMOUNT_FOR_REPUTATION },
+    amount: { gte: String(MIN_ORDER_AMOUNT_FOR_REPUTATION) },
   };
 
   const [completedOrders, disputedOrders, totalOrders] = await Promise.all([
     prisma.order.count({
       where: {
         ...qualifiedFilter,
-        status: "COMPLETED",
+        status: 'COMPLETED',
       },
     }),
     prisma.dispute.count({
@@ -112,11 +112,7 @@ async function loadOnChainSignals(walletAddress: string): Promise<{
 
   const completionRate = completedOrders / totalOrders;
   const disputeRate = disputedOrders / totalOrders;
-  const onChainScore = clamp(
-    Math.round(40 + completionRate * 45 - disputeRate * 35),
-    0,
-    100,
-  );
+  const onChainScore = clamp(Math.round(40 + completionRate * 45 - disputeRate * 35), 0, 100);
 
   return {
     completedOrders,
@@ -129,10 +125,7 @@ async function loadOnChainSignals(walletAddress: string): Promise<{
 async function computeReputation(walletAddress: string): Promise<ReputationSnapshot> {
   const normalizedWallet = normalizeWallet(walletAddress);
   const [{ completedOrders, disputedOrders, onChainScore, disputeRate }, reviewSummary] =
-    await Promise.all([
-      loadOnChainSignals(normalizedWallet),
-      getReviewSummary(walletAddress),
-    ]);
+    await Promise.all([loadOnChainSignals(normalizedWallet), getReviewSummary(walletAddress)]);
 
   const score = computeCompositeScore({
     onChainScore,
@@ -181,12 +174,14 @@ export function getReputationCacheTtlMs(): number {
   return CACHE_TTL_MS;
 }
 
-export async function refreshReputationSnapshot(walletAddress: string): Promise<ReputationSnapshot> {
+export async function refreshReputationSnapshot(
+  walletAddress: string
+): Promise<ReputationSnapshot> {
   reputationCache.delete(normalizeWallet(walletAddress));
   try {
     return await getReputationSnapshot(walletAddress);
   } catch (error) {
-    logger.error("Failed to refresh reputation snapshot", { error, walletAddress });
+    logger.error('Failed to refresh reputation snapshot', { error, walletAddress });
     throw error;
   }
 }

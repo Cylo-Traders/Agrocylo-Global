@@ -1,18 +1,18 @@
-import crypto from "node:crypto";
-import type { Request, Response, NextFunction } from "express";
-import type Redis from "ioredis";
-import logger from "../config/logger.js";
+import crypto from 'node:crypto';
+import type { Request, Response, NextFunction } from 'express';
+import type { Redis } from 'ioredis';
+import logger from '../config/logger.js';
 import {
   incrementIdempotencyHits,
   incrementIdempotencyMisses,
   incrementIdempotencyConflicts,
-} from "../services/metricsService.js";
-import { sessionPrincipal } from "./walletAuth.js";
+} from '../services/metricsService.js';
+import { sessionPrincipal } from './walletAuth.js';
 
-const IDEMPOTENCY_KEY_HEADER = "idempotency-key";
+const IDEMPOTENCY_KEY_HEADER = 'idempotency-key';
 const IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60; // 24 hours for completed responses
 const IN_PROGRESS_TTL_SECONDS = 60; // short lock so crashed handlers become retryable
-const IN_PROGRESS_MARKER = "IN_PROGRESS" as const;
+const IN_PROGRESS_MARKER = 'IN_PROGRESS' as const;
 
 export interface IdempotencyCacheEntry {
   status: number | typeof IN_PROGRESS_MARKER;
@@ -25,9 +25,9 @@ export interface IdempotencyOptions {
   allowlist?: string[];
 }
 
-const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 // Session-token issuance must never be replayed from a cache.
-const EXCLUDED_PREFIXES = ["/auth"];
+const EXCLUDED_PREFIXES = ['/auth'];
 
 /**
  * Records are namespaced by verified principal (wallet + role) so one caller
@@ -35,49 +35,55 @@ const EXCLUDED_PREFIXES = ["/auth"];
  * response it is no longer authorized to receive. The `v2` prefix leaves
  * legacy unscoped `idem:<key>` entries unreachable until they expire.
  */
-export function idempotencyRedisKey(walletAddress: string, role: string | undefined, key: string): string {
-  return `idem:v2:${walletAddress}:${role ?? ""}:${key}`;
+export function idempotencyRedisKey(
+  walletAddress: string,
+  role: string | undefined,
+  key: string
+): string {
+  return `idem:v2:${walletAddress}:${role ?? ''}:${key}`;
 }
 
 function sortedStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) {
-    return `[${value.map((v) => sortedStringify(v)).join(",")}]`;
+    return `[${value.map((v) => sortedStringify(v)).join(',')}]`;
   }
   const obj = value as Record<string, unknown>;
   const keys = Object.keys(obj).sort();
   const parts = keys.map((k) => `${JSON.stringify(k)}:${sortedStringify(obj[k])}`);
-  return `{${parts.join(",")}}`;
+  return `{${parts.join(',')}}`;
 }
 
 function fingerprintForRequest(req: Request): string {
-  const method = (req.method || "GET").toUpperCase();
+  const method = (req.method || 'GET').toUpperCase();
   // Use originalUrl (includes query) for uniqueness; fallback to path/url.
   const path =
-    (req as unknown as { originalUrl?: string }).originalUrl ||
-    req.url ||
-    req.path ||
-    "";
+    (req as unknown as { originalUrl?: string }).originalUrl || req.url || req.path || '';
   // Body may be undefined / string / object; normalize to stable JSON.
-  let bodyStr = "";
+  let bodyStr = '';
   if (req.body !== undefined && req.body !== null) {
     try {
-      if (typeof req.body === "string") bodyStr = req.body;
-      else if (Buffer.isBuffer(req.body)) bodyStr = req.body.toString("utf-8");
+      if (typeof req.body === 'string') bodyStr = req.body;
+      else if (Buffer.isBuffer(req.body)) bodyStr = req.body.toString('utf-8');
       else bodyStr = sortedStringify(req.body);
     } catch {
       bodyStr = String(req.body);
     }
   }
   const raw = `${method}:${path}:${bodyStr}`;
-  return crypto.createHash("sha256").update(raw).digest("hex");
+  return crypto.createHash('sha256').update(raw).digest('hex');
 }
 
 function isAllowedPath(req: Request, allowlist?: string[]): boolean {
   if (!allowlist || allowlist.length === 0) return true;
-  const url = (req as unknown as { originalUrl?: string }).originalUrl || req.path || req.url || "";
-  const pathname = url.split("?")[0] || "";
-  return allowlist.some((prefix) => pathname === prefix || pathname.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`) || pathname.startsWith(prefix));
+  const url = (req as unknown as { originalUrl?: string }).originalUrl || req.path || req.url || '';
+  const pathname = url.split('?')[0] || '';
+  return allowlist.some(
+    (prefix) =>
+      pathname === prefix ||
+      pathname.startsWith(prefix.endsWith('/') ? prefix : `${prefix}/`) ||
+      pathname.startsWith(prefix)
+  );
 }
 
 /**
@@ -98,7 +104,7 @@ export function createIdempotencyMiddleware(redisClient: Redis, options?: Idempo
 
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     // Scope to unsafe methods only
-    const method = (req.method || "").toUpperCase();
+    const method = (req.method || '').toUpperCase();
     if (SAFE_METHODS.has(method)) {
       return next();
     }
@@ -107,7 +113,7 @@ export function createIdempotencyMiddleware(redisClient: Redis, options?: Idempo
     }
 
     const idempotencyKeyRaw = req.headers[IDEMPOTENCY_KEY_HEADER];
-    if (!idempotencyKeyRaw || typeof idempotencyKeyRaw !== "string") {
+    if (!idempotencyKeyRaw || typeof idempotencyKeyRaw !== 'string') {
       return next();
     }
     const principal = sessionPrincipal(req);
@@ -136,15 +142,15 @@ export function createIdempotencyMiddleware(redisClient: Redis, options?: Idempo
         if (entry) {
           // Fingerprint mismatch → 422 (RFC draft behaviour)
           if (entry.fingerprint && entry.fingerprint !== fingerprint) {
-            logger.warn("[Idempotency] Fingerprint mismatch for reused key", {
+            logger.warn('[Idempotency] Fingerprint mismatch for reused key', {
               idempotencyKey,
               ip: req.ip,
               expectedFingerprint: entry.fingerprint,
               gotFingerprint: fingerprint,
             });
             res.status(422).json({
-              title: "Unprocessable Entity",
-              detail: "Idempotency-Key reuse with different request fingerprint",
+              title: 'Unprocessable Entity',
+              detail: 'Idempotency-Key reuse with different request fingerprint',
               status: 422,
             });
             return;
@@ -153,13 +159,13 @@ export function createIdempotencyMiddleware(redisClient: Redis, options?: Idempo
           // In-progress marker
           if (entry.status === IN_PROGRESS_MARKER) {
             incrementIdempotencyConflicts();
-            logger.warn("[Idempotency] Concurrent duplicate request rejected", {
+            logger.warn('[Idempotency] Concurrent duplicate request rejected', {
               idempotencyKey,
               ip: req.ip,
             });
             res.status(409).json({
-              title: "Conflict",
-              detail: "A request with this idempotency key is already in progress",
+              title: 'Conflict',
+              detail: 'A request with this idempotency key is already in progress',
               status: 409,
             });
             return;
@@ -167,7 +173,7 @@ export function createIdempotencyMiddleware(redisClient: Redis, options?: Idempo
 
           // Cached completed response — only serve if fingerprint matches (or no fingerprint stored for backwards compat)
           incrementIdempotencyHits();
-          logger.debug("[Idempotency] Cache hit, returning cached response", {
+          logger.debug('[Idempotency] Cache hit, returning cached response', {
             idempotencyKey,
             cachedStatus: entry.status,
           });
@@ -179,10 +185,14 @@ export function createIdempotencyMiddleware(redisClient: Redis, options?: Idempo
       // Claim atomically with short IN_PROGRESS TTL
       const claimed = await redisClient.set(
         redisKey,
-        JSON.stringify({ status: IN_PROGRESS_MARKER, fingerprint, body: null } as IdempotencyCacheEntry),
-        "EX",
+        JSON.stringify({
+          status: IN_PROGRESS_MARKER,
+          fingerprint,
+          body: null,
+        } as IdempotencyCacheEntry),
+        'EX',
         IN_PROGRESS_TTL_SECONDS,
-        "NX",
+        'NX'
       );
 
       if (!claimed) {
@@ -193,28 +203,30 @@ export function createIdempotencyMiddleware(redisClient: Redis, options?: Idempo
             const entry = JSON.parse(raced) as IdempotencyCacheEntry;
             if (entry.fingerprint && entry.fingerprint !== fingerprint) {
               res.status(422).json({
-                title: "Unprocessable Entity",
-                detail: "Idempotency-Key reuse with different request fingerprint",
+                title: 'Unprocessable Entity',
+                detail: 'Idempotency-Key reuse with different request fingerprint',
                 status: 422,
               });
               return;
             }
-          } catch {}
+          } catch {
+            // ignore
+          }
         }
         incrementIdempotencyConflicts();
-        logger.warn("[Idempotency] Race condition: key claimed by concurrent request", {
+        logger.warn('[Idempotency] Race condition: key claimed by concurrent request', {
           idempotencyKey,
         });
         res.status(409).json({
-          title: "Conflict",
-          detail: "A request with this idempotency key is already in progress",
+          title: 'Conflict',
+          detail: 'A request with this idempotency key is already in progress',
           status: 409,
         });
         return;
       }
 
       incrementIdempotencyMisses();
-      logger.debug("[Idempotency] Cache miss, claimed key for execution", {
+      logger.debug('[Idempotency] Cache miss, claimed key for execution', {
         idempotencyKey,
       });
 
@@ -225,15 +237,18 @@ export function createIdempotencyMiddleware(redisClient: Redis, options?: Idempo
         if (lockCleared) return;
         lockCleared = true;
         redisClient.del(redisKey).catch((error) => {
-          logger.error("[Idempotency] Failed to clear IN_PROGRESS lock", { idempotencyKey, error });
+          logger.error('[Idempotency] Failed to clear IN_PROGRESS lock', { idempotencyKey, error });
         });
       };
 
       // Intercept response to cache appropriately
-      const originalJson = typeof (res as any).json === 'function' ? (res as any).json.bind(res) : null;
-      const originalSend = typeof (res as any).send === 'function' ? (res as any).send.bind(res) : null;
+      const originalJson =
+        typeof (res as any).json === 'function' ? (res as any).json.bind(res) : null;
+      const originalSend =
+        typeof (res as any).send === 'function' ? (res as any).send.bind(res) : null;
       // originalStatus not needed for logic but keep for future; guard
-      const originalStatus = typeof (res as any).status === 'function' ? (res as any).status.bind(res) : null;
+      const _originalStatus =
+        typeof (res as any).status === 'function' ? (res as any).status.bind(res) : null;
 
       // Wrap res.json — the primary path for API handlers
       if (originalJson) {
@@ -256,9 +271,9 @@ export function createIdempotencyMiddleware(redisClient: Redis, options?: Idempo
           };
 
           redisClient
-            .set(redisKey, JSON.stringify(entry), "EX", IDEMPOTENCY_TTL_SECONDS)
+            .set(redisKey, JSON.stringify(entry), 'EX', IDEMPOTENCY_TTL_SECONDS)
             .catch((error) => {
-              logger.error("[Idempotency] Failed to cache response", {
+              logger.error('[Idempotency] Failed to cache response', {
                 idempotencyKey,
                 error,
               });
@@ -278,7 +293,7 @@ export function createIdempotencyMiddleware(redisClient: Redis, options?: Idempo
             clearLock();
             return originalSend(body as any);
           }
-          if (typeof body === "object" && body !== null) {
+          if (typeof body === 'object' && body !== null) {
             responseTracked = true;
             const entry: IdempotencyCacheEntry = {
               status,
@@ -286,9 +301,9 @@ export function createIdempotencyMiddleware(redisClient: Redis, options?: Idempo
               fingerprint,
             };
             redisClient
-              .set(redisKey, JSON.stringify(entry), "EX", IDEMPOTENCY_TTL_SECONDS)
+              .set(redisKey, JSON.stringify(entry), 'EX', IDEMPOTENCY_TTL_SECONDS)
               .catch((error) => {
-                logger.error("[Idempotency] Failed to cache response", {
+                logger.error('[Idempotency] Failed to cache response', {
                   idempotencyKey,
                   error,
                 });
@@ -322,8 +337,8 @@ export function createIdempotencyMiddleware(redisClient: Redis, options?: Idempo
           clearLock();
         }
         if (typeof (res as any).removeListener === 'function') {
-          (res as any).removeListener("finish", onFinish);
-          (res as any).removeListener("close", onClose);
+          (res as any).removeListener('finish', onFinish);
+          (res as any).removeListener('close', onClose);
         }
       };
       const onClose = () => {
@@ -331,13 +346,13 @@ export function createIdempotencyMiddleware(redisClient: Redis, options?: Idempo
           clearLock();
         }
         if (typeof (res as any).removeListener === 'function') {
-          (res as any).removeListener("finish", onFinish);
-          (res as any).removeListener("close", onClose);
+          (res as any).removeListener('finish', onFinish);
+          (res as any).removeListener('close', onClose);
         }
       };
       if (typeof (res as any).on === 'function') {
-        (res as any).on("finish", onFinish);
-        (res as any).on("close", onClose);
+        (res as any).on('finish', onFinish);
+        (res as any).on('close', onClose);
       }
 
       // Also wrap next to detect handler error that calls next(err)
@@ -351,8 +366,8 @@ export function createIdempotencyMiddleware(redisClient: Redis, options?: Idempo
 
       wrappedNext();
     } catch (error) {
-      logger.error("[Idempotency] Redis operation failed", {
-        idempotencyKey: (req.headers[IDEMPOTENCY_KEY_HEADER] as string) || "unknown",
+      logger.error('[Idempotency] Redis operation failed', {
+        idempotencyKey: (req.headers[IDEMPOTENCY_KEY_HEADER] as string) || 'unknown',
         error,
       });
       // Fail open: let the request proceed if Redis is unavailable

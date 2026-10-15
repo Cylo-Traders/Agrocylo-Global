@@ -42,8 +42,9 @@
     "test:scripts": "node --test scripts/__tests__/*.test.js"
   },
   "devDependencies": {
-    "turbo": "^2.3.3",
-    "husky": "^9.0.0"
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "turbo": "^2.3.3"
   },
   "devEngines": {
     "packageManager": {

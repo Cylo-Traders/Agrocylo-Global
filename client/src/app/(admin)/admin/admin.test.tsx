@@ -42,6 +42,14 @@ describe("AdminOverviewPage", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(adminService.fetchPlatformConfig).mockResolvedValue({
+      feeBps: 300,
+      minStake: "100",
+      supportedTokens: ["XLM", "USDC"],
+      featureFlags: { enableBarter: true },
+      maintenanceMode: false,
+    });
+    vi.mocked(adminService.fetchAdminAuditLog).mockResolvedValue([]);
   });
 
   it("shows loading state on initial render", () => {

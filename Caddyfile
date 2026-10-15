@@ -1,7 +1,7 @@
 localhost
 
 handle /agro/* {
-	reverse_proxy agro-client:3000
+	reverse_proxy agro-client:3001
 }
 
 handle /api/v1/* {

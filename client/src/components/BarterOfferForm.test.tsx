@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import BarterOfferForm from "./BarterOfferForm";
+import { AnalyticsProvider } from "@/context/AnalyticsContext";
 import * as barterService from "@/services/barterService";
 
 vi.mock("@/services/barterService");
@@ -16,12 +17,14 @@ describe("BarterOfferForm", () => {
 
   it("blocks invalid submission when fields are empty", async () => {
     render(
-      <BarterOfferForm
-        open={true}
-        walletAddress={walletAddress}
-        onClose={mockOnClose}
-        onSuccess={mockOnSuccess}
-      />
+      <AnalyticsProvider>
+        <BarterOfferForm
+          open={true}
+          walletAddress={walletAddress}
+          onClose={mockOnClose}
+          onSuccess={mockOnSuccess}
+        />
+      </AnalyticsProvider>
     );
 
     const submitButton = screen.getByRole("button", { name: /Submit Offer/i });
@@ -54,12 +57,14 @@ describe("BarterOfferForm", () => {
     });
 
     render(
-      <BarterOfferForm
-        open={true}
-        walletAddress={walletAddress}
-        onClose={mockOnClose}
-        onSuccess={mockOnSuccess}
-      />
+      <AnalyticsProvider>
+        <BarterOfferForm
+          open={true}
+          walletAddress={walletAddress}
+          onClose={mockOnClose}
+          onSuccess={mockOnSuccess}
+        />
+      </AnalyticsProvider>
     );
 
     // Fill in recipient wallet
@@ -97,12 +102,14 @@ describe("BarterOfferForm", () => {
     );
 
     render(
-      <BarterOfferForm
-        open={true}
-        walletAddress={walletAddress}
-        onClose={mockOnClose}
-        onSuccess={mockOnSuccess}
-      />
+      <AnalyticsProvider>
+        <BarterOfferForm
+          open={true}
+          walletAddress={walletAddress}
+          onClose={mockOnClose}
+          onSuccess={mockOnSuccess}
+        />
+      </AnalyticsProvider>
     );
 
     // Fill minimum valid form

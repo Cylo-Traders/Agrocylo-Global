@@ -108,7 +108,7 @@ export default function PriceAlertComponent({
           <p className="text-muted-foreground text-xs">Current Price</p>
           <div className="flex items-baseline gap-2">
             <span className="text-2xl font-bold">
-              ${alert.currentPrice?.toFixed(2) || "N/A"}
+              {alert.currentPrice?.toFixed(2) || "N/A"}
             </span>
             {priceChange && (
               <Badge

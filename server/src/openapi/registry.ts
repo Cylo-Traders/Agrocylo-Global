@@ -8,15 +8,15 @@
  * - Runtime validation of request/response shapes
  */
 
-import type { ZodSchema } from "zod";
+import type { ZodSchema } from 'zod';
 
 export interface OpenAPIEndpoint {
-  method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS";
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD' | 'OPTIONS';
   path: string;
   summary: string;
   description?: string;
   tags?: string[];
-  authentication?: "Bearer" | "None";
+  authentication?: 'Bearer' | 'None';
   requestSchema?: ZodSchema;
   responseSchema?: ZodSchema;
   parameters?: OpenAPIParameter[];
@@ -25,7 +25,7 @@ export interface OpenAPIEndpoint {
 
 export interface OpenAPIParameter {
   name: string;
-  in: "query" | "path" | "header" | "cookie";
+  in: 'query' | 'path' | 'header' | 'cookie';
   required?: boolean;
   schema?: { type: string; format?: string; enum?: string[] };
   description?: string;
@@ -60,7 +60,7 @@ class OpenAPIRegistry {
    */
   toOpenAPI(): Record<string, unknown> {
     const paths: Record<string, Record<string, unknown>> = {};
-    const schemas: Record<string, unknown> = {};
+    const _schemas: Record<string, unknown> = {};
 
     for (const endpoint of this.getEndpoints()) {
       if (!paths[endpoint.path]) {
@@ -68,19 +68,19 @@ class OpenAPIRegistry {
       }
 
       const methodKey = endpoint.method.toLowerCase();
-      const operationId = `${endpoint.method.toLowerCase()}${endpoint.path.replace(/[^a-zA-Z0-9]/g, "_")}`;
+      const operationId = `${endpoint.method.toLowerCase()}${endpoint.path.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
       const operation: Record<string, unknown> = {
         summary: endpoint.summary,
         operationId,
-        tags: endpoint.tags || ["default"],
+        tags: endpoint.tags || ['default'],
       };
 
       if (endpoint.description) {
         operation.description = endpoint.description;
       }
 
-      if (endpoint.authentication === "Bearer") {
+      if (endpoint.authentication === 'Bearer') {
         operation.security = [{ bearerAuth: [] }];
       }
 
@@ -89,7 +89,7 @@ class OpenAPIRegistry {
           name: p.name,
           in: p.in,
           required: p.required ?? false,
-          schema: p.schema || { type: "string" },
+          schema: p.schema || { type: 'string' },
           description: p.description,
         }));
       }
@@ -98,8 +98,8 @@ class OpenAPIRegistry {
         operation.requestBody = {
           required: true,
           content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/RequestBody" },
+            'application/json': {
+              schema: { $ref: '#/components/schemas/RequestBody' },
             },
           },
         };
@@ -111,16 +111,16 @@ class OpenAPIRegistry {
           [statusCode]: {
             description: `Successful response (${statusCode})`,
             content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/ResponseBody" },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ResponseBody' },
               },
             },
           },
-          "default": {
-            description: "Error response (RFC 7807)",
+          default: {
+            description: 'Error response (RFC 7807)',
             content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/ProblemDetail" },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ProblemDetail' },
               },
             },
           },
@@ -128,100 +128,100 @@ class OpenAPIRegistry {
       } else {
         operation.responses = {
           [statusCode]: { description: endpoint.summary },
-          "default": {
-            description: "Error response (RFC 7807)",
+          default: {
+            description: 'Error response (RFC 7807)',
             content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/ProblemDetail" },
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ProblemDetail' },
               },
             },
           },
         };
       }
 
-      paths[endpoint.path][methodKey] = operation;
+      (paths[endpoint.path] ??= {})[methodKey] = operation;
     }
 
     return {
-      openapi: "3.0.3",
+      openapi: '3.0.3',
       info: {
-        title: "Agrocylo Backend API",
+        title: 'Agrocylo Backend API',
         description:
-          "Decentralized agricultural marketplace with escrow contracts on Stellar Soroban",
-        version: "1.0.0",
+          'Decentralized agricultural marketplace with escrow contracts on Stellar Soroban',
+        version: '1.0.0',
         contact: {
-          name: "Agrocylo Team",
+          name: 'Agrocylo Team',
         },
       },
       servers: [
         {
-          url: "https://api.agrocylo.com",
-          description: "Production API",
+          url: 'https://api.agrocylo.com',
+          description: 'Production API',
         },
         {
-          url: "http://localhost:5000",
-          description: "Local development API",
+          url: 'http://localhost:5000',
+          description: 'Local development API',
         },
       ],
       paths,
       components: {
         securitySchemes: {
           bearerAuth: {
-            type: "http",
-            scheme: "bearer",
-            bearerFormat: "JWT",
-            description: "Bearer token authentication (wallet signature)",
+            type: 'http',
+            scheme: 'bearer',
+            bearerFormat: 'JWT',
+            description: 'Bearer token authentication (wallet signature)',
           },
         },
         schemas: {
           ProblemDetail: {
-            type: "object",
-            description: "RFC 7807 Problem Detail object",
-            required: ["type", "status"],
+            type: 'object',
+            description: 'RFC 7807 Problem Detail object',
+            required: ['type', 'status'],
             properties: {
               type: {
-                type: "string",
-                format: "uri",
-                description: "URI reference to the problem type",
+                type: 'string',
+                format: 'uri',
+                description: 'URI reference to the problem type',
               },
               status: {
-                type: "integer",
-                description: "HTTP status code",
+                type: 'integer',
+                description: 'HTTP status code',
               },
               title: {
-                type: "string",
-                description: "Short, human-readable summary",
+                type: 'string',
+                description: 'Short, human-readable summary',
               },
               detail: {
-                type: "string",
-                description: "Human-readable explanation specific to this occurrence",
+                type: 'string',
+                description: 'Human-readable explanation specific to this occurrence',
               },
               instance: {
-                type: "string",
-                format: "uri",
-                description: "URI reference to the specific occurrence",
+                type: 'string',
+                format: 'uri',
+                description: 'URI reference to the specific occurrence',
               },
             },
           },
           RequestBody: {
-            type: "object",
-            description: "Request body schema (varies per endpoint)",
+            type: 'object',
+            description: 'Request body schema (varies per endpoint)',
           },
           ResponseBody: {
-            type: "object",
-            description: "Response body schema (varies per endpoint)",
+            type: 'object',
+            description: 'Response body schema (varies per endpoint)',
           },
         },
       },
       tags: [
-        { name: "products", description: "Product listings and catalog" },
-        { name: "orders", description: "Order management and fulfillment" },
-        { name: "campaigns", description: "Campaign and group buying" },
-        { name: "disputes", description: "Dispute resolution" },
-        { name: "notifications", description: "User notifications" },
-        { name: "admin", description: "Admin-only endpoints" },
-        { name: "auth", description: "Authentication endpoints" },
-        { name: "default", description: "Other endpoints" },
+        { name: 'products', description: 'Product listings and catalog' },
+        { name: 'orders', description: 'Order management and fulfillment' },
+        { name: 'campaigns', description: 'Campaign and group buying' },
+        { name: 'disputes', description: 'Dispute resolution' },
+        { name: 'notifications', description: 'User notifications' },
+        { name: 'admin', description: 'Admin-only endpoints' },
+        { name: 'auth', description: 'Authentication endpoints' },
+        { name: 'default', description: 'Other endpoints' },
       ],
     };
   }

@@ -58,7 +58,7 @@ fn setup() -> TestEnv<'static> {
     let mut tokens = Vec::new(&env);
     tokens.push_back(token_id.clone());
     let fee_collector = Address::generate(&env);
-    client.initialize(&admin, &tokens, &fee_collector, 300);
+    client.initialize(&admin, &tokens, &fee_collector, &300);
     client.set_attester(&admin, &attester);
 
     // Leak lifetimes to 'static for convenience struct.
@@ -118,7 +118,7 @@ fn test_init_rejects_reinit() {
     extra.push_back(t.token_id.clone());
     let err = t
         .client
-        .try_initialize(&t.admin, &extra)
+        .try_initialize(&t.admin, &extra, &t.admin, &300)
         .unwrap_err()
         .unwrap();
     assert_eq!(err, EscrowError::AlreadyInitialized);
@@ -132,7 +132,10 @@ fn test_init_requires_at_least_one_token() {
     let client = ProductionEscrowContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let empty: Vec<Address> = Vec::new(&env);
-    let err = client.try_initialize(&admin, &empty).unwrap_err().unwrap();
+    let err = client
+        .try_initialize(&admin, &empty, &admin, &300)
+        .unwrap_err()
+        .unwrap();
     assert_eq!(err, EscrowError::MustSupportOneToken);
 }
 
@@ -1228,10 +1231,7 @@ fn test_campaign_valid_transition_in_production_to_harvested() {
         CampaignStatus::InProduction
     );
     t.client.mark_harvest(&t.farmer, &t.attester, &id);
-    assert_eq!(
-        t.client.get_campaign(&id).status,
-        CampaignStatus::Harvested
-    );
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Harvested);
 }
 
 #[test]
@@ -1244,10 +1244,7 @@ fn test_campaign_valid_transition_harvested_to_settled() {
     t.client.invest(&t.investor1, &id, &10_000);
     t.client.start_production(&t.farmer, &id);
     t.client.mark_harvest(&t.farmer, &t.attester, &id);
-    assert_eq!(
-        t.client.get_campaign(&id).status,
-        CampaignStatus::Harvested
-    );
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Harvested);
     t.client.settle(&t.farmer, &id);
     assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Settled);
 }
@@ -1276,10 +1273,7 @@ fn test_campaign_valid_transition_funded_to_disputed() {
     t.client.invest(&t.investor1, &id, &10_000);
     assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Funded);
     t.client.open_dispute(&t.farmer, &id);
-    assert_eq!(
-        t.client.get_campaign(&id).status,
-        CampaignStatus::Disputed
-    );
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Disputed);
 }
 
 #[test]
@@ -1292,10 +1286,7 @@ fn test_campaign_valid_transition_in_production_to_disputed() {
     t.client.invest(&t.investor1, &id, &10_000);
     t.client.start_production(&t.farmer, &id);
     t.client.open_dispute(&t.investor1, &id);
-    assert_eq!(
-        t.client.get_campaign(&id).status,
-        CampaignStatus::Disputed
-    );
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Disputed);
 }
 
 #[test]
@@ -1387,11 +1378,7 @@ fn test_cannot_settle_from_in_production() {
         .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
     t.client.invest(&t.investor1, &id, &10_000);
     t.client.start_production(&t.farmer, &id); // → InProduction
-    let err = t
-        .client
-        .try_settle(&t.farmer, &id)
-        .unwrap_err()
-        .unwrap();
+    let err = t.client.try_settle(&t.farmer, &id).unwrap_err().unwrap();
     assert_eq!(err, EscrowError::CampaignNotHarvested);
 }
 
@@ -1406,11 +1393,7 @@ fn test_cannot_refund_settled_campaign() {
     t.client.start_production(&t.farmer, &id);
     t.client.mark_harvest(&t.farmer, &t.attester, &id);
     t.client.settle(&t.farmer, &id); // → Settled
-    let err = t
-        .client
-        .try_refund(&t.investor1, &id)
-        .unwrap_err()
-        .unwrap();
+    let err = t.client.try_refund(&t.investor1, &id).unwrap_err().unwrap();
     assert_eq!(err, EscrowError::CampaignNotFailed);
 }
 
@@ -1815,11 +1798,7 @@ fn test_error_not_admin_settle() {
     t.client.invest(&t.investor1, &id, &10_000);
     t.client.start_production(&t.farmer, &id);
     t.client.mark_harvest(&t.farmer, &t.attester, &id);
-    let err = t
-        .client
-        .try_settle(&t.investor1, &id)
-        .unwrap_err()
-        .unwrap();
+    let err = t.client.try_settle(&t.investor1, &id).unwrap_err().unwrap();
     assert_eq!(err, EscrowError::NotAdmin);
 }
 
@@ -2204,7 +2183,7 @@ fn test_error_already_initialized() {
     tokens.push_back(t.token_id.clone());
     let err = t
         .client
-        .try_initialize(&t.admin, &tokens)
+        .try_initialize(&t.admin, &tokens, &t.admin, &300)
         .unwrap_err()
         .unwrap();
     assert_eq!(err, EscrowError::AlreadyInitialized);
@@ -2253,7 +2232,10 @@ fn test_error_must_support_one_token() {
     let client = ProductionEscrowContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let empty: Vec<Address> = Vec::new(&env);
-    let err = client.try_initialize(&admin, &empty).unwrap_err().unwrap();
+    let err = client
+        .try_initialize(&admin, &empty, &admin, &300)
+        .unwrap_err()
+        .unwrap();
     assert_eq!(err, EscrowError::MustSupportOneToken);
 }
 
@@ -2574,16 +2556,6 @@ fn test_batch_refund_orders_count_and_total_are_correct() {
 
 #[test]
 fn test_reject_confirm_order_after_settlement() {
-// ===========================================================================
-// Issue #462 — Formal Failure & Dispute Model
-// ===========================================================================
-
-// ---------------------------------------------------------------------------
-// 25. mark_campaign_failed Tests
-// ---------------------------------------------------------------------------
-
-#[test]
-fn test_mark_campaign_failed_from_funded_state_full_refund() {
     let t = setup();
     let deadline = future_deadline(&t);
     let id = t
@@ -2608,14 +2580,27 @@ fn test_mark_campaign_failed_from_funded_state_full_refund() {
     assert_eq!(err, EscrowError::CampaignNotHarvested);
 }
 
+// ===========================================================================
+// Issue #462 — Formal Failure & Dispute Model
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// 25. mark_campaign_failed Tests
+// ---------------------------------------------------------------------------
+
 #[test]
-fn test_confirm_order_before_settlement_allowed() {
+fn test_mark_campaign_failed_from_funded_state_full_refund() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
     t.client.invest(&t.investor1, &id, &6_000);
     t.client.invest(&t.investor2, &id, &4_000); // → Funded
 
     assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Funded);
 
-    // Farmer marks campaign as failed
+    // Farmer marks campaign as failed before production starts
     t.client.mark_campaign_failed(&t.farmer, &id);
     assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
 
@@ -2624,6 +2609,31 @@ fn test_confirm_order_before_settlement_allowed() {
     let r2 = t.client.refund(&t.investor2, &id);
     assert_eq!(r1, 6_000);
     assert_eq!(r2, 4_000);
+}
+
+#[test]
+fn test_confirm_order_before_settlement_allowed() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &t.attester, &id);
+
+    // Create and confirm order before settlement
+    let order_id = t.client.create_order(&t.buyer, &id, &2_000);
+    t.client.confirm_order(&t.buyer, &order_id);
+
+    // Should transition to Harvested with revenue recorded
+    let campaign = t.client.get_campaign(&id);
+    assert_eq!(campaign.status, CampaignStatus::Harvested);
+    assert_eq!(campaign.total_revenue, 2_000);
+
+    // Now settle
+    t.client.settle(&t.farmer, &id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Settled);
 }
 
 #[test]
@@ -2701,34 +2711,40 @@ fn test_mark_campaign_failed_non_farmer_non_admin_rejected() {
     let id = t
         .client
         .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
-    t.client.invest(&t.investor1, &id, &10_000);
-    t.client.start_production(&t.farmer, &id);
-    t.client.mark_harvest(&t.farmer, &t.attester, &id);
-
-    // Create and confirm order before settlement
-    let order_id = t.client.create_order(&t.buyer, &id, &2_000);
-    t.client.confirm_order(&t.buyer, &order_id);
-
-    // Should transition to Harvested with revenue recorded
-    let campaign = t.client.get_campaign(&id);
-    assert_eq!(campaign.status, CampaignStatus::Harvested);
-    assert_eq!(campaign.total_revenue, 2_000);
-
-    // Now settle
-    t.client.settle(&t.farmer, &id);
-    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Settled);
-}
-
-#[test]
-fn test_order_transitions_to_refunded_on_batch_expiry() {
     t.client.invest(&t.investor1, &id, &10_000); // → Funded
-    // Investor (not farmer or admin) cannot mark as failed
+                                                 // Investor (not farmer or admin) cannot mark as failed
     let err = t
         .client
         .try_mark_campaign_failed(&t.investor1, &id)
         .unwrap_err()
         .unwrap();
     assert_eq!(err, EscrowError::NotAdmin);
+}
+
+#[test]
+fn test_order_transitions_to_refunded_on_batch_expiry() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &t.attester, &id);
+
+    let order_id = t.client.create_order(&t.buyer, &id, &2_000);
+
+    advance_ledger(&t.env, ORDER_EXPIRY_SECS);
+
+    let mut ids = Vec::new(&t.env);
+    ids.push_back(order_id);
+
+    let (count, total) = t.client.batch_refund_orders(&ids);
+    assert_eq!(count, 1);
+    assert_eq!(total, 2_000);
+
+    let order = t.client.get_order(&order_id);
+    assert_eq!(order.status, OrderStatus::Refunded);
 }
 
 #[test]
@@ -2978,11 +2994,26 @@ use crate::{Milestone, MilestoneConfig};
 
 fn milestone_configs_50pct(t: &TestEnv) -> Vec<MilestoneConfig> {
     let mut configs = Vec::new(&t.env);
-    configs.push_back(MilestoneConfig { milestone: Milestone::Planted, release_bps: 1000 });
-    configs.push_back(MilestoneConfig { milestone: Milestone::Growing, release_bps: 1000 });
-    configs.push_back(MilestoneConfig { milestone: Milestone::Harvested, release_bps: 1000 });
-    configs.push_back(MilestoneConfig { milestone: Milestone::Shipped, release_bps: 1000 });
-    configs.push_back(MilestoneConfig { milestone: Milestone::Delivered, release_bps: 1000 });
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Planted,
+        release_bps: 1000,
+    });
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Growing,
+        release_bps: 1000,
+    });
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Harvested,
+        release_bps: 1000,
+    });
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Shipped,
+        release_bps: 1000,
+    });
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Delivered,
+        release_bps: 1000,
+    });
     configs // 5 x 10% = 50% total
 }
 
@@ -2990,7 +3021,9 @@ fn milestone_configs_50pct(t: &TestEnv) -> Vec<MilestoneConfig> {
 fn test_set_milestone_configs_ok() {
     let t = setup();
     let deadline = future_deadline(&t);
-    let id = t.client.create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
     let configs = milestone_configs_50pct(&t);
     t.client.set_milestone_configs(&t.admin, &id, &configs);
     let stored = t.client.get_milestone_configs(&id);
@@ -3003,10 +3036,15 @@ fn test_set_milestone_configs_ok() {
 fn test_set_milestone_configs_rejects_non_admin() {
     let t = setup();
     let deadline = future_deadline(&t);
-    let id = t.client.create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
     let configs = milestone_configs_50pct(&t);
-    let err = t.client.try_set_milestone_configs(&t.farmer, &id, &configs)
-        .unwrap_err().unwrap();
+    let err = t
+        .client
+        .try_set_milestone_configs(&t.farmer, &id, &configs)
+        .unwrap_err()
+        .unwrap();
     assert_eq!(err, EscrowError::NotAdmin);
 }
 
@@ -3014,13 +3052,24 @@ fn test_set_milestone_configs_rejects_non_admin() {
 fn test_set_milestone_configs_rejects_wrong_order() {
     let t = setup();
     let deadline = future_deadline(&t);
-    let id = t.client.create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
     // Put Growing first instead of Planted.
     let mut configs = Vec::new(&t.env);
-    configs.push_back(MilestoneConfig { milestone: Milestone::Growing, release_bps: 1000 });
-    configs.push_back(MilestoneConfig { milestone: Milestone::Planted, release_bps: 1000 });
-    let err = t.client.try_set_milestone_configs(&t.admin, &id, &configs)
-        .unwrap_err().unwrap();
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Growing,
+        release_bps: 1000,
+    });
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Planted,
+        release_bps: 1000,
+    });
+    let err = t
+        .client
+        .try_set_milestone_configs(&t.admin, &id, &configs)
+        .unwrap_err()
+        .unwrap();
     assert_eq!(err, EscrowError::InvalidMilestone);
 }
 
@@ -3028,7 +3077,9 @@ fn test_set_milestone_configs_rejects_wrong_order() {
 fn test_advance_milestone_planted_ok() {
     let t = setup();
     let deadline = future_deadline(&t);
-    let id = t.client.create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
     t.client.invest(&t.investor1, &id, &10_000);
     let configs = milestone_configs_50pct(&t);
     t.client.set_milestone_configs(&t.admin, &id, &configs);
@@ -3038,7 +3089,7 @@ fn test_advance_milestone_planted_ok() {
     t.client.confirm_order(&t.buyer, &order_id);
 
     let farmer_before = balance(&t, &t.farmer);
-    t.client.advance_milestone(&t.buyer, &id);
+    t.client.advance_milestone(&t.buyer, &t.attester, &id);
     // 10% of 10_000 = 1_000
     assert_eq!(balance(&t, &t.farmer), farmer_before + 1_000);
 
@@ -3051,7 +3102,9 @@ fn test_advance_milestone_planted_ok() {
 fn test_advance_milestone_growing_ok() {
     let t = setup();
     let deadline = future_deadline(&t);
-    let id = t.client.create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
     t.client.invest(&t.investor1, &id, &10_000);
     let configs = milestone_configs_50pct(&t);
     t.client.set_milestone_configs(&t.admin, &id, &configs);
@@ -3059,9 +3112,9 @@ fn test_advance_milestone_growing_ok() {
     let order_id = t.client.create_order(&t.buyer, &id, &1_000);
     t.client.confirm_order(&t.buyer, &order_id);
 
-    t.client.advance_milestone(&t.buyer, &id); // Planted: 1_000
+    t.client.advance_milestone(&t.buyer, &t.attester, &id); // Planted: 1_000
     let farmer_before = balance(&t, &t.farmer);
-    t.client.advance_milestone(&t.buyer, &id); // Growing: 1_000
+    t.client.advance_milestone(&t.buyer, &t.attester, &id); // Growing: 1_000
     assert_eq!(balance(&t, &t.farmer), farmer_before + 1_000);
 
     let c = t.client.get_campaign(&id);
@@ -3073,7 +3126,9 @@ fn test_advance_milestone_growing_ok() {
 fn test_advance_milestone_all_five_ok() {
     let t = setup();
     let deadline = future_deadline(&t);
-    let id = t.client.create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
     t.client.invest(&t.investor1, &id, &10_000);
     let configs = milestone_configs_50pct(&t);
     t.client.set_milestone_configs(&t.admin, &id, &configs);
@@ -3083,7 +3138,7 @@ fn test_advance_milestone_all_five_ok() {
 
     let farmer_before = balance(&t, &t.farmer);
     for _ in 0..5 {
-        t.client.advance_milestone(&t.buyer, &id);
+        t.client.advance_milestone(&t.buyer, &t.attester, &id);
     }
     // 5 x 1_000 = 5_000 (50% of 10_000)
     assert_eq!(balance(&t, &t.farmer), farmer_before + 5_000);
@@ -3096,14 +3151,19 @@ fn test_advance_milestone_all_five_ok() {
 fn test_advance_milestone_rejects_farmer() {
     let t = setup();
     let deadline = future_deadline(&t);
-    let id = t.client.create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
     t.client.invest(&t.investor1, &id, &10_000);
     let configs = milestone_configs_50pct(&t);
     t.client.set_milestone_configs(&t.admin, &id, &configs);
 
     // Farmer cannot advance milestones (not a buyer).
-    let err = t.client.try_advance_milestone(&t.farmer, &id)
-        .unwrap_err().unwrap();
+    let err = t
+        .client
+        .try_advance_milestone(&t.farmer, &t.attester, &id)
+        .unwrap_err()
+        .unwrap();
     assert_eq!(err, EscrowError::NotBuyerOrOracle);
 }
 
@@ -3111,14 +3171,16 @@ fn test_advance_milestone_rejects_farmer() {
 fn test_advance_milestone_admin_as_oracle_ok() {
     let t = setup();
     let deadline = future_deadline(&t);
-    let id = t.client.create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
     t.client.invest(&t.investor1, &id, &10_000);
     let configs = milestone_configs_50pct(&t);
     t.client.set_milestone_configs(&t.admin, &id, &configs);
 
     // Admin acts as oracle — no order needed.
     let farmer_before = balance(&t, &t.farmer);
-    t.client.advance_milestone(&t.admin, &id);
+    t.client.advance_milestone(&t.admin, &t.attester, &id);
     assert_eq!(balance(&t, &t.farmer), farmer_before + 1_000);
 }
 
@@ -3126,14 +3188,19 @@ fn test_advance_milestone_admin_as_oracle_ok() {
 fn test_advance_milestone_rejects_no_config() {
     let t = setup();
     let deadline = future_deadline(&t);
-    let id = t.client.create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
     t.client.invest(&t.investor1, &id, &10_000);
 
     let order_id = t.client.create_order(&t.buyer, &id, &1_000);
     t.client.confirm_order(&t.buyer, &order_id);
 
-    let err = t.client.try_advance_milestone(&t.buyer, &id)
-        .unwrap_err().unwrap();
+    let err = t
+        .client
+        .try_advance_milestone(&t.buyer, &t.attester, &id)
+        .unwrap_err()
+        .unwrap();
     assert_eq!(err, EscrowError::MilestoneNotConfigured);
 }
 
@@ -3141,7 +3208,9 @@ fn test_advance_milestone_rejects_no_config() {
 fn test_advance_milestone_rejects_past_end() {
     let t = setup();
     let deadline = future_deadline(&t);
-    let id = t.client.create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
     t.client.invest(&t.investor1, &id, &10_000);
     let configs = milestone_configs_50pct(&t);
     t.client.set_milestone_configs(&t.admin, &id, &configs);
@@ -3150,11 +3219,14 @@ fn test_advance_milestone_rejects_past_end() {
     t.client.confirm_order(&t.buyer, &order_id);
 
     for _ in 0..5 {
-        t.client.advance_milestone(&t.buyer, &id);
+        t.client.advance_milestone(&t.buyer, &t.attester, &id);
     }
     // 6th advance should fail — no more milestones.
-    let err = t.client.try_advance_milestone(&t.buyer, &id)
-        .unwrap_err().unwrap();
+    let err = t
+        .client
+        .try_advance_milestone(&t.buyer, &t.attester, &id)
+        .unwrap_err()
+        .unwrap();
     assert_eq!(err, EscrowError::InvalidMilestone);
 }
 
@@ -3164,7 +3236,9 @@ fn test_advance_milestone_over_release_prevented() {
     // should reject the 3rd milestone (cumulative 90% > 70%).
     let t = setup();
     let deadline = future_deadline(&t);
-    let id = t.client.create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
     t.client.invest(&t.investor1, &id, &10_000);
 
     let mut configs = Vec::new(&t.env);
@@ -3185,10 +3259,13 @@ fn test_advance_milestone_over_release_prevented() {
     let order_id = t.client.create_order(&t.buyer, &id, &1_000);
     t.client.confirm_order(&t.buyer, &order_id);
 
-    t.client.advance_milestone(&t.buyer, &id); // 30% = 3_000
-    t.client.advance_milestone(&t.buyer, &id); // 30% = 3_000 (total 6_000)
-    let err = t.client.try_advance_milestone(&t.buyer, &id)
-        .unwrap_err().unwrap();
+    t.client.advance_milestone(&t.buyer, &t.attester, &id); // 30% = 3_000
+    t.client.advance_milestone(&t.buyer, &t.attester, &id); // 30% = 3_000 (total 6_000)
+    let err = t
+        .client
+        .try_advance_milestone(&t.buyer, &t.attester, &id)
+        .unwrap_err()
+        .unwrap();
     // 3rd milestone would push to 9_000 > 7_000 max.
     assert_eq!(err, EscrowError::InvalidTranche);
 }
@@ -3199,7 +3276,9 @@ fn test_advance_milestone_refund_after_partial_release() {
     // Investor gets proportional refund from remaining pool.
     let t = setup();
     let deadline = future_deadline(&t);
-    let id = t.client.create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
     t.client.invest(&t.investor1, &id, &10_000);
     let configs = milestone_configs_50pct(&t);
     t.client.set_milestone_configs(&t.admin, &id, &configs);
@@ -3208,8 +3287,8 @@ fn test_advance_milestone_refund_after_partial_release() {
     t.client.confirm_order(&t.buyer, &order_id);
 
     // Advance 2 milestones: 2_000 released (20%).
-    t.client.advance_milestone(&t.buyer, &id);
-    t.client.advance_milestone(&t.buyer, &id);
+    t.client.advance_milestone(&t.buyer, &t.attester, &id);
+    t.client.advance_milestone(&t.buyer, &t.attester, &id);
 
     // Campaign fails. Remaining pool = 10_000 - 2_000 = 8_000.
     t.client.mark_campaign_failed(&t.farmer, &id);
@@ -3291,16 +3370,13 @@ fn test_registry_wired_campaign_creation() {
     t.client.set_registry_contract(&t.admin, &registry_id);
 
     // Register farmer in registry contract
-    registry_client.register_farmer(&t.admin, &t.farmer);
+    registry_client.register_farmer(&t.farmer);
 
     // Create campaign in production escrow
     let deadline = future_deadline(&t);
-    let campaign_id = t.client.create_campaign(
-        &t.farmer,
-        &t.token_id,
-        &100_000,
-        &deadline,
-    );
+    let campaign_id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &100_000, &deadline);
 
     // Verify campaign creation is registered in registry
     let campaigns = registry_client.get_campaigns(&0, &10);
