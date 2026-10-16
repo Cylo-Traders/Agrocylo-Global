@@ -10,7 +10,7 @@ vi.mock("../services/authService.js", () => ({
   HANDOFF_AUDIENCE: "agrocylo-sso-handoff",
 }));
 
-const { requireWallet } = await import("./walletAuth.js");
+const { requireWallet, requireRole, requireAnyRole } = await import("./walletAuth.js");
 
 const JWT_SECRET = "test-secret-at-least-32-chars-long!!";
 const WALLET = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -18,6 +18,7 @@ const WALLET = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 function makeRes() {
   const res: Partial<Response> = {
     status: vi.fn().mockReturnThis(),
+    type: vi.fn().mockReturnThis(),
     json: vi.fn().mockReturnThis(),
   };
   return res as Response;
@@ -98,5 +99,41 @@ describe("requireWallet role handling (DB enum FARMER|BUYER|ADMIN)", () => {
     expect(next).toHaveBeenCalledOnce();
     expect(req.walletRole).toBe("USER");
     expect(["ADMIN", "FARMER", "BUYER"]).not.toContain(req.walletRole);
+  });
+});
+
+describe("requireRole / requireAnyRole (#1133)", () => {
+  const run = (mw: ReturnType<typeof requireRole>, role?: string) => {
+    const req: any = { walletRole: role, originalUrl: "/x" };
+    const res = makeRes();
+    const next = vi.fn();
+    mw(req, res, next);
+    return { res, next };
+  };
+
+  it("allows the matching role", () => {
+    expect(run(requireRole("FARMER"), "FARMER").next).toHaveBeenCalledOnce();
+  });
+
+  it("denies a different role with 403", () => {
+    const { res, next } = run(requireRole("FARMER"), "BUYER");
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(403);
+  });
+
+  it("denies when the role is missing", () => {
+    const { res, next } = run(requireRole("BUYER"));
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(403);
+  });
+
+  it("lets ADMIN through", () => {
+    expect(run(requireRole("FARMER"), "ADMIN").next).toHaveBeenCalledOnce();
+  });
+
+  it("requireAnyRole accepts any listed role", () => {
+    const mw = requireAnyRole("FARMER", "BUYER");
+    expect(run(mw, "BUYER").next).toHaveBeenCalledOnce();
+    expect(run(mw, "FARMER").next).toHaveBeenCalledOnce();
   });
 });

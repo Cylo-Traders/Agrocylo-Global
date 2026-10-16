@@ -4,16 +4,20 @@
  * useNotifications
  *
  * Manages the notification list for the connected wallet:
- *   - Fetches paginated history from the API
- *   - Provides mark-as-read, delete, and clear-all actions
+ *   - Fetches paginated history from the API (read + unread)
+ *   - Provides mark-as-read, delete, and clear-all actions with rollback
  *   - Exposes an unread badge count
  *   - Accepts a filter by notification type and a search term
  */
 
-import { useState, useEffect, useCallback } from "react";
-import { markNotificationsRead } from "@/services/notification/api";
+import { useState, useEffect, useCallback, useRef } from "react";
+import {
+  listNotifications,
+  deleteNotificationById,
+  clearAllNotifications,
+  markNotificationsRead,
+} from "@/services/notification/api";
 import type { OrderEventNotification } from "@/services/notification/api";
-import { API_BASE_URL } from "@/lib/apiConfig";
 
 export type NotificationFilter = "all" | "orders" | "disputes" | "system";
 
@@ -33,33 +37,49 @@ interface UseNotificationsResult {
   loadNextPage: () => Promise<void>;
   markRead: (ids: string[]) => Promise<void>;
   markAllRead: () => Promise<void>;
-  deleteNotification: (id: string) => void;
-  clearAll: () => void;
+  deleteNotification: (id: string) => Promise<void>;
+  clearAll: () => Promise<void>;
   refetch: () => Promise<void>;
 }
 
-async function fetchAllNotifications(
-  walletAddress: string,
-  page: number,
-  pageSize: number,
-): Promise<{ items: OrderEventNotification[]; total: number }> {
-  const url = new URL(`${API_BASE_URL}/notifications`);
-  url.searchParams.set("page", String(page));
-  url.searchParams.set("page_size", String(pageSize));
+// Map backend event types to UI category filters
+// Backend types: order_created, funds_locked, delivery_confirmed, refund_issued,
+// order_received, new_investment, campaign_funded, group_order_*, weather_alert, etc.
+// Plus legacy short types like "created"/"confirmed"
+const ORDERS_KEYWORDS = [
+  "order",
+  "funds_locked",
+  "delivery_confirmed",
+  "refund",
+  "created",
+  "confirmed",
+  "investment",
+  "campaign",
+  "group_order",
+];
 
-  const res = await fetch(url, {
-    headers: { "x-wallet-address": walletAddress },
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`Failed to fetch notifications: ${res.status}`);
-  return res.json() as Promise<{ items: OrderEventNotification[]; total: number }>;
-}
+const DISPUTES_KEYWORDS = ["dispute"];
 
-async function deleteNotificationById(walletAddress: string, id: string): Promise<void> {
-  await fetch(`${API_BASE_URL}/notifications/${id}`, {
-    method: "DELETE",
-    headers: { "x-wallet-address": walletAddress },
-  });
+const SYSTEM_KEYWORDS = ["weather", "system", "harvest_completed", "alert"];
+
+function matchesFilter(type: string, filter: NotificationFilter): boolean {
+  if (filter === "all") return true;
+  const lower = type.toLowerCase();
+  if (filter === "orders") {
+    return ORDERS_KEYWORDS.some((k) => lower.includes(k));
+  }
+  if (filter === "disputes") {
+    return DISPUTES_KEYWORDS.some((k) => lower.includes(k));
+  }
+  if (filter === "system") {
+    // System is weather/system alerts that are not orders/disputes
+    const isSystem = SYSTEM_KEYWORDS.some((k) => lower.includes(k));
+    const isOrder = ORDERS_KEYWORDS.some((k) => lower.includes(k));
+    const isDispute = DISPUTES_KEYWORDS.some((k) => lower.includes(k));
+    if (lower === "system" || lower === "weather_alert") return true;
+    return isSystem && !isOrder && !isDispute;
+  }
+  return false;
 }
 
 export function useNotifications({
@@ -73,20 +93,44 @@ export function useNotifications({
   const [page, setPage] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isLoadingRef = useRef(false);
+
+  // Sync ref with state for guard checks
+  useEffect(() => {
+    isLoadingRef.current = isLoading;
+  }, [isLoading]);
 
   const loadNotifications = useCallback(
     async (p = 1) => {
       if (!walletAddress) return;
+      if (isLoadingRef.current) return;
+      isLoadingRef.current = true;
       setIsLoading(true);
       setError(null);
       try {
-        const data = await fetchAllNotifications(walletAddress, p, pageSize);
-        setAll((prev) => (p === 1 ? data.items : [...prev, ...data.items]));
+        // Explicitly request full history (read + unread); pagination contract is page/page_size + total
+        const data = await listNotifications(walletAddress, {
+          unreadOnly: false,
+          page: p,
+          pageSize,
+        });
+
+        // Prevent duplicates when paging or when real-time inserts overlap HTTP
+        setAll((prev) => {
+          if (p === 1) return data.items;
+          const existingIds = new Set(prev.map((n) => n.id));
+          const unique = data.items.filter((n) => !existingIds.has(n.id));
+          return [...prev, ...unique];
+        });
+
+        // Contract validation: listNotifications already throws if total is not a finite number,
+        // so we cannot silently set total to undefined
         setTotal(data.total);
         setPage(p);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Unknown error");
       } finally {
+        isLoadingRef.current = false;
         setIsLoading(false);
       }
     },
@@ -97,9 +141,9 @@ export function useNotifications({
     void loadNotifications(1);
   }, [loadNotifications]);
 
-  // Client-side filter + search
+  // Client-side filter + search with event-type to category mapping
   const filtered = all.filter((n) => {
-    if (filter !== "all" && n.type !== filter) return false;
+    if (!matchesFilter(n.type, filter)) return false;
     if (search.trim()) {
       const q = search.toLowerCase();
       if (!n.message.toLowerCase().includes(q) && !n.type.toLowerCase().includes(q)) return false;
@@ -110,13 +154,21 @@ export function useNotifications({
   const unreadCount = all.filter((n) => !n.isRead).length;
   const hasNextPage = all.length < total;
 
-  const loadNextPage = useCallback(() => loadNotifications(page + 1), [loadNotifications, page]);
+  const loadNextPage = useCallback(async () => {
+    if (!hasNextPage || isLoadingRef.current) return;
+    await loadNotifications(page + 1);
+  }, [hasNextPage, loadNotifications, page]);
 
   const markRead = useCallback(
     async (ids: string[]) => {
       if (!walletAddress || ids.length === 0) return;
-      await markNotificationsRead(walletAddress, ids);
-      setAll((prev) => prev.map((n) => (ids.includes(n.id) ? { ...n, isRead: true } : n)));
+      try {
+        await markNotificationsRead(walletAddress, ids);
+        setAll((prev) => prev.map((n) => (ids.includes(n.id) ? { ...n, isRead: true } : n)));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to mark as read");
+        throw e;
+      }
     },
     [walletAddress],
   );
@@ -127,21 +179,49 @@ export function useNotifications({
   }, [all, markRead]);
 
   const deleteNotification = useCallback(
-    (id: string) => {
+    async (id: string) => {
+      if (!walletAddress) return;
+      const prevAll = all;
+      const prevTotal = total;
+      // Optimistic update
       setAll((prev) => prev.filter((n) => n.id !== id));
-      setTotal((t) => t - 1);
-      if (walletAddress) void deleteNotificationById(walletAddress, id);
+      setTotal((t) => Math.max(0, t - 1));
+      setError(null);
+      try {
+        await deleteNotificationById(walletAddress, id);
+      } catch (e) {
+        // Rollback on failure; keep item visible with actionable error
+        setAll(prevAll);
+        setTotal(prevTotal);
+        const message = e instanceof Error ? e.message : "Failed to delete notification";
+        setError(message);
+        throw e;
+      }
     },
-    [walletAddress],
+    [walletAddress, all, total],
   );
 
-  const clearAll = useCallback(() => {
-    all.forEach((n) => {
-      if (walletAddress) void deleteNotificationById(walletAddress, n.id);
-    });
+  const clearAll = useCallback(async () => {
+    if (!walletAddress) return;
+    if (all.length === 0 && total === 0) return;
+    const prevAll = all;
+    const prevTotal = total;
+    // Optimistic: clear visible page; real scope is all notifications for wallet on server
     setAll([]);
     setTotal(0);
-  }, [all, walletAddress]);
+    setError(null);
+    try {
+      await clearAllNotifications(walletAddress);
+      // Ensure total reflects server state; refetch first page could be done but we already cleared
+    } catch (e) {
+      // Rollback – refresh does not resurrect falsely deleted items because we restore prev state
+      setAll(prevAll);
+      setTotal(prevTotal);
+      const message = e instanceof Error ? e.message : "Failed to clear notifications";
+      setError(message);
+      throw e;
+    }
+  }, [walletAddress, all, total]);
 
   return {
     notifications: filtered,

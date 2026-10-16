@@ -45,6 +45,8 @@ model Campaign {
   orders        Order[]
   transactions  Transaction[]
   disputes      Dispute[]
+  conversations Conversation[]
+  products      Product[]
   // No `conversations` relation here either: `Conversation` only carries an
   // `orderId` (conversations are per-order, buyer/seller messaging), never a
   // `campaignId` — this was the same class of half-finished relation as

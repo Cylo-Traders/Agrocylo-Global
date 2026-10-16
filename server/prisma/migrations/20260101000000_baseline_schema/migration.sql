@@ -77,7 +77,9 @@ CREATE TABLE "cart_items" (
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL,
 
-    CONSTRAINT "cart_items_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "cart_items_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "cart_items_positive_quantity" CHECK ("quantity" > 0),
+    CONSTRAINT "cart_items_cart_id_product_id_key" UNIQUE ("cart_id", "product_id")
 );
 
 -- CreateTable
@@ -362,6 +364,9 @@ CREATE UNIQUE INDEX "product_price_tiers_product_id_min_quantity_key" ON "produc
 
 -- CreateIndex
 CREATE INDEX "carts_buyer_wallet_idx" ON "carts"("buyer_wallet");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "carts_one_active_per_buyer_idx" ON "carts"("buyer_wallet") WHERE "status" = 'active';
 
 -- CreateIndex
 CREATE INDEX "cart_items_cart_id_farmer_wallet_idx" ON "cart_items"("cart_id", "farmer_wallet");

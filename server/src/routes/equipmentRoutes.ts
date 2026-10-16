@@ -1,12 +1,12 @@
-import { Router } from "express";
-import type { Request, Response, NextFunction } from "express";
-import { prisma } from "../config/database.js";
-import { ApiError } from "../http/errors.js";
+import { Router } from 'express';
+import type { Request, Response, NextFunction } from 'express';
+import { prisma } from '../config/database.js';
+import { ApiError } from '../http/errors.js';
 
 const router = Router();
 
 // Create new Equipment/Input/Tool listing
-router.post("/equipment/listings", async (req: Request, res: Response, next: NextFunction) => {
+router.post('/equipment/listings', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const {
       ownerWallet,
@@ -20,12 +20,27 @@ router.post("/equipment/listings", async (req: Request, res: Response, next: Nex
       location,
     } = req.body;
 
-    if (!ownerWallet || !title || !listingType || pricePerUnit === undefined || !currency || !unit) {
-      throw new ApiError(400, "Validation Error", "ownerWallet, title, listingType, pricePerUnit, currency, and unit are required");
+    if (
+      !ownerWallet ||
+      !title ||
+      !listingType ||
+      pricePerUnit === undefined ||
+      !currency ||
+      !unit
+    ) {
+      throw new ApiError(
+        400,
+        'Validation Error',
+        'ownerWallet, title, listingType, pricePerUnit, currency, and unit are required'
+      );
     }
 
-    if (!["SEED", "TOOL", "EQUIPMENT_RENTAL"].includes(listingType)) {
-      throw new ApiError(400, "Invalid Listing Type", "listingType must be SEED, TOOL, or EQUIPMENT_RENTAL");
+    if (!['SEED', 'TOOL', 'EQUIPMENT_RENTAL'].includes(listingType)) {
+      throw new ApiError(
+        400,
+        'Invalid Listing Type',
+        'listingType must be SEED, TOOL, or EQUIPMENT_RENTAL'
+      );
     }
 
     const listing = await prisma.equipmentListing.create({
@@ -49,7 +64,7 @@ router.post("/equipment/listings", async (req: Request, res: Response, next: Nex
 });
 
 // List equipment/inputs with filtering
-router.get("/equipment/listings", async (req: Request, res: Response, next: NextFunction) => {
+router.get('/equipment/listings', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { listingType, ownerWallet } = req.query;
 
@@ -59,7 +74,7 @@ router.get("/equipment/listings", async (req: Request, res: Response, next: Next
 
     const listings = await prisma.equipmentListing.findMany({
       where,
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
       include: { rentals: true },
     });
 
@@ -70,40 +85,73 @@ router.get("/equipment/listings", async (req: Request, res: Response, next: Next
 });
 
 // Rent equipment / tools with deposit
-router.post("/equipment/rent", async (req: Request, res: Response, next: NextFunction) => {
+router.post('/equipment/rent', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { listingId, renterWallet, startDate, endDate } = req.body;
 
     if (!listingId || !renterWallet || !startDate || !endDate) {
-      throw new ApiError(400, "Validation Error", "listingId, renterWallet, startDate, and endDate are required");
+      throw new ApiError(
+        400,
+        'Validation Error',
+        'listingId, renterWallet, startDate, and endDate are required'
+      );
     }
 
     const listing = await prisma.equipmentListing.findUnique({ where: { id: listingId } });
     if (!listing) {
-      throw new ApiError(404, "Not Found", "Equipment listing not found");
+      throw new ApiError(404, 'Not Found', 'Equipment listing not found');
+    }
+
+    if (listing.listingType !== 'EQUIPMENT_RENTAL') {
+      throw new ApiError(
+        400,
+        'Invalid Listing Type',
+        'Only equipment rental listings can be rented'
+      );
     }
 
     if (!listing.isAvailable) {
-      throw new ApiError(400, "Unavailable", "This equipment is currently unavailable for rental");
+      throw new ApiError(400, 'Unavailable', 'This equipment is currently unavailable for rental');
     }
 
     const start = new Date(startDate);
     const end = new Date(endDate);
 
-    if (start >= end) {
-      throw new ApiError(400, "Invalid Rental Dates", "startDate must be before endDate");
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start >= end) {
+      throw new ApiError(400, 'Invalid Rental Dates', 'startDate must be before endDate');
     }
 
-    const rental = await prisma.equipmentRental.create({
-      data: {
-        listingId,
-        renterWallet,
-        startDate: start,
-        endDate: end,
-        status: "ACTIVE",
-        depositAmount: listing.depositAmount,
-        depositRefunded: false,
-      },
+    const rental = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${listingId}))`;
+
+      const overlap = await tx.equipmentRental.findFirst({
+        where: {
+          listingId,
+          status: 'ACTIVE',
+          startDate: { lt: end },
+          endDate: { gt: start },
+        },
+        select: { id: true },
+      });
+      if (overlap) {
+        throw new ApiError(
+          409,
+          'Rental Conflict',
+          'This equipment is already rented for part of the requested period'
+        );
+      }
+
+      return tx.equipmentRental.create({
+        data: {
+          listingId,
+          renterWallet,
+          startDate: start,
+          endDate: end,
+          status: 'ACTIVE',
+          depositAmount: listing.depositAmount,
+          depositRefunded: false,
+        },
+      });
     });
 
     res.status(201).json(rental);
@@ -113,41 +161,44 @@ router.post("/equipment/rent", async (req: Request, res: Response, next: NextFun
 });
 
 // Return equipment and trigger deposit refund
-router.post("/equipment/rentals/:id/return", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { id } = req.params;
-    const { confirmCondition = true } = req.body;
+router.post(
+  '/equipment/rentals/:id/return',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { id } = req.params;
+      const { confirmCondition = true } = req.body;
 
-    const rental = await prisma.equipmentRental.findUnique({
-      where: { id },
-      include: { listing: true },
-    });
+      const rental = await prisma.equipmentRental.findUnique({
+        where: { id },
+        include: { listing: true },
+      });
 
-    if (!rental) {
-      throw new ApiError(404, "Not Found", "Rental record not found");
+      if (!rental) {
+        throw new ApiError(404, 'Not Found', 'Rental record not found');
+      }
+
+      if (rental.status === 'RETURNED') {
+        throw new ApiError(400, 'Already Returned', 'This rental has already been returned');
+      }
+
+      const updatedRental = await prisma.equipmentRental.update({
+        where: { id },
+        data: {
+          status: 'RETURNED',
+          depositRefunded: confirmCondition,
+        },
+      });
+
+      res.json({
+        rental: updatedRental,
+        message: confirmCondition
+          ? `Equipment returned successfully. Deposit of ${rental.depositAmount} ${rental.listing.currency} refunded.`
+          : `Equipment returned. Deposit withheld pending damage inspection.`,
+      });
+    } catch (err) {
+      next(err);
     }
-
-    if (rental.status === "RETURNED") {
-      throw new ApiError(400, "Already Returned", "This rental has already been returned");
-    }
-
-    const updatedRental = await prisma.equipmentRental.update({
-      where: { id },
-      data: {
-        status: "RETURNED",
-        depositRefunded: confirmCondition,
-      },
-    });
-
-    res.json({
-      rental: updatedRental,
-      message: confirmCondition
-        ? `Equipment returned successfully. Deposit of ${rental.depositAmount} ${rental.listing.currency} refunded.`
-        : `Equipment returned. Deposit withheld pending damage inspection.`,
-    });
-  } catch (err) {
-    next(err);
   }
-});
+);
 
 export default router;

@@ -99,16 +99,20 @@ const Notification: React.FC<NotificationProps> = ({ message, onClose }) => {
 export const NotificationContainer: React.FC<{ notifications: NotificationMessage[] }> = ({
   notifications,
 }) => {
-  const [displayedNotifications, setDisplayedNotifications] =
-    useState<NotificationMessage[]>(notifications)
+  // Dismissal is the only independent state here (#1084): the visible list is
+  // derived from the `notifications` prop minus dismissed ids. The previous
+  // version mirrored the prop into state through an effect, which both
+  // cascaded a render and resurrected dismissed toasts whenever the prop
+  // array identity changed.
+  const [dismissedIds, setDismissedIds] = useState<string[]>([])
 
-  useEffect(() => {
-    setDisplayedNotifications(notifications)
-  }, [notifications])
+  const handleClose = React.useCallback((id: string) => {
+    setDismissedIds((prev) => (prev.includes(id) ? prev : [...prev, id]))
+  }, [])
 
-  const handleClose = (id: string) => {
-    setDisplayedNotifications((prev) => prev.filter((notif) => notif.id !== id))
-  }
+  const displayedNotifications = notifications.filter(
+    (notification) => !dismissedIds.includes(notification.id),
+  )
 
   return (
     <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-md">

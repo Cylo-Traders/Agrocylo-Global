@@ -1,6 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createIdempotencyMiddleware } from './idempotency.js';
+import jwt from 'jsonwebtoken';
 import type { Request, Response, NextFunction } from 'express';
+
+const JWT_SECRET = vi.hoisted(() => 'test-secret-at-least-32-chars-long!!');
+vi.mock('../config/index.js', () => ({ config: { jwtSecret: JWT_SECRET } }));
+vi.mock('../services/authService.js', () => ({ HANDOFF_AUDIENCE: 'agrocylo-sso-handoff' }));
+vi.mock('../config/database.js', () => ({ prisma: {} }));
+
+import { createIdempotencyMiddleware, idempotencyRedisKey } from './idempotency.js';
+
+const WALLET_A = 'GWALLETA';
+const WALLET_B = 'GWALLETB';
+const bearer = (walletAddress: string, extra: Record<string, unknown> = {}, opts: jwt.SignOptions = {}) =>
+  `Bearer ${jwt.sign({ walletAddress, ...extra }, JWT_SECRET, opts)}`;
+const AUTH = bearer(WALLET_A);
+const scoped = (key: string) => idempotencyRedisKey(WALLET_A, undefined, key);
 
 class InMemoryRedis {
   private store = new Map<string, { value: string; expiresAt: number | null }>();
@@ -116,7 +130,7 @@ describe('Idempotency Middleware', () => {
       let handlerCalled = 0;
 
       const req = {
-        headers: { 'idempotency-key': idempotencyKey },
+        headers: { authorization: AUTH, 'idempotency-key': idempotencyKey },
         method: 'POST',
       } as unknown as Request;
 
@@ -141,14 +155,14 @@ describe('Idempotency Middleware', () => {
 
       // Store a cached response
       await redisClient.set(
-        `idem:${idempotencyKey}`,
+        scoped(idempotencyKey),
         JSON.stringify({ status: 201, body: cachedResponse }),
         'EX',
         86400,
       );
 
       const req = {
-        headers: { 'idempotency-key': idempotencyKey },
+        headers: { authorization: AUTH, 'idempotency-key': idempotencyKey },
         method: 'POST',
       } as unknown as Request;
 
@@ -171,7 +185,7 @@ describe('Idempotency Middleware', () => {
       const idempotencyKey = 'test-idem-concurrent';
 
       const createRequest = () => ({
-        headers: { 'idempotency-key': idempotencyKey },
+        headers: { authorization: AUTH, 'idempotency-key': idempotencyKey },
         method: 'POST',
       }) as unknown as Request;
 
@@ -208,7 +222,7 @@ describe('Idempotency Middleware', () => {
       const idempotencyKey = 'test-idem-ttl';
 
       const req = {
-        headers: { 'idempotency-key': idempotencyKey },
+        headers: { authorization: AUTH, 'idempotency-key': idempotencyKey },
         method: 'POST',
       } as unknown as Request;
 
@@ -223,7 +237,7 @@ describe('Idempotency Middleware', () => {
       await middleware(req, res, next);
 
       // Check TTL was set
-      const ttl = await redisClient.ttl(`idem:${idempotencyKey}`);
+      const ttl = await redisClient.ttl(scoped(idempotencyKey));
       expect(ttl).toBeGreaterThan(0);
       expect(ttl).toBeLessThanOrEqual(24 * 60 * 60); // 24 hours in seconds
     });
@@ -235,7 +249,7 @@ describe('Idempotency Middleware', () => {
 
       // Store with short TTL for testing
       await redisClient.set(
-        `idem:${idempotencyKey}`,
+        scoped(idempotencyKey),
         JSON.stringify({ status: 201, body: { id: '1' } }),
         'PX',
         shortTtlMs,
@@ -245,7 +259,7 @@ describe('Idempotency Middleware', () => {
       await new Promise(resolve => setTimeout(resolve, shortTtlMs + 100));
 
       // Key should be gone, allowing new request
-      const exists = await redisClient.exists(`idem:${idempotencyKey}`);
+      const exists = await redisClient.exists(scoped(idempotencyKey));
       expect(exists).toBe(0);
     });
   });
@@ -257,7 +271,7 @@ describe('Idempotency Middleware', () => {
 
       // Pre-store a response
       await redisClient.set(
-        `idem:${idempotencyKey}`,
+        scoped(idempotencyKey),
         JSON.stringify({ status: 200, body: { data: 'cached' } }),
         'EX',
         86400,
@@ -272,7 +286,7 @@ describe('Idempotency Middleware', () => {
       const idempotencyKey = 'test-idem-metrics-miss';
 
       const req = {
-        headers: { 'idempotency-key': idempotencyKey },
+        headers: { authorization: AUTH, 'idempotency-key': idempotencyKey },
         method: 'POST',
       } as unknown as Request;
 
@@ -329,7 +343,7 @@ describe('Idempotency Middleware', () => {
 
       // First request with body A
       const reqA = {
-        headers: { 'idempotency-key': key },
+        headers: { authorization: AUTH, 'idempotency-key': key },
         method: 'POST',
         path: '/orders',
         url: '/orders',
@@ -357,7 +371,7 @@ describe('Idempotency Middleware', () => {
 
       // Second request same key but different body
       const reqB = {
-        headers: { 'idempotency-key': key },
+        headers: { authorization: AUTH, 'idempotency-key': key },
         method: 'POST',
         path: '/orders',
         url: '/orders',
@@ -390,7 +404,7 @@ describe('Idempotency Middleware', () => {
 
       const makeReq = () =>
         ({
-          headers: { 'idempotency-key': key },
+          headers: { authorization: AUTH, 'idempotency-key': key },
           method: 'POST',
           path: '/orders',
           url: '/orders',
@@ -434,13 +448,95 @@ describe('Idempotency Middleware', () => {
     });
   });
 
+  describe('Principal isolation (#952)', () => {
+    const KEY = 'checkout-key';
+    const makeReq = (authorization?: string, path = '/cart/checkout') =>
+      ({
+        headers: { ...(authorization ? { authorization } : {}), 'idempotency-key': KEY },
+        method: 'POST',
+        path,
+        url: path,
+        originalUrl: path,
+        body: { cartId: 'c1' },
+      }) as unknown as Request;
+    /** Runs a request; the "handler" responds 201 with `body` if reached. `sent` spies on what reached the client. */
+    async function run(middleware: ReturnType<typeof createIdempotencyMiddleware>, req: Request, body: unknown) {
+      const sent = vi.fn().mockReturnThis();
+      const res: any = { status: vi.fn().mockReturnThis(), json: sent, statusCode: 200 };
+      const next = vi.fn(() => {
+        res.statusCode = 201;
+        res.json(body);
+      });
+      await middleware(req, res, next as unknown as NextFunction);
+      await new Promise((r) => setTimeout(r, 10));
+      return { res: { json: sent }, handlerRan: next.mock.calls.length > 0 };
+    }
+
+    it('wallet A retry replays its own response without re-running the mutation', async () => {
+      const middleware = createIdempotencyMiddleware(redisClient);
+      await run(middleware, makeReq(AUTH), { owner: 'A' });
+      const retry = await run(middleware, makeReq(AUTH), { owner: 'A-again' });
+      expect(retry.handlerRan).toBe(false);
+      expect(retry.res.json).toHaveBeenCalledWith({ owner: 'A' });
+    });
+
+    it('missing, invalid, expired or handoff credentials never receive the cached response', async () => {
+      const middleware = createIdempotencyMiddleware(redisClient);
+      await run(middleware, makeReq(AUTH), { owner: 'A' });
+      for (const auth of [
+        undefined,
+        'Bearer not-a-jwt',
+        bearer(WALLET_A, {}, { expiresIn: -10 }),
+        bearer(WALLET_A, { aud: 'agrocylo-sso-handoff' }),
+      ]) {
+        const { res, handlerRan } = await run(middleware, makeReq(auth), { owner: 'route' });
+        // Falls through to the route (whose auth rejects it); cached body is never served.
+        expect(handlerRan).toBe(true);
+        expect(res.json).not.toHaveBeenCalledWith({ owner: 'A' });
+      }
+    });
+
+    it('wallet B cannot read or block wallet A\'s entry with the same key/body', async () => {
+      const middleware = createIdempotencyMiddleware(redisClient);
+      await run(middleware, makeReq(AUTH), { owner: 'A' });
+      const b = await run(middleware, makeReq(bearer(WALLET_B)), { owner: 'B' });
+      expect(b.handlerRan).toBe(true);
+      expect(b.res.json).toHaveBeenCalledWith({ owner: 'B' });
+      expect(JSON.parse((await redisClient.get(scoped(KEY)))!).body).toEqual({ owner: 'A' });
+    });
+
+    it('a role change (e.g. demoted admin) does not replay the old role\'s response', async () => {
+      const middleware = createIdempotencyMiddleware(redisClient);
+      await run(middleware, makeReq(bearer(WALLET_A, { role: 'ADMIN' })), { admin: true });
+      const demoted = await run(middleware, makeReq(bearer(WALLET_A, { role: 'BUYER' })), { admin: false });
+      expect(demoted.handlerRan).toBe(true);
+      expect(demoted.res.json).not.toHaveBeenCalledWith({ admin: true });
+    });
+
+    it('legacy unscoped idem:<key> entries are ignored', async () => {
+      const middleware = createIdempotencyMiddleware(redisClient);
+      await redisClient.set(`idem:${KEY}`, JSON.stringify({ status: 201, body: { owner: 'legacy' } }));
+      const { res, handlerRan } = await run(middleware, makeReq(AUTH), { owner: 'A' });
+      expect(handlerRan).toBe(true);
+      expect(res.json).not.toHaveBeenCalledWith({ owner: 'legacy' });
+    });
+
+    it('/auth routes are never cached', async () => {
+      const middleware = createIdempotencyMiddleware(redisClient);
+      await run(middleware, makeReq(AUTH, '/auth/refresh'), { token: 't1' });
+      const again = await run(middleware, makeReq(AUTH, '/auth/refresh'), { token: 't2' });
+      expect(again.handlerRan).toBe(true);
+      expect(await redisClient.get(scoped(KEY))).toBeNull();
+    });
+  });
+
   describe('GET requests are unaffected', () => {
     it('GET with idempotency-key still calls next and does not create a cache entry', async () => {
       const middleware = createIdempotencyMiddleware(redisClient);
       const key = 'test-get-bypass';
 
       const req = {
-        headers: { 'idempotency-key': key },
+        headers: { authorization: AUTH, 'idempotency-key': key },
         method: 'GET',
         path: '/orders',
         url: '/orders',
@@ -459,7 +555,7 @@ describe('Idempotency Middleware', () => {
 
       expect(next).toHaveBeenCalledOnce();
       // No Redis entry should exist
-      const exists = await redisClient.exists(`idem:${key}`);
+      const exists = await redisClient.exists(scoped(key));
       expect(exists).toBe(0);
       expect(res.status).not.toHaveBeenCalled();
     });
@@ -469,7 +565,7 @@ describe('Idempotency Middleware', () => {
       for (const method of ['HEAD', 'OPTIONS']) {
         const key = `test-bypass-${method}`;
         const req = {
-          headers: { 'idempotency-key': key },
+          headers: { authorization: AUTH, 'idempotency-key': key },
           method,
           path: '/orders',
           url: '/orders',
@@ -492,7 +588,7 @@ describe('Idempotency Middleware', () => {
       const key = 'test-5xx-not-cached';
 
       const req1 = {
-        headers: { 'idempotency-key': key },
+        headers: { authorization: AUTH, 'idempotency-key': key },
         method: 'POST',
         path: '/orders',
         url: '/orders',
@@ -516,12 +612,12 @@ describe('Idempotency Middleware', () => {
       await new Promise((r) => setTimeout(r, 10));
 
       // After 500, key should be deleted (retryable), not cached
-      const cached = await redisClient.get(`idem:${key}`);
+      const cached = await redisClient.get(scoped(key));
       expect(cached).toBeNull();
 
       // Second request same key+fingerprint should be treated as new (miss), not hit, and not 422/409
       const req2 = {
-        headers: { 'idempotency-key': key },
+        headers: { authorization: AUTH, 'idempotency-key': key },
         method: 'POST',
         path: '/orders',
         url: '/orders',
@@ -550,7 +646,7 @@ describe('Idempotency Middleware', () => {
       const key = 'test-inprogress-ttl';
 
       const req = {
-        headers: { 'idempotency-key': key },
+        headers: { authorization: AUTH, 'idempotency-key': key },
         method: 'POST',
         path: '/orders',
         url: '/orders',
@@ -567,7 +663,7 @@ describe('Idempotency Middleware', () => {
 
       await middleware(req, res, next);
 
-      const ttl = await redisClient.ttl(`idem:${key}`);
+      const ttl = await redisClient.ttl(scoped(key));
       expect(ttl).toBeGreaterThan(0);
       expect(ttl).toBeLessThanOrEqual(60);
       expect(ttl).toBeGreaterThan(50); // allow small drift, but must be ~60 not ~86400
@@ -578,7 +674,7 @@ describe('Idempotency Middleware', () => {
       const key = 'test-crash-retry';
 
       const req1 = {
-        headers: { 'idempotency-key': key },
+        headers: { authorization: AUTH, 'idempotency-key': key },
         method: 'POST',
         path: '/orders',
         url: '/orders',
@@ -605,7 +701,7 @@ describe('Idempotency Middleware', () => {
       // In our implementation, next(err) triggers clearLock; but even without that, TTL is 60s.
       // For this test, manually trigger the clear by invoking the stored onClose/onFinish if needed.
       // Simpler: check that TTL is short (already verified above) so retry would be possible soon.
-      const ttl = await redisClient.ttl(`idem:${key}`);
+      const ttl = await redisClient.ttl(scoped(key));
       expect(ttl).toBeGreaterThan(0);
       expect(ttl).toBeLessThanOrEqual(60);
     });
@@ -618,7 +714,7 @@ describe('Idempotency Middleware', () => {
       const fingerprint = 'dummy-fingerprint-for-test';
       // Use the same fingerprint generation as middleware would for this request
       const reqForFingerprint = {
-        headers: { 'idempotency-key': key },
+        headers: { authorization: AUTH, 'idempotency-key': key },
         method: 'POST',
         path: '/orders',
         url: '/orders',
@@ -629,14 +725,14 @@ describe('Idempotency Middleware', () => {
       // Compute expected fingerprint by calling middleware once to claim, then overwrite?
       // Simpler: directly set a raw IN_PROGRESS without fingerprint so our new code treats it as 409 regardless of fingerprint mismatch check (no fingerprint stored)
       await redisClient.set(
-        `idem:${key}`,
+        scoped(key),
         JSON.stringify({ status: 'IN_PROGRESS', body: null }),
         'EX',
         60,
       );
 
       const req = {
-        headers: { 'idempotency-key': key },
+        headers: { authorization: AUTH, 'idempotency-key': key },
         method: 'POST',
         path: '/orders',
         url: '/orders',

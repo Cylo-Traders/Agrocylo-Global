@@ -28,13 +28,10 @@ import {
   FreighterAdapter,
 } from "../lib/walletAdapters";
 import { authenticateWallet, logoutWalletSession } from "@/lib/walletSession";
-import {
-  AUTH_EXPIRED_EVENT,
-  clearAuthSession,
-  hasValidAccessToken,
-} from "@/lib/authToken";
 
 const CONNECT_TIMEOUT_MS = 12_000;
+const WALLET_POLL_INTERVAL_MS = 5_000;
+const WALLET_EVENT_DEBOUNCE_MS = 500;
 
 const initialState: WalletContextType = {
   address: null,
@@ -78,6 +75,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
   const mountedRef = useRef(true);
   const restoreGenerationRef = useRef(0);
   const connectGenerationRef = useRef(0);
+  const identitySyncRef = useRef(false);
+  const lastWalletEventRef = useRef(0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -186,9 +185,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
     setLoading(true);
     setError(null);
 
-      const adapter =
-        (adapterId ? WALLET_ADAPTERS.find((a) => a.id === adapterId) : null) ??
-        getPreferredAdapter();
+    const adapter =
+      (adapterId ? WALLET_ADAPTERS.find((a) => a.id === adapterId) : null) ??
+      getPreferredAdapter();
 
     const isMobile =
       typeof navigator !== "undefined" &&
@@ -199,41 +198,45 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
       const hint = deepLink
         ? `Open ${adapter.name} at ${deepLink} and try again.`
         : `${adapter.name} is not supported on mobile. Please use a desktop browser with the ${adapter.name} extension installed.`;
-      if (generation === connectGenerationRef.current && !cancelled && mountedRef.current) {
+      if (
+        generation === connectGenerationRef.current &&
+        !cancelled &&
+        mountedRef.current
+      ) {
         setError(hint);
         setLoading(false);
       }
       return;
     }
 
-      if (isMobile && !adapter.supportsMobile()) {
-        const deepLink = adapter.mobileDeepLink();
-        const hint = deepLink
-          ? `Open ${adapter.name} at ${deepLink} and try again.`
-          : `${adapter.name} is not supported on mobile. Please use a desktop browser with the ${adapter.name} extension installed.`;
-        setError(hint);
-        setLoading(false);
-        return;
-      }
+    if (isMobile && !adapter.supportsMobile()) {
+      const deepLink = adapter.mobileDeepLink();
+      const hint = deepLink
+        ? `Open ${adapter.name} at ${deepLink} and try again.`
+        : `${adapter.name} is not supported on mobile. Please use a desktop browser with the ${adapter.name} extension installed.`;
+      setError(hint);
+      setLoading(false);
+      return;
+    }
 
-      try {
-        const pub = await Promise.race([
-          adapter.getPublicKey(),
-          new Promise<never>((_, reject) =>
-            setTimeout(
-              () =>
-                reject(
-                  new Error(
-                    `Connection timed out after ${CONNECT_TIMEOUT_MS / 1000}s. ` +
-                      `Make sure ${adapter.name} is unlocked and try again.`,
-                  ),
+    try {
+      const pub = await Promise.race([
+        adapter.getPublicKey(),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `Connection timed out after ${CONNECT_TIMEOUT_MS / 1000}s. ` +
+                    `Make sure ${adapter.name} is unlocked and try again.`,
                 ),
-              CONNECT_TIMEOUT_MS,
-            ),
+              ),
+            CONNECT_TIMEOUT_MS,
           ),
-        ]);
+        ),
+      ]);
 
-        if (!mountedRef.current) return;
+      if (!mountedRef.current) return;
 
       if (cancelled) return;
       if (generation !== connectGenerationRef.current) return;
@@ -244,19 +247,19 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
       if (generation !== connectGenerationRef.current) return;
       if (!mountedRef.current) return;
 
-        setAddress(pub);
-        setNetwork(networkName);
-        setConnected(true);
-        setActiveWalletId(adapter.id);
-        trackWalletConnected(pub, {
-          network: networkName,
-          adapter: adapter.name,
-        });
+      setAddress(pub);
+      setNetwork(networkName);
+      setConnected(true);
+      setActiveWalletId(adapter.id);
+      trackWalletConnected(pub, {
+        network: networkName,
+        adapter: adapter.name,
+      });
 
-        localStorage.setItem("walletAddress", pub);
-        localStorage.setItem("walletNetwork", networkName);
-        localStorage.setItem("activeWalletId", adapter.id);
-        savePreferredAdapter(adapter.id);
+      localStorage.setItem("walletAddress", pub);
+      localStorage.setItem("walletNetwork", networkName);
+      localStorage.setItem("activeWalletId", adapter.id);
+      savePreferredAdapter(adapter.id);
 
       try {
         const b = await getXlmBalance(pub);
@@ -301,6 +304,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
         adapter: activeWalletId ?? undefined,
       });
     }
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("walletIdentityChanged"));
+    }
     setAddress(null);
     setBalance(null);
     setConnected(false);
@@ -313,6 +319,138 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
     localStorage.removeItem("walletNetwork");
     localStorage.removeItem("activeWalletId");
   }, [address, network, activeWalletId]);
+
+  const reauthenticate = useCallback(async () => {
+    if (!address || !activeWalletId) return;
+    const adapter = WALLET_ADAPTERS.find((item) => item.id === activeWalletId);
+    if (!adapter) return;
+
+    setAuthenticating(true);
+    setSessionError(null);
+    try {
+      await authenticateWallet(adapter, address);
+      if (mountedRef.current) setAuthenticated(true);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setAuthenticated(false);
+      setSessionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (mountedRef.current) setAuthenticating(false);
+    }
+  }, [activeWalletId, address]);
+
+  useEffect(() => {
+    if (
+      !connected ||
+      !activeWalletId ||
+      !address ||
+      typeof window === "undefined"
+    ) {
+      return;
+    }
+
+    const adapter = WALLET_ADAPTERS.find((item) => item.id === activeWalletId);
+    if (!adapter) return;
+    let cancelled = false;
+
+    const reconcileIdentity = async () => {
+      if (cancelled || identitySyncRef.current) return;
+      identitySyncRef.current = true;
+      try {
+        const [liveAddress, liveNetwork] = await Promise.all([
+          adapter.getPublicKey(),
+          adapter.getNetwork(),
+        ]);
+        if (cancelled || !mountedRef.current) return;
+
+        const accountChanged = liveAddress !== address;
+        const networkChanged = liveNetwork !== network;
+        if (!accountChanged && !networkChanged) return;
+
+        setAuthenticated(false);
+        setSessionError(null);
+        void logoutWalletSession();
+        window.dispatchEvent(new Event("walletIdentityChanged"));
+        setBalance(null);
+        setAddress(liveAddress);
+        setNetwork(liveNetwork);
+        localStorage.setItem("walletAddress", liveAddress);
+        localStorage.setItem("walletNetwork", liveNetwork);
+        setError(
+          accountChanged
+            ? "Wallet account changed. Previous wallet data and transaction intent were cleared."
+            : "Wallet network changed. Previous wallet data and transaction intent were cleared.",
+        );
+
+        try {
+          const liveBalance = await getXlmBalance(liveAddress);
+          if (!cancelled && mountedRef.current) setBalance(liveBalance);
+        } catch {
+          // Balance refresh is non-fatal after an identity change.
+        }
+      } catch {
+        if (cancelled || !mountedRef.current) return;
+        setAuthenticated(false);
+        setSessionError(null);
+        void logoutWalletSession();
+        window.dispatchEvent(new Event("walletIdentityChanged"));
+        setError("Wallet is locked or disconnected. Please reconnect.");
+        setAddress(null);
+        setBalance(null);
+        setNetwork(null);
+        setConnected(false);
+        setActiveWalletId(null);
+        localStorage.removeItem("walletAddress");
+        localStorage.removeItem("walletNetwork");
+        localStorage.removeItem("activeWalletId");
+      } finally {
+        identitySyncRef.current = false;
+      }
+    };
+
+    const handleProviderEvent = () => {
+      const now = Date.now();
+      if (now - lastWalletEventRef.current < WALLET_EVENT_DEBOUNCE_MS) return;
+      lastWalletEventRef.current = now;
+      void reconcileIdentity();
+    };
+    const provider = (window as Window & { freighter?: unknown }).freighter as
+      | {
+          on?: (event: string, listener: () => void) => void;
+          removeListener?: (event: string, listener: () => void) => void;
+        }
+      | undefined;
+    const providerEvents = ["accountsChanged", "chainChanged", "disconnect"];
+    providerEvents.forEach((event) =>
+      provider?.on?.(event, handleProviderEvent),
+    );
+    [
+      "accountsChanged",
+      "chainChanged",
+      "walletChanged",
+      "walletDisconnected",
+    ].forEach((event) => window.addEventListener(event, handleProviderEvent));
+    const interval = window.setInterval(
+      reconcileIdentity,
+      WALLET_POLL_INTERVAL_MS,
+    );
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      providerEvents.forEach((event) =>
+        provider?.removeListener?.(event, handleProviderEvent),
+      );
+      [
+        "accountsChanged",
+        "chainChanged",
+        "walletChanged",
+        "walletDisconnected",
+      ].forEach((event) =>
+        window.removeEventListener(event, handleProviderEvent),
+      );
+    };
+  }, [activeWalletId, address, connected, network]);
 
   // Compare the connected wallet's active network against the network the app
   // is configured for. Recomputed whenever the wallet reports a network change.

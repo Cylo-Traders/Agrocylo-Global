@@ -62,23 +62,42 @@ export async function deleteSession(sessionId: string): Promise<void> {
   await prisma.ussdSession.delete({ where: { sessionId } }).catch(() => {});
 }
 
-export async function getWalletByPhone(phoneNumber: string): Promise<string | null> {
+export async function getWalletByPhone(
+  phoneNumber: string,
+  requireVerified = true,
+): Promise<string | null> {
   const link = await prisma.phoneLink.findUnique({ where: { phoneNumber } });
-  return link?.walletAddress ?? null;
+  if (!link) return null;
+  if (requireVerified && !link.verifiedAt) return null;
+  return link.walletAddress ?? null;
 }
 
-export async function getPhoneByWallet(walletAddress: string): Promise<string | null> {
+export async function getPhoneByWallet(
+  walletAddress: string,
+  requireVerified = true,
+): Promise<string | null> {
   const link = await prisma.phoneLink.findFirst({ where: { walletAddress } });
-  return link?.phoneNumber ?? null;
+  if (!link) return null;
+  if (requireVerified && !link.verifiedAt) return null;
+  return link.phoneNumber ?? null;
 }
 
 export async function linkPhoneToWallet(
   phoneNumber: string,
   walletAddress: string,
+  isVerified = false,
 ): Promise<void> {
+  const verifiedAt = isVerified ? new Date() : null;
   await prisma.phoneLink.upsert({
     where: { phoneNumber },
-    create: { phoneNumber, walletAddress },
-    update: { walletAddress },
+    create: { phoneNumber, walletAddress, verifiedAt },
+    update: { walletAddress, verifiedAt },
+  });
+}
+
+export async function verifyPhoneLink(phoneNumber: string): Promise<void> {
+  await prisma.phoneLink.update({
+    where: { phoneNumber },
+    data: { verifiedAt: new Date() },
   });
 }

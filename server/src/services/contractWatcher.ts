@@ -9,6 +9,12 @@ import { BlockchainEventIngestionService } from "./events/blockchainEventIngesti
 import { EscrowEventIngestionService } from "./events/escrowEventIngestionService.js";
 import { indexGovernanceEvent } from "./governanceService.js";
 import { captureAlert } from "../config/sentry.js";
+import { OrderStatus } from "../constants/status.js";
+import {
+  contractWatcherEventsPerPoll,
+  contractWatcherPagesPerPoll,
+  contractWatcherUnhandledTotal,
+} from "./promMetrics.js";
 
 /**
  * Canonical ingestion pipeline: BlockchainTransaction (transactions table) is
@@ -20,6 +26,10 @@ import { captureAlert } from "../config/sentry.js";
 
 const POLL_INTERVAL_MS = 5_000;
 const CHECKPOINT_SERVICE_NAME = "contract-watcher";
+/** Upper bound on ledgers scanned per poll, so catch-up after downtime is incremental. */
+export const MAX_LEDGER_SPAN = 100;
+/** Upper bound on getEvents pages per poll; checkpoint only advances once drained. */
+export const MAX_PAGES_PER_POLL = 50;
 
 /**
  * Extracts the entity, action and decoded data array from a raw RPC event.

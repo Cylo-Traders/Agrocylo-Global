@@ -1,0 +1,112 @@
+# Issue 1143: Document product and location query parameters
+
+components:
+  schemas:
+    ProductQueryParams:
+      type: object
+      properties:
+        search:
+          type: string
+          description: Search term for product name or description
+        category:
+          type: string
+          description: Filter by product category
+        min_price:
+          type: number
+          description: Minimum price filter
+        max_price:
+          type: number
+          description: Maximum price filter
+        farmer_wallet:
+          type: string
+          description: Filter by farmer wallet address
+        is_available:
+          type: boolean
+          description: Filter by availability status
+        sort:
+          type: string
+          enum: [price_asc, price_desc, created_asc, created_desc]
+          description: Sort order
+        page:
+          type: integer
+          minimum: 1
+          default: 1
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+
+    LocationQueryParams:
+      type: object
+      properties:
+        latitude:
+          type: number
+          format: double
+          description: Center latitude for proximity search
+        longitude:
+          type: number
+          format: double
+          description: Center longitude for proximity search
+        radius:
+          type: number
+          description: Search radius in kilometers
+        type:
+          type: string
+          enum: [farm, warehouse, market]
+          description: Location type filter
+
+paths:
+  /products:
+    get:
+      summary: List products
+      parameters:
+        - in: query
+          name: search
+          schema:
+            type: string
+        - in: query
+          name: category
+          schema:
+            type: string
+        - in: query
+          name: min_price
+          schema:
+            type: number
+        - in: query
+          name: max_price
+          schema:
+            type: number
+        - in: query
+          name: sort
+          schema:
+            type: string
+            enum: [price_asc, price_desc, created_asc, created_desc]
+        - in: query
+          name: page
+          schema:
+            type: integer
+        - in: query
+          name: limit
+          schema:
+            type: integer
+
+  /locations/farmers:
+    get:
+      summary: Get farmer locations
+      parameters:
+        - in: query
+          name: latitude
+          schema:
+            type: number
+          required: true
+        - in: query
+          name: longitude
+          schema:
+            type: number
+          required: true
+        - in: query
+          name: radius
+          schema:
+            type: number
+          default: 50

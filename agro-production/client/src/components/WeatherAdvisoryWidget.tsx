@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { useAsyncResource } from "@/hooks/useAsyncResource";
 
 const FarmerMap = dynamic(() => import("./FarmerMap").then((mod) => ({ default: mod.default })), {
   ssr: false,
@@ -24,17 +25,11 @@ interface WeatherAdvisoryWidgetProps {
 }
 
 export function WeatherAdvisoryWidget({ farmerId, location }: WeatherAdvisoryWidgetProps) {
-  const [advisories, setAdvisories] = useState<WeatherAdvisory[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchAdvisories();
-  }, [farmerId, location]);
-
-  const fetchAdvisories = async () => {
-    try {
-      setLoading(true);
+  // Callback before the resource that runs it (#1084): the fetch is keyed by
+  // its inputs and aborted when they change or the owner unmounts, so a slow
+  // response can never be rendered for the wrong location.
+  const fetchAdvisories = useCallback(
+    async (signal: AbortSignal) => {
       const params = new URLSearchParams();
       if (farmerId) params.append("farmerId", farmerId);
       if (location) {
@@ -42,18 +37,25 @@ export function WeatherAdvisoryWidget({ farmerId, location }: WeatherAdvisoryWid
         params.append("lng", location.lng.toString());
       }
 
-      const response = await fetch(`/api/weather/advisories?${params}`);
-      if (!response.ok) throw new Error("Failed to fetch advisories");
+      const url =
+        (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api/v1") +
+        `/weather/advisories?${params}`;
 
-      const data = await response.json();
-      setAdvisories(data);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load weather data");
-    } finally {
-      setLoading(false);
-    }
-  };
+      const response = await fetch(url, { signal });
+      if (!response.ok) throw new Error("Failed to fetch weather data");
+
+      return (await response.json()) as WeatherAdvisory[];
+    },
+    [farmerId, location],
+  );
+
+  const requestKey = `${farmerId ?? ""}|${location?.lat ?? ""}|${location?.lng ?? ""}`;
+  const { data, error, loading, reload } = useAsyncResource(
+    requestKey,
+    fetchAdvisories,
+  );
+
+  const advisories = data ?? [];
 
   const getSeverityColor = (severity: string) => {
     const colors = {
@@ -78,8 +80,10 @@ export function WeatherAdvisoryWidget({ farmerId, location }: WeatherAdvisoryWid
   if (loading) {
     return (
       <div className="bg-white border rounded-lg p-6 shadow-sm animate-pulse">
-        <div className="h-6 bg-gray-200 rounded w-1/3 mb-4"></div>
-        <div className="h-32 bg-gray-200 rounded"></div>
+        {/* The heading stays visible while loading so assistive technology and
+            screen readers keep the widget's name on screen. */}
+        <h3 className="text-lg font-semibold mb-2">Weather Advisories</h3>
+        <div className="h-32 bg-gray-200 rounded" aria-hidden="true"></div>
       </div>
     );
   }
@@ -91,7 +95,7 @@ export function WeatherAdvisoryWidget({ farmerId, location }: WeatherAdvisoryWid
         <div className="bg-red-50 border border-red-200 rounded p-3">
           <p className="text-red-600 text-sm">{error}</p>
           <button
-            onClick={fetchAdvisories}
+            onClick={reload}
             className="mt-2 text-red-600 text-sm underline"
           >
             Retry
@@ -169,11 +173,10 @@ export function WeatherAdvisoryWidget({ farmerId, location }: WeatherAdvisoryWid
                   {
                     id: farmerId || "current",
                     name: "Your Location",
-                    location,
+                    latitude: location.lat,
+                    longitude: location.lng,
                   },
                 ]}
-                center={location}
-                zoom={10}
               />
             </div>
           )}

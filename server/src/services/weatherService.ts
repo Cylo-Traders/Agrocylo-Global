@@ -65,32 +65,83 @@ export function evaluateThresholds(reading: WeatherReading): WeatherAlert[] {
 
 const WEATHER_API_BASE = "https://api.open-meteo.com/v1/forecast";
 
+/** Bounded wall-clock budget for upstream weather calls (Issue #971). */
+const WEATHER_FETCH_TIMEOUT_MS = 10_000;
+
+/** Rejects a provider payload that cannot yield a normal reading/alerts. */
+function unusableWeatherPayload(message: string): never {
+  throw new Error(`Weather API returned unusable data: ${message}`);
+}
+
+/**
+ * Parses a required numeric field. Explicitly-supplied zeros are valid
+ * observations; absent, null, empty or non-finite values are treated as an
+ * upstream-data failure rather than being silently coerced to zero.
+ */
+function parseFiniteWeatherNumber(value: unknown, field: string): number {
+  if (value === undefined || value === null || value === "") {
+    return unusableWeatherPayload(`missing required numeric field '${field}'`);
+  }
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    return unusableWeatherPayload(`nonfinite value '${String(value)}' for '${field}'`);
+  }
+  return n;
+}
+
+/** Parses the provider timestamp, rejecting missing or malformed values. */
+function parseWeatherTimestamp(value: unknown): Date {
+  const raw = value === undefined || value === null ? "" : String(value);
+  if (raw.trim() === "") {
+    return unusableWeatherPayload("missing reading timestamp");
+  }
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return unusableWeatherPayload(`malformed reading timestamp '${raw}'`);
+  }
+  return parsed;
+}
+
 /**
  * Polls the public Open-Meteo API for current conditions at a location. No API key
  * required, which keeps this usable in every environment out of the box.
+ * A bounded timeout protects the scheduled job from a hung upstream, and any
+ * missing/malformed payload is surfaced as an explicit failure instead of being
+ * persisted as a fabricated zero-value reading (Issue #971).
  */
 export async function fetchCurrentWeather(
   lat: number,
   lng: number,
 ): Promise<{ reading: WeatherReading; raw: unknown }> {
   const url = `${WEATHER_API_BASE}?latitude=${lat}&longitude=${lng}&current=temperature_2m,precipitation,wind_speed_10m,weather_code`;
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Weather API request failed with status ${response.status}`);
-  }
-  const raw = await response.json();
-  const current = (raw as Record<string, Record<string, number | string>>).current ?? {};
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), WEATHER_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`Weather API request failed with status ${response.status}`);
+    }
+    const raw: unknown = await response.json();
+    const current = (raw as Record<string, unknown>)?.current;
+    if (!current || typeof current !== "object" || Array.isArray(current)) {
+      return unusableWeatherPayload("expected a 'current' object, got none");
+    }
+    const fields = current as Record<string, unknown>;
+    const temperatureC = parseFiniteWeatherNumber(fields["temperature_2m"], "temperature_2m");
+    const precipitationMm = parseFiniteWeatherNumber(fields["precipitation"], "precipitation");
+    const windSpeedKph = parseFiniteWeatherNumber(fields["wind_speed_10m"], "wind_speed_10m");
+    const conditionCode = Math.trunc(
+      parseFiniteWeatherNumber(fields["weather_code"], "weather_code"),
+    );
+    const recordedAt = parseWeatherTimestamp(fields["time"]);
 
-  return {
-    raw,
-    reading: {
-      temperatureC: Number(current.temperature_2m ?? 0),
-      precipitationMm: Number(current.precipitation ?? 0),
-      windSpeedKph: Number(current.wind_speed_10m ?? 0),
-      conditionCode: Number(current.weather_code ?? 0),
-      recordedAt: current.time ? new Date(String(current.time)) : new Date(),
-    },
-  };
+    return {
+      raw,
+      reading: { temperatureC, precipitationMm, windSpeedKph, conditionCode, recordedAt },
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 async function persistReading(

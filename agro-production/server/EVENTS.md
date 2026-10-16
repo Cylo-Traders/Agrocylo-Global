@@ -70,7 +70,9 @@ Emitted each time an investor funds a campaign.
 | `amount`     | `string` | Amount invested in this transaction         |
 | `totalRaised`| `string` | Cumulative amount raised after this event   |
 
-**Side effects**: upserts the investor `User`, updates `Campaign.totalRaised`, sets campaign status to `FUNDED` when `totalRaised === targetAmount`, upserts an `Investment` record (keyed by `campaignId + investorAddress + ledger`), broadcasts `campaign.invested` over WebSocket, records a `Transaction`.
+**Side effects**: upserts the investor `User`, updates `Campaign.totalRaised`, sets campaign status to `FUNDED` when `totalRaised` reaches or exceeds `targetAmount` (compared as BigInt — see issue #1068), upserts an `Investment` record (keyed by `campaignId + investorAddress + ledger`), broadcasts `campaign.invested` over WebSocket, records a `Transaction`.
+
+**Overfunding policy**: the contract does not reject contributions beyond the target, so `totalRaised` may exceed `targetAmount`. The indexer marks the campaign `FUNDED` on the first event whose `totalRaised >= targetAmount`; overshoot amounts remain recorded in `Campaign.totalRaised`.
 
 ---
 

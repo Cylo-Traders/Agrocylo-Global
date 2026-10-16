@@ -1,7 +1,7 @@
-import crypto from "node:crypto";
-import { prisma } from "../config/database.js";
-import { ApiError, ConflictError, NotFoundError, ValidationError } from "../http/errors.js";
-import logger from "../config/logger.js";
+import crypto from 'node:crypto';
+import { prisma } from '../config/database.js';
+import { ApiError, ConflictError, NotFoundError, ValidationError } from '../http/errors.js';
+import logger from '../config/logger.js';
 
 /** Platform-fee credit granted to a referrer, in basis points of the
  * referee's first confirmed order/investment amount that triggered the
@@ -13,7 +13,7 @@ const REFERRAL_REWARD_BPS_DENOM = 10_000n;
 const REFERRAL_REWARD_CAP = 5_000n;
 
 function generateCode(): string {
-  return crypto.randomBytes(6).toString("base64url").toUpperCase().slice(0, 8);
+  return crypto.randomBytes(6).toString('base64url').toUpperCase().slice(0, 8);
 }
 
 export class ReferralService {
@@ -30,11 +30,13 @@ export class ReferralService {
         });
       } catch (error) {
         const isUniqueViolation =
-          error instanceof Object && "code" in error && (error as { code?: string }).code === "P2002";
+          error instanceof Object &&
+          'code' in error &&
+          (error as { code?: string }).code === 'P2002';
         if (!isUniqueViolation) throw error;
       }
     }
-    throw new ApiError(500, "Internal Server Error", "Failed to allocate a unique referral code");
+    throw new ApiError(500, 'Internal Server Error', 'Failed to allocate a unique referral code');
   }
 
   /**
@@ -45,25 +47,25 @@ export class ReferralService {
    */
   static async recordSignup(refereeWallet: string, referralCode: string) {
     if (!referralCode) {
-      throw new ValidationError("referralCode is required");
+      throw new ValidationError('referralCode is required');
     }
 
     const codeRow = await prisma.referralCode.findUnique({ where: { code: referralCode } });
     if (!codeRow) {
-      throw new NotFoundError("Referral code", referralCode);
+      throw new NotFoundError('Referral code', referralCode);
     }
 
     if (codeRow.walletAddress.toLowerCase() === refereeWallet.toLowerCase()) {
       // Self-referral: silently ignored rather than erroring, so a wallet
       // pasting its own code during onboarding doesn't see a scary failure —
       // it just never becomes eligible for a reward.
-      logger.warn("[ReferralService] Self-referral attempt ignored", { refereeWallet });
+      logger.warn('[ReferralService] Self-referral attempt ignored', { refereeWallet });
       return null;
     }
 
     const existing = await prisma.referral.findUnique({ where: { refereeWallet } });
     if (existing) {
-      throw new ConflictError("This wallet is already linked to a referrer");
+      throw new ConflictError('This wallet is already linked to a referrer');
     }
 
     return prisma.referral.create({
@@ -71,7 +73,7 @@ export class ReferralService {
         referrerWallet: codeRow.walletAddress,
         refereeWallet,
         code: referralCode,
-        status: "PENDING",
+        status: 'PENDING',
       },
     });
   }
@@ -91,7 +93,7 @@ export class ReferralService {
     const { refereeWallet, amount, triggerOrderId, triggerCampaignId } = params;
 
     const referral = await prisma.referral.findUnique({ where: { refereeWallet } });
-    if (!referral || referral.status !== "PENDING") {
+    if (!referral || referral.status !== 'PENDING') {
       return;
     }
 
@@ -99,7 +101,7 @@ export class ReferralService {
       // Defensive: should already be blocked at signup, but never reward self-referral.
       await prisma.referral.update({
         where: { id: referral.id },
-        data: { status: "INELIGIBLE" },
+        data: { status: 'INELIGIBLE' },
       });
       return;
     }
@@ -108,7 +110,10 @@ export class ReferralService {
     try {
       amountNum = BigInt(amount);
     } catch {
-      logger.warn("[ReferralService] Non-numeric amount on trigger, skipping reward", { amount, refereeWallet });
+      logger.warn('[ReferralService] Non-numeric amount on trigger, skipping reward', {
+        amount,
+        refereeWallet,
+      });
       return;
     }
     if (amountNum <= 0n) {
@@ -121,17 +126,19 @@ export class ReferralService {
     if (reward > REFERRAL_REWARD_CAP) reward = REFERRAL_REWARD_CAP;
     if (reward <= 0n) return;
 
-    await prisma.$transaction(async (tx) => {
-      await tx.referral.update({
-        where: { id: referral.id },
+    const claimed = await prisma.$transaction(async (tx) => {
+      const claim = await tx.referral.updateMany({
+        where: { id: referral.id, status: 'PENDING' },
         data: {
-          status: "REWARDED",
+          status: 'REWARDED',
           rewardedAt: new Date(),
           rewardAmount: reward.toString(),
           triggerOrderId: triggerOrderId ?? null,
           triggerCampaignId: triggerCampaignId ?? null,
         },
       });
+      if (claim.count !== 1) return false;
+
       await tx.feeCredit.create({
         data: {
           walletAddress: referral.referrerWallet,
@@ -140,9 +147,12 @@ export class ReferralService {
           sourceReferralId: referral.id,
         },
       });
+      return true;
     });
 
-    logger.info("[ReferralService] Referral reward issued", {
+    if (!claimed) return;
+
+    logger.info('[ReferralService] Referral reward issued', {
       referralId: referral.id,
       referrer: referral.referrerWallet,
       reward: reward.toString(),
@@ -155,16 +165,16 @@ export class ReferralService {
 
     const [total, rewarded, pending, ineligible, rewardAgg] = await Promise.all([
       prisma.referral.count({ where }),
-      prisma.referral.count({ where: { ...where, status: "REWARDED" } }),
-      prisma.referral.count({ where: { ...where, status: "PENDING" } }),
-      prisma.referral.count({ where: { ...where, status: "INELIGIBLE" } }),
+      prisma.referral.count({ where: { ...where, status: 'REWARDED' } }),
+      prisma.referral.count({ where: { ...where, status: 'PENDING' } }),
+      prisma.referral.count({ where: { ...where, status: 'INELIGIBLE' } }),
       prisma.referral.findMany({
-        where: { ...where, status: "REWARDED" },
+        where: { ...where, status: 'REWARDED' },
         select: { rewardAmount: true },
       }),
     ]);
 
-    const totalRewarded = rewardAgg.reduce((sum, r) => sum + BigInt(r.rewardAmount ?? "0"), 0n);
+    const totalRewarded = rewardAgg.reduce((sum, r) => sum + BigInt(r.rewardAmount ?? '0'), 0n);
 
     return {
       totalReferrals: total,
@@ -180,13 +190,13 @@ export class ReferralService {
   static async listReferralsByReferrer(referrerWallet: string) {
     return prisma.referral.findMany({
       where: { referrerWallet },
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
     });
   }
 
   static async getFeeCreditBalance(walletAddress: string): Promise<string> {
     const credits = await prisma.feeCredit.findMany({
-      where: { walletAddress, consumedAt: null },
+      where: { walletAddress, consumedAt: null, revokedAt: null },
       select: { amount: true },
     });
     return credits.reduce((sum, c) => sum + BigInt(c.amount), 0n).toString();

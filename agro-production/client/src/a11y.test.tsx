@@ -6,9 +6,39 @@ import { NotificationContainer } from "./components/Notification";
 import type { NotificationMessage } from "./components/Notification";
 import { WalletProvider } from "./context/WalletContext";
 
-vi.mock("./lib/walletFreighter", () => ({
-  getFreighterPublicKey: vi.fn(),
+const walletA11yMocks = vi.hoisted(() => ({
+  connectModal: vi.fn(),
+  disconnect: vi.fn(async () => undefined),
 }));
+
+vi.mock("@/lib/wallets/registry", () => {
+  const adapter = {
+    id: "freighter",
+    name: "Freighter",
+    iconUrl: "freighter.png",
+    installUrl: "https://freighter.app",
+    moduleType: "HOT_WALLET",
+    platforms: ["browser", "mobile"],
+    supportsDeepLink: false,
+    isAvailable: vi.fn(async () => true),
+    getPublicKey: vi.fn(async () => null),
+    getNetwork: vi.fn(async () => null),
+    signTransaction: vi.fn(),
+    disconnect: walletA11yMocks.disconnect,
+  };
+  return {
+    DEFAULT_WALLET_ID: "freighter",
+    WALLET_ADAPTERS: [adapter],
+    getWalletAdapter: () => adapter,
+    connectWithWalletModal: walletA11yMocks.connectModal,
+    disconnectWallet: walletA11yMocks.disconnect,
+    initializeWalletKit: vi.fn(),
+    refreshWalletAvailability: vi.fn(async () => [
+      { id: "freighter", available: true },
+    ]),
+  };
+});
+
 
 vi.mock("./lib/analytics", () => ({
   trackWalletConnected: vi.fn(),
@@ -79,6 +109,7 @@ describe("Marketplace Filters Accessibility", () => {
 describe("Wallet Connect Accessibility", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    globalThis.localStorage.clear();
   });
 
   it("has descriptive aria-label for connect button", () => {
@@ -91,8 +122,10 @@ describe("Wallet Connect Accessibility", () => {
   });
 
   it("has descriptive aria-label for disconnect button when connected", async () => {
-    const { getFreighterPublicKey } = await import("./lib/walletFreighter");
-    vi.mocked(getFreighterPublicKey).mockResolvedValue("GTESTADDRESS");
+    walletA11yMocks.connectModal.mockResolvedValueOnce({
+      address: "GTESTADDRESS",
+      walletId: "freighter",
+    });
 
     render(
       <WalletProvider>
@@ -109,8 +142,10 @@ describe("Wallet Connect Accessibility", () => {
   });
 
   it("shows connected wallet address with accessible label", async () => {
-    const { getFreighterPublicKey } = await import("./lib/walletFreighter");
-    vi.mocked(getFreighterPublicKey).mockResolvedValue("GTESTADDRESS");
+    walletA11yMocks.connectModal.mockResolvedValueOnce({
+      address: "GTESTADDRESS",
+      walletId: "freighter",
+    });
 
     render(
       <WalletProvider>

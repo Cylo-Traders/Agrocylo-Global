@@ -5,6 +5,7 @@ import { prisma } from "../config/database.js";
 import { ApiError } from "../http/errors.js";
 import { config } from "../config/index.js";
 import { toServerRole, type ServerProfileRole } from "../lib/profileDto.js";
+import { IdentityService } from "./identityService.js";
 
 if (!config.jwtSecret) {
   throw new Error("JWT_SECRET is not configured");

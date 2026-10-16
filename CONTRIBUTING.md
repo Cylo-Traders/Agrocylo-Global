@@ -134,12 +134,36 @@ and always kills the processes it spawned.
 see [`docs/DEPENDENCY_UPGRADE_POLICY.md`](docs/DEPENDENCY_UPGRADE_POLICY.md).
 `npm run check:versions` enforces it in CI.
 
-#### For Backend
+#### For backend
+
+The two servers are independent and each owns its dependencies, lockfile,
+environment, Prisma schema, and migrations.
+
+For the root marketplace API (port 5000), use Node 22.13.x and npm 10.9.x:
+
 ```bash
-cd agro-production/server  # port 5001; use server/ for marketplace port 5000
+cd server
+nvm use
+cp .env.example .env
+# Edit .env, including DATABASE_URL and required secrets.
+npm ci
+npm run prisma:generate
+npx prisma migrate dev
+npm run dev
+```
+
+For the production/campaign API (port 5001), follow its separate setup:
+
+```bash
+cd agro-production/server
 npm install
 npm run dev
 ```
+
+Do not share `node_modules`, lockfiles, or Prisma commands between these
+directories. See [the root server guide](server/README.md) for the distinction
+between generation and migrations, API-only runtime flags, and recovery from a
+missing `PrismaClient` export.
 
 #### For Smart Contracts (Rust/Soroban)
 ```bash

@@ -12,7 +12,7 @@ vi.mock('../config/database.js', () => ({
     nonce: { upsert: vi.fn(), findUnique: vi.fn(), delete: vi.fn() },
     refreshToken: { create: vi.fn(), findUnique: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
     user: { findUnique: vi.fn(), upsert: vi.fn() },
-    profile: { findUnique: vi.fn() },
+    profile: { findUnique: vi.fn(), upsert: vi.fn() },
   },
 }));
 

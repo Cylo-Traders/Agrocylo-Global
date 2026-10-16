@@ -5,6 +5,7 @@ import type { IndexedEvent } from "../../types/indexedEvent.js";
 import { ReferralService } from "../referralService.js";
 import { canonicalizeAmount } from "../../lib/money.js";
 import { IdentityService } from "../identityService.js";
+import { CampaignStatus } from "../../constants/status.js";
 
 type PrismaTx = Omit<typeof prisma, "$connect" | "$disconnect" | "$on" | "$use" | "$extends">;
 

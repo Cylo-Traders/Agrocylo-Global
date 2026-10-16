@@ -14,7 +14,10 @@
     "mainClient": "Return to Main Marketplace",
     "switchToLight": "Switch to light mode",
     "switchToDark": "Switch to dark mode",
-    "language": "Language"
+    "language": "Language",
+    "main": "Main navigation",
+    "openMenu": "Open navigation menu",
+    "closeMenu": "Close navigation menu"
   },
   "campaigns": {
     "title": "Production Campaigns",
@@ -25,5 +28,23 @@
   "sso": {
     "connectedWallet": "SSO Connected Wallet",
     "autoAuthenticated": "Session transferred from main marketplace"
+  },
+  "errors": {
+    "boundary": {
+      "title": "Something went wrong",
+      "description": "This page hit an unexpected error. It has been reported. You can try again or go back to the home page.",
+      "retry": "Try again",
+      "home": "Go home",
+      "reference": "Reference",
+      "details": "Error details (development only)"
+    },
+    "notFound": {
+      "title": "Page not found",
+      "description": "The page you're looking for doesn't exist or may have been moved.",
+      "home": "Go home",
+      "marketplace": "Browse the marketplace",
+      "campaigns": "View campaigns",
+      "linksLabel": "Helpful links"
+    }
   }
 }

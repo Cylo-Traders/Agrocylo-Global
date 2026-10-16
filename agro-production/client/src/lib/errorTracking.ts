@@ -17,6 +17,13 @@ export interface ErrorTrackingPayload {
 
 const TELEMETRY_ENABLED = process.env.NEXT_PUBLIC_TELEMETRY_ENABLED === "true";
 
+// Errors already sent, keyed by identity. A route-boundary error arrives here
+// twice -- once from the boundary and once from Next's console.error log,
+// which initErrorTracking wraps -- and React runs effects twice in
+// development. Each Error object must be reported once (Issue #1090).
+const reportedErrors = new WeakSet<Error>();
+const boundaryReportedErrors = new WeakSet<Error>();
+
 let originalOnError: typeof window.onerror | null = null;
 let originalOnUnhandledRejection: typeof window.onunhandledrejection | null = null;
 
@@ -35,6 +42,7 @@ function redactContext(context?: Record<string, unknown>): Record<string, unknow
       key.toLowerCase().includes("secret") ||
       key.toLowerCase().includes("password") ||
       key.toLowerCase().includes("token") ||
+      key.toLowerCase().includes("address") ||
       key.toLowerCase().includes("xdr") ||
       key.toLowerCase().includes("stack")
     ) {
@@ -47,6 +55,8 @@ function redactContext(context?: Record<string, unknown>): Record<string, unknow
 
 function reportError(error: Error, context?: Record<string, unknown>) {
   if (!TELEMETRY_ENABLED) return;
+  if (reportedErrors.has(error)) return;
+  reportedErrors.add(error);
 
   const telemetryUrl = process.env.NEXT_PUBLIC_TELEMETRY_URL;
   if (!telemetryUrl) {
@@ -118,4 +128,27 @@ export function initErrorTracking() {
 
 export function captureError(error: Error, context?: Record<string, unknown>) {
   reportError(error, context);
+}
+
+/**
+ * Report an error caught by an App Router error boundary (`error.tsx`,
+ * `global-error.tsx`) to Sentry and telemetry, at most once per Error.
+ * `digest` is Next's opaque server-error hash, safe to send; the message of a
+ * server error is already replaced by Next in production.
+ */
+export function reportBoundaryError(
+  error: Error & { digest?: string },
+  boundary: string
+) {
+  if (!boundaryReportedErrors.has(error)) {
+    boundaryReportedErrors.add(error);
+    // Loaded lazily: a static import pulls Sentry's server build into every
+    // module that imports this file (e.g. errorHandling) under Vitest.
+    void import("@sentry/nextjs")
+      .then((Sentry) =>
+        Sentry.captureException(error, { tags: { boundary }, extra: { digest: error.digest } })
+      )
+      .catch(() => {});
+  }
+  reportError(error, { boundary, digest: error.digest });
 }

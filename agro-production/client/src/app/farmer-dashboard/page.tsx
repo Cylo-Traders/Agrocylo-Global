@@ -73,6 +73,7 @@ import Link from "next/link";
 import WalletConnect from "@/components/WalletConnect";
 import { OrderTableSkeleton } from "@/components/Skeletons";
 import { useWallet } from "@/context/WalletContext";
+import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { useWebSocket, type WsMessage } from "@/hooks/useWebSocket";
 import {
   filterOrdersForFarmer,
@@ -132,38 +133,39 @@ function FarmerOrderTable({ orders, label, emptyText }: {
 
 export default function FarmerDashboardPage() {
   const { address, connected } = useWallet();
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
-  const loadOrders = useCallback(async () => {
-    if (!address) return;
+  // Callback before the resource that runs it (#1084). It aborts with the
+  // owner, so a wallet switch or unmount drops the stale response instead of
+  // committing it.
+  const loadOrders = useCallback(async (signal: AbortSignal) => {
     try {
-      const response = await fetchOrdersByFarmer(address);
-      setOrders(filterOrdersForFarmer(response, address));
-      setError(null);
-      setLastUpdated(new Date().toISOString());
+      const response = await fetchOrdersByFarmer(address ?? "");
+      const filtered = filterOrdersForFarmer(response, address ?? "");
+      if (!signal.aborted) setLastUpdated(new Date().toISOString());
+      return filtered;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load farmer orders.");
-    } finally {
-      setLoading(false);
+      throw new Error(
+        err instanceof Error ? err.message : "Could not load farmer orders.",
+      );
     }
   }, [address]);
 
-  useEffect(() => {
-    if (address) {
-      setLoading(true);
-      void loadOrders();
-    }
-  }, [address, loadOrders]);
+  const {
+    data,
+    error,
+    loading,
+    reload,
+  } = useAsyncResource(`farmer-orders:${address ?? "disconnected"}`, loadOrders);
+
+  const orders = data ?? [];
 
   useWebSocket(
     useCallback((message: WsMessage) => {
-      if (message.event === "order.created" || message.event === "order.confirmed") {
-        void loadOrders();
+      if (message.type === "order.created" || message.type === "order.confirmed") {
+        reload();
       }
-    }, [loadOrders]),
+    }, [reload]),
   );
 
   if (!connected || !address) {
@@ -213,7 +215,12 @@ export default function FarmerDashboardPage() {
 
       {lastUpdated && <p className="text-xs text-muted" aria-live="polite">Live data refreshed {new Date(lastUpdated).toLocaleTimeString()}</p>}
       {loading && <OrderTableSkeleton rows={4} />}
-      {!loading && error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700" role="alert">{error}</div>}
+      {!loading && error && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 space-y-3" role="alert">
+          <p>{error}</p>
+          <button onClick={reload} className="underline text-red-700 hover:text-red-900">Try again</button>
+        </div>
+      )}
       {!loading && !error && (
         <>
           <section aria-labelledby="pending-deliveries-heading">

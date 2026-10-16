@@ -6,6 +6,7 @@ import type {
 } from "./types.js";
 import logger from "../config/logger.js";
 import { recordParseError } from "./metrics.js";
+import { validateEventSchema, EVENT_SCHEMA_VERSION } from "./schema.js";
 
 /**
  * Decodes base64-encoded XDR ScVal topics and value from a raw Soroban event
@@ -34,12 +35,18 @@ export class ProductionEventParser {
       throw new Error(`Event ${raw.id}: malformed value XDR`);
     }
 
+    const validation = validateEventSchema(action, data);
+    if (!validation.valid) {
+      throw new Error(`Event ${raw.id}: schema validation failed - ${validation.reason}`);
+    }
+
     const base = {
       ledger: raw.ledger,
       eventIndex: parseEventIndex(raw.id),
       timestamp: new Date(raw.ledgerClosedAt),
       rawId: raw.id,
       txHash: raw.txHash,
+      schemaVersion: validation.version,
     };
 
     switch (action) {

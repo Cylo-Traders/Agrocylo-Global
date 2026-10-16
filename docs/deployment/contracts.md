@@ -1,52 +1,58 @@
-# Contract Deployment — `scripts/deploy-contracts.sh`
+# Production Contract Deployment Guide
 
-One command deploys and fully cross-wires the entire Soroban contract set to a
-clean network, then verifies the wiring actually took. Re-running is safe and
-converges to the same state.
+This document describes how to deploy the four production Soroban contracts to Stellar testnet or mainnet, verify WASM integrity, and manage the multisig admin/guardian roles.
 
-> Background on multisig admin/guardian custody and reproducible-WASM
-> verification lives in [`CONTRACTS.md`](./CONTRACTS.md). This page is the
-> operational runbook for the deploy script itself.
+**Issue References:** #778, #779, #843
 
-## The contract set
+## Overview
 
-| Contract | Crate | Role |
-|---|---|---|
-| `governance` | `agro-production/contract/governance` | Proposals, voting, timelocked execution |
-| `escrow` | `contracts/escrow` | Marketplace order escrow + path-payment settlement |
-| `production_escrow` | `agro-production/contract/production_escrow` | Campaign escrow |
-| `registry` | `agro-production/contract/registry` | Order / reputation registry, escrow↔production link |
-| `investment_basket` | `agro-production/contract/investment_basket` | Batched campaign investments |
+The contracts form an interdependent system (all six contracts' `initialize`
+gates on the admin's authorization as of #843):
+- **governance** — Manages proposals, voting, and timelocked execution of parameter changes and upgrades
+- **production_escrow** — Holds investor funds in escrow, manages campaign lifecycle
+- **registry** — Tracks orders and cross-links escrow/production contracts
+- **investment_basket** — Manages batched fund investments
+- **escrow** — Marketplace escrow (`contracts/escrow`)
+- **weather-insurance** — Parametric weather policies (`contracts/weather-insurance`, deployed outside `deploy-contracts.sh`)
 
-## What the script does
+They must be deployed and cross-wired in a specific dependency order to ensure all references are valid.
 
-1. **Build** all five contracts (`wasm32v1-none`, `release`, pinned toolchain).
-2. **Deploy** each instance with a deterministic salt (`sha256("agrocylo:<network>:<contract>")`)
-   so a first deploy is reproducible; existing IDs in the manifest are reused.
-3. **Initialize** each contract (`AlreadyInitialized` is tolerated).
-4. **Cross-wire**, in dependency order:
-   - `escrow.set_registry_contract(registry)`
-   - `escrow.set_path_payment_router(router)` — only if `PATH_PAYMENT_ROUTER` set
-   - `escrow.set_fee_config(fee_collector, fee_rate_bps)` — only if `FEE_RATE_BPS > 0`
-   - `production_escrow.set_registry_contract(registry)`
-   - `escrow.set_governance_contract(governance)`
-   - `production_escrow.set_governance_contract(governance)`
-   - `registry.set_governance_contract(governance)`
-   - `investment_basket.set_governance_contract(governance)`
+## Deployment Architecture
 
-   Governance wiring is **last**: once `set_governance_contract` lands, every
-   other setter on that contract becomes governance-gated and can no longer be
-   driven by the raw admin key. Each wiring step reads the current on-chain
-   value first and is skipped when it already matches — that is what makes a
-   re-run converge instead of erroring on the now-gated setters.
-5. **Verify** — reads back every configured `registry` / `governance` address
-   (and `registry.get_contract_refs`) and asserts each equals what was just
-   deployed. Any mismatch prints `FAIL …` and exits `1`, so a contract that
-   shipped with the registry or governance unset fails the deploy instead of a
-   later audit.
-6. **Write** `deployments/deployed-addresses.<network>.json` — contract IDs,
-   WASM hashes, salts, and the wiring map. See
-   [`deployed-addresses.example.json`](../../deployments/deployed-addresses.example.json).
+### Contract Dependency Order
+
+Derived from reading `initialize` and setter functions in each contract:
+
+1. **governance** (standalone, no external dependencies)
+   - `initialize(admin, voting_period_secs, timelock_delay_secs, upgrade_timelock_delay_secs, quorum_weight)`
+
+2. **production_escrow, registry, investment_basket** (can deploy in parallel)
+   - `production_escrow.initialize(admin, supported_tokens, fee_collector, fee_rate_bps)`
+   - `registry.initialize(admin, escrow_contract, production_contract)`
+   - `investment_basket.initialize(admin, escrow_contract)`
+
+3. **Wire registry reference** (production_escrow depends on registry address)
+   - `production_escrow.set_registry_contract(registry_id)`
+
+4. **Wire governance** (all contracts reference governance once configured)
+   - `production_escrow.set_governance_contract(governance_id)`
+   - `registry.set_governance_contract(governance_id)`
+   - `investment_basket.set_governance_contract(governance_id)`
+
+5. **Set guardian** (governance-gated, requires multisig after #779)
+   - `production_escrow.set_guardian(guardian_address)`
+   - `registry.set_guardian(guardian_address)`
+   - `investment_basket.set_guardian(guardian_address)`
+
+6. **Set attester** (admin-only, production_escrow only)
+   - `production_escrow.set_attester(attester_address)`
+
+### Why This Order Matters
+
+- **governance first** — Other contracts check governance exists before accepting governance-gated operations. Deploying it first ensures `set_governance_contract` calls won't fail on a missing address.
+- **registry before set_registry_contract** — production_escrow's `set_registry_contract` must point to an already-deployed registry instance.
+- **governance before set_governance_contract** — Same reasoning: all contracts must have a live governance address to wire.
+- **set_guardian after governance** — The `set_guardian` functions themselves are governance-gated (once governance is configured), so governance must already be deployed and wired.
 
 ## Prerequisites
 
@@ -72,7 +78,19 @@ converges to the same state.
 
 ## Commands per network
 
-### Local sandbox
+> **MAINNET REQUIREMENT (Issue #843):** initialization must happen **in the same
+> transaction as deployment** — do **not** run `contract deploy` and `invoke
+> initialize` as separate steps on mainnet. A window between the two lets an
+> attacker front-run `initialize` and become admin (`initialize` now requires
+> the admin's authorization on all six contracts, but the deploy+init gap must
+> also be closed). Use `deploy-contracts.sh` (it performs constructor-style
+> atomic init on mainnet automatically), or pass `--init-fn initialize
+> --init-args '<json>'` to every `stellar contract deploy`. `scripts/deploy-contracts.sh` is the supported path.
+>
+> If you run any manual `invoke initialize` on mainnet, you MUST do it in the
+> same transaction as the deploy for that contract (constructor-style init).
+
+For each contract in dependency order, call `initialize` then cross-wiring setters:
 
 ```bash
 DEPLOYER=local-admin \
@@ -81,15 +99,83 @@ SUPPORTED_TOKENS=$NATIVE_SAC,$USDC_SAC \
 scripts/deploy-contracts.sh --network local
 ```
 
-### Testnet
+### Step 4: Verify Deployment
+
+After each step (or at the end), verify contract state. `deploy-contracts.sh`
+does this automatically in its verification pass; if deploying manually, run
+each readback and assert the value:
 
 ```bash
-DEPLOYER=testnet-deployer \
-FEE_COLLECTOR=GB…FEE \
-SUPPORTED_TOKENS=CB…XLM,CB…USDC \
-FEE_RATE_BPS=50 \
-PATH_PAYMENT_ROUTER=CB…ROUTER \
-scripts/deploy-contracts.sh --network testnet
+# Read back initialized values
+soroban contract invoke --id C_PRODUCTION_ESCROW_ID -- get_admin
+soroban contract invoke --id C_GOVERNANCE_ID -- get_admin
+soroban contract invoke --id C_REGISTRY_ID -- get_admin
+soroban contract invoke --id C_BASKET_ID -- get_admin
+
+# Verify governance was wired
+soroban contract invoke --id C_PRODUCTION_ESCROW_ID -- get_governance_contract
+# Should return C_GOVERNANCE_ID
+```
+
+**Mandatory pre-funding gate (Issue #843):** before any funds move on mainnet,
+every `get_admin` readback **must** equal the expected multisig account. The
+deploy script asserts `get_admin` per contract and fails the run (exit 1) on
+any mismatch; it also verifies `get_registry_contract`,
+`get_governance_contract`, registry `get_contract_refs`, and — when `GUARDIAN`
+is set — `get_guardian` on every contract that exposes it. A failing readback
+means the contract must **not** receive funds until it is fixed.
+
+### Step 5: Update Deployment Manifest
+
+Update `deployments/<network>.json` with actual contract IDs, WASM hashes, and ledger sequence:
+
+```json
+{
+  "network": "testnet",
+  "deployment_timestamp": "2025-09-15T14:30:00Z",
+  "deployer_account": "GDEVACCOUNT...",
+  "ledger_sequence": 12345678,
+  "contracts": {
+    "governance": {
+      "id": "CGOVGOV...",
+      "wasm_hash": "abc123..."
+    },
+    "production_escrow": {
+      "id": "CESCROW...",
+      "wasm_hash": "def456...",
+      "initializations": {
+        "admin": "GADMIN...",
+        "supported_tokens": ["CUSDC..."],
+        "fee_collector": "GFEE...",
+        "fee_rate_bps": 300
+      }
+    },
+    "registry": {
+      "id": "CREG...",
+      "wasm_hash": "ghi789...",
+      "initializations": {
+        "admin": "GADMIN...",
+        "escrow_contract": "CESCROW...",
+        "production_contract": "CESCROW..."
+      }
+    },
+    "investment_basket": {
+      "id": "CBASKET...",
+      "wasm_hash": "jkl012...",
+      "initializations": {
+        "admin": "GADMIN...",
+        "escrow_contract": "CESCROW..."
+      }
+    }
+  },
+  "deployment_steps": [
+    "Deployed governance",
+    "Deployed production_escrow, registry, investment_basket",
+    "Initialized all contracts",
+    "Wired governance references",
+    "Set guardian and attester roles"
+  ]
+}
 ```
 
 ### Mainnet

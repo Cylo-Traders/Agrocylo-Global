@@ -1,5 +1,5 @@
 import express from "express";
-import { requireWallet, type WalletRequest } from "../middleware/walletAuth.js";
+import { requireWallet, requireRole, type WalletRequest } from "../middleware/walletAuth.js";
 import { ApiError } from "../http/errors.js";
 import { createBuyerDemand, listBuyerDemands } from "../services/demandService.js";
 import { createFarmerSupply, listFarmerSupplies } from "../services/supplyService.js";
@@ -27,7 +27,7 @@ router.get("/supply", async (req, res) => {
   res.status(200).json(result);
 });
 
-router.post("/demand", requireWallet, async (req: WalletRequest, res, next) => {
+router.post("/demand", requireWallet, requireRole("BUYER"), async (req: WalletRequest, res, next) => {
   try {
     if (!req.walletAddress) {
       throw new ApiError(401, "Unauthorized", "Missing wallet", "https://cylos.io/errors/unauthorized");
@@ -39,7 +39,7 @@ router.post("/demand", requireWallet, async (req: WalletRequest, res, next) => {
   }
 });
 
-router.post("/supply", requireWallet, async (req: WalletRequest, res, next) => {
+router.post("/supply", requireWallet, requireRole("FARMER"), async (req: WalletRequest, res, next) => {
   try {
     if (!req.walletAddress) {
       throw new ApiError(401, "Unauthorized", "Missing wallet", "https://cylos.io/errors/unauthorized");

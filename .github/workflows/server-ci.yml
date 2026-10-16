@@ -44,6 +44,10 @@ jobs:
     runs-on: ubuntu-latest
     name: Test
     needs: install-and-build
+    # Issue #1064: the suite now releases its resources in afterAll, so a run
+    # that outlives this budget means a handle leaked again. Fail fast instead
+    # of burning the 6-hour GitHub default.
+    timeout-minutes: 10
     services:
       postgres:
         image: postgres:15
@@ -79,6 +83,9 @@ jobs:
       - name: Run tests
         env:
           DATABASE_URL: postgresql://test_user:test_password@localhost:5432/agrocylo_test
+        # Leaked handles abort the run with a diagnostic naming the owning test
+        # file instead of hanging until the job timeout.
+        timeout-minutes: 8
         run: npm test
         working-directory: agro-production/server
 

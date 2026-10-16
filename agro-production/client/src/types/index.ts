@@ -83,21 +83,24 @@ export type ProductCategory =
 export interface Product {
   id: string;
   name: string;
-  description: string;
+  description: string | null;
   imageUrl: string | null;
-  priceTokens: string; // i64 stored as BigInt, serialized to string in JSON
+  pricePerUnit: string;
+  amountUnit: "stroops";
+  currency: ProductCurrency;
   campaignId: string | null;
-  inventoryCount: number;
-  category: string;
-  isActive: boolean;
+  category: ProductCategory;
+  unit: string;
   createdAt: string;
   updatedAt: string;
-  unit: string;
   quantity: number;
-  pricePerUnit: string;
-  location: string;
+  location: string | null;
   farmerAddress: string;
+  isActive: boolean;
+  isSellable: boolean;
 }
+
+export type ProductCurrency = "XLM" | "USDC";
 
 export interface ProductFilters {
   category?: string;
@@ -124,5 +127,7 @@ export interface ProductListResponse {
     total: number;
     page: number;
     limit: number;
+    serviceVersion?: string;
+    readiness?: "ready" | "degraded";
   };
 }

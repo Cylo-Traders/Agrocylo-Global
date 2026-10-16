@@ -4,8 +4,8 @@ import { ProductCard } from "../components/ProductCard";
 import type { Product } from "@/types";
 
 vi.mock("next/link", () => ({
-  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
-    <a href={href}>{children}</a>
+  default: ({ children, href, ...props }: { children: React.ReactNode; href: string; "aria-label"?: string }) => (
+    <a href={href} {...props}>{children}</a>
   ),
 }));
 
@@ -18,11 +18,10 @@ const baseProduct: Product = {
   name: "Organic Tomatoes",
   description: "Fresh from the farm",
   imageUrl: null,
-  priceTokens: "5000000",
   campaignId: null,
-  inventoryCount: 100,
   category: "VEGETABLES",
-  isActive: true,
+  currency: "XLM",
+  amountUnit: "stroops",
   createdAt: "2026-01-01T00:00:00Z",
   updatedAt: "2026-01-01T00:00:00Z",
   unit: "kg",
@@ -30,6 +29,8 @@ const baseProduct: Product = {
   pricePerUnit: "5000000",
   location: "Lagos",
   farmerAddress: "GABC1234567890",
+  isActive: true,
+  isSellable: true,
 };
 
 describe("ProductCard", () => {

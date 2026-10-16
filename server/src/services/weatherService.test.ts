@@ -118,11 +118,24 @@ describe("weatherService.evaluateThresholds", () => {
   });
 });
 
-function mockFetchResponse(current: Record<string, number | string>) {
+const DEFAULT_MOCK_TIME = "2026-07-27T00:00";
+
+function mockFetchResponse(
+  current: Record<string, number | string>,
+  time: string = DEFAULT_MOCK_TIME,
+) {
   return {
     ok: true,
     status: 200,
-    json: async () => ({ current }),
+    json: async () => ({ current: { time, ...current } }),
+  };
+}
+
+function mockMalformedPayload(payload: unknown) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => payload,
   };
 }
 
@@ -232,6 +245,75 @@ describe("weatherService.pollFarmerWeather", () => {
 
     await pollFarmerWeather(wallet);
 
+    expect(create).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("rejects an empty current-weather payload without persisting a zero-value reading", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockMalformedPayload({})));
+
+    await expect(pollFarmerWeather(wallet)).rejects.toThrow(/unusable data/);
+    expect(create).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("rejects a payload with partial/missing fields without fabricating alerts", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(mockMalformedPayload({ current: { temperature_2m: 21 } })),
+    );
+
+    await expect(pollFarmerWeather(wallet)).rejects.toThrow(/unusable data/);
+    expect(create).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("rejects nonfinite numeric fields", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        mockMalformedPayload({
+          current: { temperature_2m: "not-a-number", precipitation: 0, wind_speed_10m: 5, weather_code: 1 },
+        }),
+      ),
+    );
+
+    await expect(pollFarmerWeather(wallet)).rejects.toThrow(/nonfinite value/);
+    expect(create).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("rejects a malformed timestamp", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(mockFetchResponse({ temperature_2m: 21, precipitation: 0, wind_speed_10m: 5, weather_code: 1 }, "not-a-date")),
+    );
+
+    await expect(pollFarmerWeather(wallet)).rejects.toThrow(/malformed reading timestamp/);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("treats an explicitly supplied zero as a valid observation", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        mockFetchResponse({ temperature_2m: 0, precipitation: 0, wind_speed_10m: 0, weather_code: 0 }),
+      ),
+    );
+
+    await pollFarmerWeather(wallet);
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ temperatureC: 0, precipitationMm: 0, windSpeedKph: 0 }),
+      }),
+    );
+  });
+
+  it("surfaces an upstream timeout/network failure without persisting a reading", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("aborted")));
+
+    await expect(pollFarmerWeather(wallet)).rejects.toThrow("aborted");
     expect(create).not.toHaveBeenCalled();
     expect(notify).not.toHaveBeenCalled();
   });

@@ -5,6 +5,8 @@
    - Retries use exponential backoff and only apply to network errors and 5xx responses on safe methods
 */
 
+import { getAccessToken } from "./authToken";
+
 /** Thrown when no response is received (DNS failure, timeout, offline, etc.) */
 export class NetworkError extends Error {
   constructor(message: string, public readonly cause?: unknown) {
@@ -55,6 +57,12 @@ export interface RequestOptions extends RequestInit {
   timeoutMs?: number;
   /** Max retry attempts on network error or 5xx (default: 3) */
   retries?: number;
+  /**
+   * Set false to omit the Authorization header (e.g. for routes that must
+   * work without a session). Default: attach the wallet access token
+   * (getAccessToken) as `Authorization: Bearer …` when one exists.
+   */
+  auth?: boolean;
 }
 
 export interface ApiClientOptions {
@@ -85,6 +93,17 @@ export class ApiClient {
     const method = init.method ?? "GET";
     const fetcher = this.fetchImpl ?? fetch.bind(globalThis);
 
+    // Central wallet auth (#1052): attach the stored access token unless the
+    // caller opted out, without clobbering an explicitly-provided header.
+    const headers = { ...(init.headers as Record<string, string> | undefined) };
+    if (options.auth !== false && !headers["Authorization"]) {
+      const token = getAccessToken();
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+    }
+    init.headers = headers;
+
     let lastError: unknown;
 
     for (let attempt = 0; attempt <= retries; attempt++) {
@@ -95,12 +114,21 @@ export class ApiClient {
       }
 
       const controller = new AbortController();
+      const externalSignal = options.signal;
+      const abortListener = externalSignal
+        ? () => controller.abort(externalSignal.reason)
+        : undefined;
+      if (abortListener) {
+        if (externalSignal?.aborted) abortListener();
+        else externalSignal?.addEventListener("abort", abortListener, { once: true });
+      }
       const timer = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
         console.debug(`[api] ${method} ${url}`);
         const res = await fetcher(url, { ...init, signal: controller.signal });
         clearTimeout(timer);
+        if (abortListener) externalSignal?.removeEventListener("abort", abortListener);
 
         const ct = res.headers.get("content-type") ?? "";
         const body = ct.includes("application/json")
@@ -127,6 +155,9 @@ export class ApiClient {
         return body as T;
       } catch (err) {
         clearTimeout(timer);
+        if (abortListener) externalSignal?.removeEventListener("abort", abortListener);
+
+        if (externalSignal?.aborted) throw err;
 
         if (err instanceof ApiError) throw err; // already handled above
 
@@ -156,9 +187,23 @@ export class ApiClient {
     return this.request<T>(path, { ...options, method: "POST", headers, body: JSON.stringify(data) });
   }
 
+  /**
+   * Multipart upload (#1053): sends a FormData body as-is so the browser
+   * sets the `multipart/form-data` boundary itself (never set Content-Type
+   * manually for FormData). Auth is attached like any other request.
+   */
+  upload<T = unknown>(path: string, data: FormData, options: RequestOptions = {}) {
+    return this.request<T>(path, { ...options, method: "POST", body: data });
+  }
+
   put<T = unknown>(path: string, data?: unknown, options?: RequestOptions) {
     const headers = { "Content-Type": "application/json", ...(options?.headers as Record<string, string>) };
     return this.request<T>(path, { ...options, method: "PUT", headers, body: JSON.stringify(data) });
+  }
+
+  patch<T = unknown>(path: string, data?: unknown, options?: RequestOptions) {
+    const headers = { "Content-Type": "application/json", ...(options?.headers as Record<string, string>) };
+    return this.request<T>(path, { ...options, method: "PATCH", headers, body: JSON.stringify(data) });
   }
 
   delete<T = unknown>(path: string, options?: RequestOptions) {

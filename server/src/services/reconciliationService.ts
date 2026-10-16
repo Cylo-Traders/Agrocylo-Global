@@ -1,8 +1,24 @@
-import { rpc, Address, Contract, nativeToScVal, scValToNative as sdkScValToNative, TransactionBuilder, xdr } from "@stellar/stellar-sdk";
+import { rpc, Account, Address, Contract, nativeToScVal, scValToNative as sdkScValToNative, TransactionBuilder, xdr } from "@stellar/stellar-sdk";
 import { prisma } from "../config/database.js";
 import { config } from "../config/index.js";
 import logger from "../config/logger.js";
 import { amountsEqual, canonicalizeAmount } from "../lib/money.js";
+import { captureAlert } from "../config/sentry.js";
+import {
+  ACTIVE_CAMPAIGN_STATUSES_ESCROW,
+  CampaignStatus,
+  DisputeStatus,
+  OPEN_ORDER_STATUSES,
+  OrderStatus,
+  fromContractCampaignStatus,
+  fromContractOrderStatus,
+  normalizeOrderStatus,
+} from "../constants/status.js";
+import {
+  reconciliationDriftTotal,
+  reconciliationErrorsTotal,
+  reconciliationRunDurationSeconds,
+} from "./promMetrics.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -39,7 +55,7 @@ async function simulateContractFn(
   args: xdr.ScVal[],
 ): Promise<xdr.ScVal | null> {
   const contract = new Contract(contractId);
-  const sourceAccount = new rpc.Account(
+  const sourceAccount = new Account(
     "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     "0",
   );
@@ -164,7 +180,7 @@ async function reconcileOrders(
         continue;
       }
 
-      const chainStatus = ORDER_STATUS_MAP[Number(native["status"])] ?? String(native["status"]);
+      const chainStatus = fromContractOrderStatus(Number(native["status"]), "escrow");
       // Canonicalize chain amount: on-chain i128 may render as number/bigint; normalize to canonical string
       let chainAmount = "";
       try {
@@ -830,7 +846,7 @@ export async function reconcileSingleOrder(orderIdOnChain: string): Promise<Drif
     throw new Error("Unexpected contract response format");
   }
 
-  const chainStatus = ORDER_STATUS_MAP[Number(native["status"])] ?? String(native["status"]);
+  const chainStatus = fromContractOrderStatus(Number(native["status"]), "escrow");
   let chainAmount = "";
   try {
     const rawAmt = native["amount"];

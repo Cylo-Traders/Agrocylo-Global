@@ -15,6 +15,7 @@ vi.mock('express-rate-limit', () => ({
 
 vi.mock('../services/wsServer.js', () => ({
   broadcast: vi.fn(),
+  broadcastTo: vi.fn(),
   attachWebSocketServer: vi.fn(),
   closeWebSocketServer: vi.fn(),
   drainWebSocketServer: vi.fn(),
@@ -62,7 +63,7 @@ vi.mock('../db/client.js', () => ({
 
 import app from '../app.js';
 import { prisma } from '../db/client.js';
-import { broadcast } from '../services/wsServer.js';
+import { broadcast, broadcastTo } from '../services/wsServer.js';
 
 const WALLET = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const OTHER_WALLET = 'GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC';
@@ -113,10 +114,15 @@ describe('Transaction Status & Reconciliation API', () => {
       expect(res.body.status).toBe('awaiting_signature');
       expect(res.body.requestId).toBe(REQUEST_ID);
       expect(res.body.txHash).toBe(TX_HASH);
-      expect(broadcast).toHaveBeenCalledWith('transaction.status', expect.objectContaining({
+      // Issue #1065: status is targeted at the owning wallet and carries no
+      // wallet address.
+      expect(broadcastTo).toHaveBeenCalledWith(WALLET, 'transaction.status', expect.objectContaining({
         status: 'awaiting_signature',
-        walletAddress: WALLET,
+        requestId: REQUEST_ID,
       }));
+      const payload = vi.mocked(broadcastTo).mock.calls.at(-1)?.[2] as Record<string, unknown>;
+      expect(payload).not.toHaveProperty('walletAddress');
+      expect(broadcast).not.toHaveBeenCalled();
     });
 
     it('returns existing transaction on duplicate requestId (idempotent)', async () => {
@@ -177,22 +183,49 @@ describe('Transaction Status & Reconciliation API', () => {
   });
 
   describe('GET /api/v1/transactions/:requestId', () => {
-    it('returns transaction status by requestId', async () => {
+    it('returns transaction status by requestId for the owning wallet', async () => {
       (prisma.transaction.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(makeTx());
 
       const res = await request(app)
-        .get(`/api/v1/transactions/${REQUEST_ID}`);
+        .get(`/api/v1/transactions/${REQUEST_ID}`)
+        .set('Authorization', 'Bearer test-session');
 
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('awaiting_signature');
       expect(res.body.requestId).toBe(REQUEST_ID);
     });
 
+    it('returns 404 when another wallet reads the transaction by a guessed requestId', async () => {
+      // Issue #1065: the transaction exists but belongs to a different wallet.
+      (prisma.transaction.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(makeTx());
+      mockVerifySession.mockResolvedValue({
+        walletAddress: OTHER_WALLET,
+        sessionToken: 'other-session',
+      });
+
+      const res = await request(app)
+        .get(`/api/v1/transactions/${REQUEST_ID}`)
+        .set('Authorization', 'Bearer other-session');
+
+      // 404 rather than 403 so the transaction's existence is not revealed.
+      expect(res.status).toBe(404);
+    });
+
+    it('returns 401 for unauthenticated reads', async () => {
+      (prisma.transaction.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(makeTx());
+
+      const res = await request(app)
+        .get(`/api/v1/transactions/${REQUEST_ID}`);
+
+      expect(res.status).toBe(401);
+    });
+
     it('returns 404 for unknown requestId', async () => {
       (prisma.transaction.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
       const res = await request(app)
-        .get(`/api/v1/transactions/${REQUEST_ID}`);
+        .get(`/api/v1/transactions/${REQUEST_ID}`)
+        .set('Authorization', 'Bearer test-session');
 
       expect(res.status).toBe(404);
     });
@@ -228,7 +261,7 @@ describe('Transaction Status & Reconciliation API', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('submitted');
-      expect(broadcast).toHaveBeenCalledWith('transaction.status', expect.objectContaining({
+      expect(broadcastTo).toHaveBeenCalledWith(WALLET, 'transaction.status', expect.objectContaining({
         status: 'submitted',
         previousStatus: 'awaiting_signature',
       }));
@@ -309,6 +342,21 @@ describe('Transaction Status & Reconciliation API', () => {
   });
 
   describe('GET /api/v1/transactions/:requestId/reconcile', () => {
+    it('returns 404 when another wallet reconciles the transaction', async () => {
+      // Issue #1065: reconcile reads are owner-gated like status reads.
+      (prisma.transaction.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(makeTx());
+      mockVerifySession.mockResolvedValue({
+        walletAddress: OTHER_WALLET,
+        sessionToken: 'other-session',
+      });
+
+      const res = await request(app)
+        .get(`/api/v1/transactions/${REQUEST_ID}/reconcile`)
+        .set('Authorization', 'Bearer other-session');
+
+      expect(res.status).toBe(404);
+    });
+
     it('returns indexed when transaction found in watcher data', async () => {
       (prisma.transaction.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(
         makeTx({ status: 'submitted' }),
@@ -319,7 +367,8 @@ describe('Transaction Status & Reconciliation API', () => {
         .mockResolvedValue({ id: 'indexed-tx', ledger: 1234, status: 'indexed' });
 
       const res = await request(app)
-        .get(`/api/v1/transactions/${REQUEST_ID}/reconcile`);
+        .get(`/api/v1/transactions/${REQUEST_ID}/reconcile`)
+        .set('Authorization', 'Bearer test-session');
 
       expect(res.status).toBe(200);
       expect(res.body.dbStatus).toBe('submitted');
@@ -339,7 +388,8 @@ describe('Transaction Status & Reconciliation API', () => {
         .mockResolvedValue({ id: 'indexed-tx', ledger: 0, status: 'indexed' });
 
       const res = await request(app)
-        .get(`/api/v1/transactions/${REQUEST_ID}/reconcile`);
+        .get(`/api/v1/transactions/${REQUEST_ID}/reconcile`)
+        .set('Authorization', 'Bearer test-session');
 
       expect(res.status).toBe(200);
       expect(res.body.confirmedInLedger).toBe(true);
@@ -355,7 +405,8 @@ describe('Transaction Status & Reconciliation API', () => {
       (prisma.transaction.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
       const res = await request(app)
-        .get(`/api/v1/transactions/${REQUEST_ID}/reconcile`);
+        .get(`/api/v1/transactions/${REQUEST_ID}/reconcile`)
+        .set('Authorization', 'Bearer test-session');
 
       expect(res.status).toBe(200);
       expect(res.body.reconciledStatus).toBe('submitted');
@@ -370,7 +421,8 @@ describe('Transaction Status & Reconciliation API', () => {
       (prisma.eventCursor.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
       const res = await request(app)
-        .get(`/api/v1/transactions/${REQUEST_ID}/reconcile`);
+        .get(`/api/v1/transactions/${REQUEST_ID}/reconcile`)
+        .set('Authorization', 'Bearer test-session');
 
       expect(res.status).toBe(200);
       expect(res.body.reconciledStatus).toBe('failed');
@@ -380,7 +432,8 @@ describe('Transaction Status & Reconciliation API', () => {
       (prisma.transaction.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
       const res = await request(app)
-        .get(`/api/v1/transactions/${REQUEST_ID}/reconcile`);
+        .get(`/api/v1/transactions/${REQUEST_ID}/reconcile`)
+        .set('Authorization', 'Bearer test-session');
 
       expect(res.status).toBe(404);
     });

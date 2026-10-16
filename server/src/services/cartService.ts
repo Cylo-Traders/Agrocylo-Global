@@ -6,6 +6,34 @@ import { wsManager } from './wsManager.js';
 const FEE_BPS = 3n;
 const HUNDRED = 100n;
 
+// CartItem.quantity is @db.Decimal(10, 2): 8 integer digits + 2 decimal places.
+const QUANTITY_MAX_INT_DIGITS = 8;
+const QUANTITY_MAX_SCALE = 2;
+
+/**
+ * Validates a cart item quantity before it reaches persistence. Rejects
+ * non-numeric / non-finite input, zero, negatives, range overflow and values
+ * with more fractional places than the column scale supports (issue #958).
+ */
+function validateQuantity(input: unknown): string {
+  const value = String(input ?? '').trim();
+  if (!/^\d+(\.\d+)?$/.test(value)) {
+    throw new ApiError(400, 'Bad Request', 'quantity must be a positive decimal number');
+  }
+  const [intPart, fracPart = ''] = value.split('.');
+  const significant = intPart.replace(/^0+/, '');
+  if (!significant || significant === '0') {
+    throw new ApiError(400, 'Bad Request', 'quantity must be greater than zero');
+  }
+  if (significant.length > QUANTITY_MAX_INT_DIGITS) {
+    throw new ApiError(400, 'Bad Request', `quantity is out of range (max ${QUANTITY_MAX_INT_DIGITS} integer digits)`);
+  }
+  if (fracPart.length > QUANTITY_MAX_SCALE) {
+    throw new ApiError(400, 'Bad Request', `quantity supports at most ${QUANTITY_MAX_SCALE} decimal places`);
+  }
+  return value;
+}
+
 type CartItemRow = {
   item_id: string;
   product_id: string;
@@ -21,6 +49,15 @@ type CartItemRow = {
 
 type Tx = Prisma.TransactionClient;
 
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: string }).code === 'P2002'
+  );
+}
+
 function fee(amount: bigint): bigint {
   return (amount * FEE_BPS) / HUNDRED;
 }
@@ -32,11 +69,25 @@ async function getOrCreateActiveCart(tx: Tx, wallet: string): Promise<string> {
   });
   if (existing) return existing.id;
 
-  const created = await tx.cart.create({
-    data: { buyerWallet: wallet, status: 'active' },
-    select: { id: true },
-  });
-  return created.id;
+  try {
+    const created = await tx.cart.create({
+      data: { buyerWallet: wallet, status: 'active' },
+      select: { id: true },
+    });
+    return created.id;
+  } catch (error) {
+    // Two concurrent requests each raced past the findFirst; the unique
+    // partial index ("one active cart per buyer") lets only one win. Re-read
+    // the winner instead of failing the request (issue #959).
+    if (isUniqueViolation(error)) {
+      const winner = await tx.cart.findFirst({
+        where: { buyerWallet: wallet, status: 'active' },
+        select: { id: true },
+      });
+      if (winner) return winner.id;
+    }
+    throw error;
+  }
 }
 
 async function ensureCartActive(tx: Tx, cartId: string, buyerWallet: string): Promise<void> {
@@ -144,7 +195,7 @@ export async function addItem(buyerWallet: string, payload: { product_id?: strin
     throw new ApiError(400, 'Bad Request', 'product_id and quantity are required');
   }
   const productId = payload.product_id;
-  const quantity = payload.quantity;
+  const quantity = validateQuantity(payload.quantity);
 
   return prisma.$transaction(async (tx) => {
     const cartId = await getOrCreateActiveCart(tx, buyerWallet);
@@ -162,28 +213,20 @@ export async function addItem(buyerWallet: string, payload: { product_id?: strin
     if (!product) throw new ApiError(404, 'Not Found', 'Product not found');
     if (!product.isAvailable) throw new ApiError(409, 'Conflict', 'Product is not available');
 
-    const existing = await tx.cartItem.findFirst({
-      where: { cartId, productId },
-      select: { id: true },
+    await tx.cartItem.upsert({
+      where: { cartId_productId: { cartId, productId } },
+      create: {
+        cartId,
+        productId: product.id,
+        farmerWallet: product.farmerWallet,
+        quantity: new Prisma.Decimal(quantity),
+        unitPrice: product.pricePerUnit,
+        currency: product.currency,
+      },
+      update: {
+        quantity: { increment: new Prisma.Decimal(quantity) },
+      },
     });
-
-    if (existing) {
-      await tx.cartItem.update({
-        where: { id: existing.id },
-        data: { quantity: { increment: new Prisma.Decimal(quantity) } },
-      });
-    } else {
-      await tx.cartItem.create({
-        data: {
-          cartId,
-          productId: product.id,
-          farmerWallet: product.farmerWallet,
-          quantity: new Prisma.Decimal(quantity),
-          unitPrice: product.pricePerUnit,
-          currency: product.currency,
-        },
-      });
-    }
     const rows = await fetchCartRows(cartId, tx);
     const result = { cart_id: cartId, groups: groupRows(rows) };
     emitCartEvent(buyerWallet, result);
@@ -192,19 +235,27 @@ export async function addItem(buyerWallet: string, payload: { product_id?: strin
 }
 
 export async function updateItemQuantity(buyerWallet: string, itemId: string, quantity: string) {
+  const validated = validateQuantity(quantity);
   return prisma.$transaction(async (tx) => {
-    const owner = await tx.cartItem.findFirst({
+    const updated = await tx.cartItem.updateMany({
+      where: { id: itemId, cart: { buyerWallet, status: 'active' } },
+      data: { quantity: new Prisma.Decimal(validated) },
+    });
+    if (updated.count === 0) {
+      const owner = await tx.cartItem.findFirst({
+        where: { id: itemId, cart: { buyerWallet } },
+        select: { cart: { select: { status: true } } },
+      });
+      if (!owner) throw new ApiError(404, 'Not Found', 'Cart item not found');
+      throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
+    }
+    const ownerRow = await tx.cartItem.findFirst({
       where: { id: itemId, cart: { buyerWallet } },
-      select: { cartId: true, cart: { select: { status: true } } },
+      select: { cartId: true },
     });
-    if (!owner) throw new ApiError(404, 'Not Found', 'Cart item not found');
-    if (owner.cart.status !== 'active') throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
-    await tx.cartItem.update({
-      where: { id: itemId },
-      data: { quantity: new Prisma.Decimal(quantity) },
-    });
-    const rows = await fetchCartRows(owner.cartId, tx);
-    const result = { cart_id: owner.cartId, groups: groupRows(rows) };
+    const cartId = ownerRow!.cartId;
+    const rows = await fetchCartRows(cartId, tx);
+    const result = { cart_id: cartId, groups: groupRows(rows) };
     emitCartEvent(buyerWallet, result);
     return result;
   });
@@ -218,7 +269,10 @@ export async function removeItem(buyerWallet: string, itemId: string) {
     });
     if (!owner) throw new ApiError(404, 'Not Found', 'Cart item not found');
     if (owner.cart.status !== 'active') throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
-    await tx.cartItem.delete({ where: { id: itemId } });
+    const removed = await tx.cartItem.deleteMany({
+      where: { id: itemId, cart: { buyerWallet, status: 'active' } },
+    });
+    if (removed.count === 0) throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
     const rows = await fetchCartRows(owner.cartId, tx);
     const result = { cart_id: owner.cartId, groups: groupRows(rows) };
     emitCartEvent(buyerWallet, result);
@@ -230,10 +284,14 @@ export async function clearCart(buyerWallet: string) {
   return prisma.$transaction(async (tx) => {
     const cart = await tx.cart.findFirst({
       where: { buyerWallet, status: 'active' },
-      select: { id: true, status: true },
+      select: { id: true },
     });
     if (!cart) return { cart_id: null, groups: [] };
-    if (cart.status !== 'active') throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
+    const claimed = await tx.cart.updateMany({
+      where: { id: cart.id, buyerWallet, status: 'active' },
+      data: { updatedAt: new Date() },
+    });
+    if (claimed.count === 0) throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
     await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
     const result = { cart_id: cart.id, groups: [] };
     emitCartEvent(buyerWallet, result);
@@ -245,11 +303,10 @@ export async function checkout(buyerWallet: string) {
   return prisma.$transaction(async (tx) => {
     const cart = await tx.cart.findFirst({
       where: { buyerWallet, status: 'active' },
-      select: { id: true, status: true },
+      select: { id: true },
     });
     if (!cart) throw new ApiError(404, 'Not Found', 'Active cart not found');
     const cartId = cart.id;
-    if (cart.status !== 'active') throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
 
     const rows = await fetchCartRows(cartId, tx);
     const unavailable = rows.filter((r) => !r.is_available);
@@ -276,7 +333,11 @@ export async function checkout(buyerWallet: string) {
     const totalFee = orders.reduce((acc, o) => acc + BigInt(o.fee_amount), 0n);
     const totalNet = orders.reduce((acc, o) => acc + BigInt(o.net_amount), 0n);
 
-    await tx.cart.update({ where: { id: cartId }, data: { status: 'checked_out' } });
+    const updated = await tx.cart.updateMany({
+      where: { id: cartId, buyerWallet, status: 'active' },
+      data: { status: 'checked_out' },
+    });
+    if (updated.count === 0) throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
     return { orders, total_gross: totalGross.toString(), total_fee: totalFee.toString(), total_net: totalNet.toString() };
   });
 }

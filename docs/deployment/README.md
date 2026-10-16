@@ -64,12 +64,38 @@ The `deploy.yml` workflow runs these stages in order:
 
 1. **Resolve environment** — Determines staging vs production from the trigger.
 2. **Build images** — Builds 4 Docker images in parallel, pushes to `ghcr.io`.
-3. **Deploy** — Updates all 4 Fly.io machines with the new images.
-4. **Migrate** — Runs `prisma migrate deploy` against each database.
+3. **Migrate** — Runs `prisma migrate deploy` against both databases using the
+   committed migration history. This job depends on the image build but runs
+   before any Fly.io application is updated.
+4. **Deploy** — Updates all 4 Fly.io machines with the new images only after
+   both migrations succeed. A migration failure blocks promotion.
 5. **Smoke test** — Hits `/health` on both backends and `/` on both frontends. Retries up to 5 times with 10 s backoff.
 6. **Rollback** — If any smoke test fails, runs `flyctl releases rollback` on all 4 apps and fails the workflow.
 
 ## How to deploy
+
+### Database migration ownership
+
+Prisma migrations are release artifacts. The GitHub Actions `migrate` job is the
+single production/staging migration owner and runs once per release before
+application rollout. Application containers only start the compiled server;
+they never run `prisma db push`, `--accept-data-loss`, schema reset, or any
+other schema-writing command. This prevents restarts and multiple replicas from
+competing to modify the database.
+
+For local Compose, the `backend-migrate` and `agro-backend-migrate` one-shot
+services run `prisma migrate deploy` after PostgreSQL health checks. The
+application services depend on successful completion of those jobs, so a
+migration failure prevents startup. Re-running an already initialized stack
+only replays the migration history safely and does not erase seeded data.
+
+```bash
+docker compose up -d
+docker compose ps backend-migrate agro-backend-migrate
+```
+
+Use `docker compose down -v` only when intentionally deleting the disposable
+local databases.
 
 ### Automatic (recommended)
 

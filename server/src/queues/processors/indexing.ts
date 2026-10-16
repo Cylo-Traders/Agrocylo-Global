@@ -138,10 +138,8 @@ export async function processIndexing(job: Job): Promise<void> {
         await handleIndexProductData(job);
         break;
       default:
-        logger.warn("Unknown indexing job name", {
-          jobId: job.id,
-          name: job.name,
-        });
+        // Fail loudly so unsupported jobs are not silently marked complete.
+        throw new Error(`Unknown indexing job name: ${job.name}`);
     }
   } catch (error) {
     logger.error("Indexing job failed", error, {

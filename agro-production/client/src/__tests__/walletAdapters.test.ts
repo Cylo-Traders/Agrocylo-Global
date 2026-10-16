@@ -1,91 +1,186 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { WALLET_ADAPTERS, getWalletAdapter, DEFAULT_WALLET_ID } from "../lib/wallets/registry";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ModuleInterface } from "@creit.tech/stellar-wallets-kit/types";
+
+const fixtures = vi.hoisted(() => {
+  const ids = ["freighter", "xbull", "albedo", "rabet", "hana", "lobstr"];
+  return ids.map((id) => ({
+    moduleType: "HOT_WALLET",
+    productId: id,
+    productName: id === "xbull" ? "xBull" : id[0].toUpperCase() + id.slice(1),
+    productUrl: `https://wallet.example/${id}`,
+    productIcon: `https://wallet.example/${id}.png`,
+    isAvailable: vi.fn(async () => true),
+    getAddress: vi.fn(async () => ({ address: `G${id.toUpperCase()}` })),
+    getNetwork: vi.fn(async () => ({
+      network: "TESTNET",
+      networkPassphrase: "Test SDF Network ; September 2015",
+    })),
+    signTransaction: vi.fn(async () => ({
+      signedTxXdr: `SIGNED_${id}`,
+    })),
+  }));
+});
+
+const kit = vi.hoisted(() => ({
+  init: vi.fn(),
+  setWallet: vi.fn(),
+  getAddress: vi.fn(async () => ({ address: "GPERSISTED" })),
+  fetchAddress: vi.fn(async () => ({ address: "GCONNECTED" })),
+  getNetwork: vi.fn(async () => ({
+    network: "TESTNET",
+    networkPassphrase: "Test SDF Network ; September 2015",
+  })),
+  signTransaction: vi.fn(async () => ({ signedTxXdr: "SIGNED_XDR" })),
+  disconnect: vi.fn(async () => undefined),
+  refreshSupportedWallets: vi.fn(async () =>
+    fixtures.map((module) => ({
+      id: module.productId,
+      name: module.productName,
+      type: module.moduleType,
+      icon: module.productIcon,
+      url: module.productUrl,
+      isAvailable: true,
+      isPlatformWrapper: false,
+    })),
+  ),
+  authModal: vi.fn(async () => ({ address: "GMODAL" })),
+  selectedModule: { productId: "freighter" },
+}));
+
+vi.mock("@creit.tech/stellar-wallets-kit/sdk", () => ({
+  StellarWalletsKit: kit,
+}));
+
+vi.mock("@creit.tech/stellar-wallets-kit/modules/utils", () => ({
+  defaultModules: ({
+    filterBy,
+  }: {
+    filterBy: (module: ModuleInterface) => boolean;
+  }) => fixtures.filter((module) => filterBy(module as unknown as ModuleInterface)),
+}));
+
+vi.mock("@creit.tech/stellar-wallets-kit/modules/wallet-connect", () => ({
+  WalletConnectModule: class {},
+  WalletConnectTargetChain: {
+    PUBLIC: "stellar:pubnet",
+    TESTNET: "stellar:testnet",
+  },
+}));
+
+vi.mock("@creit.tech/stellar-wallets-kit/types", () => ({
+  Networks: {
+    PUBLIC: "Public Global Stellar Network ; September 2015",
+    TESTNET: "Test SDF Network ; September 2015",
+    FUTURENET: "Test SDF Future Network ; October 2022",
+    SANDBOX: "Local Sandbox Stellar Network ; September 2022",
+    STANDALONE: "Standalone Network ; February 2017",
+  },
+}));
+
+import {
+  DEFAULT_WALLET_ID,
+  getWalletAdapter,
+  WALLET_ADAPTERS,
+} from "../lib/wallets/registry";
 
 const NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
 
-/**
- * Every adapter must honor the same contract regardless of which wallet
- * extension backs it, so the UI and signTransaction.ts can treat them
- * interchangeably.
- */
-describe("wallet adapter conformance", () => {
+describe("Stellar Wallets Kit adapter contract", () => {
   beforeEach(() => {
-    delete (window as { freighter?: unknown }).freighter;
-    delete (window as { freighterApi?: unknown }).freighterApi;
-    delete (window as { rabet?: unknown }).rabet;
-    delete (window as { hanaWallet?: unknown }).hanaWallet;
+    vi.clearAllMocks();
+    kit.getAddress.mockResolvedValue({ address: "GPERSISTED" });
+    kit.fetchAddress.mockResolvedValue({ address: "GCONNECTED" });
+    kit.getNetwork.mockResolvedValue({
+      network: "TESTNET",
+      networkPassphrase: NETWORK_PASSPHRASE,
+    });
+    kit.signTransaction.mockResolvedValue({ signedTxXdr: "SIGNED_XDR" });
   });
 
-  it("exposes at least three distinct adapters", () => {
-    expect(WALLET_ADAPTERS.length).toBeGreaterThanOrEqual(3);
-    const ids = new Set(WALLET_ADAPTERS.map((a) => a.id));
-    expect(ids.size).toBe(WALLET_ADAPTERS.length);
+  it("enables the reviewed cross-platform module set", () => {
+    expect(WALLET_ADAPTERS.map((adapter) => adapter.id)).toEqual([
+      "freighter",
+      "xbull",
+      "albedo",
+      "rabet",
+      "hana",
+      "lobstr",
+    ]);
+    expect(DEFAULT_WALLET_ID).toBe("freighter");
   });
 
-  it("falls back to the default adapter for an unknown id", () => {
-    expect(getWalletAdapter("not-a-real-wallet").id).toBe(DEFAULT_WALLET_ID);
+  it("falls back to the default adapter for an unknown persisted id", () => {
+    expect(getWalletAdapter("removed-provider").id).toBe(DEFAULT_WALLET_ID);
     expect(getWalletAdapter(undefined).id).toBe(DEFAULT_WALLET_ID);
   });
 
-  for (const adapter of WALLET_ADAPTERS) {
-    describe(`${adapter.name} (${adapter.id})`, () => {
-      it("reports unavailable when no bridge is injected", () => {
-        expect(adapter.isAvailable()).toBe(false);
-      });
+  for (const fixture of fixtures) {
+    it(`${fixture.productName} satisfies connection, network, signing, and disconnect`, async () => {
+      const adapter = getWalletAdapter(fixture.productId);
 
-      it("getPublicKey resolves null when unavailable", async () => {
-        if (adapter.id === "freighter") return; // falls through to @stellar/freighter-api, mocked elsewhere
-        await expect(adapter.getPublicKey()).resolves.toBeNull();
+      expect(adapter.name).toBe(fixture.productName);
+      expect(adapter.iconUrl).toBe(fixture.productIcon);
+      expect(adapter.installUrl).toBe(fixture.productUrl);
+      await expect(adapter.isAvailable()).resolves.toBe(true);
+      await expect(adapter.getPublicKey()).resolves.toBe("GCONNECTED");
+      await expect(adapter.getNetwork()).resolves.toEqual({
+        networkPassphrase: NETWORK_PASSPHRASE,
       });
+      await expect(
+        adapter.signTransaction("XDR", {
+          networkPassphrase: NETWORK_PASSPHRASE,
+          address: "GCONNECTED",
+        }),
+      ).resolves.toBe("SIGNED_XDR");
+      await adapter.disconnect();
 
-      it("signTransaction rejects when unavailable", async () => {
-        if (adapter.id === "freighter") return; // falls through to @stellar/freighter-api, mocked elsewhere
-        await expect(
-          adapter.signTransaction("XDR", { networkPassphrase: NETWORK_PASSPHRASE }),
-        ).rejects.toThrow();
+      expect(kit.setWallet).toHaveBeenCalledWith(fixture.productId);
+      expect(kit.signTransaction).toHaveBeenCalledWith("XDR", {
+        networkPassphrase: NETWORK_PASSPHRASE,
+        address: "GCONNECTED",
       });
+      expect(kit.disconnect).toHaveBeenCalled();
     });
   }
 
-  it("Rabet adapter round-trips getPublicKey and signTransaction through the injected bridge", async () => {
-    const connect = vi.fn(async () => ({ publicKey: "GRABET" }));
-    const sign = vi.fn(async () => ({ xdr: "SIGNED_XDR" }));
-    (window as unknown as { rabet: unknown }).rabet = { connect, sign };
-
-    const adapter = getWalletAdapter("rabet");
-    expect(adapter.isAvailable()).toBe(true);
-    await expect(adapter.getPublicKey()).resolves.toBe("GRABET");
+  it("restores the kit's persisted address without requesting wallet access", async () => {
     await expect(
-      adapter.signTransaction("XDR", { networkPassphrase: NETWORK_PASSPHRASE }),
-    ).resolves.toBe("SIGNED_XDR");
-    expect(sign).toHaveBeenCalledWith("XDR", "testnet");
+      getWalletAdapter("freighter").getPublicKey({ silent: true }),
+    ).resolves.toBe("GPERSISTED");
+    expect(kit.getAddress).toHaveBeenCalled();
+    expect(kit.fetchAddress).not.toHaveBeenCalled();
   });
 
-  it("Rabet adapter surfaces wallet errors", async () => {
-    (window as unknown as { rabet: unknown }).rabet = {
-      connect: vi.fn(async () => ({ error: "User rejected" })),
-      sign: vi.fn(),
-    };
-    const adapter = getWalletAdapter("rabet");
-    await expect(adapter.getPublicKey()).rejects.toThrow("User rejected");
+  it("re-reads the address from the module after a refresh, without prompting", async () => {
+    const [xbull] = fixtures.filter((module) => module.productId === "xbull");
+    kit.getAddress.mockResolvedValueOnce({ address: "" } as never);
+    await expect(
+      getWalletAdapter("xbull").getPublicKey({ silent: true }),
+    ).resolves.toBe("GXBULL");
+    expect(xbull?.getAddress).toHaveBeenCalledWith({ skipRequestAccess: true });
+    expect(kit.fetchAddress).not.toHaveBeenCalled();
   });
 
-  it("Hana adapter round-trips getPublicKey, getNetwork, and signTransaction", async () => {
-    (window as unknown as { hanaWallet: unknown }).hanaWallet = {
-      stellar: {
-        getPublicKey: vi.fn(async () => "GHANA"),
-        getNetworkDetails: vi.fn(async () => ({ networkPassphrase: NETWORK_PASSPHRASE })),
-        signTransaction: vi.fn(async () => "SIGNED_XDR"),
-      },
-    };
-    const adapter = getWalletAdapter("hana");
-    expect(adapter.isAvailable()).toBe(true);
-    await expect(adapter.getPublicKey()).resolves.toBe("GHANA");
-    await expect(adapter.getNetwork()).resolves.toEqual({
-      networkPassphrase: NETWORK_PASSPHRASE,
-    });
+  it("reports no address when the provider cannot be read without a prompt", async () => {
+    const [hana] = fixtures.filter((module) => module.productId === "hana");
+    kit.getAddress.mockResolvedValueOnce({ address: "" } as never);
+    hana?.getAddress.mockRejectedValueOnce(new Error("locked"));
     await expect(
-      adapter.signTransaction("XDR", { networkPassphrase: NETWORK_PASSPHRASE }),
-    ).resolves.toBe("SIGNED_XDR");
+      getWalletAdapter("hana").getPublicKey({ silent: true }),
+    ).resolves.toBeNull();
+  });
+
+  it("normalizes an unavailable provider to false", async () => {
+    fixtures[0].isAvailable.mockRejectedValueOnce(new Error("not installed"));
+    await expect(getWalletAdapter("freighter").isAvailable()).resolves.toBe(false);
+  });
+
+  it("rejects an empty signed XDR", async () => {
+    kit.signTransaction.mockResolvedValueOnce({ signedTxXdr: "" });
+    await expect(
+      getWalletAdapter("hana").signTransaction("XDR", {
+        networkPassphrase: NETWORK_PASSPHRASE,
+      }),
+    ).rejects.toThrow("Transaction rejected by Hana");
   });
 });

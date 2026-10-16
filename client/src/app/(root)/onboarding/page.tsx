@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useWallet } from "@/hooks/useWallet";
 import { useProfile } from "@/context/ProfileContext";
 import { useAnalytics } from "@/hooks/useAnalytics";
@@ -17,8 +17,9 @@ import Complete from "@/components/onboarding/Complete";
 
 export default function OnboardingPage() {
   const searchParams = useSearchParams();
-  const { address } = useWallet();
-  const { setProfile } = useProfile();
+  const router = useRouter();
+  const { address, reauthenticate } = useWallet();
+  const { setProfile, isLoaded, isOnboarded, profile } = useProfile();
   const { trackFunnelStep, trackFeatureAdoption } = useAnalytics();
 
   const referralFromUrl = searchParams?.get("ref") || "";
@@ -29,6 +30,14 @@ export default function OnboardingPage() {
   const [referralCode, setReferralCode] = useState(referralFromUrl);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // If an onboarded user lands here (e.g. a hard refresh during the final
+  // step, or revisiting the URL), send them to their destination instead of
+  // restarting the wizard.
+  useEffect(() => {
+    if (!isLoaded || !isOnboarded || !profile) return;
+    router.replace(profile.role === "farmer" ? "/dashboard" : "/market");
+  }, [isLoaded, isOnboarded, profile, router]);
 
   function isNetworkFetchError(err: unknown): boolean {
     return (
@@ -81,6 +90,16 @@ export default function OnboardingPage() {
         },
         address,
       );
+      // Establish the wallet auth session before seeding the profile, so that
+      // when the redirect effect below fires the dashboard readiness gate
+      // already has the session token it needs. Failure is non-fatal: the
+      // gate can re-prompt.
+      try {
+        await reauthenticate();
+      } catch {
+        // ignore - the dashboard gate offers a recovery action
+      }
+
       // Seed the profile cache so AuthGuard sees the user as onboarded immediately,
       // without waiting for a refetch round-trip.
       setProfile(created);

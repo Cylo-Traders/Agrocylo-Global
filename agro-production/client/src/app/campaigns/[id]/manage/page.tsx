@@ -1,14 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { notFound } from "next/navigation";
 import { fetchCampaign, fundingProgress, formatAmount } from "@/services/campaignService";
 import { trackCampaignViewed } from "@/lib/analytics";
 import { classifyError, logErrorWithContext } from "@/lib/errorHandling";
 import { CampaignDetailSkeleton } from "@/components/Skeletons";
 import InvestmentModal from "@/components/ui/InvestmentModal";
 import { useWallet } from "@/context/WalletContext";
+import { useAsyncResource } from "@/hooks/useAsyncResource";
+import { useNow } from "@/hooks/useNow";
+import { useWalletNetworkGuard } from "@/hooks/useWalletNetworkGuard";
 import type { CampaignDetail } from "@/types";
 
 function StatCard({ label, value }: { label: string; value: string }) {
@@ -22,51 +26,55 @@ function StatCard({ label, value }: { label: string; value: string }) {
 
 export default function CampaignDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const [campaign, setCampaign] = useState<CampaignDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [investmentOpen, setInvestmentOpen] = useState(false);
   const { address, connected, connect, loading: walletLoading } = useWallet();
+  const networkGuard = useWalletNetworkGuard();
+  const now = useNow();
 
-  const loadCampaign = useCallback(async () => {
-    if (!id) return;
-    try {
-      const loadedCampaign = await fetchCampaign(id);
-      setCampaign(loadedCampaign);
-      setError(null);
-      trackCampaignViewed(id);
-    } catch (err: unknown) {
-      const classified = classifyError(err, "loadCampaign");
-      logErrorWithContext(err, {
-        feature: "campaign-detail",
-        action: "loadCampaign",
-        campaignId: id,
-        category: classified.category,
-      });
-      setError(classified.actionableMessage);
-    } finally {
-      setLoading(false);
-    }
-  }, [id]);
+  // Callback declared before the resource that runs it, stable per id, and
+  // cancellable through the resource's AbortSignal (#1084).
+  const loadCampaign = useCallback(
+    async (signal: AbortSignal) => {
+      try {
+        const loadedCampaign = await fetchCampaign(id);
+        if (!signal.aborted) trackCampaignViewed(id);
+        return loadedCampaign;
+      } catch (err: unknown) {
+        if (signal.aborted) throw err;
+        const classified = classifyError(err, "loadCampaign");
+        logErrorWithContext(err, {
+          feature: "campaign-detail",
+          action: "loadCampaign",
+          campaignId: id,
+          category: classified.category,
+        });
+        throw new Error(classified.actionableMessage);
+      }
+    },
+    [id],
+  );
 
-  useEffect(() => {
-    void loadCampaign();
-  }, [loadCampaign]);
-
-  const refreshCampaign = useCallback(() => {
-    void loadCampaign();
-  }, [loadCampaign]);
+  const { data: campaign, error, loading, reload } = useAsyncResource(
+    `campaign-manage:${id}`,
+    loadCampaign,
+  );
 
   if (loading) return <CampaignDetailSkeleton />;
 
-  if (error) return (<div className="border border-red-200 bg-red-50 rounded-xl p-6 text-red-700 text-sm" role="alert">{error}</div>);
-  if (!campaign) return null;
+  if (error)
+    return (
+      <div className="border border-red-200 bg-red-50 rounded-xl p-6 text-red-700 text-sm space-y-3" role="alert">
+        <p>{error}</p>
+        <button onClick={reload} className="underline text-red-700 hover:text-red-900">Try again</button>
+      </div>
+    );
+  if (!campaign) notFound();
 
   const pct = fundingProgress(campaign);
   const deadline = new Date(campaign.deadline);
   const createdAt = new Date(campaign.createdAt);
-  const isExpired = deadline < new Date();
-  const daysLeft = Math.max(0, Math.ceil((deadline.getTime() - Date.now()) / 86_400_000));
+  const isExpired = deadline.getTime() < now;
+  const daysLeft = Math.max(0, Math.ceil((deadline.getTime() - now) / 86_400_000));
   const canOrder = campaign.status === "HARVESTED" || campaign.status === "IN_PRODUCTION";
   const canInvest = campaign.status === "FUNDING" && !isExpired && campaign.onChainId !== "pending";
 
@@ -138,6 +146,11 @@ export default function CampaignDetailPage() {
           <div>
             <p className="font-semibold text-primary-800">Fund this campaign</p>
             <p className="text-sm text-primary-700 mt-0.5">Invest with your connected wallet. Your contribution appears after on-chain confirmation and indexing.</p>
+            {networkGuard.blocked && networkGuard.reason && (
+              <p id="manage-invest-network-guard" className="text-sm text-red-700 mt-1" role="alert">
+                {networkGuard.reason}
+              </p>
+            )}
           </div>
           {!connected ? (
             <button
@@ -150,7 +163,10 @@ export default function CampaignDetailPage() {
           ) : (
             <button
               onClick={() => setInvestmentOpen(true)}
-              className="whitespace-nowrap bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-700"
+              disabled={networkGuard.blocked}
+              aria-disabled={networkGuard.blocked}
+              aria-describedby={networkGuard.blocked ? "manage-invest-network-guard" : undefined}
+              className="whitespace-nowrap bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
               aria-label={`Invest in campaign ${campaign.id.slice(0, 8)}…`}
             >
               Invest
@@ -160,8 +176,27 @@ export default function CampaignDetailPage() {
       )}
       {canOrder && (
         <div className="border border-primary-200 bg-primary-50 rounded-xl p-5 flex items-center justify-between gap-4">
-          <div><p className="font-semibold text-primary-800">Ready to Order</p><p className="text-sm text-primary-700 mt-0.5">This campaign is accepting orders. Place a secure escrow order.</p></div>
-          <Link href={`/checkout/${campaign.id}`} className="whitespace-nowrap bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-700" aria-label={`Place order for campaign ${campaign.id.slice(0, 8)}…`}>Place Order</Link>
+          <div>
+            <p className="font-semibold text-primary-800">Ready to Order</p>
+            <p className="text-sm text-primary-700 mt-0.5">This campaign is accepting orders. Place a secure escrow order.</p>
+            {networkGuard.blocked && networkGuard.reason && (
+              <p id="manage-order-network-guard" className="text-sm text-red-700 mt-1" role="alert">
+                {networkGuard.reason}
+              </p>
+            )}
+          </div>
+          {networkGuard.blocked ? (
+            <span
+              className="whitespace-nowrap bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium opacity-50 cursor-not-allowed"
+              aria-disabled="true"
+              aria-describedby="manage-order-network-guard"
+              aria-label={`Place order for campaign ${campaign.id.slice(0, 8)}… unavailable: wrong wallet network`}
+            >
+              Place Order
+            </span>
+          ) : (
+            <Link href={`/checkout/${campaign.id}`} className="whitespace-nowrap bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-700" aria-label={`Place order for campaign ${campaign.id.slice(0, 8)}…`}>Place Order</Link>
+          )}
         </div>
       )}
       {address && (
@@ -171,7 +206,7 @@ export default function CampaignDetailPage() {
           campaignId={campaign.id}
           onChainCampaignId={campaign.onChainId}
           investorAddress={address}
-          onIndexed={refreshCampaign}
+          onIndexed={reload}
         />
       )}
     </div>

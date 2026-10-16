@@ -14,11 +14,14 @@
     "test": "vitest",
     "test:watch": "vitest --watch",
     "test:a11y": "vitest run src/a11y.test.tsx",
+    "test:e2e": "playwright test --config playwright.config.ts",
+    "smoke:wallets": "node scripts/wallet-testnet-smoke.mjs",
     "doctor": "node ../../scripts/doctor-next.js --app=agro",
     "reset:cache": "node ../../scripts/reset-next-cache.js --app=agro"
   },
   "dependencies": {
     "@agrocylo/wallet-core": "*",
+    "@creit.tech/stellar-wallets-kit": "2.6.0",
     "@sentry/nextjs": "^10.70.0",
     "@stellar/freighter-api": "^1.4.0",
     "@stellar/stellar-sdk": "^17.1.0",
@@ -32,6 +35,7 @@
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.0.0",
     "@testing-library/react": "^16.2.0",
+    "@testing-library/user-event": "^14.6.7",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

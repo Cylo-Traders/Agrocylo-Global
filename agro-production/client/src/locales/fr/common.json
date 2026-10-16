@@ -14,7 +14,10 @@
     "mainClient": "Retour au Marché Principal",
     "switchToLight": "Passer en mode clair",
     "switchToDark": "Passer en mode sombre",
-    "language": "Langue"
+    "language": "Langue",
+    "main": "Navigation principale",
+    "openMenu": "Ouvrir le menu de navigation",
+    "closeMenu": "Fermer le menu de navigation"
   },
   "campaigns": {
     "title": "Campagnes de Production",
@@ -25,5 +28,23 @@
   "sso": {
     "connectedWallet": "Portefeuille Connecté par SSO",
     "autoAuthenticated": "Session transférée depuis le marché principal"
+  },
+  "errors": {
+    "boundary": {
+      "title": "Une erreur s'est produite",
+      "description": "Cette page a rencontré une erreur inattendue. Elle a été signalée. Vous pouvez réessayer ou revenir à l'accueil.",
+      "retry": "Réessayer",
+      "home": "Retour à l'accueil",
+      "reference": "Référence",
+      "details": "Détails de l'erreur (développement uniquement)"
+    },
+    "notFound": {
+      "title": "Page introuvable",
+      "description": "La page que vous recherchez n'existe pas ou a peut-être été déplacée.",
+      "home": "Retour à l'accueil",
+      "marketplace": "Parcourir le marché",
+      "campaigns": "Voir les campagnes",
+      "linksLabel": "Liens utiles"
+    }
   }
 }

@@ -7,6 +7,8 @@ vi.mock('../middleware/walletAuth.js', () => ({
     req.walletAddress = req.headers['x-wallet-address'];
     next();
   },
+  requireRole: () => (_req: any, _res: any, next: any) => next(),
+  requireAnyRole: () => (_req: any, _res: any, next: any) => next(),
 }));
 
 vi.mock('../services/notificationService.js', () => ({
@@ -31,17 +33,20 @@ describe('Notification routes', () => {
   });
 
   it('GET /notifications returns notification items for an authenticated wallet', async () => {
-    vi.mocked(notificationService.listNotifications).mockResolvedValue([
-      {
-        id: 'n1',
-        walletAddress: '0x1111111111111111111111111111111111111111',
-        message: 'Order funded',
-        orderId: '101',
-        type: 'created',
-        isRead: false,
-        createdAt: new Date(),
-      },
-    ]);
+    vi.mocked(notificationService.listNotifications).mockResolvedValue({
+      items: [
+        {
+          id: 'n1',
+          walletAddress: '0x1111111111111111111111111111111111111111',
+          message: 'Order funded',
+          orderId: '101',
+          type: 'created',
+          isRead: false,
+          createdAt: new Date(),
+        },
+      ],
+      total: 1,
+    });
 
     const res = await request(app)
       .get('/notifications?unread_only=true&limit=10')
@@ -49,9 +54,10 @@ describe('Notification routes', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.items).toHaveLength(1);
+    expect(res.body.total).toBe(1);
     expect(notificationService.listNotifications).toHaveBeenCalledWith(
       '0x1111111111111111111111111111111111111111',
-      { unreadOnly: true, limit: 10 },
+      expect.objectContaining({ unreadOnly: true, limit: 10 })
     );
   });
 
@@ -98,7 +104,7 @@ describe('Notification routes', () => {
     };
 
     vi.mocked(notificationPreferenceService.upsertNotificationPreferences).mockResolvedValue(
-      payload,
+      payload
     );
 
     const res = await request(app)
@@ -121,7 +127,7 @@ describe('Notification routes', () => {
     expect(res.status).toBe(204);
     expect(notificationService.markNotificationsRead).toHaveBeenCalledWith(
       '0x1111111111111111111111111111111111111111',
-      ['n1'],
+      ['n1']
     );
   });
 });

@@ -1,8 +1,8 @@
-import { Prisma } from "@prisma/client";
-import { prisma } from "../config/database.js";
-import { ApiError } from "../http/errors.js";
-import { NotificationEventType } from "../enums/notificationEventType.js";
-import { NotificationService } from "./notificationService.js";
+import { Prisma } from '@prisma/client';
+import { prisma } from '../config/database.js';
+import { ApiError } from '../http/errors.js';
+import { NotificationEventType } from '../enums/notificationEventType.js';
+import { NotificationService } from './notificationService.js';
 
 export interface GroupOrderContributionDto {
   id: string;
@@ -43,17 +43,19 @@ export interface GroupOrderIntentInput {
 
 const DEFAULT_EXPIRY_MINUTES = 60;
 const GROUP_ORDER_STATUSES = {
-  pending: "PENDING",
-  fulfilled: "FULFILLED",
-  expired: "EXPIRED",
-  refunded: "REFUNDED",
+  pending: 'PENDING',
+  finalizing: 'FINALIZING',
+  fulfilling: 'FULFILLING',
+  fulfilled: 'FULFILLED',
+  expired: 'EXPIRED',
+  cancelled: 'CANCELLED',
 } as const;
 
 function toDecimal(value: string): Prisma.Decimal {
   try {
     return new Prisma.Decimal(value);
   } catch {
-    throw new ApiError(400, "Bad Request", `Invalid decimal value: ${value}`);
+    throw new ApiError(400, 'Bad Request', `Invalid decimal value: ${value}`);
   }
 }
 
@@ -111,7 +113,13 @@ function toGroupOrderDto(order: {
   };
 }
 
-async function notifyProgress(groupOrderId: string, buyerWallet: string, farmerWallet: string, quantity: string, currency: string) {
+async function notifyProgress(
+  groupOrderId: string,
+  buyerWallet: string,
+  farmerWallet: string,
+  quantity: string,
+  currency: string
+) {
   await Promise.allSettled([
     NotificationService.notify({
       walletAddress: buyerWallet,
@@ -130,9 +138,12 @@ async function notifyProgress(groupOrderId: string, buyerWallet: string, farmerW
   ]);
 }
 
-function uniqueWallets(groupOrder: { farmerWallet: string; contributions: Array<{ buyerWallet: string }> }): string[] {
+function uniqueWallets(groupOrder: {
+  farmerWallet: string;
+  contributions: Array<{ buyerWallet: string }>;
+}): string[] {
   return Array.from(
-    new Set([groupOrder.farmerWallet, ...groupOrder.contributions.map((item) => item.buyerWallet)]),
+    new Set([groupOrder.farmerWallet, ...groupOrder.contributions.map((item) => item.buyerWallet)])
   );
 }
 
@@ -141,36 +152,39 @@ function buildBatchTxHash(groupOrderId: string): string {
 }
 
 async function submitGroupOrderBatch(groupOrderId: string) {
-  const groupOrder = await prisma.groupOrder.findUnique({
-    where: { id: groupOrderId },
-    include: { contributions: true },
-  });
-
-  if (!groupOrder) {
-    throw new ApiError(404, "Not Found", "Group order not found");
-  }
-
-  const batchTxHash = buildBatchTxHash(groupOrder.id);
+  const batchTxHash = buildBatchTxHash(groupOrderId);
   const orderIds: string[] = [];
 
-  await prisma.$transaction(async (tx) => {
-    for (const contribution of groupOrder.contributions) {
+  const groupOrder = await prisma.$transaction(async (tx) => {
+    const claimed = await tx.groupOrder.updateMany({
+      where: { id: groupOrderId, status: GROUP_ORDER_STATUSES.finalizing, batchTxHash: null },
+      data: { status: GROUP_ORDER_STATUSES.fulfilling },
+    });
+    if (claimed.count === 0) return null;
+
+    const current = await tx.groupOrder.findUnique({
+      where: { id: groupOrderId },
+      include: { contributions: true },
+    });
+    if (!current) throw new ApiError(404, 'Not Found', 'Group order not found');
+
+    for (const contribution of current.contributions) {
       const order = await tx.order.create({
         data: {
-          orderIdOnChain: `${groupOrder.id}:${contribution.id}`,
+          orderIdOnChain: `${current.id}:${contribution.id}`,
           buyerAddress: contribution.buyerWallet,
-          sellerAddress: groupOrder.farmerWallet,
+          sellerAddress: current.farmerWallet,
           amount: contribution.quantity.toString(),
           token: contribution.currency,
-          status: "PENDING",
-          productId: groupOrder.productId,
+          status: 'PENDING',
+          productId: current.productId,
           txHash: batchTxHash,
         },
       });
 
       orderIds.push(order.orderIdOnChain);
 
-      await tx.groupOrderContribution.update({
+      await tx.groupOrderContribution.updateMany({
         where: { id: contribution.id },
         data: {
           status: GROUP_ORDER_STATUSES.fulfilled,
@@ -180,14 +194,17 @@ async function submitGroupOrderBatch(groupOrderId: string) {
     }
 
     await tx.groupOrder.update({
-      where: { id: groupOrder.id },
+      where: { id: current.id },
       data: {
         status: GROUP_ORDER_STATUSES.fulfilled,
         batchTxHash,
         fulfilledAt: new Date(),
       },
     });
+    return current;
   });
+
+  if (!groupOrder) return null;
 
   await Promise.allSettled(
     uniqueWallets(groupOrder).map((wallet) =>
@@ -197,46 +214,51 @@ async function submitGroupOrderBatch(groupOrderId: string) {
         orderId: groupOrder.id,
         amount: groupOrder.committedQuantity.toString(),
         token: groupOrder.currency,
-      }),
-    ),
+      })
+    )
   );
 
   return { batchTxHash, orderIds };
 }
 
-export async function createOrJoinGroupOrder(input: GroupOrderIntentInput): Promise<GroupOrderDto & {
-  thresholdReached: boolean;
-  batchTxHash: string | null;
-  submittedOrders: string[];
-}> {
+export async function createOrJoinGroupOrder(input: GroupOrderIntentInput): Promise<
+  GroupOrderDto & {
+    thresholdReached: boolean;
+    batchTxHash: string | null;
+    submittedOrders: string[];
+  }
+> {
   if (!input.productId) {
-    throw new ApiError(400, "Bad Request", "productId is required");
+    throw new ApiError(400, 'Bad Request', 'productId is required');
   }
   if (!input.buyerWallet) {
-    throw new ApiError(400, "Bad Request", "buyerWallet is required");
+    throw new ApiError(400, 'Bad Request', 'buyerWallet is required');
   }
   if (!input.quantity) {
-    throw new ApiError(400, "Bad Request", "quantity is required");
+    throw new ApiError(400, 'Bad Request', 'quantity is required');
   }
 
   const quantity = toDecimal(input.quantity);
   if (quantity.lte(0)) {
-    throw new ApiError(400, "Bad Request", "quantity must be greater than zero");
+    throw new ApiError(400, 'Bad Request', 'quantity must be greater than zero');
   }
 
   const product = await prisma.product.findUnique({
     where: { id: input.productId },
   });
   if (!product) {
-    throw new ApiError(404, "Not Found", "Product not found");
+    throw new ApiError(404, 'Not Found', 'Product not found');
   }
 
-  const targetQuantity = input.targetQuantity ? toDecimal(input.targetQuantity) : product.stockQuantity ?? quantity;
+  const targetQuantity = input.targetQuantity
+    ? toDecimal(input.targetQuantity)
+    : (product.stockQuantity ?? quantity);
   const now = new Date();
   const windowMinutes = Math.max(input.expiresInMinutes ?? DEFAULT_EXPIRY_MINUTES, 1);
   const windowEndsAt = new Date(now.getTime() + windowMinutes * 60_000);
 
   const result = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${product.id})::bigint)`);
     const activePool = await tx.groupOrder.findFirst({
       where: {
         productId: product.id,
@@ -245,7 +267,7 @@ export async function createOrJoinGroupOrder(input: GroupOrderIntentInput): Prom
         windowEndsAt: { gt: now },
       },
       include: { contributions: true },
-      orderBy: { createdAt: "asc" },
+      orderBy: { createdAt: 'asc' },
     });
 
     const groupOrder =
@@ -275,17 +297,26 @@ export async function createOrJoinGroupOrder(input: GroupOrderIntentInput): Prom
       },
     });
 
-    const updatedCommitted = new Prisma.Decimal(groupOrder.committedQuantity).add(quantity);
     const updatedGroupOrder = await tx.groupOrder.update({
       where: { id: groupOrder.id },
       data: {
-        committedQuantity: updatedCommitted,
+        committedQuantity: { increment: quantity },
       },
       include: { contributions: true },
     });
 
-    const thresholdReached = updatedCommitted.gte(poolTargetQuantity);
-    return { groupOrder: updatedGroupOrder, contribution, thresholdReached };
+    const thresholdReached = new Prisma.Decimal(updatedGroupOrder.committedQuantity).gte(
+      poolTargetQuantity
+    );
+    const finalizationClaimed =
+      thresholdReached &&
+      (
+        await tx.groupOrder.updateMany({
+          where: { id: groupOrder.id, status: GROUP_ORDER_STATUSES.pending },
+          data: { status: GROUP_ORDER_STATUSES.finalizing },
+        })
+      ).count === 1;
+    return { groupOrder: updatedGroupOrder, contribution, thresholdReached, finalizationClaimed };
   });
 
   await notifyProgress(
@@ -293,13 +324,13 @@ export async function createOrJoinGroupOrder(input: GroupOrderIntentInput): Prom
     input.buyerWallet,
     result.groupOrder.farmerWallet,
     quantity.toString(),
-    result.groupOrder.currency,
+    result.groupOrder.currency
   );
 
-  if (!result.thresholdReached) {
+  if (!result.finalizationClaimed) {
     return {
       ...toGroupOrderDto(result.groupOrder),
-      thresholdReached: false,
+      thresholdReached: result.thresholdReached,
       batchTxHash: result.groupOrder.batchTxHash,
       submittedOrders: [],
     };
@@ -312,14 +343,14 @@ export async function createOrJoinGroupOrder(input: GroupOrderIntentInput): Prom
   });
 
   if (!fulfilled) {
-    throw new ApiError(500, "Internal Server Error", "Failed to finalize group order");
+    throw new ApiError(500, 'Internal Server Error', 'Failed to finalize group order');
   }
 
   return {
     ...toGroupOrderDto(fulfilled),
     thresholdReached: true,
-    batchTxHash: submission.batchTxHash,
-    submittedOrders: submission.orderIds,
+    batchTxHash: submission?.batchTxHash ?? fulfilled.batchTxHash,
+    submittedOrders: submission?.orderIds ?? [],
   };
 }
 
@@ -335,20 +366,27 @@ export async function expireGroupOrders(now = new Date()): Promise<GroupOrderDto
   const expiredDtos: GroupOrderDto[] = [];
 
   for (const order of expiredOrders) {
-    await prisma.$transaction(async (tx) => {
-      await tx.groupOrder.update({
-        where: { id: order.id },
+    const claimed = await prisma.$transaction(async (tx) => {
+      const claim = await tx.groupOrder.updateMany({
+        where: {
+          id: order.id,
+          status: GROUP_ORDER_STATUSES.pending,
+          windowEndsAt: { lte: now },
+        },
         data: {
           status: GROUP_ORDER_STATUSES.expired,
           expiredAt: now,
         },
       });
+      if (claim.count === 0) return false;
 
       await tx.groupOrderContribution.updateMany({
-        where: { groupOrderId: order.id, status: GROUP_ORDER_STATUSES.pending },
-        data: { status: GROUP_ORDER_STATUSES.refunded },
+        where: { groupOrderId: order.id, status: 'RESERVED' },
+        data: { status: GROUP_ORDER_STATUSES.cancelled },
       });
+      return true;
     });
+    if (!claimed) continue;
 
     const refreshed = await prisma.groupOrder.findUnique({
       where: { id: order.id },
@@ -367,8 +405,8 @@ export async function expireGroupOrders(now = new Date()): Promise<GroupOrderDto
           orderId: refreshed.id,
           amount: refreshed.committedQuantity.toString(),
           token: refreshed.currency,
-        }),
-      ),
+        })
+      )
     );
 
     expiredDtos.push(toGroupOrderDto(refreshed));
@@ -377,13 +415,24 @@ export async function expireGroupOrders(now = new Date()): Promise<GroupOrderDto
   return expiredDtos;
 }
 
+export async function finalizeReadyGroupOrders(): Promise<void> {
+  const ready = await prisma.groupOrder.findMany({
+    where: { status: GROUP_ORDER_STATUSES.finalizing },
+    select: { id: true },
+    take: 50,
+  });
+  for (const order of ready) {
+    await submitGroupOrderBatch(order.id);
+  }
+}
+
 export async function getGroupOrderById(id: string): Promise<GroupOrderDto> {
   const groupOrder = await prisma.groupOrder.findUnique({
     where: { id },
     include: { contributions: true },
   });
   if (!groupOrder) {
-    throw new ApiError(404, "Not Found", "Group order not found");
+    throw new ApiError(404, 'Not Found', 'Group order not found');
   }
   return toGroupOrderDto(groupOrder);
 }

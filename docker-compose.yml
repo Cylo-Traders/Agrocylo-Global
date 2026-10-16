@@ -56,6 +56,39 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── One-shot schema migration gates ─────────────────────────────────
+  # These services run the committed migration history once per `up` and
+  # must complete successfully before their application service starts.
+  # Application restarts do not run a schema-writing command.
+
+  backend-migrate:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: agrocylo-backend-migrate
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://agrocylo:agrocylo123@postgres:5432/agrocylo_db}
+    command: ["npx", "prisma", "migrate", "deploy"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  agro-backend-migrate:
+    build:
+      context: ./agro-production/server
+      dockerfile: Dockerfile
+      args:
+        DATABASE_URL: ${AGRO_DATABASE_URL:-postgresql://agrocylo:agrocylo123@postgres-agro:5432/agrocylo_production}
+    container_name: agrocylo-agro-backend-migrate
+    environment:
+      DATABASE_URL: ${AGRO_DATABASE_URL:-postgresql://agrocylo:agrocylo123@postgres-agro:5432/agrocylo_production}
+    command: ["npx", "prisma", "migrate", "deploy"]
+    restart: "no"
+    depends_on:
+      postgres-agro:
+        condition: service_healthy
+
   # ── Backend services ────────────────────────────────────────────────
 
   backend:
@@ -79,6 +112,8 @@ services:
     ports:
       - "5000:5000"
     depends_on:
+      backend-migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -105,6 +140,8 @@ services:
     ports:
       - "5001:5001"
     depends_on:
+      agro-backend-migrate:
+        condition: service_completed_successfully
       postgres-agro:
         condition: service_healthy
 

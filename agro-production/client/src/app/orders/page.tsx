@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
 import { useWallet } from "@/context/WalletContext";
 import { fetchOrdersByBuyer, fetchOrdersByFarmer, confirmOrderReceipt } from "@/services/orderService";
 import { formatAmount } from "@/services/campaignService";
 import { isNetworkError } from "@/lib/apiClient";
+import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { OrderTableSkeleton, ButtonSpinner } from "@/components/Skeletons";
 import ConfirmOrderModal from "@/components/ui/ConfirmOrderModal";
 import type { Order, OrderStatus } from "@/types";
@@ -135,48 +136,50 @@ type Tab = "buyer" | "farmer";
 export default function OrdersPage() {
   const { address, connected, connect, loading: walletLoading } = useWallet();
   const [tab, setTab] = useState<Tab>("buyer");
-  const [buyerOrders, setBuyerOrders] = useState<Order[]>([]);
-  const [farmerOrders, setFarmerOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
 
-  const refreshOrders = async () => {
-    if (!address) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const [b, f] = await Promise.all([
-        fetchOrdersByBuyer(address).catch(() => [] as Order[]),
-        fetchOrdersByFarmer(address).catch(() => [] as Order[]),
-      ]);
-      setBuyerOrders(b);
-      setFarmerOrders(f);
-    } catch (err: unknown) {
-      setError(
-        isNetworkError(err)
-          ? "Network error — check your connection and try again"
-          : err instanceof Error
-            ? err.message
-            : "Failed to load orders"
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Callback before the resource (#1084). Both order sets load under one
+  // AbortSignal, so an address change or unmount invalidates the whole pair.
+  const loadOrders = useCallback(
+    async (signal: AbortSignal) => {
+      const buyerAddress = address ?? "";
+      try {
+        const [b, f] = await Promise.all([
+          fetchOrdersByBuyer(buyerAddress).catch(() => [] as Order[]),
+          fetchOrdersByFarmer(buyerAddress).catch(() => [] as Order[]),
+        ]);
+        return { buyer: b, farmer: f };
+      } catch (err: unknown) {
+        if (signal.aborted) throw err;
+        throw new Error(
+          isNetworkError(err)
+            ? "Network error — check your connection and try again"
+            : err instanceof Error
+              ? err.message
+              : "Failed to load orders"
+        );
+      }
+    },
+    [address],
+  );
 
-  useEffect(() => {
-    if (!address) return;
-    void refreshOrders();
-  }, [address]);
+  const {
+    data,
+    error,
+    loading,
+    reload,
+  } = useAsyncResource(`orders:${address ?? "disconnected"}`, loadOrders);
+
+  const buyerOrders = data?.buyer ?? [];
+  const farmerOrders = data?.farmer ?? [];
 
   const handleConfirmReceipt = async (orderId: string) => {
     if (!address) return;
     try {
       await confirmOrderReceipt(orderId, address);
       // Refresh orders to update status
-      await refreshOrders();
+      reload();
       setConfirmModalOpen(false);
       setSelectedOrder(null);
     } catch (err) {
@@ -217,10 +220,11 @@ export default function OrdersPage() {
       {loading && <OrderTableSkeleton rows={3} />}
       {!loading && error && (
         <div
-          className="border border-red-200 bg-red-50 rounded-xl p-4 text-red-700 text-sm"
+          className="border border-red-200 bg-red-50 rounded-xl p-4 text-red-700 text-sm space-y-3"
           role="alert"
         >
-          {error}
+          <p>{error}</p>
+          <button onClick={reload} className="underline text-red-700 hover:text-red-900">Try again</button>
         </div>
       )}
       {!loading && !error && tab === "buyer" && (

@@ -1,6 +1,17 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+/**
+ * Investment dashboard (#1018: investor scope on the buyer dashboard).
+ *
+ * Issue #1085: this component used to return early for `role === "buyer"`
+ * *before* calling its hooks, so every hook below the branch was conditional.
+ * Changing roles on a mounted instance would break hook order, and ESLint
+ * flagged the whole component. It is now a pure role dispatcher: neither
+ * branch has hooks of its own, and all investor state lives in
+ * `InvestorDashboard`, whose hooks run on every render.
+ */
+
+import { useCallback, useState } from "react";
 import Link from "next/link";
 import {
   fetchUserInvestments,
@@ -9,6 +20,8 @@ import {
   type InvestmentWithCampaign,
 } from "@/services/investmentService";
 import { formatAmount } from "@/services/campaignService";
+import { useAsyncResource } from "@/hooks/useAsyncResource";
+import { useWalletNetworkGuard } from "@/hooks/useWalletNetworkGuard";
 import { useWebSocket, type WsMessage } from "@/hooks/useWebSocket";
 
 interface Props {
@@ -17,48 +30,66 @@ interface Props {
 }
 
 export default function InvestmentDashboard({ investorAddress, role = 'investor' }: Props) {
-  // Issue #1018: Integrate investor dashboard scope with existing buyer dashboard
+  // Pure dispatcher, no hooks: mounting or unmounting a branch can never
+  // change this component's own hook order (#1085).
   if (role === 'buyer') {
-    return (
-      <div className="bg-surface border border-border rounded-xl p-8 text-center text-muted text-sm">
-        This is the Investment Dashboard. Buyer-specific dashboard features will be integrated here or in a separate component.
-      </div>
-    );
+    return <BuyerDashboardPlaceholder />;
   }
-  const [investments, setInvestments] = useState<InvestmentWithCampaign[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  return <InvestorDashboard investorAddress={investorAddress} />;
+}
+
+/**
+ * Buyer mode (#1018): a placeholder that deliberately mounts no investor
+ * effects — no investment fetch, no WebSocket subscription.
+ */
+function BuyerDashboardPlaceholder() {
+  return (
+    <div className="bg-surface border border-border rounded-xl p-8 text-center text-muted text-sm">
+      This is the Investment Dashboard. Buyer-specific dashboard features will be integrated here or in a separate component.
+    </div>
+  );
+}
+
+function InvestorDashboard({ investorAddress }: { investorAddress: string }) {
   const [lastUpdate, setLastUpdate] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const data = await fetchUserInvestments(investorAddress);
-      setInvestments(data);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load investments");
-    } finally {
-      setLoading(false);
-    }
-  }, [investorAddress]);
+  // Callback before the resource that runs it (#1084): stable per address and
+  // abortable, so switching wallets mid-flight drops the stale response.
+  const loadInvestments = useCallback(
+    async (signal: AbortSignal) => {
+      try {
+        return await fetchUserInvestments(investorAddress);
+      } catch (e) {
+        if (signal.aborted) throw e;
+        throw new Error(e instanceof Error ? e.message : "Failed to load investments");
+      }
+    },
+    [investorAddress],
+  );
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  const {
+    data,
+    error,
+    loading,
+    reload,
+  } = useAsyncResource(`investments:${investorAddress}`, loadInvestments);
+
+  const investments = data ?? [];
 
   useWebSocket(
     useCallback(
       (msg: WsMessage) => {
         if (
-          msg.event === "campaign.invested" ||
-          msg.event === "campaign.settled" ||
-          msg.event === "campaign.created"
+          msg.type === "campaign.invested" ||
+          msg.type === "campaign.settled" ||
+          msg.type === "campaign.created"
         ) {
           setLastUpdate(msg.timestamp);
-          load();
+          reload();
         }
       },
-      [load],
+      [reload],
     ),
   );
 
@@ -84,8 +115,9 @@ export default function InvestmentDashboard({ investorAddress, role = 'investor'
 
   if (error) {
     return (
-      <div className="bg-surface border border-error rounded-xl p-5 text-error text-sm" role="alert">
-        {error}
+      <div className="bg-surface border border-error rounded-xl p-5 text-error text-sm space-y-3" role="alert">
+        <p>{error}</p>
+        <button onClick={reload} className="underline hover:no-underline">Try again</button>
       </div>
     );
   }
@@ -115,7 +147,7 @@ export default function InvestmentDashboard({ investorAddress, role = 'investor'
       ) : (
         <div className="space-y-3" aria-label="Investments list">
           {investments.map((inv) => (
-            <InvestmentRow key={inv.id} investment={inv} onInvestmentUpdated={load} />
+            <InvestmentRow key={inv.id} investment={inv} onInvestmentUpdated={reload} />
           ))}
         </div>
       )}
@@ -156,6 +188,9 @@ function InvestmentRow({ investment, onInvestmentUpdated }: { investment: Invest
   const [claiming, setClaiming] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
   const [claimed, setClaimed] = useState(false);
+  // Claiming settlement returns is a signed transaction (#1087): it is blocked
+  // while the wallet network is wrong or unverifiable.
+  const networkGuard = useWalletNetworkGuard();
 
   const statusColors: Record<string, string> = {
     FUNDING: "text-warning",
@@ -169,6 +204,10 @@ function InvestmentRow({ investment, onInvestmentUpdated }: { investment: Invest
 
   const handleClaim = useCallback(async () => {
     if (!campaign.onChainId || campaign.onChainId === "pending" || claiming || claimed) return;
+    if (networkGuard.blocked) {
+      setClaimError(networkGuard.reason ?? "Wallet network does not match.");
+      return;
+    }
 
     setClaiming(true);
     setClaimError(null);
@@ -194,7 +233,7 @@ function InvestmentRow({ investment, onInvestmentUpdated }: { investment: Invest
     } finally {
       setClaiming(false);
     }
-  }, [campaign.onChainId, claiming, claimed, investment.investorAddress, investment.campaignId, onInvestmentUpdated]);
+  }, [campaign.onChainId, claiming, claimed, investment.investorAddress, investment.campaignId, networkGuard.blocked, networkGuard.reason, onInvestmentUpdated]);
 
   const canClaim = campaign.status === "SETTLED" && claimable > 0n && !claimed;
 
@@ -234,12 +273,19 @@ function InvestmentRow({ investment, onInvestmentUpdated }: { investment: Invest
         {canClaim && (
           <button
             onClick={handleClaim}
-            disabled={claiming}
+            disabled={claiming || networkGuard.blocked}
+            aria-disabled={claiming || networkGuard.blocked}
+            aria-describedby={networkGuard.blocked ? `claim-network-guard-${investment.id}` : undefined}
             aria-label={claiming ? "Claiming returns" : "Claim returns"}
-            className="whitespace-nowrap bg-success text-white px-3 py-1.5 rounded text-xs font-medium hover:bg-green-600 disabled:opacity-50 transition-colors"
+            className="whitespace-nowrap bg-success text-white px-3 py-1.5 rounded text-xs font-medium hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {claiming ? "Claiming…" : "Claim"}
           </button>
+        )}
+        {canClaim && networkGuard.blocked && networkGuard.reason && (
+          <p id={`claim-network-guard-${investment.id}`} className="text-xs text-error" role="alert">
+            {networkGuard.reason}
+          </p>
         )}
         {claimError && (
           <p className="text-xs text-error" role="alert">{claimError}</p>

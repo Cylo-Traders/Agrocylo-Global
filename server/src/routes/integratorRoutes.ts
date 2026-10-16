@@ -30,13 +30,32 @@ function respond(
   req: Request,
   res: Response,
   rows: Array<Record<string, unknown>>,
+  next_cursor: string | null = null,
 ): void {
   const format = typeof req.query["format"] === "string" ? req.query["format"] : "json";
   if (format === "csv") {
-    res.status(200).type("text/csv").send(toCsv(rows));
+    let csv = toCsv(rows);
+    if (next_cursor) {
+      csv = csv ? `${csv}\n` : "";
+      csv += `# next_cursor: ${next_cursor}`;
+    }
+    res.status(200).type("text/csv").send(csv);
   } else {
-    res.status(200).json({ data: rows, count: rows.length });
+    res.status(200).json({ data: rows, count: rows.length, next_cursor });
   }
+}
+
+/**
+ * Parses + validates the `limit` query parameter: missing → default,
+ * anything that is not a finite positive integer (zero, negative,
+ * fractional, nonnumeric) → 400 (Issue #969).
+ */
+function parseLimit(value: unknown): number {
+  return ensureNotOverPageLimit(Number(value ?? 100));
+}
+
+function parseCursor(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 // GET /integrator/v1/reports/farmers
@@ -49,10 +68,11 @@ router.get(
       if (!req.integratorScope) {
         throw new ApiError(401, "Unauthorized", "Missing integrator scope");
       }
-      const limit = Number(req.query["limit"] ?? 100);
-      ensureNotOverPageLimit(limit);
-      const rows = await IntegratorService.getFarmerReport(req.integratorScope);
-      respond(req, res, rows.slice(0, limit));
+      const report = await IntegratorService.getFarmerReport(req.integratorScope, {
+        limit: parseLimit(req.query["limit"]),
+        cursor: parseCursor(req.query["cursor"]),
+      });
+      respond(req, res, report.rows, report.next_cursor);
     } catch (error) {
       next(error);
     }
@@ -69,10 +89,11 @@ router.get(
       if (!req.integratorScope) {
         throw new ApiError(401, "Unauthorized", "Missing integrator scope");
       }
-      const limit = Number(req.query["limit"] ?? 100);
-      ensureNotOverPageLimit(limit);
-      const rows = await IntegratorService.getOrderReport(req.integratorScope);
-      respond(req, res, rows.slice(0, limit));
+      const report = await IntegratorService.getOrderReport(req.integratorScope, {
+        limit: parseLimit(req.query["limit"]),
+        cursor: parseCursor(req.query["cursor"]),
+      });
+      respond(req, res, report.rows, report.next_cursor);
     } catch (error) {
       next(error);
     }
@@ -136,7 +157,7 @@ router.get(
   requireAdmin,
   async (req: AdminRequest, res: Response, next: NextFunction) => {
     try {
-      const limit = Number(req.query["limit"] ?? 100);
+      const limit = parseLimit(req.query["limit"]);
       const usage = await IntegratorService.getUsageLog(req.params["keyId"] ?? "", limit);
       res.status(200).json(usage);
     } catch (error) {

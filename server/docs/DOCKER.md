@@ -143,7 +143,7 @@ docker-compose down -v
 In `server/Dockerfile`:
 
 ```dockerfile
-FROM node:20-alpine
+FROM node:22.13.0-alpine
 
 WORKDIR /app
 
@@ -225,7 +225,7 @@ docker run \
 For smaller production images:
 
 ```dockerfile
-FROM node:20-alpine AS builder
+FROM node:22.13.0-alpine AS builder
 
 WORKDIR /app
 COPY package*.json ./
@@ -235,7 +235,7 @@ RUN npx prisma generate
 RUN npm run build
 
 # Production stage
-FROM node:20-alpine
+FROM node:22.13.0-alpine
 
 WORKDIR /app
 COPY package*.json ./
@@ -399,7 +399,7 @@ volumes:
 
 ```dockerfile
 # Use alpine variant
-FROM node:20-alpine
+FROM node:22.13.0-alpine
 
 # Use npm ci instead of npm install
 RUN npm ci --only=production

@@ -5,6 +5,8 @@ import {
   TimeoutError,
   TransactionFailedError,
   NetworkError,
+  XdrMismatchError,
+  verifySignedXdrInvariants,
 } from "./stellarTransactions";
 
 vi.mock("@stellar/freighter-api", () => ({
@@ -30,6 +32,7 @@ vi.mock("./stellar", () => ({ getRpcServer: () => getRpcServer() }));
 vi.mock("./testMode", () => ({ isTestMode: vi.fn(() => false) }));
 
 import FreighterApi from "@stellar/freighter-api";
+import { TransactionBuilder } from "@stellar/stellar-sdk";
 
 const VALID_XDR = "AAAAAgAAAAABAABkdwAAAAIAAAABAAAAFgAAAAAABcekAAAB4w==";
 const MAINNET = "Public Global Stellar Network ; September 2015";
@@ -181,6 +184,194 @@ describe("stellarTransactions — network / retry path", () => {
     await expect(
       txModule.submitTransactionOrThrow(VALID_XDR, { maxRetries: 1, baseDelayMs: 1 }),
     ).rejects.toBeInstanceOf(NetworkError);
+  });
+});
+
+// ── #993 — verifySignedXdrInvariants ─────────────────────────────────────────
+
+// Builds a minimal Transaction-like object that satisfies TxLike.
+function makeTxStub(overrides: {
+  source?: string;
+  sequence?: string;
+  fee?: string;
+  timeBounds?: { minTime?: string; maxTime?: string };
+  operations?: Array<{ type: string; func?: { toXDR: (fmt: string) => string } }>;
+  hashHex?: string;
+} = {}) {
+  const hashHex = overrides.hashHex ?? "aabbccdd";
+  return {
+    source: overrides.source ?? "GABC1111111111111111111111111111111111111111111111111111",
+    sequence: overrides.sequence ?? "12345",
+    fee: overrides.fee ?? "100",
+    timeBounds: overrides.timeBounds ?? { minTime: "0", maxTime: "9999999999" },
+    operations: overrides.operations ?? [
+      { type: "invokeHostFunction", func: { toXDR: (_fmt: string) => "funcXDR==" } },
+    ],
+    hash() {
+      return Buffer.from(hashHex, "hex");
+    },
+  };
+}
+
+describe("verifySignedXdrInvariants — XDR mutation rejection (#993)", () => {
+  let fromXDR: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fromXDR = vi.mocked(TransactionBuilder.fromXDR);
+  });
+
+  it("passes when prepared and signed transactions are identical", () => {
+    const tx = makeTxStub();
+    fromXDR.mockReturnValue(tx);
+
+    expect(() =>
+      verifySignedXdrInvariants("prep-xdr", "signed-xdr", TESTNET),
+    ).not.toThrow();
+  });
+
+  it("passes when the only difference is added signatures (same hash)", () => {
+    const prepared = makeTxStub({ hashHex: "deadbeef" });
+    const signed = makeTxStub({ hashHex: "deadbeef" }); // same hash
+    fromXDR
+      .mockReturnValueOnce(prepared)
+      .mockReturnValueOnce(signed);
+
+    expect(() =>
+      verifySignedXdrInvariants("prep-xdr", "signed-xdr", TESTNET),
+    ).not.toThrow();
+  });
+
+  it("rejects when the source account is altered", () => {
+    fromXDR
+      .mockReturnValueOnce(makeTxStub({ source: "GABC", hashHex: "0001" }))
+      .mockReturnValueOnce(makeTxStub({ source: "GXYZ", hashHex: "0002" }));
+
+    expect(() =>
+      verifySignedXdrInvariants("prep-xdr", "signed-xdr", TESTNET),
+    ).toThrow(XdrMismatchError);
+  });
+
+  it("rejects when the sequence number is altered", () => {
+    fromXDR
+      .mockReturnValueOnce(makeTxStub({ sequence: "1", hashHex: "0001" }))
+      .mockReturnValueOnce(makeTxStub({ sequence: "2", hashHex: "0002" }));
+
+    expect(() =>
+      verifySignedXdrInvariants("prep-xdr", "signed-xdr", TESTNET),
+    ).toThrow(XdrMismatchError);
+  });
+
+  it("rejects when the fee is altered", () => {
+    fromXDR
+      .mockReturnValueOnce(makeTxStub({ fee: "100", hashHex: "0001" }))
+      .mockReturnValueOnce(makeTxStub({ fee: "9999", hashHex: "0002" }));
+
+    expect(() =>
+      verifySignedXdrInvariants("prep-xdr", "signed-xdr", TESTNET),
+    ).toThrow(XdrMismatchError);
+  });
+
+  it("rejects when time bounds are altered", () => {
+    fromXDR
+      .mockReturnValueOnce(
+        makeTxStub({ timeBounds: { minTime: "0", maxTime: "1000" }, hashHex: "0001" }),
+      )
+      .mockReturnValueOnce(
+        makeTxStub({ timeBounds: { minTime: "0", maxTime: "9999" }, hashHex: "0002" }),
+      );
+
+    expect(() =>
+      verifySignedXdrInvariants("prep-xdr", "signed-xdr", TESTNET),
+    ).toThrow(XdrMismatchError);
+  });
+
+  it("rejects when an operation is removed", () => {
+    fromXDR
+      .mockReturnValueOnce(
+        makeTxStub({
+          operations: [
+            { type: "invokeHostFunction", func: { toXDR: () => "f==" } },
+          ],
+          hashHex: "0001",
+        }),
+      )
+      .mockReturnValueOnce(makeTxStub({ operations: [], hashHex: "0002" }));
+
+    expect(() =>
+      verifySignedXdrInvariants("prep-xdr", "signed-xdr", TESTNET),
+    ).toThrow(XdrMismatchError);
+  });
+
+  it("rejects when the contract function or arguments are altered", () => {
+    fromXDR
+      .mockReturnValueOnce(
+        makeTxStub({
+          operations: [
+            { type: "invokeHostFunction", func: { toXDR: () => "original-func==" } },
+          ],
+          hashHex: "0001",
+        }),
+      )
+      .mockReturnValueOnce(
+        makeTxStub({
+          operations: [
+            { type: "invokeHostFunction", func: { toXDR: () => "tampered-func==" } },
+          ],
+          hashHex: "0002",
+        }),
+      );
+
+    expect(() =>
+      verifySignedXdrInvariants("prep-xdr", "signed-xdr", TESTNET),
+    ).toThrow(XdrMismatchError);
+  });
+
+  it("includes the altered field name in the error", () => {
+    fromXDR
+      .mockReturnValueOnce(makeTxStub({ source: "GABC", hashHex: "0001" }))
+      .mockReturnValueOnce(makeTxStub({ source: "GXYZ", hashHex: "0002" }));
+
+    let err: XdrMismatchError | undefined;
+    try {
+      verifySignedXdrInvariants("prep-xdr", "signed-xdr", TESTNET);
+    } catch (e) {
+      err = e as XdrMismatchError;
+    }
+    expect(err).toBeInstanceOf(XdrMismatchError);
+    expect(err?.field).toBe("source account");
+  });
+
+  it("skips verification gracefully when fromXDR returns a stub without hash()", () => {
+    // Simulates the existing test mock that returns { _mockTx: true }
+    fromXDR.mockReturnValue({ _mockTx: true });
+
+    expect(() =>
+      verifySignedXdrInvariants("prep-xdr", "signed-xdr", TESTNET),
+    ).not.toThrow();
+  });
+});
+
+describe("signAndSubmitTransaction — XDR invariant integration (#993)", () => {
+  let fromXDR: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fromXDR = vi.mocked(TransactionBuilder.fromXDR);
+  });
+
+  it("returns errorKind 'xdr_mismatch' when the wallet alters the source account", async () => {
+    freighter.signTransaction.mockResolvedValue(VALID_XDR);
+
+    // First two fromXDR calls go to verifySignedXdrInvariants;
+    // they return different source accounts so the check fails.
+    fromXDR
+      .mockReturnValueOnce(makeTxStub({ source: "GAAA", hashHex: "0001" })) // prepared
+      .mockReturnValueOnce(makeTxStub({ source: "GBBB", hashHex: "0002" })); // signed (attacker)
+
+    const result = await txModule.signAndSubmitTransaction(VALID_XDR, { intervalMs: 1 });
+
+    expect(result.success).toBe(false);
+    expect(result.errorKind).toBe("xdr_mismatch");
+    expect(result.error).toMatch(/source account/);
   });
 });
 

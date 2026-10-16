@@ -7,6 +7,7 @@ import {
   incrementIdempotencyMisses,
   incrementIdempotencyConflicts,
 } from "../services/metricsService.js";
+import { sessionPrincipal } from "./walletAuth.js";
 
 const IDEMPOTENCY_KEY_HEADER = "idempotency-key";
 const IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60; // 24 hours for completed responses
@@ -25,6 +26,18 @@ export interface IdempotencyOptions {
 }
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+// Session-token issuance must never be replayed from a cache.
+const EXCLUDED_PREFIXES = ["/auth"];
+
+/**
+ * Records are namespaced by verified principal (wallet + role) so one caller
+ * can never read or block another's entry, and a demoted role cannot replay a
+ * response it is no longer authorized to receive. The `v2` prefix leaves
+ * legacy unscoped `idem:<key>` entries unreachable until they expire.
+ */
+export function idempotencyRedisKey(walletAddress: string, role: string | undefined, key: string): string {
+  return `idem:v2:${walletAddress}:${role ?? ""}:${key}`;
+}
 
 function sortedStringify(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -77,6 +90,8 @@ function isAllowedPath(req: Request, allowlist?: string[]): boolean {
  * - Only 2xx (and deterministic 4xx) are cached; 5xx are never cached and the lock is cleared.
  * - IN_PROGRESS lock uses a short 60s TTL so a crashed handler becomes retryable quickly.
  * - Correctly handles `status` being `number | 'IN_PROGRESS'` (previous bug compared number to string).
+ * - Only engages for a verified Bearer session; otherwise the request falls
+ *   through so route authentication runs (no replay without credentials).
  */
 export function createIdempotencyMiddleware(redisClient: Redis, options?: IdempotencyOptions) {
   const allowlist = options?.allowlist;
@@ -87,7 +102,7 @@ export function createIdempotencyMiddleware(redisClient: Redis, options?: Idempo
     if (SAFE_METHODS.has(method)) {
       return next();
     }
-    if (!isAllowedPath(req, allowlist)) {
+    if (!isAllowedPath(req, allowlist) || isAllowedPath(req, EXCLUDED_PREFIXES)) {
       return next();
     }
 
@@ -95,8 +110,12 @@ export function createIdempotencyMiddleware(redisClient: Redis, options?: Idempo
     if (!idempotencyKeyRaw || typeof idempotencyKeyRaw !== "string") {
       return next();
     }
+    const principal = sessionPrincipal(req);
+    if (!principal) {
+      return next();
+    }
     const idempotencyKey = idempotencyKeyRaw;
-    const redisKey = `idem:${idempotencyKey}`;
+    const redisKey = idempotencyRedisKey(principal.walletAddress, principal.role, idempotencyKey);
     const fingerprint = fingerprintForRequest(req);
 
     try {

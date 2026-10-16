@@ -38,6 +38,7 @@ test_snapshots/
 # Environment
 .env*
 !.env.example
+!.env.testnet.example
 
 # IDEs
 .vscode/

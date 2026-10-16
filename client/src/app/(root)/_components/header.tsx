@@ -3,7 +3,13 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { Menu, ShoppingBag, ExternalLink } from "lucide-react";
+import {
+  Menu,
+  ShoppingBag,
+  ExternalLink,
+  LayoutDashboard,
+  Sparkles,
+} from "lucide-react";
 
 import Wrapper from "@/components/shared/wrapper";
 import { ThemeToggle } from "@/components/shared/theme-toggle";
@@ -11,6 +17,7 @@ import { Separator } from "@/components/ui/separator";
 import ConnectWallet from "@/components/shared/connect-wallet";
 import { siteConfig } from "@/config/site.config";
 import { useCart } from "@/context/CartContext";
+import { useProfile } from "@/context/ProfileContext";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -35,7 +42,14 @@ const navItems = [
 
 export default function Header() {
   const { itemCount, setDrawerOpen } = useCart();
+  const { profile, isLoaded, isOnboarded } = useProfile();
   const pathname = usePathname();
+
+  // Only expose account entry points once the profile fetch has settled so we
+  // don't flash the wrong CTA during hydration.
+  const showDashboard = isLoaded && isOnboarded && profile?.role === "farmer";
+  const showGetStarted =
+    isLoaded && !isOnboarded && pathname !== "/onboarding";
 
   const handleAgroProductionNav = (e: React.MouseEvent<HTMLAnchorElement>) => {
     const baseUrl = process.env.NEXT_PUBLIC_AGRO_PRODUCTION_URL;
@@ -116,7 +130,28 @@ export default function Header() {
         </ul>
 
         <div className="flex items-center justify-end gap-1">
-          <div className="hidden items-center gap-1 md:flex lg:max-w-[280px]">
+          <div className="hidden items-center gap-1 md:flex lg:max-w-[360px]">
+            {showDashboard && (
+              <Button
+                asChild
+                size="sm"
+                variant="outline"
+                aria-label="Go to your dashboard"
+              >
+                <Link href="/dashboard">
+                  <LayoutDashboard className="size-4" />
+                  <span className="hidden lg:inline">Dashboard</span>
+                </Link>
+              </Button>
+            )}
+            {showGetStarted && (
+              <Button asChild size="sm" aria-label="Get started with onboarding">
+                <Link href="/onboarding">
+                  <Sparkles className="size-4" />
+                  <span className="hidden lg:inline">Get Started</span>
+                </Link>
+              </Button>
+            )}
             <ThemeToggle />
             <Separator orientation="vertical" className="mx-1 !h-5" />
             <ConnectWallet />
@@ -187,6 +222,28 @@ export default function Header() {
                       Agro Production
                       <ExternalLink className="ml-auto size-4" />
                     </a>
+                  )}
+
+                  {showDashboard && (
+                    <Link
+                      href="/dashboard"
+                      aria-label="Go to your dashboard"
+                      className="flex min-h-11 items-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                    >
+                      <LayoutDashboard className="size-4" />
+                      Dashboard
+                    </Link>
+                  )}
+
+                  {showGetStarted && (
+                    <Link
+                      href="/onboarding"
+                      aria-label="Get started with onboarding"
+                      className="flex min-h-11 items-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                    >
+                      <Sparkles className="size-4" />
+                      Get Started
+                    </Link>
                   )}
                 </div>
 

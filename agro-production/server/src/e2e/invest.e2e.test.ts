@@ -33,6 +33,28 @@ import {
   makeCampaignInvestedRawEvent,
 } from './helpers/xdrBuilder.js';
 
+/**
+ * Races `promise` against a timeout, always clearing the timer so a fast
+ * resolution cannot leave a pending handle behind after the suite (#1064).
+ */
+async function withDeadline<T>(
+  promise: Promise<T>,
+  ms: number,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -157,13 +179,9 @@ function runE2ESuite() {
         txHash: 'bbb',
       });
 
-      // WS should broadcast within 2 s.
-      const raw = await Promise.race([
-        wsEvent,
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('WS timeout')), 2000),
-        ),
-      ]);
+      // WS should broadcast within 2 s. The timer is always cleared so it
+      // cannot outlive the suite and keep the worker alive (#1064).
+      const raw = await withDeadline(wsEvent, 2000, 'WS timeout');
       ws.close();
 
       const envelope = JSON.parse(raw) as { event: string; payload: unknown };
@@ -264,12 +282,7 @@ function runE2ESuite() {
       mockRpc.advanceLedger(1);
 
       // Wait for WS notification (watcher polls every 150ms).
-      const raw = await Promise.race([
-        investedMsg,
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('WS timeout after 5 s')), 5000),
-        ),
-      ]);
+      const raw = await withDeadline(investedMsg, 5000, 'WS timeout after 5 s');
       ws.close();
 
       const envelope = JSON.parse(raw) as {

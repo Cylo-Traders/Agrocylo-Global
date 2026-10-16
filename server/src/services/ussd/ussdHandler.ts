@@ -14,6 +14,16 @@ import { prisma } from "../../config/database.js";
 
 const MAX_TEXT_LENGTH = 182;
 
+/**
+ * Validate a Stellar public key (G... address, 56 chars, base32).
+ * Uses the same base-32 alphabet as StrKey: A-Z and 2-7.
+ */
+export function isStellarPublicKey(address: string): boolean {
+  return /^G[A-Z2-7]{55}$/.test(address);
+}
+
+
+
 function truncate(text: string): string {
   if (text.length <= MAX_TEXT_LENGTH) return text;
   return text.slice(0, MAX_TEXT_LENGTH - 3) + "...";
@@ -40,6 +50,10 @@ export async function handleUssdRequest(
   if (!session) {
     session = await createSession(sessionId, phoneNumber);
     return mainMenu();
+  }
+
+  if (session.phoneNumber !== phoneNumber) {
+    throw new Error("Session phone number mismatch");
   }
 
   await updateSession(sessionId, {});
@@ -77,7 +91,7 @@ async function handleMainMenu(sessionId: string, input: string): Promise<string>
       return "CON Enter the Order ID to confirm receipt:";
     case "4":
       await updateSession(sessionId, { step: "link_wallet", state: {} });
-      return "CON Enter your wallet address (0x...):";
+      return "CON Enter your Stellar wallet address (G...):";
     default:
       return "CON Invalid choice.\n" + mainMenu();
   }
@@ -89,12 +103,12 @@ async function handleLinkWallet(
   input: string,
 ): Promise<string> {
   const wallet = input.trim();
-  if (!/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
-    return "CON Invalid wallet address. Enter a valid 0x address:";
+  if (!isStellarPublicKey(wallet)) {
+    return "CON Invalid Stellar address. Enter a valid G... Stellar public key:";
   }
-  await linkPhoneToWallet(phoneNumber, wallet);
+  await linkPhoneToWallet(phoneNumber, wallet, false);
   await updateSession(sessionId, { step: "main_menu", walletAddress: wallet });
-  return truncate("END Wallet linked successfully!\n" + mainMenu());
+  return truncate("END Wallet link requested! Verification required before completing transactions.\n" + mainMenu());
 }
 
 async function handleListSupplyCrop(
@@ -139,7 +153,7 @@ async function handleOrderStatusId(
     return "CON Please enter a valid Order ID:";
   }
 
-  const wallet = await getWalletByPhone(phoneNumber);
+  const wallet = await getWalletByPhone(phoneNumber, true);
   if (!wallet) {
     await updateSession(sessionId, { step: "main_menu" });
     return truncate("END No wallet linked to this number. Use option 4 to link first.\n" + mainMenu());
@@ -177,7 +191,7 @@ async function handleConfirmReceiptId(
     return "CON Please enter a valid Order ID:";
   }
 
-  const wallet = await getWalletByPhone(phoneNumber);
+  const wallet = await getWalletByPhone(phoneNumber, true);
   if (!wallet) {
     await updateSession(sessionId, { step: "main_menu" });
     return truncate("END No wallet linked to this number. Use option 4 to link first.\n" + mainMenu());
@@ -195,8 +209,8 @@ async function handleConfirmReceiptId(
       data: { status: "COMPLETED" },
     });
 
-    const buyerPhone = await getPhoneByWallet(order.buyerAddress);
-    const sellerPhone = await getPhoneByWallet(order.sellerAddress);
+    const buyerPhone = await getPhoneByWallet(order.buyerAddress, true);
+    const sellerPhone = await getPhoneByWallet(order.sellerAddress, true);
 
     if (buyerPhone) {
       await sendSms(buyerPhone, `Receipt confirmed for Order ${orderId}. Thank you!`);

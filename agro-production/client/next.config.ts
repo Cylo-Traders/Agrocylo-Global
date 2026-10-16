@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertEndpointsValid } from "./src/lib/endpointValidator";
+import { assertEndpointsValid, assertApiWsOriginsValid } from "./src/lib/endpointValidator";
+import { getAllowedProductImageHosts, getAllowedProductImageOrigins } from "./src/lib/productImagePolicy";
+import { buildContentSecurityPolicy, observabilityConnectSources } from "./src/lib/cspPolicy";
 
 // ── Resolve repository root for Turbopack ────────────────────────────────
 // Issue #918: client fix derives repo root from config file location; this
@@ -81,6 +83,25 @@ const { sorobanRpc, horizon: horizonHostname } = assertEndpointsValid(
   { isProduction: process.env.NODE_ENV === "production" }
 );
 
+// Issue #1001: allow a separately hosted API/WebSocket origin (e.g. localhost:5001
+// in dev, or a dedicated api./ws. host in production) through the CSP connect-src.
+// Both are optional -- same-origin deployments leave them unset and rely on 'self'.
+const { apiOrigin, wsOrigin } = assertApiWsOriginsValid(
+  {
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
+    NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL,
+    NODE_ENV: process.env.NODE_ENV,
+  },
+  { isProduction: process.env.NODE_ENV === "production" }
+);
+
+const productImageHosts = getAllowedProductImageHosts();
+const productImageOrigins = getAllowedProductImageOrigins();
+const productImagePatterns = productImageOrigins.map((origin) => {
+  const url = new URL(origin);
+  return { protocol: url.protocol.replace(":", "") as "http" | "https", hostname: url.hostname };
+});
+
 const nextConfig: NextConfig = {
   output: "standalone",
   // Issue #755: shared monorepo packages ship raw TS source, so Next.js
@@ -92,16 +113,44 @@ const nextConfig: NextConfig = {
   // Keep CSP/image hosts in sync with the validated endpoints so a
   // malformed value never reaches `new URL(...).hostname` as a generic throw.
   async headers() {
-    const imageHosts = ["ipfs.io", "gateway.pinata.cloud", sorobanRpc, horizonHostname].filter(Boolean);
-    const cspImageSources = imageHosts.map((h) => `https://${h}`).join(" ");
-    const cspConnectSources = [`https://${sorobanRpc}`, `https://${horizonHostname}`, "https://freighter.app"].join(" ");
+    const imageHosts = ["ipfs.io", "gateway.pinata.cloud", sorobanRpc, horizonHostname, ...productImageHosts].filter(Boolean);
+    const cspImageSources = [...new Set([...imageHosts.map((h) => `https://${h}`), ...productImageOrigins])].join(" ");
+    const apiWsOrigins = [apiOrigin, wsOrigin].filter((o): o is string => Boolean(o));
+    const cspConnectSources = [`https://${sorobanRpc}`, `https://${horizonHostname}`, "https://freighter.app", ...new Set(apiWsOrigins)];
+    // Issue #1040: Sentry and first-party telemetry are configured via env but
+    // were never in connect-src, so their requests were blocked in production.
+    // Only origins the code actually validates are added, and only for features
+    // that are enabled -- an unset variable must not widen the policy.
+    const { origins: cspObservabilitySources, rejected: rejectedObservability } = observabilityConnectSources({
+      NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN,
+      NEXT_PUBLIC_TELEMETRY_ENABLED: process.env.NEXT_PUBLIC_TELEMETRY_ENABLED,
+      NEXT_PUBLIC_TELEMETRY_URL: process.env.NEXT_PUBLIC_TELEMETRY_URL,
+      NODE_ENV: process.env.NODE_ENV,
+    });
+    if (rejectedObservability.length > 0) {
+      // Names only. The values may contain a DSN public key, which is not a
+      // secret but does not belong in build logs either.
+      console.warn(
+        `[csp] ignoring malformed observability origin(s): ${rejectedObservability.join(", ")}`,
+      );
+    }
+    const contentSecurityPolicy = buildContentSecurityPolicy({
+      isProduction: process.env.NODE_ENV === "production",
+      // No nonce here: this is the static baseline for requests that do not
+      // pass through middleware. src/middleware.ts generates a per-request
+      // nonce and forwards it, which is what allows hydration (#1039).
+      nonce: null,
+      imageSources: cspImageSources.split(" ").filter(Boolean),
+      connectSources: cspConnectSources,
+      observabilitySources: cspObservabilitySources,
+    });
     return [
       {
         source: "/:path*",
         headers: [
           {
             key: "Content-Security-Policy",
-            value: `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' ${cspImageSources}; connect-src 'self' ${cspConnectSources}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`,
+            value: contentSecurityPolicy,
           },
           { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains; preload" },
           { key: "X-Content-Type-Options", value: "nosniff" },
@@ -121,6 +170,7 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "gateway.pinata.cloud" },
       { protocol: "https", hostname: sorobanRpc },
       { protocol: "https", hostname: horizonHostname },
+      ...productImagePatterns,
     ],
   },
 };

@@ -131,6 +131,30 @@ describe("BlockchainEventPersistenceService", () => {
     });
   });
 
+  it("projects campaign.created and campaign.settled with canonical CampaignStatus", async () => {
+    const base = {
+      entity: "campaign",
+      timestamp: new Date(),
+      payload: [],
+      campaignIdOnChain: "camp-1",
+      actorAddress: "GFARMER",
+      token: "TOKEN",
+    } as const;
+    await BlockchainEventPersistenceService.persist({
+      ...base, sourceEventId: "30-1", eventType: "campaign.created", action: "created", ledger: 30, eventIndex: 1, amount: "1000",
+    } as IndexedEvent);
+    expect(lastTxMock.campaign.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ create: expect.objectContaining({ status: "ACTIVE" }) }),
+    );
+
+    await BlockchainEventPersistenceService.persist({
+      ...base, sourceEventId: "31-1", eventType: "campaign.settled", action: "settled", ledger: 31, eventIndex: 1,
+    } as IndexedEvent);
+    expect(lastTxMock.campaign.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: { status: "SETTLED" } }),
+    );
+  });
+
   it("skips persistence when event already exists", async () => {
     txsStore.add("12-1");
     const event: IndexedEvent = {

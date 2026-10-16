@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { CheckCircle2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
@@ -13,11 +14,19 @@ interface CompleteProps {
 
 export default function Complete({ role }: CompleteProps) {
   const isFarmer = role === "farmer";
+  const router = useRouter();
   const { trackFunnelStep } = useAnalytics();
 
   useEffect(() => {
     trackFunnelStep("onboarding_completion", "completed", { role });
   }, [role, trackFunnelStep]);
+
+  // Send the user straight to their destination once onboarding is done. The
+  // confirmation UI below stays mounted so it is visible for the brief moment
+  // before navigation (or if the redirect is somehow blocked).
+  useEffect(() => {
+    router.replace(isFarmer ? "/dashboard" : "/market");
+  }, [isFarmer, router]);
 
   return (
     <Card className="mx-auto max-w-md">

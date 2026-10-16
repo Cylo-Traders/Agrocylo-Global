@@ -192,6 +192,13 @@ jobs:
       # agro-production/client and packages/*. Install runs once at the repo
       # root; every other step below still runs scoped to client/ via this
       # job's `defaults.run.working-directory`.
+      # Issue #1089: exactly one react/react-dom may be resolved, or every
+      # component test fails with "Invalid hook call". Reads only the
+      # lockfile, so it gates before the install.
+      - name: Single React runtime
+        working-directory: .
+        run: node scripts/check-react-runtime.js
+
       - name: Install dependencies
         working-directory: .
         run: npm ci
@@ -245,6 +252,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Issue #944: verify prisma, @prisma/client, and @prisma/adapter-pg are
+      # all on the same major before attempting generation. A CLI/client major
+      # mismatch produces a confusing MODULE_NOT_FOUND error; this surfaces the
+      # real cause early with an actionable message.
+      - name: Check Prisma toolchain compatibility
+        working-directory: .
+        run: node scripts/check-prisma-versions.js
+
       - name: Generate Prisma client
         env:
           DATABASE_URL: ""
@@ -264,6 +279,9 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Smoke-test built GraphQL module import
+        run: npm run smoke:graphql-import
 
       - name: Verify server image excludes database credentials
         working-directory: .
@@ -311,6 +329,11 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Issue #944: verify Prisma toolchain before generation (same as server job above).
+      - name: Check Prisma toolchain compatibility
+        working-directory: .
+        run: node scripts/check-prisma-versions.js
 
       - name: Generate Prisma client
         run: npx prisma generate
@@ -431,6 +454,13 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: package-lock.json
+
+      # Issue #1089: exactly one react/react-dom may be resolved, or every
+      # component test fails with "Invalid hook call". Reads only the
+      # lockfile, so it gates before the install.
+      - name: Single React runtime
+        working-directory: .
+        run: node scripts/check-react-runtime.js
 
       # Issue #755: same root-workspace install as the client job above.
       - name: Install dependencies

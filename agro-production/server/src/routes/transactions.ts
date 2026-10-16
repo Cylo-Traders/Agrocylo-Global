@@ -17,7 +17,7 @@ import {
   TransactionReconciliationResponseSchema,
 } from '../schemas/transaction.js';
 import type { TransactionStatus } from '../schemas/transaction.js';
-import { broadcast } from '../services/wsServer.js';
+import { broadcastTo } from '../services/wsServer.js';
 import { reconcileTransaction } from '../services/transactionReconciler.js';
 
 const router = Router();
@@ -102,10 +102,11 @@ router.post(
     });
 
     const response = txToResponse(tx, walletAddress);
-    broadcast('transaction.status', {
+    // Issue #1065: status updates are addressed to the owning wallet only and
+    // carry no wallet address — unauthenticated sockets receive nothing.
+    broadcastTo(walletAddress, 'transaction.status', {
       requestId: response.requestId,
       txHash: response.txHash,
-      walletAddress: response.walletAddress,
       status: response.status,
     });
 
@@ -115,13 +116,17 @@ router.post(
 
 router.get(
   '/transactions/:requestId',
+  requireWallet,
   validateParams(TransactionRequestIdParamSchema),
-  async (req: Request, res: Response) => {
+  async (req: WalletRequest, res: Response) => {
     const tx = await prisma.transaction.findUnique({
       where: { id: req.params.requestId },
     });
 
-    if (!tx) {
+    // Issue #1065: require ownership on reads so wallets cannot read each
+    // other's transactions by guessing request IDs. A foreign transaction
+    // responds with 404 so existence is not revealed.
+    if (!tx || tx.walletAddress !== req.walletAddress) {
       problemDetail(
         res,
         req,
@@ -222,10 +227,11 @@ router.patch(
     });
 
     const response = txToResponse(updated);
-    broadcast('transaction.status', {
+    // Issue #1065: owner-only status delivery with no wallet address in the
+    // payload — the target is the transaction's own wallet.
+    broadcastTo(updated.walletAddress ?? '', 'transaction.status', {
       requestId: response.requestId,
       txHash: response.txHash,
-      walletAddress: response.walletAddress,
       status: response.status,
       previousStatus: currentStatus,
     });
@@ -236,13 +242,16 @@ router.patch(
 
 router.get(
   '/transactions/:requestId/reconcile',
+  requireWallet,
   validateParams(TransactionRequestIdParamSchema),
-  async (req: Request, res: Response) => {
+  async (req: WalletRequest, res: Response) => {
     const tx = await prisma.transaction.findUnique({
       where: { id: req.params.requestId },
     });
 
-    if (!tx) {
+    // Issue #1065: reconcile reads are owner-gated like status reads, and a
+    // foreign transaction answers 404 to avoid leaking existence.
+    if (!tx || tx.walletAddress !== req.walletAddress) {
       problemDetail(
         res,
         req,
