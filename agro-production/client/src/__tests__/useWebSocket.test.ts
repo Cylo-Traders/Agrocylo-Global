@@ -203,7 +203,7 @@ describe("useWebSocket", () => {
     expect(ws.url).toBe("wss://myapp.example.com/ws");
 
     // Restore location
-    window.location = originalLocation;
+    window.location = originalLocation as string & Location;
   });
 
   it("ws://localhost:5001/ws is used when running locally on http", () => {
@@ -217,7 +217,7 @@ describe("useWebSocket", () => {
     const ws = webSocketInstances[0];
     expect(ws.url).toBe("ws://localhost:5001/ws");
 
-    window.location = originalLocation;
+    window.location = originalLocation as string & Location;
   });
 
   it("uses an explicit NEXT_PUBLIC_WS_URL override when set", () => {
