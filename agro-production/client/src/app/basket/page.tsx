@@ -16,6 +16,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { safePercentage } from "@/lib/validation";
+import { fetchInvestorBasket } from "@/services/basketService";
+import { isApiError, isNetworkError } from "@/lib/apiClient";
 
 type BasketPageState =
   | { kind: "loading" }
@@ -146,40 +148,40 @@ export default function BasketPage() {
               Positions ({state.basket.positions.length})
             </h2>
             <div className="space-y-3">
-              {state.basket.positions.map((pos) => (
-                <div
-                  key={pos.campaignId}
-                  className="flex items-center justify-between rounded-xl border border-border bg-surface p-4"
-                >
-                  <div className="min-w-0">
-                    <span className="font-medium text-foreground truncate block">
-                      {pos.campaignName || `Position ${pos.campaignId.slice(0, 8)}…`}
-                    </span>
-                    <p className="text-xs text-muted mt-0.5">
-                      Weight: {pos.weight}% · Allocated: {pos.allocatedAmount} XLM
-                    </p>
+              {state.basket.positions.map((pos) => {
+                // Display strings may carry thousands separators; parse to
+                // plain numbers only for the gain/loss arithmetic (string
+                // arithmetic on formatted values is lexicographic/NaN).
+                const allocatedXlm = Number(pos.allocatedAmount.replace(/,/g, ""));
+                const currentXlm = Number(pos.currentValue.replace(/,/g, ""));
+                const gained = currentXlm >= allocatedXlm;
+                return (
+                  <div
+                    key={pos.campaignId}
+                    className="flex items-center justify-between rounded-xl border border-border bg-surface p-4"
+                  >
+                    <div className="min-w-0">
+                      <span className="font-medium text-foreground truncate block">
+                        {pos.campaignName || `Position ${pos.campaignId.slice(0, 8)}…`}
+                      </span>
+                      <p className="text-xs text-muted mt-0.5">
+                        Weight: {pos.weight}% · Allocated: {pos.allocatedAmount} XLM
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0 ml-4">
+                      <p className="font-medium text-foreground">{pos.currentValue} XLM</p>
+                      <p
+                        className={`text-xs mt-0.5 ${
+                          gained ? "text-primary-600" : "text-red-500"
+                        }`}
+                      >
+                        {gained ? "+" : ""}
+                        {safePercentage(currentXlm - allocatedXlm, allocatedXlm).toFixed(1)}%
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-right shrink-0 ml-4">
-                    <p className="font-medium text-foreground">
-                      {pos.currentValue.toLocaleString()} XLM
-                    </p>
-                    <p
-                      className={`text-xs mt-0.5 ${
-                        pos.currentValue >= pos.allocatedAmount
-                          ? "text-primary-600"
-                          : "text-red-500"
-                      }`}
-                    >
-                      {pos.currentValue >= pos.allocatedAmount ? "+" : ""}
-                      {safePercentage(
-                        pos.currentValue - pos.allocatedAmount,
-                        pos.allocatedAmount,
-                      ).toFixed(1)}
-                      %
-                    </p>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
         </>
