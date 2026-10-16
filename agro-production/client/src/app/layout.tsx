@@ -4,12 +4,17 @@ import { WalletProvider } from "@/context/WalletContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { I18nProvider } from "@/context/I18nContext";
 import NavBar from "@/components/NavBar";
+import NetworkMismatchBanner from "@/components/NetworkMismatchBanner";
 import AnalyticsInit from "@/components/AnalyticsInit";
 import HandoffConsumer from "@/components/HandoffConsumer";
 import PendingTransactionsResolver from "@/components/PendingTransactionsResolver";
 import { resolveProductionGate } from "@/lib/productionGate";
 import ProductionUnavailable from "@/components/ProductionUnavailable";
 import { themeBootstrapScript } from "@/theme/theme";
+import { resolveProductionGate } from "@/lib/productionGate";
+import ProductionUnavailable from "@/components/ProductionUnavailable";
+import AnalyticsConsent from "@/components/AnalyticsConsent";
+import PwaSetup from "@/components/PwaSetup";
 
 export const metadata: Metadata = {
   title: "Agro Production",
@@ -44,12 +49,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <ThemeProvider>
               <WalletProvider>
                 <AnalyticsInit />
+                <AnalyticsConsent />
+                <PwaSetup />
                 <HandoffConsumer />
                 <PendingTransactionsResolver />
                 <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:bg-background focus:border focus:border-border focus:px-4 focus:py-2 focus:rounded-lg focus:text-sm">
                   Skip to main content
                 </a>
                 <NavBar />
+                {/* Issue #1087: a wrong or unverifiable wallet network is a
+                    page-level condition, so it is announced here — persistently,
+                    and before any transaction can be started. */}
+                <NetworkMismatchBanner />
                 <main id="main-content" className="max-w-5xl mx-auto px-4 py-8">{children}</main>
               </WalletProvider>
             </ThemeProvider>

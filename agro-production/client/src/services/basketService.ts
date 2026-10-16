@@ -105,7 +105,7 @@ export function mapInvestorBasket(dto: InvestorBasketSummaryDTO): BasketSummary 
       currentValue:
         position.claimed && position.payoutAmount
           ? formatStroopsForDisplay(position.payoutAmount, 7)
-          : position.allocatedAmount,
+          : formatStroopsForDisplay(position.amount, 7),
       weight: Number((positionAllocated * 100n) / safeAllocated), // amount-exact-ok
       claimed: position.claimed,
     };

@@ -123,6 +123,8 @@ model Product {
   stockQuantity Decimal?   @map("stock_quantity") @db.Decimal(10, 2)
   imageUrl      String?    @map("image_url")
   location      String?
+  chainNetwork  String?    @default("stellar:pubnet") @map("chain_network")
+  deliveryWindow String?   @map("delivery_window")
   isAvailable   Boolean    @default(true) @map("is_available")
   createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)

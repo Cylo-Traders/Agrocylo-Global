@@ -12,10 +12,12 @@ export interface ProductWriteInput {
   description?: string | null;
   category?: string | null;
   price_per_unit?: string;
-  currency?: CurrencyCode;
+  currency?: 'USDC' | 'XLM' | 'EURC' | 'STRK' | string;
   unit?: string;
   stock_quantity?: string | null;
   location?: string;
+  chain_network?: string | null;
+  delivery_window?: string | null;
   is_available?: boolean;
 }
 
@@ -68,6 +70,8 @@ function toProductDto(product: Product): ProductDto {
     stock_quantity: product.stockQuantity?.toString() ?? null,
     location: product.location,
     image_url: product.imageUrl,
+    chain_network: product.chainNetwork,
+    delivery_window: product.deliveryWindow,
     is_available: product.isAvailable,
     created_at: product.createdAt,
     updated_at: product.updatedAt,
@@ -178,12 +182,24 @@ export async function getProductGraphData(productId: string): Promise<ProductGra
   } as ProductGraphData;
 }
 
+const ALLOWED_CURRENCIES = new Set(['USDC', 'XLM', 'EURC', 'STRK']);
+
 export async function createProduct(farmerWallet: string, input: ProductWriteInput): Promise<ProductDto> {
   if (!input.name || !input.price_per_unit || !input.currency || !input.unit) {
     throw new ApiError(400, 'Bad Request', 'name, price_per_unit, currency, and unit are required');
   }
 
-  const currency = assertCurrency(input.currency);
+  // Issue #1125: Currency validation
+  const normalizedCurrency = input.currency.toUpperCase();
+  if (!ALLOWED_CURRENCIES.has(normalizedCurrency)) {
+    throw new ApiError(400, 'Bad Request', `Invalid currency: ${input.currency}. Supported currencies are USDC, XLM, EURC, STRK.`);
+  }
+
+  // Issue #1128: Enforce farmer/seller role
+  const profile = await prisma.profile.findUnique({ where: { walletAddress: farmerWallet.toLowerCase() } });
+  if (profile && profile.role !== 'farmer' && profile.role !== 'seller') {
+    throw new ApiError(403, 'Forbidden', 'Only users with farmer or seller role can create products');
+  }
 
   const product = await prisma.product.create({
     data: {
@@ -192,10 +208,12 @@ export async function createProduct(farmerWallet: string, input: ProductWriteInp
       description: input.description ?? null,
       category: input.category ?? null,
       pricePerUnit: new Prisma.Decimal(input.price_per_unit),
-      currency,
+      currency: normalizedCurrency,
       unit: input.unit,
       stockQuantity: input.stock_quantity ? new Prisma.Decimal(input.stock_quantity) : null,
       location: input.location ?? null,
+      chainNetwork: input.chain_network ?? 'stellar:pubnet',
+      deliveryWindow: input.delivery_window ?? null,
       isAvailable: input.is_available ?? true,
     },
   });
@@ -211,17 +229,31 @@ export async function updateProduct(productId: string, farmerWallet: string, inp
     throw new ApiError(403, 'Forbidden', 'You do not own this product');
   }
 
+  // Issue #1128: Enforce farmer/seller role
+  const profile = await prisma.profile.findUnique({ where: { walletAddress: farmerWallet.toLowerCase() } });
+  if (profile && profile.role !== 'farmer' && profile.role !== 'seller') {
+    throw new ApiError(403, 'Forbidden', 'Only users with farmer or seller role can update products');
+  }
+
   const data: Prisma.ProductUpdateInput = {};
   if (input.name !== undefined) data.name = input.name;
   if (input.description !== undefined) data.description = input.description;
   if (input.category !== undefined) data.category = input.category;
   if (input.price_per_unit !== undefined) data.pricePerUnit = new Prisma.Decimal(input.price_per_unit);
-  if (input.currency !== undefined) data.currency = assertCurrency(input.currency);
+  if (input.currency !== undefined) {
+    const normalizedCurrency = input.currency.toUpperCase();
+    if (!ALLOWED_CURRENCIES.has(normalizedCurrency)) {
+      throw new ApiError(400, 'Bad Request', `Invalid currency: ${input.currency}. Supported currencies are USDC, XLM, EURC, STRK.`);
+    }
+    data.currency = normalizedCurrency;
+  }
   if (input.unit !== undefined) data.unit = input.unit;
   if (input.stock_quantity !== undefined) {
     data.stockQuantity = input.stock_quantity === null ? null : new Prisma.Decimal(input.stock_quantity);
   }
   if (input.location !== undefined) data.location = input.location;
+  if (input.chain_network !== undefined) data.chainNetwork = input.chain_network;
+  if (input.delivery_window !== undefined) data.deliveryWindow = input.delivery_window;
   if (input.is_available !== undefined) data.isAvailable = input.is_available;
 
   if (Object.keys(data).length === 0) throw new ApiError(400, 'Bad Request', 'No fields provided to update');
