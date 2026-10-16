@@ -1,55 +1,64 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { loadWalletSession } from "@/lib/walletSession";
-import { getConversations, createOrGetConversation, type Conversation } from "@/services/conversationService";
+import { getConversations, type Conversation } from "@/services/conversationService";
 import MessageThread from "@/components/MessageThread";
 
 export default function MessagesPage() {
   const params = useParams();
   const campaignId = params.id as string;
 
-  const [walletSession, setWalletSession] = useState<{ address: string; token: string } | null>(null);
+  // Browser storage is read once, lazily, in the first render — not mirrored
+  // from state inside an effect (#1084). `loadWalletSession` is a no-op on
+  // the server, so SSR still renders the "connect your wallet" branch.
+  const [session] = useState(() => loadWalletSession());
+  const walletSession = useMemo(
+    () => (session ? { address: session.address, token: "" } : null),
+    [session],
+  );
+
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const session = loadWalletSession();
-    if (!session) {
-      setError("Wallet not connected");
-      setLoading(false);
-      return;
-    }
-
-    // TODO: Get sessionToken from auth system
-    // For now, we'll need this to be passed in or stored in a context
-    setWalletSession({ address: session.address, token: "" });
-  }, []);
+  const sessionToken = walletSession?.token;
 
   useEffect(() => {
-    if (!walletSession?.token) return;
+    if (!sessionToken) return;
+
+    // Captured as a local so the narrowing survives into the async closure.
+    const token = sessionToken;
+
+    // Cancelled on unmount and whenever the session changes, so a slow
+    // response can never populate a view that no longer belongs to it.
+    let cancelled = false;
 
     async function loadConversations() {
       try {
-        const data = await getConversations(walletSession.token);
+        const data = await getConversations(token);
         const campaignConversations = data.filter((c) => c.campaignId === campaignId);
+        if (cancelled) return;
         setConversations(campaignConversations);
         if (campaignConversations.length > 0) {
           setSelectedConversation(campaignConversations[0]);
         }
         setError(null);
       } catch (err) {
+        if (cancelled) return;
         setError(err instanceof Error ? err.message : "Failed to load conversations");
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
-    loadConversations();
-  }, [campaignId, walletSession]);
+    void loadConversations();
+    return () => {
+      cancelled = true;
+    };
+  }, [campaignId, sessionToken]);
 
   if (!walletSession) {
     return (
@@ -81,7 +90,7 @@ export default function MessagesPage() {
   if (conversations.length === 0) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <p className="text-muted">No conversations yet. Start one by clicking "Message" on an investment.</p>
+        <p className="text-muted">No conversations yet. Start one by clicking &quot;Message&quot; on an investment.</p>
       </div>
     );
   }

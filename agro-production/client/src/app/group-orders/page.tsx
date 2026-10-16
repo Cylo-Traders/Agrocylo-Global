@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useWebSocket, type WsMessage } from "@/hooks/useWebSocket";
+import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { safePercentage } from "@/lib/validation";
 
 interface GroupOrder {
@@ -20,15 +21,43 @@ interface GroupOrderUpdatePayload {
 }
 
 export default function GroupOrdersPage() {
+  // Declared before the effect that runs it (#1084: the effect used to call
+  // `fetchGroupOrders` before its declaration, which froze the first render's
+  // closure). The loader aborts with the owner and the list state is derived.
+  const fetchGroupOrders = useCallback(async (signal: AbortSignal) => {
+    try {
+      const response = await fetch("/api/group-orders", { signal });
+      if (!response.ok) throw new Error("Failed to fetch group orders");
+      return (await response.json()) as GroupOrder[];
+    } catch (error) {
+      if (signal.aborted) throw error;
+      console.error("Failed to fetch group orders:", error);
+      throw new Error("Failed to load group orders. Please try again.");
+    }
+  }, []);
+
+  const { data, error, loading, reload } = useAsyncResource(
+    "group-orders",
+    fetchGroupOrders,
+  );
+
+  // Display state: each fresh response is adopted exactly once during render
+  // ("adjust state when data changes" pattern) so the WebSocket handler below
+  // can keep applying live quantity updates on top of it without an effect
+  // mirroring results into state.
   const [groupOrders, setGroupOrders] = useState<GroupOrder[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [adopted, setAdopted] = useState<GroupOrder[] | null>(null);
+  if (data && data !== adopted) {
+    setAdopted(data);
+    setGroupOrders(data);
+  }
 
   const updateGroupOrderProgress = useCallback(
-    (data: GroupOrderUpdatePayload) => {
+    (update: GroupOrderUpdatePayload) => {
       setGroupOrders((prev) =>
         prev.map((order) =>
-          order.id === data.orderId
-            ? { ...order, currentQuantity: data.currentQuantity }
+          order.id === update.orderId
+            ? { ...order, currentQuantity: update.currentQuantity }
             : order,
         ),
       );
@@ -55,26 +84,10 @@ export default function GroupOrdersPage() {
     ),
   );
 
-  useEffect(() => {
-    fetchGroupOrders();
-  }, []);
-
-  const fetchGroupOrders = async () => {
-    try {
-      const response = await fetch("/api/group-orders");
-      const data = await response.json();
-      setGroupOrders(data);
-    } catch (error) {
-      console.error("Failed to fetch group orders:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const joinPool = async (orderId: string) => {
     try {
       await fetch(`/api/group-orders/${orderId}/join`, { method: "POST" });
-      fetchGroupOrders();
+      reload();
     } catch (error) {
       console.error("Failed to join pool:", error);
     }
@@ -86,6 +99,23 @@ export default function GroupOrdersPage() {
 
   if (loading) {
     return <div className="p-6">Loading group orders...</div>;
+  }
+
+  if (error) {
+    return (
+      <div className="container mx-auto p-6">
+        <h1 className="text-3xl font-bold mb-6">Group Buy Orders</h1>
+        <div
+          className="border border-red-200 bg-red-50 rounded-xl p-6 text-red-700 text-sm space-y-3"
+          role="alert"
+        >
+          <p>{error}</p>
+          <button onClick={reload} className="underline text-red-700 hover:text-red-900">
+            Try again
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (

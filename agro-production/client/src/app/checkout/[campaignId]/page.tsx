@@ -11,6 +11,7 @@ import { signAndSubmitTransaction } from "@/lib/signTransaction";
 import { parseXlmToStroops, validateStellarAddress, sanitizeString } from "@/lib/validation";
 import { trackOrderPlaced } from "@/lib/analytics";
 import { classifyError, logErrorWithContext } from "@/lib/errorHandling";
+import { useWalletNetworkGuard } from "@/hooks/useWalletNetworkGuard";
 import { ButtonSpinner } from "@/components/Skeletons";
 import TransactionProgress from "@/components/TransactionProgress";
 import { idleMachine, advanceMachine } from "@/types/transaction";
@@ -20,6 +21,9 @@ import type { CampaignDetail, Order } from "@/types";
 export default function CheckoutPage() {
   const { campaignId } = useParams<{ campaignId: string }>();
   const { address, connected, connect, loading: walletLoading } = useWallet();
+  // Placing an escrow order is a signed transaction (#1087): it never starts
+  // while the wallet network is wrong or cannot be verified.
+  const networkGuard = useWalletNetworkGuard();
   const [campaign, setCampaign] = useState<CampaignDetail | null>(null);
   const [campaignLoading, setCampaignLoading] = useState(true);
   const [campaignError, setCampaignError] = useState<string | null>(null);
@@ -49,7 +53,9 @@ export default function CheckoutPage() {
   const amountStroops = amountResult.valid ? amountResult.stroops : 0n;
   const isIdle = tx.phase === "idle" || tx.phase === "failed";
   const isInFlight = tx.phase === "recording" || tx.phase === "signing" || tx.phase === "submitting" || tx.phase === "confirming";
-  const canSubmit = Boolean(connected && campaign && amountResult.valid && isIdle && !amountError);
+  const canSubmit = Boolean(
+    connected && campaign && amountResult.valid && isIdle && !amountError && !networkGuard.blocked,
+  );
 
   function handleAmountChange(value: string) {
     setAmountXlm(value);
@@ -62,7 +68,7 @@ export default function CheckoutPage() {
   }
 
   async function handleCheckout() {
-    if (!address || !campaign || !canSubmit) return;
+    if (!address || !campaign || !canSubmit || networkGuard.blocked) return;
 
     const addrResult = validateStellarAddress(address);
     if (!addrResult.valid) {
@@ -303,14 +309,32 @@ export default function CheckoutPage() {
 
           {/* Submit button — visible only when idle or failed */}
           {isIdle && tx.phase !== "success" && (
-            <button
-              onClick={() => void handleCheckout()}
-              disabled={!canSubmit}
-              aria-label={amountError ? `Cannot place order: ${amountError}` : "Place escrow order"}
-              className="w-full bg-primary-600 text-white py-3 rounded-xl font-semibold text-sm hover:bg-primary-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              Place Escrow Order
-            </button>
+            <>
+              {networkGuard.blocked && networkGuard.reason && (
+                <p
+                  id="checkout-network-guard"
+                  className="text-sm text-error border border-red-200 bg-red-50 rounded-xl p-4"
+                  role="alert"
+                >
+                  {networkGuard.reason}
+                </p>
+              )}
+              <button
+                onClick={() => void handleCheckout()}
+                disabled={!canSubmit}
+                aria-label={
+                  networkGuard.blocked
+                    ? "Placing an order is blocked: switch your wallet network"
+                    : amountError
+                      ? `Cannot place order: ${amountError}`
+                      : "Place escrow order"
+                }
+                aria-describedby={networkGuard.blocked ? "checkout-network-guard" : undefined}
+                className="w-full bg-primary-600 text-white py-3 rounded-xl font-semibold text-sm hover:bg-primary-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Place Escrow Order
+              </button>
+            </>
           )}
 
           {/* In-flight status label */}

@@ -5,6 +5,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import {
@@ -18,6 +19,11 @@ import {
 } from "@/lib/wallets/registry";
 import type { WalletPlatform } from "@/lib/wallets/types";
 import {
+  EXPECTED_NETWORK_PASSPHRASE,
+  compareNetworks,
+  type NetworkComparison,
+} from "@/lib/stellarNetwork";
+import {
   clearWalletSession,
   loadWalletSession,
   saveWalletSession,
@@ -27,7 +33,23 @@ export type WalletState =
   | "unavailable"
   | "disconnected"
   | "wrong_network"
+  | "unknown_network"
   | "connected";
+
+/**
+ * Where the connected wallet is, relative to the network this app is
+ * configured for (#1087).
+ *
+ * - `disconnected` — no wallet connected.
+ * - `checking` — connected, but the wallet has not answered `getNetwork()` yet.
+ * - `unknown` — the wallet answered "I don't know". Never treated as a match.
+ * - `mismatch` — the wallet is on a different network than the app expects.
+ * - `match` — wallet and app agree; signing is allowed.
+ */
+export type WalletNetworkStatus =
+  | "disconnected"
+  | "checking"
+  | NetworkComparison;
 
 export interface WalletOption {
   id: string;
@@ -48,6 +70,16 @@ interface WalletContextType {
   walletState: WalletState;
   walletId: string;
   wallets: WalletOption[];
+  /** The passphrase the connected wallet reports, or null when unknown. */
+  networkPassphrase: string | null;
+  /** The passphrase this deployment is configured for. */
+  expectedNetworkPassphrase: string;
+  /** Match / mismatch / unknown / checking / disconnected. */
+  networkStatus: WalletNetworkStatus;
+  /** Convenience: true only for a *known* wrong network. */
+  networkMismatch: boolean;
+  /** True when connected but the wallet cannot report its network. */
+  networkUnknown: boolean;
   connect: (walletId?: string) => Promise<string | null>;
   disconnect: () => Promise<void>;
   selectWallet: (walletId: string) => void;
@@ -74,6 +106,11 @@ const defaultCtx: WalletContextType = {
   walletState: "disconnected",
   walletId: DEFAULT_WALLET_ID,
   wallets: baseWalletOptions(),
+  networkPassphrase: null,
+  expectedNetworkPassphrase: EXPECTED_NETWORK_PASSPHRASE,
+  networkStatus: "disconnected",
+  networkMismatch: false,
+  networkUnknown: false,
   connect: async () => null,
   disconnect: async () => {},
   selectWallet: () => {},
@@ -102,6 +139,15 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [walletId, setWalletId] = useState<string>(DEFAULT_WALLET_ID);
   const [wallets, setWallets] = useState<WalletOption[]>(baseWalletOptions);
+  // The last network report from the wallet, keyed by the connection it
+  // describes. Keying is what makes a wallet switch safe: a passphrase read
+  // for the previous connection can never be believed for the new one, and
+  // until the new answer arrives the network is `checking`, not `match`.
+  const [networkReport, setNetworkReport] = useState<{
+    key: string;
+    passphrase: string | null;
+  } | null>(null);
+  const networkRequestRef = useRef(0);
 
   const computeWallets = useCallback(async (): Promise<WalletOption[]> => {
     try {
@@ -125,6 +171,28 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     setWallets(await computeWallets());
   }, [computeWallets]);
 
+  /**
+   * Ask the adapter which network it is on (#1087).
+   *
+   * A request counter guards against a late answer from a wallet the user has
+   * already switched away from: only the newest read may update state. An
+   * adapter that cannot answer (or throws) reports `null` — unknown — and is
+   * never replaced with the configured passphrase.
+   */
+  const refreshNetwork = useCallback(async (id: string, pub: string) => {
+    const request = ++networkRequestRef.current;
+    const key = `${id}:${pub}`;
+    let passphrase: string | null = null;
+    try {
+      const details = await getWalletAdapter(id).getNetwork();
+      passphrase = details?.networkPassphrase ?? null;
+    } catch {
+      passphrase = null;
+    }
+    if (request !== networkRequestRef.current) return; // superseded
+    setNetworkReport({ key, passphrase });
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     initializeWalletKit(loadWalletSession()?.walletId);
@@ -136,15 +204,23 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     };
   }, [computeWallets]);
 
-  const applyConnection = useCallback((pub: string, id: string) => {
-    setAddress(pub);
-    setConnected(true);
-    setError(null);
-    setWalletId(id);
-    saveWalletSession({ address: pub, connectedAt: Date.now(), walletId: id });
-  }, []);
+  const applyConnection = useCallback(
+    (pub: string, id: string) => {
+      setAddress(pub);
+      setConnected(true);
+      setError(null);
+      setWalletId(id);
+      saveWalletSession({ address: pub, connectedAt: Date.now(), walletId: id });
+      void refreshNetwork(id, pub);
+    },
+    [refreshNetwork],
+  );
 
   const clearConnection = useCallback(() => {
+    // Invalidate any in-flight network read so it cannot resurrect a report
+    // for a wallet that is no longer connected.
+    networkRequestRef.current += 1;
+    setNetworkReport(null);
     setAddress(null);
     setConnected(false);
     setError(null);
@@ -233,8 +309,29 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const activeWallet = wallets.find((wallet) => wallet.id === walletId);
+
+  // Only believe a network report that describes the current connection.
+  const networkKey =
+    connected && address ? `${walletId}:${address}` : null;
+  const networkPassphrase =
+    networkReport && networkReport.key === networkKey
+      ? networkReport.passphrase
+      : null;
+  const networkComparison = compareNetworks(networkPassphrase);
+  const networkStatus: WalletNetworkStatus = !connected
+    ? "disconnected"
+    : networkPassphrase !== null
+      ? networkComparison
+      : networkReport && networkReport.key === networkKey
+        ? "unknown" // the wallet answered, but could not name its network
+        : "checking"; // the wallet has not answered yet
+
   const walletState: WalletState = connected
-    ? "connected"
+    ? networkStatus === "mismatch"
+      ? "wrong_network"
+      : networkStatus === "unknown"
+        ? "unknown_network"
+        : "connected"
     : error && activeWallet?.available === false
       ? "unavailable"
       : "disconnected";
@@ -250,6 +347,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         walletState,
         walletId,
         wallets,
+        networkPassphrase,
+        expectedNetworkPassphrase: EXPECTED_NETWORK_PASSPHRASE,
+        networkStatus,
+        networkMismatch: networkStatus === "mismatch",
+        networkUnknown: networkStatus === "unknown",
         connect,
         disconnect,
         selectWallet,

@@ -201,6 +201,11 @@ export class ApiClient {
     return this.request<T>(path, { ...options, method: "PUT", headers, body: JSON.stringify(data) });
   }
 
+  patch<T = unknown>(path: string, data?: unknown, options?: RequestOptions) {
+    const headers = { "Content-Type": "application/json", ...(options?.headers as Record<string, string>) };
+    return this.request<T>(path, { ...options, method: "PATCH", headers, body: JSON.stringify(data) });
+  }
+
   delete<T = unknown>(path: string, options?: RequestOptions) {
     return this.request<T>(path, { ...options, method: "DELETE" });
   }

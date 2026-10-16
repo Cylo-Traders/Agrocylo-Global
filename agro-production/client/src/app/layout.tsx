@@ -4,6 +4,7 @@ import { WalletProvider } from "@/context/WalletContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { I18nProvider } from "@/context/I18nContext";
 import NavBar from "@/components/NavBar";
+import NetworkMismatchBanner from "@/components/NetworkMismatchBanner";
 import AnalyticsInit from "@/components/AnalyticsInit";
 import HandoffConsumer from "@/components/HandoffConsumer";
 import PendingTransactionsResolver from "@/components/PendingTransactionsResolver";
@@ -56,6 +57,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   Skip to main content
                 </a>
                 <NavBar />
+                {/* Issue #1087: a wrong or unverifiable wallet network is a
+                    page-level condition, so it is announced here — persistently,
+                    and before any transaction can be started. */}
+                <NetworkMismatchBanner />
                 <main id="main-content" className="max-w-5xl mx-auto px-4 py-8">{children}</main>
               </WalletProvider>
             </ThemeProvider>
