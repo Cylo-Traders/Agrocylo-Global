@@ -3,9 +3,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import PortfolioPage from "../page";
 import { setAccessToken } from "@/lib/authToken";
 
-vi.mock("@/components/PriceChart", () => ({
-  PriceChart: () => <div data-testid="price-chart">Chart</div>,
-}));
+vi.mock("@/components/PriceChart", () => {
+  const Chart = () => <div data-testid="price-chart">Chart</div>;
+  return { default: Chart, PriceChart: Chart };
+});
 
 const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }));
 
