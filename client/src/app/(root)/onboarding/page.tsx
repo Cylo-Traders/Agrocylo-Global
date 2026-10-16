@@ -171,7 +171,7 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div className="from-secondary/30 to-background flex min-h-screen flex-col items-center bg-gradient-to-b px-4 pt-32 pb-16 md:pt-40">
+    <div className="from-secondary/30 to-background flex min-h-screen flex-col items-center overflow-x-hidden bg-gradient-to-b px-4 pt-32 pb-[calc(env(safe-area-inset-bottom)+4rem)] md:pt-40">
       <div className="w-full max-w-2xl">
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-bold tracking-tight md:text-4xl">

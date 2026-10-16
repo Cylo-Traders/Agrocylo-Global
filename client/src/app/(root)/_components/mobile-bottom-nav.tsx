@@ -21,7 +21,7 @@ export function MobileBottomNav() {
       aria-label="Mobile navigation"
       className="fixed inset-x-0 bottom-0 z-40 border-t border-border/70 bg-background/95 backdrop-blur-xl md:hidden"
     >
-      <div className="mx-auto grid max-w-[1240px] grid-cols-5 gap-1 px-2 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
+      <div className="mx-auto grid max-w-[1240px] grid-cols-5 gap-1 px-2 pt-2 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
         {bottomNavItems.map((item) => {
           const isActive =
             item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);

@@ -214,7 +214,7 @@ export default function ProductFormModal({
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden rounded-none p-4 sm:h-auto sm:max-h-[90vh] sm:max-w-2xl sm:rounded-3xl sm:p-6">
         <DialogHeader>
           <DialogTitle>
             {mode === "add" ? "Add Product" : "Edit Listing"}
@@ -225,7 +225,7 @@ export default function ProductFormModal({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={onSubmit} className="space-y-6">
+        <form onSubmit={onSubmit} className="min-h-0 flex-1 space-y-6 overflow-y-auto pr-1">
           <div className="grid gap-4 sm:grid-cols-2">
             <Input
               label="Product Name"
@@ -386,12 +386,12 @@ export default function ProductFormModal({
                 {imageFiles.map((f, i) => (
                   <span
                     key={i}
-                    className="bg-secondary inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs"
+                    className="bg-secondary inline-flex min-w-0 max-w-full items-center gap-2 rounded-full border px-3 py-1 text-xs"
                   >
-                    {f.name}
+                    <span className="truncate">{f.name}</span>
                     <button
                       type="button"
-                      className="text-muted-foreground hover:text-foreground"
+                      className="text-muted-foreground hover:text-foreground grid size-11 shrink-0 place-content-center"
                       onClick={() =>
                         setImageFiles((prev) =>
                           prev.filter((_, idx) => idx !== i),
@@ -411,7 +411,7 @@ export default function ProductFormModal({
 
           <Separator />
 
-          <DialogFooter className="flex-row justify-end gap-2">
+          <DialogFooter className="sticky bottom-0 flex-row justify-end gap-2 bg-background pt-4">
             <Button
               type="button"
               variant="outline"

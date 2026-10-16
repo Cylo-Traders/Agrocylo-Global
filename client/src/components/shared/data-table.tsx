@@ -79,7 +79,7 @@ export function DataTable<TData, TValue>({
 
       <div className="rounded-2xl border bg-card">
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full min-w-[640px]">
             <thead>
               {table.getHeaderGroups().map((headerGroup) => (
                 <tr
