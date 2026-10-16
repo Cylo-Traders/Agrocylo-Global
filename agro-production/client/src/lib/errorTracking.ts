@@ -42,6 +42,7 @@ function redactContext(context?: Record<string, unknown>): Record<string, unknow
       key.toLowerCase().includes("secret") ||
       key.toLowerCase().includes("password") ||
       key.toLowerCase().includes("token") ||
+      key.toLowerCase().includes("address") ||
       key.toLowerCase().includes("xdr") ||
       key.toLowerCase().includes("stack")
     ) {
