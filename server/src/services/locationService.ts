@@ -78,6 +78,7 @@ const proximitySchema = z.object({
   lat: z.coerce.number().min(-90).max(90).optional(),
   lng: z.coerce.number().min(-180).max(180).optional(),
   radius: z.coerce.number().positive().optional(),
+  role: z.string().trim().optional(),
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(20),
 }).superRefine((v, ctx) => {
@@ -108,24 +109,41 @@ export async function getFarmerLocations(query: unknown) {
     );
   const { lat, lng, radius, page, limit } = parsed.data;
   const skip = (page - 1) * limit;
+
+  const whereClause: any = { is_public: true };
+  if (role) {
+    whereClause.profile = { role };
+  }
+
   let locations = await prisma.location.findMany({
-    where: { is_public: true },
+    where: whereClause,
     include: { profile: { select: { name: true, role: true, avatar_url: true, bio: true } } },
   });
+
   if (lat !== undefined && lng !== undefined && radius !== undefined) {
     locations = locations.filter((l) => haversine(lat, lng, l.lat, l.lng) <= radius);
   }
+
   const total = locations.length;
-  const farmers = locations.slice(skip, skip + limit).map((location) => ({
-    wallet_address: (location as any).walletAddress ?? (location as any).wallet_address,
-    display_name: location.profile?.name ?? 'Farmer',
-    bio: location.profile?.bio ?? null,
-    avatar_url: location.profile?.avatar_url ?? null,
-    latitude: location.lat,
-    longitude: location.lng,
-    city: location.city ?? null,
-    country: location.country ?? null,
-  }));
+  const farmers = locations.slice(skip, skip + limit).map((location) => {
+    const distance_km = (lat !== undefined && lng !== undefined)
+      ? Math.round(haversine(lat, lng, location.lat, location.lng) * 10) / 10
+      : null;
+
+    return {
+      wallet_address: (location as any).walletAddress ?? (location as any).wallet_address,
+      display_name: location.profile?.name ?? 'Farmer',
+      bio: location.profile?.bio ?? null,
+      avatar_url: location.profile?.avatar_url ?? null,
+      latitude: location.lat,
+      longitude: location.lng,
+      city: location.city ?? null,
+      country: location.country ?? null,
+      role: location.profile?.role ?? null,
+      distance_km,
+    };
+  });
+
   return { data: farmers, farmers, meta: { total, page, limit, pages: Math.ceil(total / limit) } };
 }
 

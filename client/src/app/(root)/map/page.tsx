@@ -1,13 +1,47 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Component, type ReactNode } from "react";
 import dynamic from "next/dynamic";
-import { Users } from "lucide-react";
+import { Users, AlertTriangle } from "lucide-react";
 
 import { useGeolocation } from "@/hooks/useGeolocation";
 import { useFarmerLocations } from "@/hooks/useFarmerLocations";
 import DistanceFilter from "@/components/map/DistanceFilter";
 import MapSkeleton from "@/components/map/MapSkeleton";
+
+interface MapErrorBoundaryProps {
+  children: ReactNode;
+}
+
+interface MapErrorBoundaryState {
+  hasError: boolean;
+}
+
+class MapErrorBoundary extends Component<MapErrorBoundaryProps, MapErrorBoundaryState> {
+  constructor(props: MapErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(): MapErrorBoundaryState {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-muted/20 p-6 text-center">
+          <AlertTriangle className="size-8 text-amber-500" />
+          <p className="text-sm font-semibold">Unable to load map component</p>
+          <p className="text-muted-foreground text-xs">
+            Please check your network connection or try refreshing the page.
+          </p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const FarmerMap = dynamic(() => import("@/components/map/FarmerMap"), {
   ssr: false,
@@ -57,12 +91,14 @@ export default function MapPage() {
         {geo.isLoading ? (
           <MapSkeleton />
         ) : (
-          <FarmerMap
-            farmers={farmers}
-            userLat={geo.latitude!}
-            userLng={geo.longitude!}
-            radiusKm={radiusKm}
-          />
+          <MapErrorBoundary>
+            <FarmerMap
+              farmers={farmers}
+              userLat={geo.latitude!}
+              userLng={geo.longitude!}
+              radiusKm={radiusKm}
+            />
+          </MapErrorBoundary>
         )}
       </div>
     </div>
