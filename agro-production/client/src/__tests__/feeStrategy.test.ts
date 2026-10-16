@@ -94,8 +94,8 @@ describe("buildFeeBumpTransaction", () => {
 
     expect(parsed).toBeInstanceOf(StellarSdk.FeeBumpTransaction);
     const feeBump = parsed as StellarSdk.FeeBumpTransaction;
-    expect(feeBump.innerTransaction.hash().toString("hex")).toBe(
-      inner.hash().toString("hex"),
+    expect(Buffer.from(feeBump.innerTransaction.hash()).toString("hex")).toBe(
+      Buffer.from(inner.hash()).toString("hex"),
     );
     // Fee-bump fee must exceed the inner fee; the SDK charges per operation + 1.
     expect(BigInt(feeBump.fee)).toBeGreaterThan(BigInt(inner.fee));
