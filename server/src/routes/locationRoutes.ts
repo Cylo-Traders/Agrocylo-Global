@@ -1,5 +1,5 @@
 import express from 'express';
-import { requireWallet, type WalletRequest } from '../middleware/walletAuth.js';
+import { requireWallet, requireAnyRole, type WalletRequest } from '../middleware/walletAuth.js';
 import { ApiError, sendProblem } from '../http/errors.js';
 import { getFarmerLocations, getLocationByWallet, setLocation, updateLocation, deleteLocation } from '../services/locationService.js';
 
@@ -31,7 +31,7 @@ router.get('/locations/me', requireWallet, async (req: WalletRequest, res, next)
   } catch (error) { next(error); }
 });
 
-router.post('/locations', requireWallet, async (req: WalletRequest, res, next) => {
+router.post('/locations', requireWallet, requireAnyRole('FARMER'), async (req: WalletRequest, res, next) => {
   try {
     if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet', 'https://cylos.io/errors/unauthorized');
     assertBodyWalletMatchesSession(req.body, req.walletAddress);
@@ -40,7 +40,7 @@ router.post('/locations', requireWallet, async (req: WalletRequest, res, next) =
   } catch (error) { next(error); }
 });
 
-router.patch('/locations/:wallet_address', requireWallet, async (req: WalletRequest, res, next) => {
+router.patch('/locations/:wallet_address', requireWallet, requireAnyRole('FARMER'), async (req: WalletRequest, res, next) => {
   try {
     if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet', 'https://cylos.io/errors/unauthorized');
     const data = await updateLocation(req.params['wallet_address']!, req.walletAddress, req.body ?? {});
@@ -48,7 +48,7 @@ router.patch('/locations/:wallet_address', requireWallet, async (req: WalletRequ
   } catch (error) { next(error); }
 });
 
-router.delete('/locations/:wallet_address', requireWallet, async (req: WalletRequest, res, next) => {
+router.delete('/locations/:wallet_address', requireWallet, requireAnyRole('FARMER'), async (req: WalletRequest, res, next) => {
   try {
     if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet', 'https://cylos.io/errors/unauthorized');
     await deleteLocation(req.params['wallet_address']!, req.walletAddress);

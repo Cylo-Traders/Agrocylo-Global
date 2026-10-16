@@ -68,7 +68,14 @@ describe('location writes (#1145)', () => {
       expect(prisma.location.upsert).not.toHaveBeenCalled();
     });
 
-    it.each(ROLES)('allows %s to set their own location', async (role) => {
+    it('rejects BUYER with 403 (#1133)', async () => {
+      const res = await request(app).post('/locations').set('Authorization', bearer('BUYER')).send(body);
+      expect(res.status).toBe(403);
+      expect(res.type).toBe('application/problem+json');
+      expect(prisma.location.upsert).not.toHaveBeenCalled();
+    });
+
+    it.each(['FARMER', 'ADMIN'] as const)('allows %s to set their own location', async (role) => {
       const res = await request(app)
         .post('/locations')
         .set('Authorization', bearer(role))
@@ -84,7 +91,7 @@ describe('location writes (#1145)', () => {
         .post('/locations')
         .set('Authorization', bearer('FARMER'))
         .send({ ...body, wallet_address: 'gvictim' });
-      expect(vi.mocked(prisma.location.upsert).mock.calls[0]![0]!.where).toEqual({
+      expect(vi.mocked(prisma.location.upsert).mock.calls[0]?.[0]?.where).toEqual({
         walletAddress: WALLET,
       });
     });
@@ -114,8 +121,6 @@ describe('location writes (#1145)', () => {
       expect(prisma.location.upsert).not.toHaveBeenCalled();
     });
 
-    // Every authenticated role may set a location today. #1133 adds requireRole.
-    it.todo('restricts location writes to the roles #1133 defines');
   });
 
   describe.each([
@@ -136,12 +141,17 @@ describe('location writes (#1145)', () => {
       expect(write()).not.toHaveBeenCalled();
     });
 
-    it.each(ROLES)('allows %s on their own row', async (role) => {
+    it('rejects BUYER with 403 (#1133)', async () => {
+      expect((await call(WALLET, bearer('BUYER'))).status).toBe(403);
+      expect(write()).not.toHaveBeenCalled();
+    });
+
+    it.each(['FARMER', 'ADMIN'] as const)('allows %s on their own row', async (role) => {
       expect((await call(WALLET, bearer(role))).status).toBe(okStatus);
       expect(write()).toHaveBeenCalledTimes(1);
     });
 
-    it.each(ROLES)("rejects %s on another wallet's row with 403", async (role) => {
+    it.each(['FARMER', 'ADMIN'] as const)("rejects %s on another wallet's row with 403", async (role) => {
       expect((await call('gsomeoneelse', bearer(role))).status).toBe(403);
       expect(write()).not.toHaveBeenCalled();
     });

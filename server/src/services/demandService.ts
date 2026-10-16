@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from "../config/database.js";
 import { ApiError } from "../http/errors.js";
+import { assertCurrency } from "../constants/currencies.js";
 import { z } from "zod";
 
 const demandBodySchema = z.object({
@@ -105,7 +106,7 @@ export async function createBuyerDemand(buyerWallet: string, body: unknown) {
       quantityWanted: parsed.data.quantity_wanted,
       unit: parsed.data.unit,
       maxPricePerUnit: parsed.data.max_price_per_unit,
-      currency: parsed.data.currency,
+      currency: parsed.data.currency === undefined ? undefined : assertCurrency(parsed.data.currency),
       region: parsed.data.region,
       notes: parsed.data.notes,
       neededBy: parsed.data.needed_by,

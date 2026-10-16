@@ -80,3 +80,27 @@ export function requireWallet(req: WalletRequest, res: Response, next: NextFunct
     sendProblem(res, req, new ApiError(401, 'Unauthorized', 'Invalid or expired token', 'https://cylos.io/errors/unauthorized'));
   }
 }
+
+export type WalletRole = 'FARMER' | 'BUYER' | 'ADMIN';
+
+/**
+ * Allows the request only when the verified session role is one of `roles`
+ * (ADMIN always passes). Must run after requireWallet. Responds with a
+ * Problem+JSON 403 on mismatch or missing role (#1133).
+ */
+export function requireAnyRole(...roles: WalletRole[]) {
+  return (req: WalletRequest, res: Response, next: NextFunction): void => {
+    const role = req.walletRole;
+    if (role && (role === 'ADMIN' || (roles as string[]).includes(role))) {
+      next();
+      return;
+    }
+    sendProblem(
+      res,
+      req,
+      new ApiError(403, 'Forbidden', `Requires role: ${roles.join(' or ')}`, 'https://cylos.io/errors/forbidden'),
+    );
+  };
+}
+
+export const requireRole = (role: WalletRole) => requireAnyRole(role);

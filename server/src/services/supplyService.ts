@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from "../config/database.js";
 import { ApiError } from "../http/errors.js";
+import { assertCurrency } from "../constants/currencies.js";
 import { z } from "zod";
 
 const supplyBodySchema = z.object({
@@ -101,7 +102,7 @@ export async function createFarmerSupply(farmerWallet: string, body: unknown) {
       quantityAvailable: parsed.data.quantity_available,
       unit: parsed.data.unit,
       pricePerUnit: parsed.data.price_per_unit,
-      currency: parsed.data.currency,
+      currency: parsed.data.currency === undefined ? undefined : assertCurrency(parsed.data.currency),
       availableFrom: parsed.data.available_from,
       availableUntil: parsed.data.available_until,
       notes: parsed.data.notes,

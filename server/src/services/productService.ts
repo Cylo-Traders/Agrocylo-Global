@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import type { Product } from '@prisma/client';
 import { prisma } from '../config/database.js';
 import { ApiError } from '../http/errors.js';
+import { assertCurrency, type CurrencyCode } from '../constants/currencies.js';
 import { toClientProfile } from '../lib/profileDto.js';
 import { listReviewsForSubject } from './reviewService.js';
 import { wsManager } from './wsManager.js';
@@ -11,7 +12,7 @@ export interface ProductWriteInput {
   description?: string | null;
   category?: string | null;
   price_per_unit?: string;
-  currency?: 'STRK' | 'USDC';
+  currency?: CurrencyCode;
   unit?: string;
   stock_quantity?: string | null;
   location?: string;
@@ -182,6 +183,8 @@ export async function createProduct(farmerWallet: string, input: ProductWriteInp
     throw new ApiError(400, 'Bad Request', 'name, price_per_unit, currency, and unit are required');
   }
 
+  const currency = assertCurrency(input.currency);
+
   const product = await prisma.product.create({
     data: {
       farmerWallet: farmerWallet.toLowerCase(),
@@ -189,7 +192,7 @@ export async function createProduct(farmerWallet: string, input: ProductWriteInp
       description: input.description ?? null,
       category: input.category ?? null,
       pricePerUnit: new Prisma.Decimal(input.price_per_unit),
-      currency: input.currency,
+      currency,
       unit: input.unit,
       stockQuantity: input.stock_quantity ? new Prisma.Decimal(input.stock_quantity) : null,
       location: input.location ?? null,
@@ -213,7 +216,7 @@ export async function updateProduct(productId: string, farmerWallet: string, inp
   if (input.description !== undefined) data.description = input.description;
   if (input.category !== undefined) data.category = input.category;
   if (input.price_per_unit !== undefined) data.pricePerUnit = new Prisma.Decimal(input.price_per_unit);
-  if (input.currency !== undefined) data.currency = input.currency;
+  if (input.currency !== undefined) data.currency = assertCurrency(input.currency);
   if (input.unit !== undefined) data.unit = input.unit;
   if (input.stock_quantity !== undefined) {
     data.stockQuantity = input.stock_quantity === null ? null : new Prisma.Decimal(input.stock_quantity);
