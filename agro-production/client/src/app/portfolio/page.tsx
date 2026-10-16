@@ -12,15 +12,14 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { PriceChart } from "@/components/PriceChart";
+import PriceChart from "@/components/PriceChart";
 import {
   fetchInvestorPortfolio,
   type PortfolioSummary,
 } from "@/services/portfolioService";
 import { isApiError, isNetworkError } from "@/lib/apiClient";
 
-type PortfolioPageState =
-  | { kind: "loading" }
+type PortfolioResult =
   | { kind: "empty" }
   | { kind: "unauthorized" }
   | { kind: "offline" }
@@ -28,32 +27,50 @@ type PortfolioPageState =
   | { kind: "ready"; portfolio: PortfolioSummary };
 
 export default function PortfolioPage() {
-  const [state, setState] = useState<PortfolioPageState>({ kind: "loading" });
+  const [reloadCount, setReloadCount] = useState(0);
+  const requestKey = `portfolio:${reloadCount}`;
+  const [snapshot, setSnapshot] = useState<{
+    key: string
+    result: PortfolioResult | null
+  }>({ key: requestKey, result: null });
 
-  const fetchPortfolio = useCallback(() => {
-    setState({ kind: "loading" });
-    fetchInvestorPortfolio()
-      .then((portfolio) =>
-        setState(
-          portfolio.positions.length > 0
-            ? { kind: "ready", portfolio }
-            : { kind: "empty" },
-        ),
-      )
-      .catch((err: unknown) => {
-        if (isApiError(err) && err.status === 401) setState({ kind: "unauthorized" });
-        else if (isNetworkError(err)) setState({ kind: "offline" });
-        else
-          setState({
-            kind: "error",
-            message: err instanceof Error ? err.message : "An error occurred",
-          });
-      });
+  const loadPortfolio = useCallback(async (signal: AbortSignal): Promise<PortfolioResult> => {
+    try {
+      const portfolio = await fetchInvestorPortfolio();
+      return portfolio.positions.length > 0
+        ? { kind: "ready", portfolio }
+        : { kind: "empty" };
+    } catch (err: unknown) {
+      if (signal.aborted) throw err;
+      if (isApiError(err) && err.status === 401) return { kind: "unauthorized" };
+      if (isNetworkError(err)) return { kind: "offline" };
+      return {
+        kind: "error",
+        message: err instanceof Error ? err.message : "An error occurred",
+      };
+    }
   }, []);
 
+  // The request is abortable and its result is committed only while it still
+  // describes the current key, so an unmounted owner or a changed input makes
+  // the response inert (#1084).
   useEffect(() => {
-    fetchPortfolio();
-  }, [fetchPortfolio]);
+    const controller = new AbortController();
+    loadPortfolio(controller.signal)
+      .then((result) => {
+        if (!controller.signal.aborted) setSnapshot({ key: requestKey, result });
+      })
+      .catch(() => {
+        /* only rejects when aborted — nothing to show either way */
+      });
+    return () => controller.abort();
+  }, [loadPortfolio, requestKey]);
+
+  const retry = useCallback(() => setReloadCount((count) => count + 1), []);
+
+  // A snapshot from another key is a stale answer: render loading instead.
+  const state: PortfolioResult | { kind: "loading" } =
+    snapshot.key === requestKey && snapshot.result ? snapshot.result : { kind: "loading" };
 
   if (state.kind === "loading") {
     return (
@@ -93,7 +110,7 @@ export default function PortfolioPage() {
             Check your connection and try again.
           </p>
           <button
-            onClick={fetchPortfolio}
+            onClick={retry}
             className="mt-2 text-red-600 underline"
           >
             Retry
@@ -110,7 +127,7 @@ export default function PortfolioPage() {
           <h3 className="text-red-800 font-semibold">Error</h3>
           <p className="text-red-600">{state.message}</p>
           <button
-            onClick={fetchPortfolio}
+            onClick={retry}
             className="mt-2 text-red-600 underline"
           >
             Retry
