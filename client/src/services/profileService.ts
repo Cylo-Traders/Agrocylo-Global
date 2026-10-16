@@ -279,6 +279,23 @@ export async function registerLocation(
   });
 }
 
+export interface SavedLocation {
+  walletAddress?: string;
+  wallet_address?: string;
+  lat: number;
+  lng: number;
+  is_public?: boolean;
+}
+
+export async function getSavedLocation(): Promise<SavedLocation | null> {
+  try {
+    return await apiRequest<SavedLocation>("/locations/me", { method: "GET" });
+  } catch (err) {
+    if (err instanceof ApiRequestError && err.status === 404) return null;
+    throw err;
+  }
+}
+
 const USER_PROFILE_PREFIX = "agrocylo:user-profile:";
 
 function hasWindow(): boolean {

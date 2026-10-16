@@ -6,6 +6,10 @@ import { ApiError, sendProblem } from '../http/errors.js';
 const isTest = process.env['NODE_ENV'] === 'test';
 const shouldSkipInTest = () => isTest && process.env['ENABLE_TEST_RATE_LIMIT'] !== 'true';
 
+// Shared Redis client is optional; when absent, idempotency middleware is skipped.
+// Exported for app.ts compatibility (upstream removed the Redis store but kept the import).
+export const sharedRedisClient: null = null;
+
 function rateLimitHandler(req: Request, res: Response): void {
   logger.warn('[RateLimit] Request throttled', {
     ip: req.ip,
@@ -30,6 +34,17 @@ export const authRateLimiter = rateLimit({
   skip: shouldSkipInTest,
 });
 
+// 5 nonce requests per 5 minutes per target wallet (prevents challenge replacement)
+export const nonceWalletRateLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  limit: 5,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  handler: rateLimitHandler,
+  skip: shouldSkipInTest,
+  keyGenerator: (req: Request) => `auth-wallet:${String((req.body as { walletAddress?: unknown } | undefined)?.walletAddress ?? '').toUpperCase()}`,
+});
+
 // 5 uploads per minute per IP
 export const uploadRateLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -51,3 +66,13 @@ export const writeLimiter = rateLimit({
 });
 
 export const writeRateLimiter = writeLimiter;
+
+// 60 analytics batches per minute per IP
+export const analyticsRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  handler: rateLimitHandler,
+  skip: shouldSkipInTest,
+});

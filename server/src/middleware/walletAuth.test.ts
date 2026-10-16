@@ -18,6 +18,7 @@ const WALLET = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 function makeRes() {
   const res: Partial<Response> = {
     status: vi.fn().mockReturnThis(),
+    type: vi.fn().mockReturnThis(),
     json: vi.fn().mockReturnThis(),
   };
   return res as Response;

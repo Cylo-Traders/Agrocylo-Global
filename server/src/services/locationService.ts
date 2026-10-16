@@ -132,6 +132,18 @@ export async function setLocation(walletAddress: string, body: unknown) {
   });
 }
 
+export async function getLocationByWallet(walletAddress: string) {
+  const location = await prisma.location.findUnique({ where: { walletAddress } });
+  if (!location)
+    throw new ApiError(
+      404,
+      'Not Found',
+      'No saved location for this wallet',
+      'https://cylos.io/errors/not-found'
+    );
+  return location;
+}
+
 export async function updateLocation(wallet_address: string, requester: string, body: unknown) {
   if (requester !== wallet_address)
     throw new ApiError(

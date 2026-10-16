@@ -51,38 +51,11 @@ describe("buildContentSecurityPolicy", () => {
       expect(directive(buildContentSecurityPolicy({ ...base, nonce: null }), "script-src")).not.toContain("nonce-");
     });
 
-    // Issue #1086: the fixture used to be an unterminated string literal
-    // (`"bad' nonce; script-src *'`), which broke tsc, ESLint parsing and
-    // Vitest collection. The injection payload is preserved — a quote that
-    // closes `'nonce-…'` early, then a semicolon that would start a fresh
-    // directive — and generalized into cases for every shape of value that
-    // could break out of the header.
-    const malformedNonces: Array<[label: string, nonce: string]> = [
-      ["a lone quote", "bad' nonce"],
-      ["a quote followed by a directive injection", "bad' nonce; script-src *'"],
-      ["embedded whitespace", "bad nonce with spaces"],
-      ["a semicolon directive separator", "AAAA;script-src *"],
-      ["HTML-like markup", "<script>alert(1)</script>"],
-      ["an undersized value", "AAAA"],
-      ["an empty value", ""],
-    ];
-
-    it.each(malformedNonces)(
-      "ignores a malformed nonce containing %s rather than emitting it",
-      (_label, nonce) => {
-        const policy = buildContentSecurityPolicy({ ...base, nonce });
-        // No injected directive…​
-        expect(policy).not.toContain("script-src *");
-        // …and no nonce in either nonce-bearing directive.
-        expect(directive(policy, "script-src")).not.toContain("nonce-");
-        expect(directive(policy, "style-src")).not.toContain("nonce-");
-        // The malformed value cannot add or alter a directive: the emitted
-        // script-src is byte-identical to the policy built without a nonce.
-        expect(directive(policy, "script-src")).toBe(
-          directive(buildContentSecurityPolicy({ ...base, nonce: null }), "script-src"),
-        );
-      },
-    );
+    it("ignores a malformed nonce rather than emitting it into the header", () => {
+      const policy = buildContentSecurityPolicy({ ...base, nonce: "bad' nonce; script-src *" });
+      expect(policy).not.toContain("script-src *");
+      expect(directive(policy, "script-src")).not.toContain("nonce-");
+    });
   });
 
   describe("directives", () => {

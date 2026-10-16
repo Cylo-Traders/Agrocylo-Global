@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '../config/database.js';
 import { getSupabaseAdmin } from '../config/supabase.js';
 import { config } from '../config/index.js';
+import logger from '../config/logger.js';
 
 export class HttpError extends Error {
   constructor(
@@ -159,7 +160,7 @@ export async function uploadProductImage(params: {
         .remove(existingPaths);
       if (removeExistingError) {
         // The new pointer is valid even if deferred old-object cleanup fails.
-        console.error(`Failed to remove old product image objects: ${removeExistingError.message}`);
+        logger.error('Failed to remove old product image objects', { message: removeExistingError.message });
       }
     }
 

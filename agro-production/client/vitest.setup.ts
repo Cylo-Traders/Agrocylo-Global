@@ -50,15 +50,17 @@ globalThis.__setPrefersDark = (matches: boolean) => {
   }
 };
 
-installMatchMedia();
+if (typeof window !== "undefined") installMatchMedia();
 
 afterEach(() => {
   cleanup();
   listeners.clear();
   prefersDark = false;
-  document.documentElement.classList.remove("light", "dark");
+  if (typeof document !== "undefined") {
+    document.documentElement.classList.remove("light", "dark");
+  }
   try {
-    localStorage.clear();
+    globalThis.localStorage?.clear();
   } catch {
     /* ignore */
   }
