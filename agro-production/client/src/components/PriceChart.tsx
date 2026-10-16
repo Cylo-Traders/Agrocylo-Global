@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { TrendingUp, TrendingDown } from 'lucide-react'
 
 export interface PriceDataPoint {
@@ -22,12 +22,10 @@ const PriceChart: React.FC<PriceChartProps> = ({
   currency = 'USD',
   isLoading = false,
 }) => {
-  const [displayData, setDisplayData] = useState<PriceDataPoint[]>(data)
+  // The chart is a pure function of its props (#1084): `displayData` used to
+  // mirror `data` through an effect, which lagged a render behind the prop
+  // and produced a cascade render per update for no benefit.
   const [timeRange, setTimeRange] = useState<'1d' | '7d' | '30d' | '1y'>('7d')
-
-  useEffect(() => {
-    setDisplayData(data)
-  }, [data])
 
   if (isLoading) {
     return (
@@ -40,7 +38,7 @@ const PriceChart: React.FC<PriceChartProps> = ({
     )
   }
 
-  if (displayData.length === 0) {
+  if (data.length === 0) {
     return (
       <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500">
         No price data available
@@ -48,7 +46,7 @@ const PriceChart: React.FC<PriceChartProps> = ({
     )
   }
 
-  const prices = displayData.map((d) => d.price)
+  const prices = data.map((d) => d.price)
   const minPrice = Math.min(...prices)
   const maxPrice = Math.max(...prices)
   const firstPrice = prices[0]
@@ -62,11 +60,11 @@ const PriceChart: React.FC<PriceChartProps> = ({
   const padding = range * 0.1
 
   // Normalize prices to chart height
-  const normalizedData = displayData.map((d, i) => ({
+  const normalizedData = data.map((d, i) => ({
     ...d,
     normalizedPrice:
       ((d.price - (minPrice - padding)) / (range + padding * 2)) * chartHeight,
-    x: (i / (displayData.length - 1 || 1)) * 100,
+    x: (i / (data.length - 1 || 1)) * 100,
   }))
 
   // Create SVG path
