@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import WalletConnect from "@/components/WalletConnect";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
+import NetworkBadge from "@/components/NetworkBadge";
 import { useTheme } from "@/context/ThemeContext";
 import { useI18n } from "@/context/I18nContext";
 
@@ -106,6 +107,9 @@ export default function NavBar() {
               {t(link.key, link.fallback)}
             </Link>
           ))}
+          {/* Visible network state (#1087): a connected wallet always shows
+              which network it is on, including when that network is wrong. */}
+          <NetworkBadge />
           {themeToggle}
           <LanguageSwitcher />
           <WalletConnect />
@@ -113,6 +117,7 @@ export default function NavBar() {
 
         {/* Mobile: a single trigger that always fits 320px. */}
         <div className="md:hidden flex items-center gap-1.5">
+          <NetworkBadge />
           {themeToggle}
           <WalletConnect />
           <button
