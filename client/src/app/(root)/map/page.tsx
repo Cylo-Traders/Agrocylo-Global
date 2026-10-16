@@ -59,8 +59,8 @@ export default function MapPage() {
   });
 
   return (
-    // Header is fixed at h-20 (mobile) / h-28 (md+). Reserve that space.
-    <div className="relative h-[calc(100vh-80px)] w-full md:h-[calc(100vh-112px)]">
+    // Header is fixed at h-16 (64px mobile) / h-28 (112px desktop). Reserve that space.
+    <div className="relative h-[calc(100vh-64px)] w-full md:h-[calc(100vh-112px)]">
       {/* Filter pill — floats at top, centred. */}
       <div className="pointer-events-none absolute inset-x-0 top-4 z-10 flex justify-center">
         <div className="pointer-events-auto">
