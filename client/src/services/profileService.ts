@@ -263,20 +263,38 @@ export async function registerLocation(
   data: LocationData,
   walletAddress: string,
 ): Promise<void> {
-  void walletAddress;
-  await apiRequest<void>("/locations", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: {
-      lat: data.lat,
-      lng: data.lng,
+  // Test-mode short-circuit for non-blocking testing
+  if (process.env.NODE_ENV === "test" && !process.env.NEXT_PUBLIC_API_URL) {
+    console.log("[TEST MODE] registerLocation called with:", { data, walletAddress });
+    return;
+  }
+
+  try {
+    await apiRequest<void>("/locations", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-wallet-address": walletAddress, // Send wallet address in header for auth
+      },
+      body: {
+        wallet_address: walletAddress, // Also include in body
+        lat: data.lat,
+        lng: data.lng,
+        city: data.city,
+        country: data.country,
+        is_public: data.is_public,
+      },
+    });
+  } catch (error) {
+    // Log/telemetry on failure
+    console.error("[registerLocation] Failed to save location:", {
+      error,
+      walletAddress,
       city: data.city,
       country: data.country,
-      is_public: data.is_public,
-    },
-  });
+    });
+    throw error; // Re-throw so caller can handle
+  }
 }
 
 export interface SavedLocation {

@@ -118,6 +118,8 @@ export default function OnboardingPage() {
           );
         } catch (locationError) {
           console.error("Location registration failed", locationError);
+          // Surface non-fatal error to user
+          alert("Your profile was created successfully, but we couldn't save your location. You can update it later in settings.");
           trackFunnelStep("onboarding_completion", "location_save_failed", {
             reason:
               locationError instanceof Error
