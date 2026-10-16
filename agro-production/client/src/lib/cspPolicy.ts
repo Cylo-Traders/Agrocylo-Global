@@ -107,9 +107,12 @@ export type ObservabilityEnv = {
  *
  * - HTTPS is required, except `http://localhost` outside production.
  * - Only the origin is kept. `url.origin` already drops the path, the DSN's
- *   project id and any query/fragment, none of which belong in a CSP list.
- * - A DSN carrying userinfo is rejected: `connect-src` takes origins, and
- *   credentials in one would be published in every response header.
+ *   project id, the DSN's userinfo and any query/fragment, none of which
+ *   belong in a CSP list.
+ * - A DSN carrying a password is rejected as a pasted secret: `connect-src`
+ *   takes origins, and a real Sentry DSN never has one. Username-only
+ *   userinfo (the DSN's public key) is stripped with the origin instead, so
+ *   ordinary Sentry DSNs are accepted.
  * - `NEXT_PUBLIC_TELEMETRY_ENABLED` must be exactly `true`. When it is unset
  *   or false the telemetry URL is inert, and including it would widen the
  *   policy for a feature that is not running.
@@ -136,7 +139,7 @@ export function observabilityConnectSources(
         rejected.push(label);
         return;
       }
-      if (url.username || url.password) {
+      if (url.password) {
         rejected.push(label);
         return;
       }
