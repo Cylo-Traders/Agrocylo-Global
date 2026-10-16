@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 
 describe("Telemetry opt-in behavior", () => {
-  let originalEnv: Record<string, string | undefined>;
+  let originalEnv: typeof process.env;
   let fetchSpy: ReturnType<typeof vi.spyOn>;
   let sendBeaconSpy: ReturnType<typeof vi.spyOn>;
 
