@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import type { Product } from '@prisma/client';
 import { prisma } from '../config/database.js';
 import { ApiError } from '../http/errors.js';
+import { assertCurrency, type CurrencyCode } from '../constants/currencies.js';
 import { toClientProfile } from '../lib/profileDto.js';
 import { listReviewsForSubject } from './reviewService.js';
 import { wsManager } from './wsManager.js';

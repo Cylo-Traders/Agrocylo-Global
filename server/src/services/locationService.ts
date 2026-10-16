@@ -31,6 +31,11 @@ const updateLocationSchema = z
     if (value.country !== undefined) data.country = value.country;
     if (value.is_public !== undefined) data.is_public = value.is_public;
 
+    if ((data.lat === undefined) !== (data.lng === undefined)) {
+      ctx.addIssue({ code: 'custom', message: 'lat and lng must be provided together' });
+    } else if (data.lat === 0 && data.lng === 0) {
+      ctx.addIssue({ code: 'custom', message: 'Coordinates (0, 0) are not a valid location' });
+    }
     if (Object.keys(data).length === 0) {
       ctx.addIssue({
         code: 'custom',
@@ -54,9 +59,12 @@ const createLocationSchema = optionalLocationFields
       longitude: locationShape.longitude,
     })
   )
-  .transform((value) => {
+  .transform((value, ctx) => {
     const lat = value.lat ?? value.latitude;
     const lng = value.lng ?? value.longitude;
+    if (lat === 0 && lng === 0) {
+      ctx.addIssue({ code: 'custom', message: 'Coordinates (0, 0) are not a valid location' });
+    }
     return {
       lat: lat!,
       lng: lng!,
@@ -72,6 +80,11 @@ const proximitySchema = z.object({
   radius: z.coerce.number().positive().optional(),
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(20),
+}).superRefine((v, ctx) => {
+  const given = [v.lat, v.lng, v.radius].filter((x) => x !== undefined).length;
+  if (given !== 0 && given !== 3) {
+    ctx.addIssue({ code: 'custom', message: 'lat, lng and radius must be provided together' });
+  }
 });
 
 function haversine(lat1: number, lng1: number, lat2: number, lng2: number): number {

@@ -27,7 +27,7 @@ app.use(locationErrorHandler);
 
 const WALLET = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 const bearer = (walletAddress = WALLET) =>
-  `Bearer ${jwt.sign({ walletAddress }, JWT_SECRET)}`;
+  `Bearer ${jwt.sign({ walletAddress, role: 'FARMER' }, JWT_SECRET)}`;
 
 beforeEach(() => {
   vi.clearAllMocks();

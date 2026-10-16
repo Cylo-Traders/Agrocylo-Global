@@ -19,6 +19,8 @@ vi.mock('../middleware/walletAuth.js', () => ({
     req.walletAddress = req.headers['x-wallet-address'] || 'G1111111111111111111111111111111111111111111111111111111';
     next();
   },
+  requireRole: () => (_req: any, _res: any, next: any) => next(),
+  requireAnyRole: () => (_req: any, _res: any, next: any) => next(),
 }));
 
 vi.mock('../services/cartService.js', () => ({
