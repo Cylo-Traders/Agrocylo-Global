@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useGeolocation } from "./useGeolocation";
@@ -45,29 +45,52 @@ describe("useGeolocation", () => {
     removeGeolocation();
   });
 
-  it("resolves the browser position on success", async () => {
+  it("does not prompt the browser for location on mount", async () => {
+    const getCurrentPosition = vi.fn();
+    installGeolocation(getCurrentPosition);
+
+    const { result } = renderHook(() => useGeolocation());
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(getCurrentPosition).not.toHaveBeenCalled();
+    expect(result.current.latitude).toBe(LAGOS_LAT);
+    expect(result.current.longitude).toBe(LAGOS_LNG);
+    expect(result.current.error).toBeNull();
+    expect(result.current.permissionGranted).toBe(false);
+    expect(result.current.source).toBe("fallback");
+  });
+
+  it("requests the browser position when requestLocation is called", async () => {
     installGeolocation((success) =>
       success({ coords: { latitude: 12.34, longitude: 56.78 } }),
     );
 
     const { result } = renderHook(() => useGeolocation());
-
     await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => result.current.requestLocation());
+
+    await waitFor(() => expect(result.current.isRequesting).toBe(false));
 
     expect(result.current.latitude).toBe(12.34);
     expect(result.current.longitude).toBe(56.78);
     expect(result.current.error).toBeNull();
     expect(result.current.permissionGranted).toBe(true);
+    expect(result.current.source).toBe("browser");
   });
 
-  it("falls back to Lagos when permission is denied", async () => {
+  it("falls back to Lagos when permission is denied via requestLocation", async () => {
     installGeolocation((_success, error) =>
       error({ code: 1, message: "User denied Geolocation" }),
     );
 
     const { result } = renderHook(() => useGeolocation());
-
     await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => result.current.requestLocation());
+
+    await waitFor(() => expect(result.current.isRequesting).toBe(false));
 
     expect(result.current.latitude).toBe(LAGOS_LAT);
     expect(result.current.longitude).toBe(LAGOS_LNG);
@@ -83,11 +106,17 @@ describe("useGeolocation", () => {
     );
 
     const { result } = renderHook(() => useGeolocation());
-
     await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => result.current.requestLocation());
+
+    await waitFor(() => expect(result.current.isRequesting).toBe(false));
 
     expect(result.current.latitude).toBe(LAGOS_LAT);
     expect(result.current.longitude).toBe(LAGOS_LNG);
+    expect(result.current.error).toBe(
+      "Location request timed out — showing Lagos, Nigeria",
+    );
     expect(result.current.permissionGranted).toBe(false);
   });
 
@@ -95,12 +124,16 @@ describe("useGeolocation", () => {
     removeGeolocation();
 
     const { result } = renderHook(() => useGeolocation());
-
     await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => result.current.requestLocation());
+
+    await waitFor(() =>
+      expect(result.current.error).toBe("Geolocation not supported"),
+    );
 
     expect(result.current.latitude).toBe(LAGOS_LAT);
     expect(result.current.longitude).toBe(LAGOS_LNG);
-    expect(result.current.error).toBe("Geolocation not supported");
     expect(result.current.permissionGranted).toBe(false);
   });
 
@@ -121,17 +154,15 @@ describe("useGeolocation", () => {
     expect(result.current.latitude).toBe(9.1);
     expect(result.current.longitude).toBe(7.2);
     expect(result.current.permissionGranted).toBe(true);
+    expect(result.current.source).toBe("saved");
     expect(getCurrentPosition).not.toHaveBeenCalled();
   });
 
-  it("falls back to the browser when the saved location cannot be loaded", async () => {
+  it("does not prompt the browser when the saved location cannot be loaded", async () => {
     vi.mocked(profileService.getSavedLocation).mockRejectedValue(
       new Error("network"),
     );
-    const getCurrentPosition = vi.fn(
-      (success: PositionCallback) =>
-        success({ coords: { latitude: 1.5, longitude: 2.5 } }),
-    );
+    const getCurrentPosition = vi.fn();
     installGeolocation(getCurrentPosition);
 
     const { result } = renderHook(() =>
@@ -140,9 +171,10 @@ describe("useGeolocation", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(getCurrentPosition).toHaveBeenCalled();
-    expect(result.current.latitude).toBe(1.5);
-    expect(result.current.longitude).toBe(2.5);
+    expect(getCurrentPosition).not.toHaveBeenCalled();
+    expect(result.current.latitude).toBe(LAGOS_LAT);
+    expect(result.current.longitude).toBe(LAGOS_LNG);
+    expect(result.current.source).toBe("fallback");
   });
 
   it("does not update state after unmount", async () => {
@@ -152,11 +184,14 @@ describe("useGeolocation", () => {
     });
 
     const { result, unmount } = renderHook(() => useGeolocation());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => result.current.requestLocation());
     unmount();
 
     expect(() =>
       capturedSuccess?.({ coords: { latitude: 1, longitude: 2 } }),
     ).not.toThrow();
-    expect(result.current.isLoading).toBe(true);
+    expect(result.current.latitude).toBe(LAGOS_LAT);
   });
 });
