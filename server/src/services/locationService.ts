@@ -107,7 +107,7 @@ export async function getFarmerLocations(query: unknown) {
       parsed.error.message,
       'https://cylos.io/errors/validation'
     );
-  const { lat, lng, radius, page, limit } = parsed.data;
+  const { lat, lng, radius, role, page, limit } = parsed.data;
   const skip = (page - 1) * limit;
 
   const whereClause: any = { is_public: true };
@@ -115,11 +115,24 @@ export async function getFarmerLocations(query: unknown) {
     whereClause.profile = { role };
   }
 
+  // Use bounding box for initial filtering when proximity search is requested
+  // This leverages the composite index (lat, lng, is_public) for efficient pre-filtering
+  if (lat !== undefined && lng !== undefined && radius !== undefined) {
+    // Calculate bounding box in degrees (approximation)
+    // 1 degree latitude ≈ 111 km; longitude varies by latitude
+    const latDelta = radius / 111;
+    const lngDelta = radius / (111 * Math.cos((lat * Math.PI) / 180));
+    
+    whereClause.lat = { gte: lat - latDelta, lte: lat + latDelta };
+    whereClause.lng = { gte: lng - lngDelta, lte: lng + lngDelta };
+  }
+
   let locations = await prisma.location.findMany({
     where: whereClause,
     include: { profile: { select: { name: true, role: true, avatar_url: true, bio: true } } },
   });
 
+  // Apply precise haversine filtering for locations within bounding box
   if (lat !== undefined && lng !== undefined && radius !== undefined) {
     locations = locations.filter((l) => haversine(lat, lng, l.lat, l.lng) <= radius);
   }
