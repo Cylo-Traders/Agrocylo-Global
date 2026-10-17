@@ -2,8 +2,9 @@
 
 import { useState, Component, type ReactNode } from "react";
 import dynamic from "next/dynamic";
-import { Users, AlertTriangle } from "lucide-react";
+import { Users, AlertTriangle, MapPin } from "lucide-react";
 
+import { useWallet } from "@/hooks/useWallet";
 import { useGeolocation } from "@/hooks/useGeolocation";
 import { useFarmerLocations } from "@/hooks/useFarmerLocations";
 import DistanceFilter from "@/components/map/DistanceFilter";
@@ -50,7 +51,8 @@ const FarmerMap = dynamic(() => import("@/components/map/FarmerMap"), {
 
 export default function MapPage() {
   const [radiusKm, setRadiusKm] = useState(50);
-  const geo = useGeolocation();
+  const { address } = useWallet();
+  const geo = useGeolocation({ walletAddress: address });
 
   const { farmers, isLoading, error } = useFarmerLocations({
     latitude: geo.latitude,
@@ -71,10 +73,34 @@ export default function MapPage() {
       {/* Status pills — stack below the filter on the right. */}
       <div className="pointer-events-none absolute right-4 top-20 z-10 flex flex-col items-end gap-2">
         {!geo.isLoading && geo.error && (
-          <Pill tone="warning">{geo.error}</Pill>
+          <Pill tone="warning">
+            <span>{geo.error}</span>
+            <button
+              type="button"
+              onClick={geo.requestLocation}
+              disabled={geo.isRequesting}
+              className="pointer-events-auto font-semibold underline underline-offset-2 disabled:opacity-60"
+            >
+              {geo.isRequesting ? "Retrying..." : "Retry"}
+            </button>
+          </Pill>
         )}
         {error && <Pill tone="destructive">{error}</Pill>}
       </div>
+
+      {/* Explicit opt-in: never prompt for precise location automatically. */}
+      {!geo.isLoading && !geo.permissionGranted && !geo.isRequesting && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-14 z-10 flex justify-center">
+          <button
+            type="button"
+            onClick={geo.requestLocation}
+            className="bg-primary text-primary-foreground pointer-events-auto inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold shadow-lg"
+          >
+            <MapPin className="size-3.5" />
+            Use my location
+          </button>
+        </div>
+      )}
 
       {/* Farmer count */}
       {!isLoading && !geo.isLoading && (
@@ -118,7 +144,7 @@ function Pill({
       : "bg-destructive/10 text-destructive border-destructive/30";
   return (
     <div
-      className={`rounded-full border px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur-sm ${colour}`}
+      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur-sm ${colour}`}
     >
       {children}
     </div>

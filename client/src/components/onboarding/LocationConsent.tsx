@@ -45,6 +45,8 @@ export default function LocationConsent({
   const { trackFeatureAdoption, trackFunnelStep } = useAnalytics();
   const [state, setState] = useState<LocationState>("idle");
   const [errorMsg, setErrorMsg] = useState("");
+  const [manualError, setManualError] = useState("");
+  const [isGeocodingManual, setIsGeocodingManual] = useState(false);
   const [city, setCity] = useState("");
   const [country, setCountry] = useState("");
   const [isPublic, setIsPublic] = useState(true);
@@ -138,22 +140,78 @@ export default function LocationConsent({
     );
   }
 
-  function handleManualSubmit() {
-    if (!city.trim() || !country.trim()) return;
-    trackFeatureAdoption("manual_location_entry", {
-      city,
-      country,
-    });
-    trackFunnelStep("onboarding_completion", "location_entered_manually", {
-      isPublic,
-    });
-    onComplete({
-      latitude: 0,
-      longitude: 0,
-      city: city.trim(),
-      country: country.trim(),
-      isPublic,
-    });
+  async function handleManualSubmit() {
+    const trimmedCity = city.trim();
+    const trimmedCountry = country.trim();
+    if (!trimmedCity || !trimmedCountry) return;
+
+    // Manual entry only provides place names, so resolve them to real
+    // coordinates before submitting. Sending a placeholder like (0, 0) would
+    // be rejected by the API (Issue #1111).
+    setIsGeocodingManual(true);
+    setManualError("");
+    try {
+      abortControllerRef.current = new AbortController();
+      const timeoutId = setTimeout(
+        () => abortControllerRef.current?.abort(),
+        10000,
+      );
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&limit=1&city=${encodeURIComponent(
+          trimmedCity,
+        )}&country=${encodeURIComponent(trimmedCountry)}`,
+        { signal: abortControllerRef.current.signal },
+      );
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        throw new Error(`Fetch failed with status ${res.status}`);
+      }
+
+      const results = (await res.json()) as Array<{ lat: string; lon: string }>;
+      const match = results[0];
+      const latitude = match ? Number.parseFloat(match.lat) : NaN;
+      const longitude = match ? Number.parseFloat(match.lon) : NaN;
+
+      if (
+        !Number.isFinite(latitude) ||
+        !Number.isFinite(longitude) ||
+        (latitude === 0 && longitude === 0)
+      ) {
+        setManualError(
+          "We couldn't find that location. Please check the city and country and try again.",
+        );
+        trackFunnelStep("onboarding_completion", "location_manual_lookup_failed", {
+          reason: "not_found",
+        });
+        return;
+      }
+
+      trackFeatureAdoption("manual_location_entry", { city, country });
+      trackFunnelStep("onboarding_completion", "location_entered_manually", {
+        isPublic,
+      });
+      onComplete({
+        latitude,
+        longitude,
+        city: trimmedCity,
+        country: trimmedCountry,
+        isPublic,
+      });
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") {
+        setManualError("Looking up your location timed out. Please try again.");
+      } else {
+        setManualError(
+          "We couldn't look up that location. Please try again.",
+        );
+      }
+      trackFunnelStep("onboarding_completion", "location_manual_lookup_failed", {
+        reason: err instanceof Error ? err.name : "unknown",
+      });
+    } finally {
+      setIsGeocodingManual(false);
+    }
   }
 
   if (state === "idle") {
@@ -316,6 +374,12 @@ export default function LocationConsent({
             />
           </div>
 
+          {manualError && (
+            <p className="text-destructive text-sm" role="alert">
+              {manualError}
+            </p>
+          )}
+
           <div className="flex items-center gap-3">
             <Checkbox
               id="loc-manual-public"
@@ -342,7 +406,7 @@ export default function LocationConsent({
           <Button
             disabled={!city.trim() || !country.trim()}
             onClick={handleManualSubmit}
-            isLoading={isSubmitting}
+            isLoading={isSubmitting || isGeocodingManual}
             className="flex-[2]"
           >
             Save Location
