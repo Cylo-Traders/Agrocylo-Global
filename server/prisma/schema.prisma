@@ -137,6 +137,9 @@ model Product {
   priceTiers   ProductPriceTier[]
 
   @@index([farmerWallet, isAvailable])
+  @@index([category, isAvailable, createdAt(sort: Desc)])
+  @@index([isAvailable, createdAt(sort: Desc)])
+  @@index([farmerWallet, createdAt(sort: Desc)])
   @@map("products")
 }
 
@@ -344,6 +347,7 @@ model Location {
   is_public      Boolean  @default(true)
   profile        Profile? @relation(fields: [walletAddress], references: [walletAddress])
 
+  @@index([lat, lng, is_public])
   @@map("locations")
 }
 
