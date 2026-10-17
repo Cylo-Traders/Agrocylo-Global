@@ -73,8 +73,9 @@ describe("AdminLayout - role gating", () => {
       </AdminLayout>,
     );
 
-    // AuthGuard with requiredRole="admin" redirects non-admin profiles
-    expect(mockReplace).toHaveBeenCalledWith("/dashboard/products");
+    // AuthGuard with requiredRole="admin" redirects non-admin profiles to the
+    // single, unguarded mismatch fallback (/market) — see AuthGuard.tsx
+    expect(mockReplace).toHaveBeenCalledWith("/market");
     expect(screen.queryByText("Admin content")).not.toBeInTheDocument();
   });
 
