@@ -106,7 +106,7 @@ export function useGeolocation(opts: { walletAddress?: string | null } = {}) {
   useEffect(() => {
     let cancelled = false;
 
-    async function useSavedLocationFirst(): Promise<boolean> {
+    async function resolveSavedLocation(): Promise<boolean> {
       if (!walletAddress) return false;
       try {
         const { getSavedLocation } = await import("@/services/profileService");
@@ -134,7 +134,7 @@ export function useGeolocation(opts: { walletAddress?: string | null } = {}) {
       // from a known default WITHOUT triggering the browser permission
       // prompt (Issue #1110). Precise location is only requested when the
       // user explicitly opts in via `requestLocation()`.
-      if (await useSavedLocationFirst()) return;
+      if (await resolveSavedLocation()) return;
       if (cancelled) return;
       applyState(fallbackState(null));
     }
