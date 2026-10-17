@@ -189,7 +189,10 @@ export default function FarmerDashboardPage() {
           <h1 className="text-2xl font-bold text-foreground">Farmer Dashboard</h1>
           <p className="mt-1 text-sm text-muted">Incoming orders for <span className="font-mono">{address.slice(0, 8)}…{address.slice(-6)}</span></p>
         </div>
-        <Link href="/campaigns" className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700">My campaigns</Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/marketplace" className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-surface">← Back to Marketplace</Link>
+          <Link href="/campaigns" className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700">My campaigns</Link>
+        </div>
       </div>
 
       <section aria-label="Revenue summary" className="grid grid-cols-1 gap-4 sm:grid-cols-3">

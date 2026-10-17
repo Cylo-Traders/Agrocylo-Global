@@ -59,16 +59,30 @@ export async function listOrdersAsSeller(sellerAddress: string): Promise<Order[]
     return [];
   }
 
+  let res: Response;
   try {
-    const res = await fetch(`${API_BASE_URL}/orders/seller/${sellerAddress}`);
-    if (!res.ok) {
-      throw new Error(`Failed to fetch seller orders: ${res.status}`);
-    }
-    return (await res.json()) as Order[];
+    res = await fetch(`${API_BASE_URL}/orders/seller/${sellerAddress}`);
   } catch (err) {
-    console.error("Failed to list seller orders:", err);
+    // Network-level failure (offline, DNS, CORS)
+    console.error("Failed to fetch seller orders (network error):", err instanceof Error ? err.message : err);
     return [];
   }
+
+  if (res.status === 401 || res.status === 403) {
+    // Session expired or wallet not authenticated — don't spam console, caller
+    // should prompt re-auth rather than treating this as an unexpected error.
+    console.warn(`Seller orders: unauthenticated (${res.status}). Wallet session may have expired.`);
+    return [];
+  }
+
+  if (!res.ok) {
+    let body = "";
+    try { body = await res.text(); } catch { /* ignore */ }
+    console.error(`Failed to fetch seller orders: HTTP ${res.status}`, body || "(empty body)");
+    return [];
+  }
+
+  return (await res.json()) as Order[];
 }
 
 /**

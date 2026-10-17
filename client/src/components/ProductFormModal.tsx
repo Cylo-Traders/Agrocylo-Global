@@ -206,7 +206,11 @@ export default function ProductFormModal({
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to save.";
       setSaveError(msg);
-      logger?.error("Product form save failed", { error: msg, mode });
+      logger?.error("Product form save failed", {
+        error: msg,
+        mode,
+        stack: err instanceof Error ? err.stack : undefined,
+      });
     } finally {
       setSaving(false);
     }
