@@ -12,6 +12,13 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  // Issue #1174/#1175: prevent duplicate import declarations that cause build
+  // errors under Turbopack's strict module resolution.
+  {
+    rules: {
+      "no-duplicate-imports": "error",
+    },
+  },
   // Issue #801: i128 stroop amounts must never go through JS double math.
   // `formatStroops` / `formatStroopsForDisplay` in @/lib/validation are the
   // only sanctioned stroop -> display conversion. `amountFormatting.test.ts`
