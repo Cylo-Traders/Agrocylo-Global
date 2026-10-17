@@ -4,9 +4,13 @@ import { imageUpload, isUnsupportedMimeType } from '../middleware/upload.js';
 import { requireWallet, type WalletRequest } from '../middleware/walletAuth.js';
 import { uploadRateLimiter } from '../middleware/rateLimiter.js';
 import { HttpError, deleteProductImage, uploadProductImage } from '../services/productImageService.js';
+import logger from '../config/logger.js';
 
 const router = express.Router();
 
+// Auth runs before multer so the JWT is validated before any file data is
+// processed. This prevents multipart parsing from consuming the request body
+// before requireWallet can read the Authorization header (#1182).
 router.post(
   '/products/:product_id/image',
   uploadRateLimiter,
@@ -17,6 +21,14 @@ router.post(
       const productId = req.params['product_id'];
       const walletAddress = req.walletAddress;
       const image = req.file;
+
+      logger.info('[productImageRoutes] POST /products/:product_id/image', {
+        productId,
+        walletAddress: walletAddress ?? null,
+        hasAuthHeader: Boolean(req.header('Authorization')),
+        contentType: req.header('Content-Type') ?? null,
+        hasFile: Boolean(image),
+      });
 
       if (!productId) {
         throw new HttpError(400, 'Missing product_id path param.');

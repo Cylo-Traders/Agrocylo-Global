@@ -17,6 +17,9 @@ import PwaSetup from "@/components/PwaSetup";
 export const metadata: Metadata = {
   title: "Agro Production",
   description: "Agricultural production campaigns on Stellar",
+  icons: {
+    icon: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
