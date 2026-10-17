@@ -15,7 +15,7 @@ export function DashboardFooter() {
           <Link href="/contact" className="hover:text-foreground transition-colors">
             Support
           </Link>
-          <span>Powered by Starknet</span>
+          <span>Powered by Stellar</span>
         </div>
       </div>
     </footer>
