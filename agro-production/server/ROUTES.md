@@ -4,9 +4,8 @@
 
 All routes are registered in [src/app.ts](src/app.ts) with the following structure:
 
-- **Auth Routes** (`src/routes/auth.ts`) — No prefix
-- **Campaign Image Routes** (`src/routes/campaignImageRoutes.ts`) — No prefix
-- **Campaign, Order, Transaction, Product Routes** — All prefixed with `/api/v1`
+- **Auth & Campaign Image Routes** (`src/routes/auth.ts`, `src/routes/campaignImageRoutes.ts`) — Available at root and `/api/v1`
+- **Campaign, Order, Transaction, Product, Analytics Routes** — Mounted at `/api/v1` and at root (`/`) for client compatibility (Issue #1189)
 
 ## Middleware Stack
 

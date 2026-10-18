@@ -399,6 +399,18 @@ See [openapi.yaml](openapi.yaml) for complete endpoint specifications, request/r
 
 ---
 
+## Storage & File Uploads
+
+Product images and evidence files support both remote object storage and local development fallback. See full reference in [`docs/deployment/STORAGE.md`](../docs/deployment/STORAGE.md).
+
+- **Upload Endpoint**: `POST /products/:product_id/image` (field name: `image`)
+- **Supported Formats**: JPEG, PNG, WebP
+- **Limits**: Max 5 MB per file, 1 file per upload request
+- **Local Dev Fallback**: In `development` mode without Supabase credentials, uploads save to `uploads/product-images/` and are served statically at `/uploads/product-images/...`.
+- **Remote Storage**: Supabase Storage / S3 / Cloudflare R2 compatible.
+
+---
+
 ## Contributing
 
 ### Contributor setup checklist

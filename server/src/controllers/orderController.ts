@@ -1,7 +1,14 @@
 import type { Request, Response } from "express";
-import logger from "../config/logger.js";
 import { OrderService } from "../services/orderService.js";
 import type { WalletRequest } from "../middleware/walletAuth.js";
+import {
+  AuthError,
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+  handleServiceError,
+  sendProblem,
+} from "../http/errors.js";
 
 export class OrderController {
   static async getAllOrders(req: Request, res: Response) {
@@ -9,98 +16,142 @@ export class OrderController {
       const walletReq = req as WalletRequest;
       const walletAddress = walletReq.walletAddress;
       if (!walletAddress) {
-        return res.status(401).json({ error: "Authentication required" });
+        sendProblem(res, req, new AuthError("Authentication required to view orders"));
+        return;
       }
       const orders = await OrderService.getAllForWallet(walletAddress);
-      return res.status(200).json(orders);
+      res.status(200).json(orders);
     } catch (error) {
-      logger.error("Error fetching all orders:", error);
-      return res.status(500).json({ error: "Internal server error" });
+      handleServiceError(error, req, res);
     }
   }
 
   static async getOrderById(req: Request, res: Response) {
     const { id } = req.params;
-    if (!id) return res.status(400).json({ error: "Order id is required" });
+    if (!id) {
+      sendProblem(res, req, new ValidationError("Order id path parameter is required"));
+      return;
+    }
+
     try {
       const walletReq = req as WalletRequest;
       const walletAddress = walletReq.walletAddress;
       if (!walletAddress) {
-        return res.status(401).json({ error: "Authentication required" });
+        sendProblem(res, req, new AuthError("Authentication required to view order"));
+        return;
       }
+
       const order = await OrderService.getByOrderId(id);
       if (!order) {
-        return res.status(404).json({ error: "Order not found" });
+        sendProblem(res, req, new NotFoundError("Order", id));
+        return;
       }
+
       if (order.buyerAddress !== walletAddress && order.sellerAddress !== walletAddress) {
-        return res.status(403).json({ error: "Forbidden: you do not have access to this order" });
+        sendProblem(
+          res,
+          req,
+          new ForbiddenError("Forbidden: you do not have permission to access this order"),
+        );
+        return;
       }
-      return res.status(200).json(order);
+
+      res.status(200).json(order);
     } catch (error) {
-      logger.error("Error fetching order " + id + ":", error);
-      return res.status(500).json({ error: "Internal server error" });
+      handleServiceError(error, req, res);
     }
   }
 
   static async getOrdersByBuyer(req: Request, res: Response) {
     const { address } = req.params;
-    if (!address)
-      return res.status(400).json({ error: "Buyer address is required" });
+    if (!address) {
+      sendProblem(res, req, new ValidationError("Buyer address path parameter is required"));
+      return;
+    }
+
     try {
       const walletReq = req as WalletRequest;
       const walletAddress = walletReq.walletAddress;
       if (!walletAddress) {
-        return res.status(401).json({ error: "Authentication required" });
+        sendProblem(res, req, new AuthError("Authentication required to view buyer orders"));
+        return;
       }
-      if (walletAddress !== address) {
-        return res.status(403).json({ error: "Forbidden: you can only view your own orders" });
+
+      if (walletAddress.toLowerCase() !== address.toLowerCase()) {
+        sendProblem(
+          res,
+          req,
+          new ForbiddenError("Forbidden: you can only view orders placed by your own wallet"),
+        );
+        return;
       }
+
       const orders = await OrderService.getByBuyerAddress(address);
-      return res.status(200).json(orders);
+      res.status(200).json(orders);
     } catch (error) {
-      return res.status(500).json({ error: "Internal server error" });
+      handleServiceError(error, req, res);
     }
   }
 
   static async getOrdersBySeller(req: Request, res: Response) {
     const { address } = req.params;
-    if (!address)
-      return res.status(400).json({ error: "Seller address is required" });
+    if (!address) {
+      sendProblem(res, req, new ValidationError("Seller address path parameter is required"));
+      return;
+    }
+
     try {
       const walletReq = req as WalletRequest;
       const walletAddress = walletReq.walletAddress;
       if (!walletAddress) {
-        return res.status(401).json({ error: "Authentication required" });
+        sendProblem(res, req, new AuthError("Authentication required to view seller orders"));
+        return;
       }
-      if (walletAddress !== address) {
-        return res.status(403).json({ error: "Forbidden: you can only view your own orders" });
+
+      if (walletAddress.toLowerCase() !== address.toLowerCase()) {
+        sendProblem(
+          res,
+          req,
+          new ForbiddenError("Forbidden: you can only view orders sold by your own wallet"),
+        );
+        return;
       }
+
       const orders = await OrderService.getByFarmerAddress(address);
-      return res.status(200).json(orders);
+      res.status(200).json(orders);
     } catch (error) {
-      return res.status(500).json({ error: "Internal server error" });
+      handleServiceError(error, req, res);
     }
   }
 
   static async getSellerStats(req: Request, res: Response) {
     const { sellerAddress } = req.params;
     if (!sellerAddress) {
-      return res.status(400).json({ error: "Seller address is required" });
+      sendProblem(res, req, new ValidationError("Seller address path parameter is required"));
+      return;
     }
+
     try {
       const walletReq = req as WalletRequest;
       const walletAddress = walletReq.walletAddress;
       if (!walletAddress) {
-        return res.status(401).json({ error: "Authentication required" });
+        sendProblem(res, req, new AuthError("Authentication required to view seller stats"));
+        return;
       }
-      if (walletAddress !== sellerAddress) {
-        return res.status(403).json({ error: "Forbidden: you can only view your own stats" });
+
+      if (walletAddress.toLowerCase() !== sellerAddress.toLowerCase()) {
+        sendProblem(
+          res,
+          req,
+          new ForbiddenError("Forbidden: you can only view statistics for your own wallet"),
+        );
+        return;
       }
+
       const stats = await OrderService.getSellerStats(sellerAddress);
-      return res.status(200).json(stats);
+      res.status(200).json(stats);
     } catch (error) {
-      logger.error("Error fetching seller stats:", error);
-      return res.status(500).json({ error: "Internal server error" });
+      handleServiceError(error, req, res);
     }
   }
 }

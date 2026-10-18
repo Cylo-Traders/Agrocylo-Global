@@ -17,6 +17,7 @@ import conversationRoutes from './routes/conversations.js';
 import adminReconciliationRoutes from './routes/adminReconciliation.js';
 import indexerRoutes from './routes/indexer.js';
 import weatherRoutes from './routes/weather.js';
+import analyticsRoutes from './routes/analytics.js';
 import { globalErrorHandler } from './middleware/errors.js';
 import { HealthResponseSchema, LivezResponseSchema, ReadyzResponseSchema } from './schemas/health.js';
 import { serveOpenApiDocument } from './openapi/document.js';
@@ -60,16 +61,23 @@ app.use((req: Request, _res: Response, next: express.NextFunction) => {
 });
 
 app.use(authRoutes);
+app.use('/api/v1', authRoutes);
 app.use(campaignImageRoutes);
+app.use('/api/v1', campaignImageRoutes);
 app.use('/api/v1', campaignRoutes);
+app.use(campaignRoutes);
 app.use('/api/v1', orderRoutes);
+app.use(orderRoutes);
 app.use('/api/v1', transactionRoutes);
 app.use('/api/v1', productRoutes);
+app.use(productRoutes);
 app.use('/api/v1', userRoutes);
 app.use('/api/v1', conversationRoutes);
 app.use('/api/v1', adminReconciliationRoutes);
 app.use('/api/v1/indexer', indexerRoutes);
 app.use('/api/v1', weatherRoutes);
+app.use('/api/v1', analyticsRoutes);
+app.use(analyticsRoutes);
 
 app.get('/health', (_req: Request, res: Response) => {
   logger.info('Health check endpoint hit');

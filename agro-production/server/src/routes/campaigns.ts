@@ -115,14 +115,19 @@ router.get(
   },
 );
 
-// GET /campaigns/:id — campaign detail with investments
+// GET /campaigns/:id — campaign detail with investments (supports UUID or onChainId)
 router.get(
   "/campaigns/:id",
   validateParams(CampaignIdParamSchema),
   validateResponse(CampaignDetailSchema),
   async (req: Request, res: Response) => {
-    const campaign = await prisma.campaign.findUnique({
-      where: { id: req.params.id },
+    const campaign = await prisma.campaign.findFirst({
+      where: {
+        OR: [
+          { id: req.params.id },
+          { onChainId: req.params.id },
+        ],
+      },
       include: {
         investments: { orderBy: { createdAt: "desc" } },
         orders: { orderBy: { createdAt: "desc" } },
@@ -299,14 +304,21 @@ router.post(
   },
 );
 
-// GET /campaigns/:id/investments — investments for a campaign
+// GET /campaigns/:id/investments — investments for a campaign (supports UUID or onChainId)
 router.get(
   "/campaigns/:id/investments",
   validateParams(CampaignIdParamSchema),
   validateResponse(z.array(InvestmentSchema)),
   async (req: Request, res: Response) => {
+    const campaign = await prisma.campaign.findFirst({
+      where: {
+        OR: [{ id: req.params.id }, { onChainId: req.params.id }],
+      },
+    });
+
+    const campaignId = campaign ? campaign.id : req.params.id;
     const investments = await prisma.investment.findMany({
-      where: { campaignId: req.params.id },
+      where: { campaignId },
       orderBy: { createdAt: "desc" },
     });
     jsonValidated(res, z.array(InvestmentSchema), 200, investments);

@@ -29,7 +29,7 @@ export const ProductSchema = z.object({
   location: z.string().nullable(),
   farmerAddress: z.string(),
   campaignId: z.string().nullable(),
-  imageUrl: z.string().url().nullable(),
+  imageUrl: z.string().nullable().optional(),
   isActive: z.boolean(),
   isSellable: z.boolean(),
   campaign: ProductCampaignSchema.nullable().optional(),
@@ -65,3 +65,28 @@ export const ProductQuerySchema = z.object({
 });
 
 export const ProductIdParamSchema = z.object({ id: z.string() });
+
+export const CreateProductSchema = z.object({
+  name: z.string().min(1, 'Product name is required'),
+  description: z.string().nullable().optional(),
+  category: ProductCategorySchema,
+  priceTokens: z.string().regex(/^\d+$/, 'priceTokens must be a positive numeric string in stroops'),
+  inventoryCount: z.number().int().nonnegative('inventoryCount must be non-negative'),
+  campaignId: z.string().optional(),
+  imageUrl: z.string().nullable().optional(),
+  isActive: z.boolean().optional(),
+});
+
+export const UpdateProductSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().nullable().optional(),
+  category: ProductCategorySchema.optional(),
+  priceTokens: z.string().regex(/^\d+$/).optional(),
+  inventoryCount: z.number().int().nonnegative().optional(),
+  campaignId: z.string().nullable().optional(),
+  imageUrl: z.string().nullable().optional(),
+  isActive: z.boolean().optional(),
+});
+
+export type CreateProductInput = z.infer<typeof CreateProductSchema>;
+export type UpdateProductInput = z.infer<typeof UpdateProductSchema>;
