@@ -100,7 +100,7 @@ echo ""
 
 # Create a Dockerfile that installs Rust 1.89.0 and builds the contract
 BUILD_DOCKERFILE=$(mktemp)
-trap "rm -f $BUILD_DOCKERFILE" EXIT
+trap 'rm -f "$BUILD_DOCKERFILE"' EXIT
 
 cat > "$BUILD_DOCKERFILE" << 'DOCKERFILE_END'
 ARG BASE_IMAGE

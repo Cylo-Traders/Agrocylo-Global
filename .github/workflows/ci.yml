@@ -31,6 +31,7 @@ jobs:
       server: ${{ steps.changes.outputs.server }}
       contracts: ${{ steps.changes.outputs.contracts }}
       agro-client: ${{ steps.changes.outputs.agro-client }}
+      agro-server: ${{ steps.changes.outputs.agro-server }}
       shared-deps: ${{ steps.changes.outputs.shared-deps }}
       scripts: ${{ steps.changes.outputs.scripts }}
       dev-smoke: ${{ steps.changes.outputs.dev-smoke }}
@@ -63,6 +64,10 @@ jobs:
               - 'contracts/**'
               - 'Cargo.toml'
               - 'rust-toolchain.toml'
+              - '.github/workflows/ci.yml'
+            agro-server:
+              - 'agro-production/server/**'
+              - 'scripts/**'
               - '.github/workflows/ci.yml'
             agro-client:
               - 'agro-production/client/**'
@@ -125,6 +130,12 @@ jobs:
 
       - name: Version policy + doctor + cache reset + smoke harness tests
         run: npm run test:scripts
+
+      - name: Shell scripts (ShellCheck)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          shellcheck scripts/*.sh
 
       - name: Shared dependency policy check
         run: npm run check:versions
@@ -268,11 +279,9 @@ jobs:
 
       - name: Lint
         run: npm run lint
-        continue-on-error: true
 
       - name: Format check
         run: npm run format:check
-        continue-on-error: true
 
       - name: Type check
         run: npx tsc --noEmit
@@ -289,6 +298,53 @@ jobs:
 
       - name: Test with coverage
         run: npm run test:coverage
+
+  agro-production-server:
+    name: Agro-Production Server
+    needs: paths
+    if: needs.paths.outputs.agro-server == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: agro-production/server
+    env:
+      DATABASE_URL: postgresql://test_user:test_password@localhost:5432/agrocylo_test
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: agrocylo_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: agro-production/server/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Lint
+        run: npm run lint
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Build
+        run: npm run build
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+      - name: Test
+        run: npm test
 
   server-integration:
     name: Server · Prisma schema/migration integration

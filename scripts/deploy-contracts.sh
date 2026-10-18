@@ -279,7 +279,8 @@ init_args_for() {
 }
 
 deploy_one() {
-    local c="$1" wasm="$WASM_DIR/${WASM[$c]}" existing salt hash id \
+    local c="$1"
+    local wasm="$WASM_DIR/${WASM[$c]}" existing salt hash id \
           init_fn="" init_args="" deployed_init=false
     existing="$(cid "$c")"
     if [[ -n "$existing" && "$FORCE" == "false" ]]; then
