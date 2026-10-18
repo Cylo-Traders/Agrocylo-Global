@@ -80,6 +80,23 @@ jobs:
         run: npx prisma migrate deploy
         working-directory: agro-production/server
 
+      - name: Check schema/migration drift
+        env:
+          PGPASSWORD: test_password
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/agrocylo_test
+          SHADOW_DATABASE_URL: postgresql://test_user:test_password@localhost:5432/agrocylo_shadow
+        # Fails the build when prisma/schema.prisma and prisma/migrations/ have
+        # diverged (e.g. a model added to the schema with no matching migration).
+        # Runs against a throwaway shadow DB so it never touches the test DB above.
+        run: |
+          psql -h localhost -U test_user -d agrocylo_test -c 'CREATE DATABASE agrocylo_shadow;'
+          npx prisma migrate diff \
+            --from-migrations prisma/migrations \
+            --to-schema-datamodel prisma/schema.prisma \
+            --shadow-database-url "$SHADOW_DATABASE_URL" \
+            --exit-code
+        working-directory: agro-production/server
+
       - name: Run tests
         env:
           DATABASE_URL: postgresql://test_user:test_password@localhost:5432/agrocylo_test
