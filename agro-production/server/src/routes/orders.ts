@@ -20,7 +20,7 @@ import {
 import { OrderSchema } from "../schemas/responses.js";
 import {
   requireIdempotencyKey,
-  getCachedResponse,
+  replayCachedResponse,
   setCachedResponse,
 } from "../middleware/idempotency.js";
 import logger from "../config/logger.js";
@@ -92,9 +92,7 @@ router.post(
       const idempotencyKey = (req as any).idempotencyKey as string;
       const { campaignId, amount } = req.body;
 
-      const cached = getCachedResponse(idempotencyKey);
-      if (cached) {
-        res.status(cached.status).json(cached.body);
+      if (await replayCachedResponse(req, res)) {
         return;
       }
 
@@ -143,7 +141,7 @@ router.post(
       });
 
       const response = order;
-      setCachedResponse(idempotencyKey, 201, response);
+      await setCachedResponse(req, 201, response);
       jsonValidated(res, OrderSchema, 201, response);
     } catch (error) {
       logger.error("[POST /orders] Failed to create order", { error });

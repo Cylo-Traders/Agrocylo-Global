@@ -32,7 +32,7 @@ import {
   InvestorPortfolioSummarySchema,
 } from "../schemas/responses.js";
 import { broadcast } from "../services/wsServer.js";
-import { getCachedResponse, setCachedResponse } from "../middleware/idempotency.js";
+import { replayCachedResponse, setCachedResponse } from "../middleware/idempotency.js";
 import { getStatusMetadata } from "../services/campaignStatusService.js";
 
 const router = Router();
@@ -260,9 +260,7 @@ router.post(
     const idempotencyKey = (req as any).idempotencyKey as string;
     const { tokenAddress, targetAmount, deadline } = req.body as Omit<CreateCampaignInput, "farmerAddress">;
 
-    const cached = getCachedResponse(idempotencyKey);
-    if (cached) {
-      res.status(cached.status).json(cached.body);
+    if (await replayCachedResponse(req, res)) {
       return;
     }
 
@@ -294,7 +292,7 @@ router.post(
     });
 
     const response = campaign;
-    setCachedResponse(idempotencyKey, 201, response);
+    await setCachedResponse(req, 201, response);
     jsonValidated(res, CampaignSchema, 201, response);
   },
 );
@@ -360,9 +358,7 @@ router.post(
     const idempotencyKey = (req as any).idempotencyKey as string;
     const { amount } = req.body as Omit<InvestInput, "investorAddress">;
 
-    const cached = getCachedResponse(idempotencyKey);
-    if (cached) {
-      res.status(cached.status).json(cached.body);
+    if (await replayCachedResponse(req, res)) {
       return;
     }
 
@@ -414,7 +410,7 @@ router.post(
     });
 
     const response = investment;
-    setCachedResponse(idempotencyKey, 201, response);
+    await setCachedResponse(req, 201, response);
     jsonValidated(res, InvestmentSchema, 201, response);
   },
 );
