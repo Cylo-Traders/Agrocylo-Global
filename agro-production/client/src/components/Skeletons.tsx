@@ -157,34 +157,6 @@ export function OrderTableSkeleton({ rows = 3 }: { rows?: number }) {
   );
 }
 
-export function DashboardSkeleton() {
-  return (
-    <div className="space-y-8 animate-pulse" aria-hidden="true">
-      <div className="flex items-center justify-between">
-        <Bone className="h-8 w-40" />
-        <Bone className="h-9 w-32 rounded-lg" />
-      </div>
-      {/* address card */}
-      <div className="bg-surface border border-border rounded-xl p-5 space-y-2">
-        <Bone className="h-3 w-28" />
-        <Bone className="h-4 w-full" />
-        <Bone className="h-3 w-24" />
-      </div>
-      {/* investments section */}
-      <div className="space-y-4">
-        <Bone className="h-6 w-36" />
-        {Array.from({ length: 2 }).map((_, i) => (
-          <div key={i} className="border border-border rounded-xl p-5 space-y-2 bg-surface">
-            <Bone className="h-4 w-48" />
-            <Bone className="h-3 w-32" />
-            <Bone className="h-2 w-full rounded-full" />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 /** Generic inline spinner for button loading states */
 export function ButtonSpinner({ className = "" }: { className?: string }) {
   return (

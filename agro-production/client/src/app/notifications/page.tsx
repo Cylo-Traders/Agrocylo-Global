@@ -3,8 +3,9 @@
 import Link from "next/link";
 
 /**
- * /notifications page to "View All" link in
- * WeatherAdvisoryWidget resolves instead of returning a 404 (Issue #1048).
+ * /notifications page. The weather-advisory widget that used to link here was
+ * removed as dead code (Issue #1224); this route stays because it is a real
+ * destination and is linked from the navbar.
  *
  * A full implementation would list weather advisories, order updates,
  * campaign milestones, and system messages.
