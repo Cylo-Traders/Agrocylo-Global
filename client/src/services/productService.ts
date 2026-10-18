@@ -104,14 +104,13 @@ export async function getProductById(
 }
 
 export async function createProduct(
-  walletAddress: string,
   input: ProductWriteInput,
 ): Promise<Product> {
   // Test mode: return dummy product
   if (isTestMode()) {
     return {
       id: String(Date.now()),
-      farmer_wallet: walletAddress,
+      farmer_wallet: "test-wallet",
       name: input.name ?? "Test Product",
       category: input.category ?? "Other",
       price_per_unit: input.price_per_unit ?? "0",
@@ -147,7 +146,6 @@ export async function createProduct(
 }
 
 export async function updateProduct(
-  walletAddress: string,
   productId: string,
   input: ProductWriteInput,
 ): Promise<Product> {
@@ -174,7 +172,6 @@ export async function updateProduct(
 }
 
 export async function softDeleteProduct(
-  _walletAddress: string,
   productId: string,
 ): Promise<Product> {
   const json = await apiRequest<unknown>(`/products/${productId}`, {
@@ -184,7 +181,6 @@ export async function softDeleteProduct(
 }
 
 export async function uploadProductImage(
-  _walletAddress: string,
   productId: string,
   file: File,
 ): Promise<{ image_url: string }> {

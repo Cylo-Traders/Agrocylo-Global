@@ -85,39 +85,63 @@ function decimalFilter(value: string | undefined): Prisma.Decimal | undefined {
   return new Prisma.Decimal(value);
 }
 
+type SortOption = 'price_asc' | 'price_desc' | 'newest' | 'distance';
+
 export async function listProducts(params: {
   farmer?: string;
   category?: string;
+  categories?: string;
   search?: string;
+  q?: string;
   location?: string;
   minPrice?: string;
   maxPrice?: string;
+  price_min?: string;
+  price_max?: string;
   page?: string;
   pageSize?: string;
+  page_size?: string;
   includeUnavailable?: boolean;
+  include_unavailable?: boolean;
+  sort?: SortOption;
+  lat?: string;
+  lng?: string;
 }): Promise<{ page: number; page_size: number; total: number; totalPages: number; items: ProductDto[] }> {
   const page = parsePage(params.page, 1);
-  const pageSize = Math.min(parsePage(params.pageSize, 20), 100);
-  const where: Prisma.ProductWhereInput = params.includeUnavailable ? {} : { isAvailable: true };
+  const pageSize = Math.min(parsePage(params.pageSize || params.page_size, 20), 100);
+  const where: Prisma.ProductWhereInput = (params.includeUnavailable || params.include_unavailable) ? {} : { isAvailable: true };
 
   if (params.farmer) {
     where.farmerWallet = params.farmer.toLowerCase();
   }
+
+  // Support both singular 'category' and plural 'categories'
   if (params.category) {
     where.category = params.category;
+  } else if (params.categories) {
+    const categoryList = params.categories.split(',').map(c => c.trim()).filter(Boolean);
+    if (categoryList.length > 0) {
+      where.category = { in: categoryList };
+    }
   }
-  if (params.search) {
+
+  // Support both 'search' and 'q'
+  const searchTerm = params.search || params.q;
+  if (searchTerm) {
     where.OR = [
-      { name: { contains: params.search, mode: 'insensitive' } },
-      { description: { contains: params.search, mode: 'insensitive' } },
-      { category: { contains: params.search, mode: 'insensitive' } },
+      { name: { contains: searchTerm, mode: 'insensitive' } },
+      { description: { contains: searchTerm, mode: 'insensitive' } },
+      { category: { contains: searchTerm, mode: 'insensitive' } },
     ];
   }
+
   if (params.location) {
     where.location = { contains: params.location, mode: 'insensitive' };
   }
-  const minPrice = decimalFilter(params.minPrice);
-  const maxPrice = decimalFilter(params.maxPrice);
+
+  // Support both naming conventions
+  const minPrice = decimalFilter(params.minPrice || params.price_min);
+  const maxPrice = decimalFilter(params.maxPrice || params.price_max);
   if (minPrice || maxPrice) {
     where.pricePerUnit = {
       ...(minPrice ? { gte: minPrice } : {}),
@@ -125,11 +149,32 @@ export async function listProducts(params: {
     };
   }
 
+  // Handle sorting
+  const sort = params.sort || 'newest';
+  const isValidSort = (s: string): s is SortOption => {
+    return ['price_asc', 'price_desc', 'newest', 'distance'].includes(s);
+  };
+
+  if (!isValidSort(sort)) {
+    throw new ApiError(400, 'Invalid sort value', `Sort must be one of: price_asc, price_desc, newest, distance. Got: ${sort}`);
+  }
+
+  // Distance sorting requires lat/lng
+  if (sort === 'distance' && (!params.lat || !params.lng)) {
+    throw new ApiError(400, 'Invalid parameters', 'Distance sort requires lat and lng');
+  }
+
+  const orderBy: Prisma.ProductOrderByWithRelationInput =
+    sort === 'price_asc' ? { pricePerUnit: 'asc' }
+    : sort === 'price_desc' ? { pricePerUnit: 'desc' }
+    : sort === 'distance' ? { createdAt: 'asc' } // Fallback: will compute actual distance in app
+    : { createdAt: 'desc' }; // newest
+
   const [total, products] = await prisma.$transaction([
     prisma.product.count({ where }),
     prisma.product.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy,
       take: pageSize,
       skip: (page - 1) * pageSize,
     }),

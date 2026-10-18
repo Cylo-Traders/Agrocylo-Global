@@ -25,10 +25,9 @@ import type {
 } from "@/types/product";
 import {
   normalizeProductWriteInput,
-  createProduct,
-  updateProduct,
   uploadProductImage,
 } from "@/services/productService";
+import { useCreateProduct, useUpdateProduct } from "@/hooks/queries/useProducts";
 import { isTestMode } from "@/lib/testMode";
 import { productFormSchema } from "@/lib/validation";
 import { FormError } from "@/components/FormError";
@@ -68,7 +67,6 @@ const SELECT_CLASSES =
 interface ProductFormModalProps {
   open: boolean;
   mode: Mode;
-  walletAddress: string;
   initialProduct?: Product | null;
   onClose: () => void;
   onSuccess: () => Promise<void> | void;
@@ -77,7 +75,6 @@ interface ProductFormModalProps {
 export default function ProductFormModal({
   open,
   mode,
-  walletAddress,
   initialProduct,
   onClose,
   onSuccess,
@@ -95,8 +92,11 @@ export default function ProductFormModal({
 
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [errors, setErrors] = useState<FormErrors>({});
-  const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  const createProductMutation = useCreateProduct();
+  const updateProductMutation = useUpdateProduct();
+  const saving = createProductMutation.isPending || updateProductMutation.isPending;
 
   useEffect(() => {
     if (!open) return;
@@ -172,7 +172,6 @@ export default function ProductFormModal({
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!validate()) return;
-    setSaving(true);
     setSaveError(null);
     try {
       const payload = normalizeProductWriteInput({
@@ -190,14 +189,15 @@ export default function ProductFormModal({
 
       const product =
         mode === "add"
-          ? await createProduct(walletAddress, payload)
-          : await updateProduct(walletAddress, initialProduct!.id, payload);
+          ? await createProductMutation.mutateAsync(payload)
+          : await updateProductMutation.mutateAsync({
+              id: initialProduct!.id,
+              input: payload,
+            });
 
       if (imageFiles.length > 0) {
         await Promise.all(
-          imageFiles.map((file) =>
-            uploadProductImage(walletAddress, product.id, file),
-          ),
+          imageFiles.map((file) => uploadProductImage(product.id, file)),
         );
       }
 
@@ -211,8 +211,6 @@ export default function ProductFormModal({
         mode,
         stack: err instanceof Error ? err.stack : undefined,
       });
-    } finally {
-      setSaving(false);
     }
   }
 
