@@ -1,5 +1,6 @@
 import express from 'express';
 import type { Request, Response } from 'express';
+import path from 'node:path';
 import cors from 'cors';
 import { corsOptions } from './config/cors.js';
 import helmet from 'helmet';
@@ -81,6 +82,7 @@ app.use(
 
 app.use(cors(corsOptions));
 app.use(express.json());
+app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
 app.use(requestContext);
 app.use(requestLogger);
 

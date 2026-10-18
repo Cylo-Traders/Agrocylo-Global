@@ -387,4 +387,101 @@ describe('Products API', () => {
       );
     });
   });
+
+  describe('POST /api/v1/products (Issue #1189)', () => {
+    it('should create a product for an owned campaign', async () => {
+      (prisma.campaign.findUnique as any).mockResolvedValue(mockCampaign);
+      (prisma.product.create as any).mockResolvedValue({
+        ...mockProduct,
+        id: 'new-prod-uuid',
+        campaign: mockCampaign,
+      });
+
+      const res = await request(app)
+        .post('/api/v1/products')
+        .set('x-wallet-address', FARMER)
+        .send({
+          name: 'Sweet Corn',
+          description: 'Fresh organic corn',
+          category: 'VEGETABLES',
+          priceTokens: '15000000',
+          inventoryCount: 50,
+          campaignId: CAMPAIGN_UUID,
+        })
+        .expect(201);
+
+      expect(res.body).toHaveProperty('id');
+      expect(res.body.name).toBe('Organic Wheat');
+    });
+
+    it('should reject creation for unowned campaign with 403', async () => {
+      (prisma.campaign.findUnique as any).mockResolvedValue({
+        ...mockCampaign,
+        farmerAddress: 'GDIFFERENTFARMER',
+      });
+
+      await request(app)
+        .post('/api/v1/products')
+        .set('x-wallet-address', FARMER)
+        .send({
+          name: 'Sweet Corn',
+          category: 'VEGETABLES',
+          priceTokens: '15000000',
+          inventoryCount: 50,
+          campaignId: CAMPAIGN_UUID,
+        })
+        .expect(403);
+    });
+  });
+
+  describe('GET /api/v1/campaigns/:id/products (Issue #1189)', () => {
+    it('should return products associated with campaign', async () => {
+      (prisma.campaign.findFirst as any).mockResolvedValue(mockCampaign);
+      (prisma.product.findMany as any).mockResolvedValue([mockProduct]);
+
+      const res = await request(app)
+        .get(`/api/v1/campaigns/${CAMPAIGN_UUID}/products`)
+        .expect(200);
+
+      expect(res.body).toHaveProperty('data');
+      expect(res.body.data).toHaveLength(1);
+    });
+
+    it('should resolve without /api/v1 prefix without 404', async () => {
+      (prisma.campaign.findFirst as any).mockResolvedValue(mockCampaign);
+      (prisma.product.findMany as any).mockResolvedValue([mockProduct]);
+
+      const res = await request(app)
+        .get(`/campaigns/${CAMPAIGN_UUID}/products`)
+        .expect(200);
+
+      expect(res.body.data).toHaveLength(1);
+    });
+  });
+
+  describe('DELETE /api/v1/products/:id (Issue #1189)', () => {
+    it('should deactivate a product when requested by owner', async () => {
+      (prisma.product.findUnique as any).mockResolvedValue({
+        ...mockProduct,
+        campaign: { farmerAddress: FARMER },
+      });
+      (prisma.product.update as any).mockResolvedValue({
+        ...mockProduct,
+        isActive: false,
+      });
+
+      await request(app)
+        .delete(`/api/v1/products/${PRODUCT_UUID}`)
+        .set('x-wallet-address', FARMER)
+        .expect(204);
+
+      expect(prisma.product.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: PRODUCT_UUID },
+          data: { isActive: false },
+        }),
+      );
+    });
+  });
 });
+

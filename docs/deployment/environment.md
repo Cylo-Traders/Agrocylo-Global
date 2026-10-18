@@ -60,7 +60,7 @@ Validated by a Zod schema in [`server/src/config/index.ts`](../../server/src/con
 | `PRISMA_GENERATE_DATABASE_URL` | generate only | — | Nonsecret, non-routable placeholder accepted only while generating Prisma artifacts. Do not set at runtime or for migrations. |
 | `SUPABASE_URL` | ✅ | — | Supabase project URL |
 | `SUPABASE_ANON_KEY` | ✅ | — | Supabase anon key |
-| `SUPABASE_SERVICE_ROLE_KEY` | ✅ prod | `""` | Server-side Supabase key (image uploads) |
+| `SUPABASE_SERVICE_ROLE_KEY` | ✅ prod | `""` | Server-side Supabase key for image uploads (see [`STORAGE.md`](./STORAGE.md)) |
 | `SUPABASE_PRODUCT_IMAGES_BUCKET` | | `product-images` | |
 | `PRODUCT_IMAGE_PLACEHOLDER_URL` | | placehold.co URL | |
 | `JWT_SECRET` | ✅ | — | API JWT signing key, HS256, ≥ 32 bytes. See rotation below. |
