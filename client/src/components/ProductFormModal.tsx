@@ -33,6 +33,7 @@ import { isTestMode } from "@/lib/testMode";
 import { productFormSchema } from "@/lib/validation";
 import { FormError } from "@/components/FormError";
 import { logger } from "@/lib/logger";
+import { useWallet } from "@/hooks/useWallet";
 
 type Mode = "add" | "edit";
 
@@ -82,6 +83,7 @@ export default function ProductFormModal({
   onClose,
   onSuccess,
 }: ProductFormModalProps) {
+  const { authenticated, reauthenticate } = useWallet();
   const [name, setName] = useState("");
   const [category, setCategory] = useState<ProductCategory | null>(null);
   const [pricePerUnit, setPricePerUnit] = useState("");
@@ -175,6 +177,12 @@ export default function ProductFormModal({
     setSaving(true);
     setSaveError(null);
     try {
+      // Product writes and image uploads require the API session. The wallet
+      // can still be connected after a reload while its short-lived JWT has
+      // expired, so restore it before starting the multi-request save flow.
+      if (!authenticated) {
+        await reauthenticate();
+      }
       const payload = normalizeProductWriteInput({
         name: name.trim(),
         category,
