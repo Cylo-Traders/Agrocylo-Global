@@ -5,6 +5,8 @@ app = "agrocylo-agro-client"
 primary = "iad"
 
 [build]
+# deploy.yml builds the image with environment-scoped public build arguments.
+# fly deploy consumes that prebuilt image; [env] cannot change inlined values.
 
 [http_service]
   internal_port = 3001

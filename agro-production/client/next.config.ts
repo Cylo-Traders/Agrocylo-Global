@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { assertEndpointsValid, assertApiWsOriginsValid } from "./src/lib/endpointValidator";
 import { getAllowedProductImageHosts, getAllowedProductImageOrigins } from "./src/lib/productImagePolicy";
 import { buildContentSecurityPolicy, observabilityConnectSources } from "./src/lib/cspPolicy";
+import { apiBaseUrl } from "./src/lib/apiConfig";
 
 // ── Resolve repository root for Turbopack ────────────────────────────────
 // Issue #918: client fix derives repo root from config file location; this
@@ -50,6 +51,13 @@ function getRepoRoot(): string {
 }
 
 const repoRoot = getRepoRoot();
+
+// Next.js freezes public configuration into the browser bundle.
+apiBaseUrl(process.env.NEXT_PUBLIC_API_URL);
+if (process.env.NODE_ENV === "production" &&
+    !/^C[A-Z2-7]{55}$/.test(process.env.NEXT_PUBLIC_PRODUCTION_CONTRACT_ID ?? "")) {
+  throw new Error("Set NEXT_PUBLIC_PRODUCTION_CONTRACT_ID to the deployed contract address before building.");
+}
 
 // ── Validate endpoints before using them for headers/images ─────────────
 // Mirrors client/next.config.ts validation (Issue #927). In production missing

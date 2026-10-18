@@ -115,6 +115,7 @@ jobs:
 
   # ── Build & push Docker images ──────────────────────────────────────────────
   build-images:
+    environment: ${{ needs.resolve-env.outputs.environment }}
     name: Build · ${{ matrix.app }}
     needs: resolve-env
     runs-on: ubuntu-latest
@@ -176,6 +177,16 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            NEXT_PUBLIC_SOROBAN_RPC_URL=${{ vars.NEXT_PUBLIC_SOROBAN_RPC_URL }}
+            NEXT_PUBLIC_HORIZON_URL=${{ vars.NEXT_PUBLIC_HORIZON_URL }}
+            NEXT_PUBLIC_NETWORK_PASSPHRASE=${{ vars.NEXT_PUBLIC_NETWORK_PASSPHRASE }}
+            NEXT_PUBLIC_STELLAR_ENV=${{ vars.NEXT_PUBLIC_STELLAR_ENV }}
+            NEXT_PUBLIC_API_URL=${{ vars.AGRO_NEXT_PUBLIC_API_URL }}
+            NEXT_PUBLIC_WS_URL=${{ vars.AGRO_NEXT_PUBLIC_WS_URL }}
+            NEXT_PUBLIC_PRODUCTION_CONTRACT_ID=${{ vars.NEXT_PUBLIC_PRODUCTION_CONTRACT_ID }}
+            NEXT_PUBLIC_AGRO_PRODUCTION_ENABLED=${{ vars.NEXT_PUBLIC_AGRO_PRODUCTION_ENABLED }}
+            NEXT_PUBLIC_BASE_PATH=${{ vars.NEXT_PUBLIC_BASE_PATH }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

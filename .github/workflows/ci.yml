@@ -435,6 +435,14 @@ jobs:
         run: cargo build --workspace --target wasm32v1-none --release
 
   agro-production-client:
+    env:
+      NEXT_PUBLIC_API_URL: https://api.example.com/api/v1
+      NEXT_PUBLIC_WS_URL: wss://api.example.com/ws
+      NEXT_PUBLIC_SOROBAN_RPC_URL: https://soroban-testnet.stellar.org
+      NEXT_PUBLIC_HORIZON_URL: https://horizon-testnet.stellar.org
+      NEXT_PUBLIC_NETWORK_PASSPHRASE: Test SDF Network ; September 2015
+      NEXT_PUBLIC_STELLAR_ENV: testnet
+      NEXT_PUBLIC_PRODUCTION_CONTRACT_ID: CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM
     name: Agro-Production Client · Next.js
     needs: paths
     if: needs.paths.outputs.agro-client == 'true'
