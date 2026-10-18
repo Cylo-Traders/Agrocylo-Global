@@ -203,7 +203,12 @@ export default function AccountModal() {
               className="min-h-10 w-full"
               disabled={authenticating}
               aria-busy={authenticating}
-              onClick={() => void reauthenticate()}
+              onClick={() => {
+                void reauthenticate().catch(() => {
+                  // sessionError from the wallet hook drives the UI; avoid an
+                  // unhandled rejection now that reauthenticate throws (#1185).
+                });
+              }}
             >
               {authenticating ? (
                 <Loader2

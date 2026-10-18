@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { config } from "../config/index.js";
-import { HANDOFF_AUDIENCE } from "../services/authService.js";
+import { HANDOFF_AUDIENCE, resolveWalletRole } from "../services/authService.js";
 import { ApiError, sendProblem } from "../http/errors.js";
 
 export interface WalletRequest extends Request {
@@ -76,7 +76,7 @@ export function requireWallet(req: WalletRequest, res: Response, next: NextFunct
       req.walletRole = decoded.role;
     }
     next();
-  } catch (err) {
+  } catch (_err) {
     sendProblem(res, req, new ApiError(401, 'Unauthorized', 'Invalid or expired token', 'https://cylos.io/errors/unauthorized'));
   }
 }
@@ -87,19 +87,52 @@ export type WalletRole = 'FARMER' | 'BUYER' | 'ADMIN';
  * Allows the request only when the verified session role is one of `roles`
  * (ADMIN always passes). Must run after requireWallet. Responds with a
  * Problem+JSON 403 on mismatch or missing role (#1133).
+ *
+ * The role carried in the JWT is a snapshot from token issue time, so it can
+ * be stale (e.g. a farmer selects their role during onboarding *after* the
+ * token was minted). When the snapshot fails the check we re-resolve the role
+ * from the DB before rejecting, so a freshly-granted role takes effect without
+ * forcing a re-login (#1185).
  */
 export function requireAnyRole(...roles: WalletRole[]) {
+  const allows = (role?: string): boolean => {
+    if (!role) return false;
+    return role === 'ADMIN' || (roles as readonly string[]).includes(role);
+  };
+
   return (req: WalletRequest, res: Response, next: NextFunction): void => {
-    const role = req.walletRole;
-    if (role && (role === 'ADMIN' || (roles as string[]).includes(role))) {
+    if (allows(req.walletRole)) {
       next();
       return;
     }
-    sendProblem(
-      res,
-      req,
-      new ApiError(403, 'Forbidden', `Requires role: ${roles.join(' or ')}`, 'https://cylos.io/errors/forbidden'),
-    );
+    if (!req.walletAddress) {
+      sendProblem(
+        res,
+        req,
+        new ApiError(403, 'Forbidden', `Requires role: ${roles.join(' or ')}`, 'https://cylos.io/errors/forbidden'),
+      );
+      return;
+    }
+    resolveWalletRole(req.walletAddress)
+      .then((freshRole) => {
+        if (allows(freshRole)) {
+          req.walletRole = freshRole;
+          next();
+          return;
+        }
+        sendProblem(
+          res,
+          req,
+          new ApiError(403, 'Forbidden', `Requires role: ${roles.join(' or ')}`, 'https://cylos.io/errors/forbidden'),
+        );
+      })
+      .catch(() => {
+        sendProblem(
+          res,
+          req,
+          new ApiError(403, 'Forbidden', `Requires role: ${roles.join(' or ')}`, 'https://cylos.io/errors/forbidden'),
+        );
+      });
   };
 }
 

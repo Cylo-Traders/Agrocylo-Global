@@ -9,7 +9,7 @@ vi.mock('../config/index.js', () => ({
 
 vi.mock('../config/database.js', () => ({
   prisma: {
-    nonce: { upsert: vi.fn(), findUnique: vi.fn(), delete: vi.fn() },
+    nonce: { upsert: vi.fn(), findUnique: vi.fn(), deleteMany: vi.fn() },
     refreshToken: { create: vi.fn(), findUnique: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
     user: { findUnique: vi.fn(), upsert: vi.fn() },
     profile: { findUnique: vi.fn(), upsert: vi.fn() },
@@ -29,7 +29,7 @@ import jwt from 'jsonwebtoken';
 
 const mockNonceUpsert = vi.mocked(prisma.nonce.upsert);
 const mockNonceFindUnique = vi.mocked(prisma.nonce.findUnique);
-const mockNonceDelete = vi.mocked(prisma.nonce.delete);
+const mockNonceDeleteMany = vi.mocked(prisma.nonce.deleteMany);
 const mockRefreshTokenCreate = vi.mocked(prisma.refreshToken.create);
 const mockRefreshTokenFindUnique = vi.mocked(prisma.refreshToken.findUnique);
 const mockRefreshTokenDelete = vi.mocked(prisma.refreshToken.delete);
@@ -96,7 +96,7 @@ describe('verifySignature', () => {
   it('returns access and refresh tokens on valid signature', async () => {
     const row = challenge();
     mockNonceFindUnique.mockResolvedValueOnce(row);
-    mockNonceDelete.mockResolvedValueOnce({} as any);
+    mockNonceDeleteMany.mockResolvedValueOnce({} as any);
     mockRefreshTokenCreate.mockResolvedValueOnce({} as any);
 
     const result = await verifySignature(VALID_WALLET, 'dGVzdA==', message(row));
@@ -104,7 +104,7 @@ describe('verifySignature', () => {
     expect(result.accessToken).toBeDefined();
     expect(result.refreshToken).toBeDefined();
     expect(mockNonceFindUnique).toHaveBeenCalledTimes(1);
-    expect(mockNonceDelete).toHaveBeenCalledTimes(1);
+    expect(mockNonceDeleteMany).toHaveBeenCalledTimes(1);
     expect(mockRefreshTokenCreate).toHaveBeenCalledTimes(1);
   });
 
@@ -217,7 +217,7 @@ describe('role resolution — JWT aligns with DB enum (FARMER|BUYER|ADMIN)', () 
   const FARMER_WALLET = 'GFARMER123456FARMER123456789FARMER123456789A';
   const BUYER_WALLET = 'GBUYER123456789BUYER123456789BUYER123456789AB';
 
-  function validChallengeFor(wallet: string) {
+  function validChallengeFor(_wallet: string) {
     return { nonce: 'some-nonce', createdAt: ISSUED_AT, expiresAt: FUTURE_DATE_OBJ } as any;
   }
 
@@ -225,21 +225,23 @@ describe('role resolution — JWT aligns with DB enum (FARMER|BUYER|ADMIN)', () 
     mockAdminWallets.push(ADMIN_WALLET);
     const row = validChallengeFor(ADMIN_WALLET);
     mockNonceFindUnique.mockResolvedValueOnce(row);
-    mockNonceDelete.mockResolvedValueOnce({} as any);
+    mockNonceDeleteMany.mockResolvedValueOnce({} as any);
     mockRefreshTokenCreate.mockResolvedValueOnce({} as any);
 
     const msg = buildSignInMessage(ADMIN_WALLET, row.nonce, row.createdAt, row.expiresAt);
     const { accessToken } = await verifySignature(ADMIN_WALLET, 'dGVzdA==', msg);
     const decoded = jwt.verify(accessToken, TEST_JWT_SECRET) as any;
     expect(decoded.role).toBe('ADMIN');
-    expect(decoded.walletAddress).toBe(ADMIN_WALLET);
+    // Sessions carry the canonical (lower-cased) wallet so the principal
+    // matches how identity rows are stored (#1184/#1185).
+    expect(decoded.walletAddress).toBe(ADMIN_WALLET.toLowerCase());
   });
 
   it('admin wallet via users.role ADMIN receives role ADMIN', async () => {
     mockUserFindUnique.mockResolvedValueOnce({ role: 'ADMIN' } as any);
     const row = validChallengeFor(ADMIN_WALLET);
     mockNonceFindUnique.mockResolvedValueOnce(row);
-    mockNonceDelete.mockResolvedValueOnce({} as any);
+    mockNonceDeleteMany.mockResolvedValueOnce({} as any);
     mockRefreshTokenCreate.mockResolvedValueOnce({} as any);
 
     const msg = buildSignInMessage(ADMIN_WALLET, row.nonce, row.createdAt, row.expiresAt);
@@ -253,7 +255,7 @@ describe('role resolution — JWT aligns with DB enum (FARMER|BUYER|ADMIN)', () 
     mockProfileFindUnique.mockResolvedValueOnce({ role: 'FARMER' } as any);
     const row = validChallengeFor(FARMER_WALLET);
     mockNonceFindUnique.mockResolvedValueOnce(row);
-    mockNonceDelete.mockResolvedValueOnce({} as any);
+    mockNonceDeleteMany.mockResolvedValueOnce({} as any);
     mockRefreshTokenCreate.mockResolvedValueOnce({} as any);
 
     const msg = buildSignInMessage(FARMER_WALLET, row.nonce, row.createdAt, row.expiresAt);
@@ -267,7 +269,7 @@ describe('role resolution — JWT aligns with DB enum (FARMER|BUYER|ADMIN)', () 
     mockProfileFindUnique.mockResolvedValueOnce(null);
     const row = validChallengeFor(BUYER_WALLET);
     mockNonceFindUnique.mockResolvedValueOnce(row);
-    mockNonceDelete.mockResolvedValueOnce({} as any);
+    mockNonceDeleteMany.mockResolvedValueOnce({} as any);
     mockRefreshTokenCreate.mockResolvedValueOnce({} as any);
 
     const msg = buildSignInMessage(BUYER_WALLET, row.nonce, row.createdAt, row.expiresAt);
@@ -313,7 +315,7 @@ describe('role resolution — JWT aligns with DB enum (FARMER|BUYER|ADMIN)', () 
       mockProfileFindUnique.mockResolvedValueOnce(null);
       const row = validChallengeFor(w);
       mockNonceFindUnique.mockResolvedValueOnce(row);
-      mockNonceDelete.mockResolvedValueOnce({} as any);
+      mockNonceDeleteMany.mockResolvedValueOnce({} as any);
       mockRefreshTokenCreate.mockResolvedValueOnce({} as any);
       const msg = buildSignInMessage(w, row.nonce, row.createdAt, row.expiresAt);
       const { accessToken } = await verifySignature(w, 'dGVzdA==', msg);
