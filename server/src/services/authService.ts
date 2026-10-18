@@ -22,17 +22,23 @@ export const HANDOFF_AUDIENCE = 'agrocylo-sso-handoff';
 const HANDOFF_EXPIRES_IN = '60s';
 
 export async function resolveWalletRole(walletAddress: string): Promise<ServerProfileRole> {
-  const normalized = walletAddress.toUpperCase();
+  // Identity rows are stored canonically lower-cased (see IdentityService);
+  // lookups must use the same canonical form or every resolve silently misses.
+  const canonical = canonicalWalletAddress(walletAddress);
+  const normalized = walletAddress.trim().toUpperCase();
   // 1. Env allowlist — immediate source of truth for bootstrapping / emergency admin grant
   //    (checked before DB so a fresh deploy can promote without a DB write).
   const allowlist = (config as unknown as { adminWallets?: string[] }).adminWallets;
-  if (Array.isArray(allowlist) && allowlist.includes(normalized)) {
+  if (
+    Array.isArray(allowlist) &&
+    allowlist.some((w) => String(w).trim().toUpperCase() === normalized)
+  ) {
     return 'ADMIN';
   }
   // 2. DB users.role — managed via grant-admin CLI / admin panel
   try {
     const user = await prisma.user.findUnique({
-      where: { walletAddress },
+      where: { walletAddress: canonical },
       select: { role: true },
     });
     if (user?.role) {
@@ -45,7 +51,7 @@ export async function resolveWalletRole(walletAddress: string): Promise<ServerPr
   // 3. Profile role — alternative source if users row not yet created
   try {
     const profile = await prisma.profile.findUnique({
-      where: { walletAddress: walletAddress },
+      where: { walletAddress: canonical },
       select: { role: true },
     });
     if (profile?.role) {
@@ -171,14 +177,21 @@ export async function verifySignature(
     throw new ApiError(401, 'Unauthorized', 'Invalid signature');
   }
 
-  // One-time nonce: delete immediately after successful verification
-  await prisma.nonce.delete({ where: { walletAddress: canonical } });
+  // One-time nonce: consume it immediately after successful verification.
+  // deleteMany (not delete) so two concurrent verifications that both passed
+  // the lookup above don't crash the loser with a P2025 race (#1185).
+  await prisma.nonce.deleteMany({ where: { walletAddress: canonical } });
 
   // Canonical identity creation via single code path (shared with indexer)
   await IdentityService.ensureUserAndProfile(canonical);
 
-  const role = await resolveWalletRole(walletAddress);
-  const accessToken = jwt.sign({ walletAddress, role }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+  const role = await resolveWalletRole(canonical);
+  // Sign the session with the canonical (lower-cased) wallet so the principal
+  // matches how every identity/order/profile row is stored. The raw address
+  // keeps its original case only where StrKey decoding needs it (above).
+  const accessToken = jwt.sign({ walletAddress: canonical, role }, JWT_SECRET, {
+    expiresIn: JWT_EXPIRES_IN,
+  });
   const refreshToken = crypto.randomBytes(40).toString('hex');
   const refreshExpiresAt = new Date(Date.now() + REFRESH_TTL_MS);
 

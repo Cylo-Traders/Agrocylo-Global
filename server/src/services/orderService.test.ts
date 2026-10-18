@@ -73,7 +73,8 @@ describe('OrderService.getByBuyerAddress', () => {
 
     expect(result).toEqual([SAMPLE_ORDER]);
     expect(mockOrder.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { buyerAddress: 'BUYER' } })
+      // Address is canonicalized (lower-cased) to match stored identity rows (#1184)
+      expect.objectContaining({ where: { buyerAddress: 'buyer' } })
     );
   });
 });
@@ -86,7 +87,8 @@ describe('OrderService.getByFarmerAddress', () => {
 
     expect(result).toEqual([SAMPLE_ORDER]);
     expect(mockOrder.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { sellerAddress: 'SELLER' } })
+      // Address is canonicalized (lower-cased) to match stored identity rows (#1184)
+      expect.objectContaining({ where: { sellerAddress: 'seller' } })
     );
   });
 });

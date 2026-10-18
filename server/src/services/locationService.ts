@@ -160,6 +160,16 @@ export async function getFarmerLocations(query: unknown) {
   return { data: farmers, farmers, meta: { total, page, limit, pages: Math.ceil(total / limit) } };
 }
 
+/**
+ * Locations are keyed by the canonical (lower-cased) wallet address, matching
+ * the profiles row they reference — canonicalizing here keeps onboarding's
+ * location save from violating the profiles FK with a checksummed address
+ * (#1185).
+ */
+function canonicalWallet(walletAddress: string): string {
+  return walletAddress.trim().toLowerCase();
+}
+
 export async function setLocation(walletAddress: string, body: unknown) {
   const parsed = createLocationSchema.safeParse(body);
   if (!parsed.success)
@@ -169,15 +179,18 @@ export async function setLocation(walletAddress: string, body: unknown) {
       parsed.error.message,
       'https://cylos.io/errors/validation'
     );
+  const canonical = canonicalWallet(walletAddress);
   return prisma.location.upsert({
-    where: { walletAddress },
-    create: { walletAddress, ...parsed.data },
+    where: { walletAddress: canonical },
+    create: { walletAddress: canonical, ...parsed.data },
     update: parsed.data,
   });
 }
 
 export async function getLocationByWallet(walletAddress: string) {
-  const location = await prisma.location.findUnique({ where: { walletAddress } });
+  const location = await prisma.location.findUnique({
+    where: { walletAddress: canonicalWallet(walletAddress) },
+  });
   if (!location)
     throw new ApiError(
       404,
@@ -189,7 +202,8 @@ export async function getLocationByWallet(walletAddress: string) {
 }
 
 export async function updateLocation(wallet_address: string, requester: string, body: unknown) {
-  if (requester !== wallet_address)
+  const target = canonicalWallet(wallet_address);
+  if (canonicalWallet(requester) !== target)
     throw new ApiError(
       403,
       'Forbidden',
@@ -204,16 +218,17 @@ export async function updateLocation(wallet_address: string, requester: string, 
       parsed.error.message,
       'https://cylos.io/errors/validation'
     );
-  return prisma.location.update({ where: { walletAddress: wallet_address }, data: parsed.data });
+  return prisma.location.update({ where: { walletAddress: target }, data: parsed.data });
 }
 
 export async function deleteLocation(wallet_address: string, requester: string) {
-  if (requester !== wallet_address)
+  const target = canonicalWallet(wallet_address);
+  if (canonicalWallet(requester) !== target)
     throw new ApiError(
       403,
       'Forbidden',
       'You can only delete your own location',
       'https://cylos.io/errors/forbidden'
     );
-  await prisma.location.delete({ where: { walletAddress: wallet_address } });
+  await prisma.location.delete({ where: { walletAddress: target } });
 }

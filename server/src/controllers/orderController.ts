@@ -32,7 +32,13 @@ export class OrderController {
       if (!order) {
         return res.status(404).json({ error: "Order not found" });
       }
-      if (order.buyerAddress !== walletAddress && order.sellerAddress !== walletAddress) {
+      // Identity rows are stored lower-cased while callers send checksummed
+      // addresses — compare case-insensitively (#1184/#1185).
+      const principal = walletAddress.toLowerCase();
+      if (
+        order.buyerAddress?.toLowerCase() !== principal &&
+        order.sellerAddress?.toLowerCase() !== principal
+      ) {
         return res.status(403).json({ error: "Forbidden: you do not have access to this order" });
       }
       return res.status(200).json(order);
@@ -52,12 +58,13 @@ export class OrderController {
       if (!walletAddress) {
         return res.status(401).json({ error: "Authentication required" });
       }
-      if (walletAddress !== address) {
+      if (walletAddress.toLowerCase() !== address.toLowerCase()) {
         return res.status(403).json({ error: "Forbidden: you can only view your own orders" });
       }
       const orders = await OrderService.getByBuyerAddress(address);
       return res.status(200).json(orders);
     } catch (error) {
+      logger.error("Error fetching buyer orders for " + address + ":", error);
       return res.status(500).json({ error: "Internal server error" });
     }
   }
@@ -72,12 +79,13 @@ export class OrderController {
       if (!walletAddress) {
         return res.status(401).json({ error: "Authentication required" });
       }
-      if (walletAddress !== address) {
+      if (walletAddress.toLowerCase() !== address.toLowerCase()) {
         return res.status(403).json({ error: "Forbidden: you can only view your own orders" });
       }
       const orders = await OrderService.getByFarmerAddress(address);
       return res.status(200).json(orders);
     } catch (error) {
+      logger.error("Error fetching seller orders for " + address + ":", error);
       return res.status(500).json({ error: "Internal server error" });
     }
   }
@@ -93,7 +101,7 @@ export class OrderController {
       if (!walletAddress) {
         return res.status(401).json({ error: "Authentication required" });
       }
-      if (walletAddress !== sellerAddress) {
+      if (walletAddress.toLowerCase() !== sellerAddress.toLowerCase()) {
         return res.status(403).json({ error: "Forbidden: you can only view your own stats" });
       }
       const stats = await OrderService.getSellerStats(sellerAddress);

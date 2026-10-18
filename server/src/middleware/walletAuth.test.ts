@@ -8,9 +8,11 @@ vi.mock("../config/index.js", () => ({
 
 vi.mock("../services/authService.js", () => ({
   HANDOFF_AUDIENCE: "agrocylo-sso-handoff",
+  resolveWalletRole: vi.fn(async () => "BUYER"),
 }));
 
 const { requireWallet, requireRole, requireAnyRole } = await import("./walletAuth.js");
+const { resolveWalletRole } = await import("../services/authService.js");
 
 const JWT_SECRET = "test-secret-at-least-32-chars-long!!";
 const WALLET = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -135,5 +137,32 @@ describe("requireRole / requireAnyRole (#1133)", () => {
     const mw = requireAnyRole("FARMER", "BUYER");
     expect(run(mw, "BUYER").next).toHaveBeenCalledOnce();
     expect(run(mw, "FARMER").next).toHaveBeenCalledOnce();
+  });
+});
+
+describe("requireAnyRole re-resolves a stale token role from the DB (#1185)", () => {
+  const runAsync = async (mw: ReturnType<typeof requireRole>, role?: string) => {
+    const req: any = { walletRole: role, walletAddress: WALLET, originalUrl: "/x" };
+    const res = makeRes();
+    const next = vi.fn();
+    mw(req, res, next);
+    await vi.waitFor(() => {
+      expect(next.mock.calls.length + (res.status as any).mock.calls.length).toBeGreaterThan(0);
+    });
+    return { res, next, req };
+  };
+
+  it("passes when the DB role satisfies the guard even though the JWT snapshot does not", async () => {
+    vi.mocked(resolveWalletRole).mockResolvedValueOnce("FARMER");
+    const { next, req } = await runAsync(requireRole("FARMER"), "BUYER");
+    expect(next).toHaveBeenCalledOnce();
+    expect(req.walletRole).toBe("FARMER");
+  });
+
+  it("still denies with 403 when the DB role does not satisfy the guard", async () => {
+    vi.mocked(resolveWalletRole).mockResolvedValueOnce("BUYER");
+    const { res, next } = await runAsync(requireRole("FARMER"), "BUYER");
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(403);
   });
 });
