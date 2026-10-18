@@ -25,6 +25,15 @@ interface ProfileContextValue {
 
 const ProfileContext = createContext<ProfileContextValue | null>(null);
 
+/**
+ * The backend canonically stores wallet addresses lower-cased while wallets
+ * report upper-case StrKeys; compare case-insensitively so a valid profile is
+ * never treated as a mismatch (#1184 / #1185).
+ */
+function sameWallet(a: string | null, b: string | null): boolean {
+  return (a ?? "").toLowerCase() === (b ?? "").toLowerCase();
+}
+
 export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const { address, connected } = useWallet();
   const [profile, setProfileState] = useState<Profile | null>(null);
@@ -54,7 +63,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
         if (cancelled) return;
         if (gen !== generationRef.current) return;
         // Verify profile belongs to active wallet; ignore mismatched wallet_address
-        if (fetched && fetched.wallet_address !== walletKey) {
+        if (fetched && !sameWallet(fetched.wallet_address, walletKey)) {
           // treat as no profile for this wallet
           setProfileState(null);
         } else {
@@ -94,7 +103,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
       // Ensure wallet didn't change during fetch
       const stillCurrent = connected && address ? address : null;
       if (stillCurrent !== currentWallet) return;
-      if (fetched && fetched.wallet_address !== currentWallet) {
+      if (fetched && !sameWallet(fetched.wallet_address, currentWallet)) {
         setProfileState(null);
       } else {
         setProfileState(fetched);
@@ -119,7 +128,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     (next: Profile | null) => {
       const currentWallet = connected && address ? address : null;
       // Keep role-derived UI tied to verified profile for active wallet
-      if (next && currentWallet && next.wallet_address !== currentWallet) {
+      if (next && currentWallet && !sameWallet(next.wallet_address, currentWallet)) {
         return;
       }
       if (!currentWallet && next) {

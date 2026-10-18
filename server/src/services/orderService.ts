@@ -12,6 +12,16 @@ const ORDER_INCLUDE = {
 
 const ORDER_BY_CREATED_DESC = { createdAt: 'desc' } as const;
 
+/**
+ * Orders store buyer/seller addresses canonically lower-cased (ingestion +
+ * migration normalize them), while callers pass checksummed wallet addresses.
+ * Every lookup goes through this helper so queries match regardless of the
+ * caller's casing (#1184).
+ */
+function canonicalWallet(walletAddress: string): string {
+  return walletAddress.trim().toLowerCase();
+}
+
 export class OrderService {
   static async getAll() {
     try {
@@ -26,10 +36,11 @@ export class OrderService {
   }
 
   static async getAllForWallet(walletAddress: string) {
+    const canonical = canonicalWallet(walletAddress);
     try {
       return await prisma.order.findMany({
         where: {
-          OR: [{ buyerAddress: walletAddress }, { sellerAddress: walletAddress }],
+          OR: [{ buyerAddress: canonical }, { sellerAddress: canonical }],
         },
         include: ORDER_INCLUDE,
         orderBy: ORDER_BY_CREATED_DESC,
@@ -57,7 +68,7 @@ export class OrderService {
   static async getByBuyerAddress(buyerAddress: string) {
     try {
       return await prisma.order.findMany({
-        where: { buyerAddress },
+        where: { buyerAddress: canonicalWallet(buyerAddress) },
         include: ORDER_INCLUDE,
         orderBy: ORDER_BY_CREATED_DESC,
       });
@@ -70,7 +81,7 @@ export class OrderService {
   static async getByFarmerAddress(sellerAddress: string) {
     try {
       return await prisma.order.findMany({
-        where: { sellerAddress },
+        where: { sellerAddress: canonicalWallet(sellerAddress) },
         include: ORDER_INCLUDE,
         orderBy: ORDER_BY_CREATED_DESC,
       });
@@ -81,14 +92,15 @@ export class OrderService {
   }
 
   static async getSellerStats(sellerAddress: string) {
+    const canonical = canonicalWallet(sellerAddress);
     try {
       const [totalOrders, completedCount, refundedCount, disputedCount] = await Promise.all([
-        prisma.order.count({ where: { sellerAddress } }),
-        prisma.order.count({ where: { sellerAddress, status: OrderStatus.COMPLETED } }),
-        prisma.order.count({ where: { sellerAddress, status: OrderStatus.REFUNDED } }),
+        prisma.order.count({ where: { sellerAddress: canonical } }),
+        prisma.order.count({ where: { sellerAddress: canonical, status: OrderStatus.COMPLETED } }),
+        prisma.order.count({ where: { sellerAddress: canonical, status: OrderStatus.REFUNDED } }),
         prisma.dispute.count({
           where: {
-            order: { sellerAddress },
+            order: { sellerAddress: canonical },
           },
         }),
       ]);

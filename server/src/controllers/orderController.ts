@@ -46,14 +46,14 @@ export class OrderController {
         sendProblem(res, req, new NotFoundError("Order", id));
         return;
       }
-
-      if (order.buyerAddress !== walletAddress && order.sellerAddress !== walletAddress) {
-        sendProblem(
-          res,
-          req,
-          new ForbiddenError("Forbidden: you do not have permission to access this order"),
-        );
-        return;
+      // Identity rows are stored lower-cased while callers send checksummed
+      // addresses — compare case-insensitively (#1184/#1185).
+      const principal = walletAddress.toLowerCase();
+      if (
+        order.buyerAddress?.toLowerCase() !== principal &&
+        order.sellerAddress?.toLowerCase() !== principal
+      ) {
+        return res.status(403).json({ error: "Forbidden: you do not have access to this order" });
       }
 
       res.status(200).json(order);
@@ -76,20 +76,15 @@ export class OrderController {
         sendProblem(res, req, new AuthError("Authentication required to view buyer orders"));
         return;
       }
-
       if (walletAddress.toLowerCase() !== address.toLowerCase()) {
-        sendProblem(
-          res,
-          req,
-          new ForbiddenError("Forbidden: you can only view orders placed by your own wallet"),
-        );
-        return;
+        return res.status(403).json({ error: "Forbidden: you can only view your own orders" });
       }
 
       const orders = await OrderService.getByBuyerAddress(address);
       res.status(200).json(orders);
     } catch (error) {
-      handleServiceError(error, req, res);
+      logger.error("Error fetching buyer orders for " + address + ":", error);
+      return res.status(500).json({ error: "Internal server error" });
     }
   }
 
@@ -107,20 +102,15 @@ export class OrderController {
         sendProblem(res, req, new AuthError("Authentication required to view seller orders"));
         return;
       }
-
       if (walletAddress.toLowerCase() !== address.toLowerCase()) {
-        sendProblem(
-          res,
-          req,
-          new ForbiddenError("Forbidden: you can only view orders sold by your own wallet"),
-        );
-        return;
+        return res.status(403).json({ error: "Forbidden: you can only view your own orders" });
       }
 
       const orders = await OrderService.getByFarmerAddress(address);
       res.status(200).json(orders);
     } catch (error) {
-      handleServiceError(error, req, res);
+      logger.error("Error fetching seller orders for " + address + ":", error);
+      return res.status(500).json({ error: "Internal server error" });
     }
   }
 
@@ -138,14 +128,8 @@ export class OrderController {
         sendProblem(res, req, new AuthError("Authentication required to view seller stats"));
         return;
       }
-
       if (walletAddress.toLowerCase() !== sellerAddress.toLowerCase()) {
-        sendProblem(
-          res,
-          req,
-          new ForbiddenError("Forbidden: you can only view statistics for your own wallet"),
-        );
-        return;
+        return res.status(403).json({ error: "Forbidden: you can only view your own stats" });
       }
 
       const stats = await OrderService.getSellerStats(sellerAddress);

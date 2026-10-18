@@ -132,6 +132,9 @@ export function DashboardReadinessGate({
     setAuthLoading(true);
     try {
       await reauthenticate();
+    } catch {
+      // reauthenticate now rejects on failure; sessionError from the hook
+      // already drives the error card, so just swallow the rejection here.
     } finally {
       setAuthLoading(false);
     }

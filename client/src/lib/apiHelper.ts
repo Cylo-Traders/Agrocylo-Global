@@ -3,7 +3,9 @@ import {
   AUTH_EXPIRED_EVENT,
   clearAuthSession,
   getAccessToken,
+  getRefreshToken,
 } from "./authToken";
+import { refreshAuthSession } from "./walletSession";
 
 export interface ApiError {
   code: string;
@@ -84,6 +86,7 @@ export async function apiRequest<T>(
 
   const url = normalizeUrl(API_BASE_URL, path);
   let lastError: ApiRequestError | null = null;
+  let triedRefresh = false;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const controller = new AbortController();
@@ -122,7 +125,28 @@ export async function apiRequest<T>(
         } catch {
           // ignore
         }
-        if (res.status === 401 && accessToken && typeof window !== "undefined") {
+
+        // Access tokens live for 15 minutes; before declaring the session
+        // dead, try the rotating refresh token once and retry the request
+        // with the new credentials (#1185).
+        if (res.status === 401 && !triedRefresh && getRefreshToken()) {
+          triedRefresh = true;
+          const refreshed = await refreshAuthSession();
+          if (refreshed === "refreshed" && attempt < MAX_RETRIES) {
+            lastError = null;
+            continue;
+          }
+          // Only a definitive rejection of the refresh token kills the
+          // session; transient refresh failures leave credentials intact.
+          if (refreshed === "invalid" && typeof window !== "undefined") {
+            clearAuthSession();
+            window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+          }
+        } else if (
+          res.status === 401 &&
+          accessToken &&
+          typeof window !== "undefined"
+        ) {
           clearAuthSession();
           window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
         }

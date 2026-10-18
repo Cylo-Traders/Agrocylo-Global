@@ -27,11 +27,25 @@ import {
   savePreferredAdapter,
   FreighterAdapter,
 } from "../lib/walletAdapters";
-import { authenticateWallet, logoutWalletSession } from "@/lib/walletSession";
+import {
+  authenticateWallet,
+  logoutWalletSession,
+  refreshAuthSession,
+} from "@/lib/walletSession";
+import {
+  AUTH_EXPIRED_EVENT,
+  getSessionWallet,
+  hasValidAccessToken,
+} from "@/lib/authToken";
 
 const CONNECT_TIMEOUT_MS = 12_000;
 const WALLET_POLL_INTERVAL_MS = 5_000;
 const WALLET_EVENT_DEBOUNCE_MS = 500;
+// Tolerate a few consecutive adapter read failures before tearing the
+// session down. Freighter reads commonly throw transiently while a signing
+// popup is open, and tearing down on the first error raced token issuance
+// right after onboarding (#1185).
+const RECONCILE_FAILURE_LIMIT = 3;
 
 const initialState: WalletContextType = {
   address: null,
@@ -138,6 +152,27 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
           setBalance(b);
         } catch {
           // balance failure is non-fatal; still consider restored
+        }
+
+        // Restore the API session alongside the wallet connection so a page
+        // reload right after onboarding doesn't drop a still-valid JWT and
+        // bounce the farmer to the "session expired" gate (#1185).
+        if (hasValidAccessToken(livePub)) {
+          setAuthenticated(true);
+        } else {
+          const sessionWallet = getSessionWallet();
+          if (
+            sessionWallet &&
+            sessionWallet.toLowerCase() === livePub.toLowerCase()
+          ) {
+            const refreshed = await refreshAuthSession();
+            if (cancelled) return;
+            if (generation !== restoreGenerationRef.current) return;
+            if (!mountedRef.current) return;
+            if (refreshed === "refreshed" && hasValidAccessToken(livePub)) {
+              setAuthenticated(true);
+            }
+          }
         }
       } catch {
         if (cancelled) return;
@@ -321,19 +356,49 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [address, network, activeWalletId]);
 
   const reauthenticate = useCallback(async () => {
-    if (!address || !activeWalletId) return;
+    if (!address || !activeWalletId) {
+      throw new Error("Connect a wallet before signing in.");
+    }
     const adapter = WALLET_ADAPTERS.find((item) => item.id === activeWalletId);
-    if (!adapter) return;
+    if (!adapter) {
+      throw new Error("No wallet adapter is active. Reconnect your wallet.");
+    }
+
+    // A still-valid session doesn't need another signature — silently adopt
+    // it so completing onboarding (or opening the gate) never re-prompts.
+    if (hasValidAccessToken(address)) {
+      setSessionError(null);
+      setAuthenticated(true);
+      return;
+    }
 
     setAuthenticating(true);
     setSessionError(null);
     try {
+      // Access token missing/expired but a refresh token may still be valid —
+      // exchange it silently before falling back to a signature prompt.
+      const sessionWallet = getSessionWallet();
+      if (sessionWallet && sessionWallet.toLowerCase() === address.toLowerCase()) {
+        const refreshed = await refreshAuthSession();
+        if (refreshed === "refreshed" && hasValidAccessToken(address)) {
+          setAuthenticated(true);
+          return;
+        }
+      }
       await authenticateWallet(adapter, address);
       if (mountedRef.current) setAuthenticated(true);
     } catch (err) {
       if (!mountedRef.current) return;
       setAuthenticated(false);
-      setSessionError(err instanceof Error ? err.message : String(err));
+      // Don't brand a transient network blip as an expired session (#1185).
+      const isNetworkError =
+        err instanceof TypeError ||
+        (err instanceof Error &&
+          /failed to fetch|networkerror|fetch failed/i.test(err.message));
+      setSessionError(
+        isNetworkError ? null : err instanceof Error ? err.message : String(err),
+      );
+      throw err instanceof Error ? err : new Error(String(err));
     } finally {
       if (mountedRef.current) setAuthenticating(false);
     }
@@ -352,6 +417,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
     const adapter = WALLET_ADAPTERS.find((item) => item.id === activeWalletId);
     if (!adapter) return;
     let cancelled = false;
+    let consecutiveFailures = 0;
 
     const reconcileIdentity = async () => {
       if (cancelled || identitySyncRef.current) return;
@@ -362,6 +428,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
           adapter.getNetwork(),
         ]);
         if (cancelled || !mountedRef.current) return;
+        consecutiveFailures = 0;
 
         const accountChanged = liveAddress !== address;
         const networkChanged = liveNetwork !== network;
@@ -390,6 +457,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       } catch {
         if (cancelled || !mountedRef.current) return;
+        consecutiveFailures += 1;
+        // Transient adapter errors (locked extension, popup mid-sign, network
+        // blip) must not destroy a freshly-issued session — only a sustained
+        // failure tears down the wallet (#1185).
+        if (consecutiveFailures < RECONCILE_FAILURE_LIMIT) return;
         setAuthenticated(false);
         setSessionError(null);
         void logoutWalletSession();
@@ -451,6 +523,21 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
       );
     };
   }, [activeWalletId, address, connected, network]);
+
+  // The api layer dispatches AUTH_EXPIRED_EVENT when it clears an expired or
+  // rejected session; flip the auth state here so the wallet gate and every
+  // consumer sees it immediately instead of after a failed request (#1185).
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      if (!mountedRef.current) return;
+      setAuthenticated(false);
+      setSessionError("Your session has expired. Please sign in again.");
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+    return () => {
+      window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+    };
+  }, []);
 
   // Compare the connected wallet's active network against the network the app
   // is configured for. Recomputed whenever the wallet reports a network change.

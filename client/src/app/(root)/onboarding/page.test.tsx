@@ -132,4 +132,46 @@ describe("Onboarding completion", () => {
       expect(screen.getByTestId("complete")).toBeInTheDocument();
     });
   });
+
+  it("establishes the wallet session BEFORE creating the profile (#1185)", async () => {
+    const reauthenticate = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(useWallet).mockReturnValue({
+      address: "GTEST",
+      reauthenticate,
+    } as ReturnType<typeof useWallet>);
+    fillProfileContext();
+
+    render(<OnboardingPage />);
+    fireEvent.click(screen.getByText("connect-next"));
+    fireEvent.click(screen.getByText("role-next"));
+    fireEvent.click(screen.getByText("profile-next"));
+    fireEvent.click(screen.getByText("finish"));
+
+    await waitFor(() => {
+      expect(createProfile).toHaveBeenCalled();
+    });
+    expect(reauthenticate).toHaveBeenCalled();
+    expect(reauthenticate.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(createProfile).mock.invocationCallOrder[0],
+    );
+  });
+
+  it("aborts with an error when the signature is rejected (#1185)", async () => {
+    vi.mocked(useWallet).mockReturnValue({
+      address: "GTEST",
+      reauthenticate: vi.fn().mockRejectedValue(new Error("User declined")),
+    } as ReturnType<typeof useWallet>);
+    fillProfileContext();
+
+    render(<OnboardingPage />);
+    fireEvent.click(screen.getByText("connect-next"));
+    fireEvent.click(screen.getByText("role-next"));
+    fireEvent.click(screen.getByText("profile-next"));
+    fireEvent.click(screen.getByText("finish"));
+
+    await waitFor(() => {
+      expect(screen.getByText("User declined")).toBeInTheDocument();
+    });
+    expect(createProfile).not.toHaveBeenCalled();
+  });
 });

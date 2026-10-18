@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WalletAdapter } from "./walletAdapters";
-import { authenticateWallet, logoutWalletSession } from "./walletSession";
-import { getAccessToken, setAuthSession } from "./authToken";
+import {
+  authenticateWallet,
+  logoutWalletSession,
+  refreshAuthSession,
+} from "./walletSession";
+import {
+  getAccessToken,
+  getRefreshToken,
+  setAuthSession,
+} from "./authToken";
 
 const ADDRESS = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 
@@ -115,5 +123,89 @@ describe("wallet backend session", () => {
       expect.stringContaining("/auth/logout"),
       expect.objectContaining({ method: "DELETE" }),
     );
+  });
+});
+
+describe("silent session refresh (#1185)", () => {
+  beforeEach(() => window.localStorage.clear());
+  afterEach(() => vi.restoreAllMocks());
+
+  it("exchanges the refresh token and stores the rotated pair", async () => {
+    setAuthSession(ADDRESS, "stale-access", "refresh-1");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ accessToken: "new-access", refreshToken: "new-refresh" }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(refreshAuthSession()).resolves.toBe("refreshed");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/auth/refresh"),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ refreshToken: "refresh-1" }),
+      }),
+    );
+    expect(getAccessToken()).toBe("new-access");
+    expect(getRefreshToken()).toBe("new-refresh");
+  });
+
+  it("reports invalid when the server rejects the refresh token", async () => {
+    setAuthSession(ADDRESS, "stale-access", "dead-refresh");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ message: "bad token" }), { status: 401 }),
+      ),
+    );
+
+    await expect(refreshAuthSession()).resolves.toBe("invalid");
+  });
+
+  it("reports error (not invalid) on a 5xx so the session is preserved", async () => {
+    setAuthSession(ADDRESS, "stale-access", "refresh-1");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("boom", { status: 500 })),
+    );
+
+    await expect(refreshAuthSession()).resolves.toBe("error");
+    expect(getAccessToken()).toBe("stale-access");
+  });
+
+  it("returns invalid without a network call when no refresh token is stored", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(refreshAuthSession()).resolves.toBe("invalid");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates concurrent refreshes so rotation is never raced", async () => {
+    setAuthSession(ADDRESS, "stale-access", "refresh-1");
+    let resolveFetch!: (value: Response) => void;
+    const fetchMock = vi.fn().mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = refreshAuthSession();
+    const second = refreshAuthSession();
+    expect(second).toBe(first);
+
+    resolveFetch(
+      new Response(
+        JSON.stringify({ accessToken: "new-access", refreshToken: "new-refresh" }),
+        { status: 200 },
+      ),
+    );
+    await expect(first).resolves.toBe("refreshed");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
