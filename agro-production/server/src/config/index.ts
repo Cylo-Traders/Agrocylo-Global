@@ -1,96 +1,93 @@
-import 'dotenv/config';
+import { z } from 'zod';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const REQUIRED_IN_PRODUCTION = [
   'RPC_URL',
   'PRODUCTION_CONTRACT_ID',
   'ESCROW_CONTRACT_ID',
   'JWT_SECRET',
+  'METRICS_API_KEY',
+  'SUPABASE_SERVICE_ROLE_KEY',
 ] as const;
 
+const DEV_JWT_SECRET = 'dev-secret-change-me';
+
 function getEnv(key: string): string | undefined {
-  return process.env[key];
+  const value = process.env[key];
+  return value === undefined || value === '' ? undefined : value;
 }
 
-function requireEnv(key: string): string {
-  const value = getEnv(key);
+function validateJwtSecret(value: string | undefined): string | undefined {
+  if (process.env.NODE_ENV !== 'production') {
+    return value;
+  }
   if (!value) {
-    throw new Error(`Missing required environment variable: ${key}`);
+    throw new Error('JWT_SECRET is required in production');
+  }
+  if (value === DEV_JWT_SECRET) {
+    throw new Error('JWT_SECRET must not use the development default in production');
+  }
+  if (value.length < 32) {
+    throw new Error('JWT_SECRET must be at least 32 characters in production');
   }
   return value;
 }
 
-const isProduction = (process.env['NODE_ENV'] ?? 'development') === 'production';
+function validateMetricsApiKey(value: string | undefined): string {
+  if (process.env.NODE_ENV === 'production' && !value) {
+    throw new Error('METRICS_API_KEY must be non-empty in production');
+  }
+  return value ?? '';
+}
 
-if (isProduction) {
-  const missing = REQUIRED_IN_PRODUCTION.filter((key) => !process.env[key]);
+const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  PORT: z.coerce.number().default(3000),
+  RPC_URL: z.string().url().optional(),
+  PRODUCTION_CONTRACT_ID: z.string().optional(),
+  ESCROW_CONTRACT_ID: z.string().optional(),
+  BASKET_CONTRACT_ID: z.string().optional(),
+  SUPABASE_URL: z.string().url().optional(),
+  SUPABASE_ANON_KEY: z.string().optional(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  JWT_SECRET: z.string().optional(),
+  METRICS_API_KEY: z.string().optional(),
+  SENTRY_DSN: z.string().optional(),
+  CORS_ORIGINS: z.string().optional(),
+  REDIS_URL: z.string().optional(),
+});
+
+const parsed = envSchema.parse(process.env);
+
+if (parsed.NODE_ENV === 'production') {
+  const missing = REQUIRED_IN_PRODUCTION.filter((key) => !getEnv(key));
   if (missing.length > 0) {
     throw new Error(
-      `[config] Startup aborted — missing required environment variables in production:\n  ${missing.join('\n  ')}\n` +
-      `Set these in your deployment environment before starting the server.`,
+      `Missing required production environment variables: ${missing.join(', ')}`,
     );
   }
 }
 
-function parseOriginList(raw: string | undefined): string[] {
-  if (!raw) return [];
-  return raw.split(',').map((s) => s.trim()).filter(Boolean);
-}
+const jwtSecret = validateJwtSecret(parsed.JWT_SECRET);
+const metricsApiKey = validateMetricsApiKey(parsed.METRICS_API_KEY);
 
 export const config = {
-  port: parseInt(getEnv('PORT') ?? '5001', 10),
-  nodeEnv: getEnv('NODE_ENV') ?? 'development',
-  logLevel: getEnv('LOG_LEVEL') ?? 'debug',
-
-  databaseUrl: requireEnv('DATABASE_URL'),
-
-  rpcUrl: isProduction
-    ? requireEnv('RPC_URL')
-    : (getEnv('RPC_URL') ?? 'https://soroban-testnet.stellar.org'),
-
-  contractId: isProduction
-    ? requireEnv('PRODUCTION_CONTRACT_ID')
-    : (getEnv('PRODUCTION_CONTRACT_ID') ?? ''),
-
-  escrowContractId: isProduction
-    ? requireEnv('ESCROW_CONTRACT_ID')
-    : (getEnv('ESCROW_CONTRACT_ID') ?? ''),
-
-  productionEscrowContractId:
-    getEnv('PRODUCTION_ESCROW_CONTRACT_ID') ??
-    getEnv('PRODUCTION_CONTRACT_ID') ??
-    '',
-
-  registryContractId: getEnv('REGISTRY_CONTRACT_ID') ?? '',
-
-  basketContractId: getEnv('BASKET_CONTRACT_ID') ?? '',
-
-  jwtSecret: isProduction
-    ? requireEnv('JWT_SECRET')
-    : (getEnv('JWT_SECRET') ?? 'dev-insecure-jwt-secret-do-not-use-in-production'),
-
-  sentryDsn: getEnv('SENTRY_DSN') ?? '',
-  sentryTracesSampleRate: parseFloat(getEnv('SENTRY_TRACES_SAMPLE_RATE') ?? '0.1'),
-
-  rateLimitWindowMs: parseInt(getEnv('RATE_LIMIT_WINDOW_MS') ?? '60000', 10),
-  rateLimitMaxRequests: parseInt(getEnv('RATE_LIMIT_MAX_REQUESTS') ?? '100', 10),
-  rateLimitWriteMaxRequests: parseInt(getEnv('RATE_LIMIT_WRITE_MAX_REQUESTS') ?? '10', 10),
-
-  redisUrl: getEnv('REDIS_URL') ?? '',
-
-  corsOrigins: parseOriginList(getEnv('CORS_ORIGINS') ?? ''),
-
-  metricsApiKey: getEnv('METRICS_API_KEY') ?? '',
-
-  shutdownTimeoutMs: parseInt(getEnv('SHUTDOWN_TIMEOUT_MS') ?? '15000', 10),
-
-  runReconciliationSweep: getEnv('RUN_RECONCILIATION_SWEEP') !== 'false',
-  reconciliationSweepIntervalMs: parseInt(getEnv('RECONCILIATION_SWEEP_INTERVAL_MS') ?? '300000', 10),
-
-  supabaseUrl: getEnv('SUPABASE_URL') ?? '',
-  supabaseAnonKey: getEnv('SUPABASE_ANON_KEY') ?? '',
-  supabaseServiceRoleKey: getEnv('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-  campaignImagesBucket: getEnv('SUPABASE_CAMPAIGN_IMAGES_BUCKET') ?? 'campaign-images',
-  campaignImagePlaceholderUrl:
-    getEnv('CAMPAIGN_IMAGE_PLACEHOLDER_URL') ??
-    'https://placehold.co/800x800/png?text=No+Image',
+  nodeEnv: parsed.NODE_ENV,
+  port: parsed.PORT,
+  rpcUrl: parsed.RPC_URL,
+  productionContractId: parsed.PRODUCTION_CONTRACT_ID,
+  escrowContractId: parsed.ESCROW_CONTRACT_ID,
+  basketContractId: parsed.BASKET_CONTRACT_ID,
+  supabaseUrl: parsed.SUPABASE_URL,
+  supabaseAnonKey: parsed.SUPABASE_ANON_KEY,
+  supabaseServiceRoleKey: parsed.SUPABASE_SERVICE_ROLE_KEY,
+  jwtSecret,
+  metricsApiKey,
+  sentryDsn: parsed.SENTRY_DSN,
+  corsOrigins: parsed.CORS_ORIGINS,
+  redisUrl: parsed.REDIS_URL,
 };
+
+export type Config = typeof config;
