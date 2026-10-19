@@ -91,6 +91,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
   const connectGenerationRef = useRef(0);
   const identitySyncRef = useRef(false);
   const lastWalletEventRef = useRef(0);
+  const connectInFlightRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -213,6 +214,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [address]);
 
   const connect = useCallback(async (adapterId?: string) => {
+    // A wallet extension treats each connect call as a new authorization
+    // request. Guard the whole async operation so StrictMode remounts and
+    // double clicks cannot open two extension windows (#1160).
+    if (connectInFlightRef.current) return;
+    connectInFlightRef.current = true;
     const generation = ++connectGenerationRef.current;
     const cancelled = false;
     // Ensure mounted true for StrictMode remount; connect is user-initiated so should be true
@@ -241,16 +247,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
         setError(hint);
         setLoading(false);
       }
-      return;
-    }
-
-    if (isMobile && !adapter.supportsMobile()) {
-      const deepLink = adapter.mobileDeepLink();
-      const hint = deepLink
-        ? `Open ${adapter.name} at ${deepLink} and try again.`
-        : `${adapter.name} is not supported on mobile. Please use a desktop browser with the ${adapter.name} extension installed.`;
-      setError(hint);
-      setLoading(false);
+      connectInFlightRef.current = false;
       return;
     }
 
@@ -317,6 +314,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
       setNetwork(null);
       setActiveWalletId(null);
     } finally {
+      connectInFlightRef.current = false;
       if (cancelled) return;
       if (generation !== connectGenerationRef.current) return;
       if (!mountedRef.current) return;

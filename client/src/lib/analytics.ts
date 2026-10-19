@@ -117,16 +117,24 @@ function generateId() {
 
 function loadConsent(): AnalyticsConsentState {
   if (!isBrowser) return "unknown";
-  const stored = window.localStorage.getItem(STORAGE_KEYS.consent);
-  if (stored === "granted" || stored === "denied" || stored === "unknown") {
-    return stored;
+  try {
+    const stored = window.localStorage.getItem(STORAGE_KEYS.consent);
+    if (stored === "granted" || stored === "denied" || stored === "unknown") {
+      return stored;
+    }
+  } catch {
+    // Privacy mode or disabled storage should not make the banner inert.
   }
   return "unknown";
 }
 
 function persistConsent(next: AnalyticsConsentState) {
   if (!isBrowser) return;
-  window.localStorage.setItem(STORAGE_KEYS.consent, next);
+  try {
+    window.localStorage.setItem(STORAGE_KEYS.consent, next);
+  } catch {
+    // Consent still updates in memory when storage is unavailable.
+  }
 }
 
 function loadSessionId(): string {
@@ -446,6 +454,7 @@ export function initAnalytics() {
 }
 
 export function setAnalyticsConsent(next: AnalyticsConsentState) {
+  if (!initialized) ensureWindowTracking();
   consentState = next;
   persistConsent(next);
 
