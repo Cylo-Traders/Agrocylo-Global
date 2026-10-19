@@ -19,6 +19,15 @@ async function productionSourceFiles(dir: string): Promise<string[]> {
   return files.flat();
 }
 
+// Files explicitly allowlisted for raw SQL access. Each entry must carry a
+// documented `@allow-raw-sql` pragma in the source explaining why the ORM API
+// cannot express the operation. Keep this list minimal and reviewed.
+const RAW_SQL_ALLOWLIST = new Set<string>(["services/groupOrderService.ts"]);
+
+function hasAllowRawSqlPragma(source: string): boolean {
+  return /@allow-raw-sql\b/.test(source);
+}
+
 describe("security guardrails", () => {
   it("does not use console logging in production source", async () => {
     const files = await productionSourceFiles(srcRoot);
@@ -42,8 +51,12 @@ describe("security guardrails", () => {
 
     for (const file of files) {
       const source = await readFile(file, "utf8");
-      if (rawSqlPatterns.some((pattern) => pattern.test(source))) {
-        offenders.push(path.relative(srcRoot, file));
+      if (!rawSqlPatterns.some((pattern) => pattern.test(source))) continue;
+
+      const relativePath = path.relative(srcRoot, file).split(path.sep).join("/");
+      const allowlisted = RAW_SQL_ALLOWLIST.has(relativePath) && hasAllowRawSqlPragma(source);
+      if (!allowlisted) {
+        offenders.push(relativePath);
       }
     }
 

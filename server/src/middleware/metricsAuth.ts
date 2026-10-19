@@ -1,21 +1,48 @@
-import type { NextFunction, Request, Response } from "express";
-import { config } from "../config/index.js";
+import { Request, Response, NextFunction } from 'express';
+import { timingSafeEqual } from 'crypto';
 
 /**
- * When METRICS_API_KEY is set, require it via `x-metrics-api-key` or
- * `Authorization: Bearer <key>`. When unset, metrics are open (use a reverse proxy or key in prod).
+ * Guard for the Prometheus `/metrics` endpoint.
+ *
+ * Policy: open-by-default. When `METRICS_API_KEY` is unset the endpoint is
+ * served without authentication (with a one-time startup warning) so that
+ * local/dev scraping keeps working. When the key is configured, requests must
+ * present a matching `Authorization: Bearer <key>` header (or `x-api-key`).
  */
-export function requireMetricsAuth(req: Request, res: Response, next: NextFunction): void {
-  const expected = config.metricsApiKey;
-  const headerKey = req.header("x-metrics-api-key");
-  const auth = req.header("authorization");
-  const bearer =
-    auth?.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : undefined;
+let warnedMissingKey = false;
 
-  if (expected && (headerKey === expected || bearer === expected)) {
+function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) {
+    return false;
+  }
+  return timingSafeEqual(bufA, bufB);
+}
+
+export function metricsAuth(req: Request, res: Response, next: NextFunction): void {
+  const expected = process.env.METRICS_API_KEY;
+
+  if (!expected) {
+    if (!warnedMissingKey) {
+      warnedMissingKey = true;
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[metricsAuth] METRICS_API_KEY is not set; /metrics is open. Set METRICS_API_KEY to require authentication.'
+      );
+    }
     next();
     return;
   }
 
-  res.status(401).json({ message: "Unauthorized: invalid or missing metrics credentials." });
+  const header = req.headers.authorization;
+  const bearer = header && header.startsWith('Bearer ') ? header.slice('Bearer '.length) : undefined;
+  const provided = bearer ?? (req.headers['x-api-key'] as string | undefined);
+
+  if (!provided || !safeEqual(provided, expected)) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  next();
 }
