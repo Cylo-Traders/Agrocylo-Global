@@ -5,7 +5,7 @@
    - Retries use exponential backoff and only apply to network errors and 5xx responses on safe methods
 */
 
-import { getAccessToken } from "./authToken";
+import { getAccessToken, setAccessToken } from "./authToken";
 
 /** Thrown when no response is received (DNS failure, timeout, offline, etc.) */
 export class NetworkError extends Error {
@@ -142,6 +142,10 @@ export class ApiClient {
             res.statusText ??
             `HTTP ${res.status}`;
           const err = new ApiError(res.status, message, body);
+          if (res.status === 401 && typeof window !== "undefined") {
+            setAccessToken(null);
+            window.dispatchEvent(new CustomEvent("agrocylo:session-expired"));
+          }
           console.error("[api][error]", { status: res.status, url, body });
           // Only retry 5xx on safe methods
           if (isRetryable(err, method) && attempt < retries) {

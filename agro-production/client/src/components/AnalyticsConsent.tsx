@@ -13,7 +13,11 @@ export default function AnalyticsConsent() {
     setChoice(getAnalyticsConsent());
     const update = () => setChoice(getAnalyticsConsent());
     window.addEventListener("agrocylo:analytics-consent", update);
-    return () => window.removeEventListener("agrocylo:analytics-consent", update);
+    window.addEventListener("storage", update);
+    return () => {
+      window.removeEventListener("agrocylo:analytics-consent", update);
+      window.removeEventListener("storage", update);
+    };
   }, []);
 
   function choose(value: "granted" | "denied") {
