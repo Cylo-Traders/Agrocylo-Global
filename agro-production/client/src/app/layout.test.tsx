@@ -1,5 +1,4 @@
-import { createElement } from "react";
-import type { ReactNode } from "react";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -9,7 +8,10 @@ vi.mock("@/lib/productionGate", () => gate);
 vi.mock("@/theme/theme", () => ({ themeBootstrapScript: "" }));
 vi.mock("@/context/I18nContext", () => ({ I18nProvider: ({ children }: { children: ReactNode }) => children }));
 vi.mock("@/context/ThemeContext", () => ({ ThemeProvider: ({ children }: { children: ReactNode }) => children }));
-vi.mock("@/context/WalletContext", () => ({ WalletProvider: ({ children }: { children: ReactNode }) => children }));
+vi.mock("@/context/WalletContext", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/context/WalletContext")>();
+  return { ...actual, WalletProvider: ({ children }: { children: ReactNode }) => children };
+});
 vi.mock("@/components/NavBar", () => ({ default: () => null }));
 vi.mock("@/components/AnalyticsInit", () => ({ default: () => null }));
 vi.mock("@/components/AnalyticsConsent", () => ({ default: () => null }));

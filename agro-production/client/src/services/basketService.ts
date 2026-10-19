@@ -16,9 +16,8 @@
  *     total allocation this position represents.
  */
 
-import api from "../lib/apiClient";
+import api, { isApiError, isNetworkError } from "../lib/apiClient";
 import { formatStroopsForDisplay } from "../lib/validation";
-import { isApiError, isNetworkError } from "../lib/apiClient";
 
 /** Server shape — mirrors InvestorBasketSummarySchema (stroops, i128 strings). */
 export interface InvestorBasketPositionDTO {

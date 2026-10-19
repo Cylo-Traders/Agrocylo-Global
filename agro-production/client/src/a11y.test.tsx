@@ -2,8 +2,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MarketplaceFilters } from "./components/MarketplaceFilters";
 import WalletConnect from "./components/WalletConnect";
-import { NotificationContainer } from "./components/Notification";
-import type { NotificationMessage } from "./components/Notification";
+import { NotificationContainer, type NotificationMessage } from "./components/Notification";
 import { WalletProvider } from "./context/WalletContext";
 
 const walletA11yMocks = vi.hoisted(() => ({

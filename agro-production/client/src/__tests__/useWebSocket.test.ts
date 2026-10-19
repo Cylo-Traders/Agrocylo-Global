@@ -52,6 +52,7 @@ describe("useWebSocket", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it("reconnect fires after disconnect", async () => {
@@ -59,6 +60,7 @@ describe("useWebSocket", () => {
     const { result } = renderHook(() => useWebSocket(onMessage));
 
     const ws = webSocketInstances[0];
+    if (!ws) throw new Error("WebSocket not created");
     expect(ws).toBeDefined();
 
     // Simulate connection opening
