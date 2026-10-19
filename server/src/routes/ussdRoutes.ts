@@ -1,30 +1,42 @@
 import { Router } from "express";
 import type { Request, Response, NextFunction } from "express";
 import { handleUssdRequest } from "../services/ussd/ussdHandler.js";
+import { sendProblem } from "../utils/problem.js";
 
 const router = Router();
 
-export function verifyProviderRequest(req: Request): boolean {
+export type ProviderVerificationResult = "ok" | "unauthorized" | "unconfigured";
+
+export function verifyProviderRequest(req: Request): ProviderVerificationResult {
   const secret = process.env.USSD_PROVIDER_SECRET;
-  if (!secret) return true;
+  if (!secret) return "unconfigured";
   const reqSecret =
     req.headers["x-ussd-provider-secret"] ||
     req.headers["x-provider-secret"] ||
     req.headers["authorization"];
-  return reqSecret === secret;
+  return reqSecret === secret ? "ok" : "unauthorized";
+}
+
+function rejectProviderRequest(res: Response, result: ProviderVerificationResult): void {
+  if (result === "unconfigured") {
+    sendProblem(res, 503, "USSD provider authentication is not configured");
+    return;
+  }
+  sendProblem(res, 401, "Unauthorized provider request");
 }
 
 router.post("/ussd", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (!verifyProviderRequest(req)) {
-      res.status(401).json({ error: "Unauthorized provider request" });
+    const verification = verifyProviderRequest(req);
+    if (verification !== "ok") {
+      rejectProviderRequest(res, verification);
       return;
     }
 
     const { sessionId, phoneNumber, text } = req.body;
 
     if (!sessionId || !phoneNumber) {
-      res.status(400).json({ error: "sessionId and phoneNumber are required" });
+      sendProblem(res, 400, "sessionId and phoneNumber are required");
       return;
     }
 
@@ -35,7 +47,7 @@ router.post("/ussd", async (req: Request, res: Response, next: NextFunction) => 
     res.status(200).send(response);
   } catch (err) {
     if (err instanceof Error && err.message.includes("Session phone number mismatch")) {
-      res.status(400).json({ error: err.message });
+      sendProblem(res, 400, err.message);
       return;
     }
     next(err);
@@ -44,8 +56,9 @@ router.post("/ussd", async (req: Request, res: Response, next: NextFunction) => 
 
 router.post("/ussd/callback", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (!verifyProviderRequest(req)) {
-      res.status(401).json({ error: "Unauthorized provider request" });
+    const verification = verifyProviderRequest(req);
+    if (verification !== "ok") {
+      rejectProviderRequest(res, verification);
       return;
     }
     const { sessionId, phoneNumber, status } = req.body;

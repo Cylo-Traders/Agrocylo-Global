@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 vi.mock("express", () => ({
   Router: vi.fn(() => ({
@@ -9,13 +9,30 @@ vi.mock("express", () => ({
 const { verifyProviderRequest } = await import("./ussdRoutes.js");
 
 describe("verifyProviderRequest", () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+
   beforeEach(() => {
     delete process.env.USSD_PROVIDER_SECRET;
   });
 
-  it("returns true when no USSD_PROVIDER_SECRET is set in environment", () => {
+  afterEach(() => {
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
+  it("fails closed when USSD_PROVIDER_SECRET is unset in production", () => {
+    process.env.NODE_ENV = "production";
     const req = { headers: {} } as any;
-    expect(verifyProviderRequest(req)).toBe(true);
+    expect(verifyProviderRequest(req)).toBe(false);
+  });
+
+  it("fails closed when USSD_PROVIDER_SECRET is unset even if a header is provided", () => {
+    process.env.NODE_ENV = "production";
+    const req = { headers: { "x-ussd-provider-secret": "anything" } } as any;
+    expect(verifyProviderRequest(req)).toBe(false);
   });
 
   it("returns true when request header matches USSD_PROVIDER_SECRET", () => {
