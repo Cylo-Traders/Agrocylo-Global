@@ -94,7 +94,12 @@ router.post(
       const idempotencyKey = (req as any).idempotencyKey as string;
       const { campaignId, amount } = req.body;
 
-      const cached = getCachedResponse(idempotencyKey);
+      // Namespace the idempotency key by route and authenticated wallet so a
+      // second wallet reusing another wallet's key never receives the first
+      // wallet's cached response, and keys cannot collide across routes.
+      const scopedKey = `orders:${buyerAddress}:${idempotencyKey}`;
+
+      const cached = await getCachedResponse(scopedKey);
       if (cached) {
         res.status(cached.status).json(cached.body);
         return;
@@ -150,7 +155,7 @@ router.post(
       });
 
       const response = order;
-      setCachedResponse(idempotencyKey, 201, response);
+      await setCachedResponse(scopedKey, 201, response);
       jsonValidated(res, OrderSchema, 201, response);
     } catch (error) {
       logger.error("[POST /orders] Failed to create order", { error });
