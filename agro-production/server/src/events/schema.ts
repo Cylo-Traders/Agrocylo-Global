@@ -41,6 +41,81 @@ export const CANONICAL_EVENTS = {
     fields: ["campaignId"],
     description: "Campaign disputed, no further actions allowed",
   },
+  "campaign.claimed": {
+    version: "1.0.0",
+    fields: ["campaignId"],
+    description: "Investor claimed campaign proceeds",
+  },
+  "campaign.refunded": {
+    version: "1.0.0",
+    fields: ["campaignId"],
+    description: "Investor refunded after campaign failure",
+  },
+  "campaign.tranche": {
+    version: "1.0.0",
+    fields: ["campaignId"],
+    description: "Campaign tranche milestone reached",
+  },
+  "order.created": {
+    version: "1.0.0",
+    fields: ["orderId", "buyer", "campaignId", "amount"],
+    description: "Buyer placed an order against a campaign",
+  },
+  "order.confirmed": {
+    version: "1.0.0",
+    fields: ["orderId", "buyer", "campaignId"],
+    description: "Buyer confirmed receipt of an order",
+  },
+  "dispute.opened": {
+    version: "1.0.0",
+    fields: ["disputeId", "campaignId", "initiatorAddress", "respondentAddress"],
+    description: "A dispute was opened against a campaign or order",
+  },
+  "dispute.evidence_submitted": {
+    version: "1.0.0",
+    fields: ["disputeId", "submitterAddress", "evidenceUrl", "evidenceHash"],
+    description: "Evidence was submitted for an open dispute",
+  },
+  "dispute.resolved": {
+    version: "1.0.0",
+    fields: ["disputeId", "resolutionOutcome"],
+    description: "A dispute was resolved",
+  },
+  "dispute.dismissed": {
+    version: "1.0.0",
+    fields: ["disputeId"],
+    description: "A dispute was dismissed",
+  },
+  "basket.created": {
+    version: "1.0.0",
+    fields: ["schemaVersion", "basketId", "constituentsCount"],
+    description: "A basket was created",
+  },
+  "basket.deposit": {
+    version: "1.0.0",
+    fields: ["schemaVersion", "basketId", "depositor", "amount"],
+    description: "A deposit was made into a basket",
+  },
+  "basket.funded": {
+    version: "1.0.0",
+    fields: ["schemaVersion", "basketId", "totalDeposit"],
+    description: "A basket reached its funding window close",
+  },
+  "basket.fw_close": {
+    version: "1.0.0",
+    fields: ["schemaVersion", "basketId", "fundingDeadline", "minDeposit"],
+    description: "A basket's funding window closed",
+  },
+  "basket.withdrawn": {
+    version: "1.0.0",
+    fields: ["schemaVersion", "basketId", "depositor", "depositAmount"],
+    description: "A depositor withdrew from a basket",
+  },
+  "basket.claimed": {
+    version: "1.0.0",
+    fields: ["schemaVersion", "basketId", "depositor", "payout"],
+    description: "A depositor claimed their basket payout",
+  },
 } as const;
 
 export type VersionedEventType = keyof typeof CANONICAL_EVENTS;

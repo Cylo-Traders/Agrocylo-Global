@@ -98,6 +98,44 @@ export class ProductionEventParser {
           campaignId: String(data[2]),
         };
 
+      case "dispute.opened":
+        return {
+          ...base,
+          action,
+          disputeId: String(data[0]),
+          campaignId: String(data[1]),
+          initiatorAddress: String(data[2]),
+          respondentAddress: String(data[3]),
+          orderId: data[4] === undefined ? undefined : String(data[4]),
+        };
+
+      case "dispute.evidence_submitted":
+        return {
+          ...base,
+          action,
+          disputeId: String(data[0]),
+          submitterAddress: String(data[1]),
+          evidenceUrl: String(data[2]),
+          evidenceHash: String(data[3]),
+        };
+
+      case "dispute.resolved":
+        return {
+          ...base,
+          action,
+          disputeId: String(data[0]),
+          resolutionOutcome: String(data[1]),
+          resolutionNotes: data[2] === undefined ? undefined : String(data[2]),
+        };
+
+      case "dispute.dismissed":
+        return {
+          ...base,
+          action,
+          disputeId: String(data[0]),
+          dismissalReason: data[1] === undefined ? undefined : String(data[1]),
+        };
+
       case "basket.created":
         return {
           ...base,
