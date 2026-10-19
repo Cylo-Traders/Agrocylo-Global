@@ -31,6 +31,14 @@ async function bootstrap() {
     registerWatcher(reconciliationInterval);
     logger.info('[Reconciliation] Scheduled to run every 15 minutes');
 
+    // Ledger drift sweep feeding reconciliation_drift_count (Issue #1205).
+    if (config.runReconciliationSweep) {
+      startReconciliationSweep(config.reconciliationSweepIntervalMs);
+      logger.info(
+        `[reconciliationSweep] Scheduled to run every ${config.reconciliationSweepIntervalMs}ms`,
+      );
+    }
+
     const server = http.createServer(app);
     registerHttpServer(server);
     attachWebSocketServer(server);

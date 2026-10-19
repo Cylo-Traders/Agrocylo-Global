@@ -14,6 +14,7 @@ import { requireWallet, type WalletRequest } from '../middleware/walletAuth.js';
 import { broadcastTo } from '../services/wsServer.js';
 import rateLimit from 'express-rate-limit';
 import { config } from '../config/index.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 
 const router = Router();
 
@@ -162,7 +163,7 @@ router.get(
   requireWallet,
   validateParams(CampaignIdParamSchema),
   validateResponse(ConversationResponseSchema.or(z.null())),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
     const { campaignId } = req.params;
 
@@ -197,7 +198,7 @@ router.get(
       200,
       conversation || null,
     );
-  },
+  }),
 );
 
 // POST /campaigns/:campaignId/conversation — create conversation for campaign
@@ -207,7 +208,7 @@ router.post(
   writeLimiter,
   validateParams(CampaignIdParamSchema),
   validateResponse(ConversationResponseSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
     const { campaignId } = req.params;
 
@@ -275,7 +276,7 @@ router.post(
     }
 
     jsonValidated(res, ConversationResponseSchema, 200, conversation);
-  },
+  }),
 );
 
 // GET /conversations/:id/messages — paginated message history
@@ -285,7 +286,7 @@ router.get(
   validateParams(ConversationIdParamSchema),
   validateQuery(MessagePaginationSchema),
   validateResponse(MessageListResponseSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
     const { id } = req.params;
     const { cursor, limit } = req.query as unknown as z.infer<
@@ -343,7 +344,7 @@ router.get(
       messages,
       nextCursor,
     });
-  },
+  }),
 );
 
 // POST /conversations/:id/messages — send a message
@@ -354,7 +355,7 @@ router.post(
   validateParams(ConversationIdParamSchema),
   validateBody(SendMessageSchema),
   validateResponse(MessageResponseSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
     const { id } = req.params;
     const { content } = req.body as z.infer<typeof SendMessageSchema>;
@@ -409,7 +410,7 @@ router.post(
     broadcastTo(otherParty, 'message.received', message);
 
     jsonValidated(res, MessageResponseSchema, 201, message);
-  },
+  }),
 );
 
 // PATCH /conversations/:id/messages/:messageId — edit message
@@ -425,7 +426,7 @@ router.patch(
   ),
   validateBody(EditMessageSchema),
   validateResponse(MessageResponseSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
     const { id, messageId } = req.params;
     const { content } = req.body as z.infer<typeof EditMessageSchema>;
@@ -481,7 +482,7 @@ router.patch(
     broadcastTo(participantCheck.otherParty, 'message.edited', updated);
 
     jsonValidated(res, MessageResponseSchema, 200, updated);
-  },
+  }),
 );
 
 // DELETE /conversations/:id/messages/:messageId — soft delete message
@@ -495,7 +496,7 @@ router.delete(
       messageId: z.string().uuid(),
     }),
   ),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
     const { id, messageId } = req.params;
 
@@ -553,7 +554,7 @@ router.delete(
     });
 
     res.status(204).send();
-  },
+  }),
 );
 
 // POST /conversations/:id/read — mark conversation as read
@@ -561,7 +562,7 @@ router.post(
   '/conversations/:id/read',
   requireWallet,
   validateParams(ConversationIdParamSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
     const { id } = req.params;
 
@@ -583,7 +584,7 @@ router.post(
     });
 
     jsonValidated(res, ConversationResponseSchema, 200, conversation);
-  },
+  }),
 );
 
 // POST /conversations/:id/block — block the other participant from messaging you
@@ -594,7 +595,7 @@ router.post(
   validateParams(ConversationIdParamSchema),
   validateBody(BlockUserSchema),
   validateResponse(BlockedUserResponseSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
     const { id } = req.params;
     const { blockedAddress } = req.body as z.infer<typeof BlockUserSchema>;
@@ -633,7 +634,7 @@ router.post(
     });
 
     jsonValidated(res, BlockedUserResponseSchema, 201, blocked);
-  },
+  }),
 );
 
 // POST /conversations/:id/messages/:messageId/report — report a message
@@ -649,7 +650,7 @@ router.post(
   ),
   validateBody(ReportMessageSchema),
   validateResponse(MessageReportResponseSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
     const { id, messageId } = req.params;
     const { reason } = req.body as z.infer<typeof ReportMessageSchema>;
@@ -690,7 +691,7 @@ router.post(
     });
 
     jsonValidated(res, MessageReportResponseSchema, 201, report);
-  },
+  }),
 );
 
 export default router;

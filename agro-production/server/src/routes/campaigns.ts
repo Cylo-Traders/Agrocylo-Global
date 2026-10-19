@@ -34,6 +34,7 @@ import {
 import { broadcast } from "../services/wsServer.js";
 import { getCachedResponse, setCachedResponse } from "../middleware/idempotency.js";
 import { getStatusMetadata } from "../services/campaignStatusService.js";
+import { asyncHandler } from "../middleware/asyncHandler.js";
 
 const router = Router();
 
@@ -48,7 +49,7 @@ router.get(
   "/investor/portfolio",
   requireWallet,
   validateResponse(InvestorPortfolioSummarySchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
 
     const investments = await prisma.investment.findMany({
@@ -82,7 +83,7 @@ router.get(
       totalInvested: totalInvested.toString(),
       totalReturned: "0",
     });
-  },
+  }),
 );
 
 // GET /campaigns — list with optional status filter and pagination
@@ -90,7 +91,7 @@ router.get(
   "/campaigns",
   validateQuery(ListCampaignsQuerySchema),
   validateResponse(CampaignListResponseSchema),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const { status, farmerAddress, page, limit } = req.query as unknown as ListCampaignsQuery;
 
     const where = {
@@ -112,7 +113,7 @@ router.get(
       data: items,
       meta: { total, page, limit },
     });
-  },
+  }),
 );
 
 // GET /campaigns/:id — campaign detail with investments (supports UUID or onChainId)
@@ -120,7 +121,7 @@ router.get(
   "/campaigns/:id",
   validateParams(CampaignIdParamSchema),
   validateResponse(CampaignDetailSchema),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const campaign = await prisma.campaign.findFirst({
       where: {
         OR: [
@@ -140,7 +141,7 @@ router.get(
     }
 
     jsonValidated(res, CampaignDetailSchema, 200, campaign);
-  },
+  }),
 );
 
 // GET /campaigns/:id/milestones — campaign milestone/tranche state
@@ -148,7 +149,7 @@ router.get(
   "/campaigns/:id/milestones",
   validateParams(CampaignIdParamSchema),
   validateResponse(CampaignMilestonesSchema),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const campaignId = req.params.id;
     const campaign = await prisma.campaign.findFirst({
       where: {
@@ -248,7 +249,7 @@ router.get(
     };
 
     jsonValidated(res, CampaignMilestonesSchema, 200, milestoneState);
-  },
+  }),
 );
 
 // POST /campaigns — register a newly-created campaign (off-chain metadata)
@@ -260,7 +261,7 @@ router.post(
   requireIdempotencyKey,
   validateBody(CreateCampaignSchema.omit({ farmerAddress: true })),
   validateResponse(CampaignSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const farmerAddress = req.walletAddress!;
     const idempotencyKey = (req as any).idempotencyKey as string;
     const { tokenAddress, targetAmount, deadline } = req.body as Omit<CreateCampaignInput, "farmerAddress">;
@@ -301,7 +302,7 @@ router.post(
     const response = campaign;
     setCachedResponse(idempotencyKey, 201, response);
     jsonValidated(res, CampaignSchema, 201, response);
-  },
+  }),
 );
 
 // GET /campaigns/:id/investments — investments for a campaign (supports UUID or onChainId)
@@ -309,7 +310,7 @@ router.get(
   "/campaigns/:id/investments",
   validateParams(CampaignIdParamSchema),
   validateResponse(z.array(InvestmentSchema)),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const campaign = await prisma.campaign.findFirst({
       where: {
         OR: [{ id: req.params.id }, { onChainId: req.params.id }],
@@ -322,7 +323,7 @@ router.get(
       orderBy: { createdAt: "desc" },
     });
     jsonValidated(res, z.array(InvestmentSchema), 200, investments);
-  },
+  }),
 );
 
 // GET /investments?investorAddress=... — all investments for a user
@@ -330,7 +331,7 @@ router.get(
   "/investments",
   validateQuery(ListInvestmentsQuerySchema),
   validateResponse(z.array(InvestmentSchema)),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const { investorAddress } = req.query as unknown as ListInvestmentsQuery;
 
     const investments = await prisma.investment.findMany({
@@ -354,7 +355,7 @@ router.get(
     });
 
     jsonValidated(res, z.array(InvestmentSchema), 200, investments);
-  },
+  }),
 );
 
 // POST /campaigns/:id/invest — record an investment (indexer shortcut)
@@ -367,7 +368,7 @@ router.post(
   validateParams(CampaignIdParamSchema),
   validateBody(InvestSchema.omit({ investorAddress: true })),
   validateResponse(InvestmentSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const investorAddress = req.walletAddress!;
     const idempotencyKey = (req as any).idempotencyKey as string;
     const { amount } = req.body as Omit<InvestInput, "investorAddress">;
@@ -428,7 +429,7 @@ router.post(
     const response = investment;
     setCachedResponse(idempotencyKey, 201, response);
     jsonValidated(res, InvestmentSchema, 201, response);
-  },
+  }),
 );
 
 export default router;

@@ -92,3 +92,16 @@ describe('reconciliationSweep', () => {
     expect(result).toEqual({ checked: 1, drifted: 0 });
   });
 });
+
+describe('reconciliationSweep scheduler', () => {
+  it('registers a timer on start and clears it on stop', async () => {
+    const { startReconciliationSweep, stopReconciliationSweep, isReconciliationSweepRunning } = await import(
+      './reconciliationSweep.js'
+    );
+    expect(isReconciliationSweepRunning()).toBe(false);
+    startReconciliationSweep(60_000);
+    expect(isReconciliationSweepRunning()).toBe(true);
+    stopReconciliationSweep();
+    expect(isReconciliationSweepRunning()).toBe(false);
+  });
+});

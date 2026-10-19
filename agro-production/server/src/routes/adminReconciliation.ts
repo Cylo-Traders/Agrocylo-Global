@@ -3,12 +3,16 @@ import type { Request, Response } from "express";
 import { prisma } from "../db/client.js";
 import { runProductionReconciliation, reconcileSingleCampaign } from "../services/reconciliationService.js";
 import { requireRole, type RoleRequest } from "../middleware/requireRole.js";
+import { requireWallet } from "../middleware/walletAuth.js";
 import logger from "../config/logger.js";
+import { asyncHandler } from "../middleware/asyncHandler.js";
 
 const router = Router();
 
-// Apply admin role requirement to all routes in this router
-router.use(requireRole("ADMIN"));
+// Admin routes require a verified session and the ADMIN role (Issue #1206).
+// Scoped to /admin so this router, mounted at /api/v1, does not intercept
+// requests meant for routers mounted after it.
+router.use("/admin", requireWallet, requireRole("ADMIN"));
 
 // Helper to log admin actions
 async function logAdminAction(
@@ -34,8 +38,8 @@ async function logAdminAction(
 }
 
 // GET /api/v1/admin/reconciliation/alerts — list reconciliation alerts
-router.get("/admin/reconciliation/alerts", async (req: Request, res: Response) => {
-  const adminWallet = (req as RoleRequest).walletAddress;
+router.get("/admin/reconciliation/alerts", asyncHandler(async (req: Request, res: Response) => {
+  const adminWallet = (req as RoleRequest).walletAddress!;
 
   try {
     const page = Math.max(1, parseInt(String(req.query.page ?? "1"), 10));
@@ -68,11 +72,11 @@ router.get("/admin/reconciliation/alerts", async (req: Request, res: Response) =
     logger.error("[Admin/Reconciliation] Failed to list alerts", err);
     res.status(500).json({ message: "Internal server error" });
   }
-});
+}));
 
 // GET /api/v1/admin/reconciliation/alerts/:id — get a single alert
-router.get("/admin/reconciliation/alerts/:id", async (req: Request, res: Response) => {
-  const adminWallet = (req as RoleRequest).walletAddress;
+router.get("/admin/reconciliation/alerts/:id", asyncHandler(async (req: Request, res: Response) => {
+  const adminWallet = (req as RoleRequest).walletAddress!;
 
   try {
     const alert = await prisma.reconciliationAlert.findUnique({
@@ -87,11 +91,11 @@ router.get("/admin/reconciliation/alerts/:id", async (req: Request, res: Respons
     logger.error("[Admin/Reconciliation] Failed to get alert", err);
     res.status(500).json({ message: "Internal server error" });
   }
-});
+}));
 
 // POST /api/v1/admin/reconciliation/alerts/:id/resolve — mark alert as resolved
-router.post("/admin/reconciliation/alerts/:id/resolve", async (req: Request, res: Response) => {
-  const adminWallet = (req as RoleRequest).walletAddress;
+router.post("/admin/reconciliation/alerts/:id/resolve", asyncHandler(async (req: Request, res: Response) => {
+  const adminWallet = (req as RoleRequest).walletAddress!;
 
   try {
     const alert = await prisma.reconciliationAlert.findUnique({
@@ -121,11 +125,11 @@ router.post("/admin/reconciliation/alerts/:id/resolve", async (req: Request, res
     logger.error("[Admin/Reconciliation] Failed to resolve alert", err);
     res.status(500).json({ message: "Internal server error" });
   }
-});
+}));
 
 // POST /api/v1/admin/reconciliation/run — trigger manual reconciliation
-router.post("/admin/reconciliation/run", async (req: Request, res: Response) => {
-  const adminWallet = (req as RoleRequest).walletAddress;
+router.post("/admin/reconciliation/run", asyncHandler(async (req: Request, res: Response) => {
+  const adminWallet = (req as RoleRequest).walletAddress!;
 
   try {
     const report = await runProductionReconciliation();
@@ -135,11 +139,11 @@ router.post("/admin/reconciliation/run", async (req: Request, res: Response) => 
     logger.error("[Admin/Reconciliation] Manual run failed", err);
     res.status(500).json({ message: "Reconciliation run failed" });
   }
-});
+}));
 
 // POST /api/v1/admin/reconciliation/reconcile-campaign/:campaignId — force reconcile a campaign
-router.post("/admin/reconciliation/reconcile-campaign/:campaignId", async (req: Request, res: Response) => {
-  const adminWallet = (req as RoleRequest).walletAddress;
+router.post("/admin/reconciliation/reconcile-campaign/:campaignId", asyncHandler(async (req: Request, res: Response) => {
+  const adminWallet = (req as RoleRequest).walletAddress!;
 
   try {
     const findings = await reconcileSingleCampaign(req.params.campaignId);
@@ -156,11 +160,11 @@ router.post("/admin/reconciliation/reconcile-campaign/:campaignId", async (req: 
     logger.error("[Admin/Reconciliation] Force reconcile failed", err);
     res.status(500).json({ message: "Force reconcile failed" });
   }
-});
+}));
 
 // GET /api/v1/admin/reconciliation/summary — reconciliation summary stats
-router.get("/admin/reconciliation/summary", async (req: Request, res: Response) => {
-  const adminWallet = (req as RoleRequest).walletAddress;
+router.get("/admin/reconciliation/summary", asyncHandler(async (req: Request, res: Response) => {
+  const adminWallet = (req as RoleRequest).walletAddress!;
 
   try {
     const [totalAlerts, unresolvedAlerts, recentAlerts] = await Promise.all([
@@ -191,6 +195,6 @@ router.get("/admin/reconciliation/summary", async (req: Request, res: Response) 
     logger.error("[Admin/Reconciliation] Failed to get summary", err);
     res.status(500).json({ message: "Internal server error" });
   }
-});
+}));
 
 export default router;

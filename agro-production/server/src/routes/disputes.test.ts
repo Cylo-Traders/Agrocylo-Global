@@ -53,10 +53,9 @@ import { prisma } from '../db/client.js';
 import { globalErrorHandler } from '../middleware/errors.js';
 
 /**
- * `disputes.ts` is not mounted on the top-level `app.ts` graph, so this suite
- * exercises the router on its own instance. Mounting the whole app here made
- * every request fall through to `adminReconciliation`'s `requireRole("ADMIN")`
- * and answered 403 before the disputes router was ever reached.
+ * Exercises the disputes router on its own instance with the header-trusting
+ * `requireWallet` mock above. Mounting in `app.ts` is covered by
+ * `src/test/routes.test.ts`.
  */
 function createDisputesApp() {
   const testApp = express();

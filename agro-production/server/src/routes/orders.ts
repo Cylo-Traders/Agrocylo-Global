@@ -24,6 +24,7 @@ import {
   setCachedResponse,
 } from "../middleware/idempotency.js";
 import logger from "../config/logger.js";
+import { asyncHandler } from "../middleware/asyncHandler.js";
 
 const router = Router();
 
@@ -33,7 +34,7 @@ router.get(
   requireWallet,
   validateQuery(ListOrdersQuerySchema),
   validateResponse(z.array(OrderSchema)),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
     const { buyerAddress, farmerAddress } = req.query as unknown as ListOrdersQuery;
 
@@ -75,7 +76,7 @@ router.get(
     }
 
     problemDetail(res, req, 400, "Bad Request", "Either buyerAddress or farmerAddress is required");
-  },
+  }),
 );
 
 // POST /orders — requires authenticated session; buyerAddress derived from session
@@ -86,7 +87,7 @@ router.post(
   writeLimiter,
   validateBody(CreateOrderSchema.omit({ buyerAddress: true })),
   validateResponse(OrderSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     try {
       const buyerAddress = req.walletAddress!;
       const idempotencyKey = (req as any).idempotencyKey as string;
@@ -149,7 +150,7 @@ router.post(
       logger.error("[POST /orders] Failed to create order", { error });
       problemDetail(res, req, 500, "Internal Server Error", "Failed to create order");
     }
-  },
+  }),
 );
 
 // GET /orders/:id
@@ -158,7 +159,7 @@ router.get(
   requireWallet,
   validateParams(OrderIdParamSchema),
   validateResponse(OrderSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
     const order = await prisma.order.findUnique({ where: { id: req.params.id } });
     if (!order) {
@@ -170,7 +171,7 @@ router.get(
       return;
     }
     jsonValidated(res, OrderSchema, 200, order);
-  },
+  }),
 );
 
 // PUT /orders/:id — update txHash after on-chain confirmation
@@ -181,7 +182,7 @@ router.put(
   validateParams(OrderIdParamSchema),
   validateBody(z.object({ txHash: z.string() })),
   validateResponse(OrderSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
     const order = await prisma.order.findUnique({ where: { id: req.params.id } });
     if (!order) {
@@ -199,7 +200,7 @@ router.put(
     });
 
     jsonValidated(res, OrderSchema, 200, updated);
-  },
+  }),
 );
 
 // PATCH /orders/:id/confirm
@@ -210,7 +211,7 @@ router.patch(
   writeLimiter,
   validateParams(OrderIdParamSchema),
   validateResponse(OrderSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
 
     const order = await prisma.order.findUnique({ where: { id: req.params.id } });
@@ -233,7 +234,7 @@ router.patch(
     });
 
     jsonValidated(res, OrderSchema, 200, updated);
-  },
+  }),
 );
 
 export default router;

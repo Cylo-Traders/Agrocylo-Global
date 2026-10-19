@@ -33,10 +33,16 @@ vi.mock('../services/wsServer.js', () => ({
   attachWebSocketServer: vi.fn(),
 }));
 
+import jwt from 'jsonwebtoken';
 import app from '../app.js';
+import { config } from '../config/index.js';
 
 const ADMIN_WALLET = 'GADMINWALLETADDRESSAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const NON_ADMIN_WALLET = 'GUSERRWALLETADDRESSAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+
+function sessionFor(walletAddress: string): string {
+  return `Bearer ${jwt.sign({ walletAddress }, config.jwtSecret)}`;
+}
 
 describe('Admin Authorization', () => {
   beforeEach(() => {
@@ -44,39 +50,81 @@ describe('Admin Authorization', () => {
   });
 
   describe('Route-level middleware protection', () => {
-    it('rejects requests without x-wallet-address header to admin routes', async () => {
+    it('rejects unauthenticated requests to admin routes', async () => {
       const res = await request(app).get('/api/v1/admin/reconciliation/alerts');
 
       expect(res.status).toBe(401);
-      expect(res.body.message).toContain('x-wallet-address');
+      expect(mockUserFindUnique).not.toHaveBeenCalled();
     });
 
-    it('rejects non-admin users from accessing admin reconciliation endpoints', async () => {
-      mockUserFindUnique.mockResolvedValue({
-        role: 'INVESTOR',
-      });
+    it('rejects a forged x-wallet-address header without a session (Issue #1206)', async () => {
+      mockUserFindUnique.mockResolvedValue({ role: 'ADMIN' });
+
+      const res = await request(app)
+        .post('/api/v1/admin/reconciliation/run')
+        .set('x-wallet-address', ADMIN_WALLET);
+
+      expect(res.status).toBe(401);
+      expect(mockUserFindUnique).not.toHaveBeenCalled();
+      expect(mockAdminAuditLogCreate).not.toHaveBeenCalled();
+    });
+
+    it('rejects a token signed with the wrong secret', async () => {
+      const forged = jwt.sign({ walletAddress: ADMIN_WALLET }, 'not-the-server-secret');
 
       const res = await request(app)
         .get('/api/v1/admin/reconciliation/alerts')
-        .set('x-wallet-address', NON_ADMIN_WALLET);
+        .set('Authorization', `Bearer ${forged}`);
+
+      expect(res.status).toBe(401);
+      expect(mockUserFindUnique).not.toHaveBeenCalled();
+    });
+
+    it('rejects a valid non-admin session with 403', async () => {
+      mockUserFindUnique.mockResolvedValue({ role: 'INVESTOR' });
+
+      const res = await request(app)
+        .get('/api/v1/admin/reconciliation/alerts')
+        .set('Authorization', sessionFor(NON_ADMIN_WALLET));
 
       expect(res.status).toBe(403);
       expect(res.body.message).toContain('ADMIN');
+      expect(mockUserFindUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { walletAddress: NON_ADMIN_WALLET } }),
+      );
     });
 
-    it('accepts requests with valid admin role to admin reconciliation endpoints', async () => {
-      mockUserFindUnique.mockResolvedValue({
-        role: 'ADMIN',
-      });
+    it('ignores the header and authorizes by the session wallet', async () => {
+      mockUserFindUnique.mockImplementation(({ where }: { where: { walletAddress: string } }) =>
+        Promise.resolve({ role: where.walletAddress === ADMIN_WALLET ? 'ADMIN' : 'INVESTOR' }),
+      );
+
+      const res = await request(app)
+        .get('/api/v1/admin/reconciliation/alerts')
+        .set('Authorization', sessionFor(NON_ADMIN_WALLET))
+        .set('x-wallet-address', ADMIN_WALLET);
+
+      expect(res.status).toBe(403);
+    });
+
+    it('accepts a valid admin session', async () => {
+      mockUserFindUnique.mockResolvedValue({ role: 'ADMIN' });
       mockReconciliationAlertFindMany.mockResolvedValue([]);
       mockReconciliationAlertCount.mockResolvedValue(0);
 
       const res = await request(app)
         .get('/api/v1/admin/reconciliation/alerts')
-        .set('x-wallet-address', ADMIN_WALLET);
+        .set('Authorization', sessionFor(ADMIN_WALLET));
 
-      expect(res.status).not.toBe(401);
-      expect(res.status).not.toBe(403);
+      expect(res.status).toBe(200);
+      expect(res.body.pagination.total).toBe(0);
+    });
+
+    it('does not apply the admin gate to non-admin routes mounted after it', async () => {
+      const res = await request(app).get('/api/v1/definitely-not-a-route');
+
+      expect(res.status).toBe(404);
+      expect(mockUserFindUnique).not.toHaveBeenCalled();
     });
   });
 

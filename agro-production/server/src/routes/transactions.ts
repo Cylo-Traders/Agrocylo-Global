@@ -19,6 +19,7 @@ import {
 import type { TransactionStatus } from '../schemas/transaction.js';
 import { broadcastTo } from '../services/wsServer.js';
 import { reconcileTransaction } from '../services/transactionReconciler.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 
 const router = Router();
 
@@ -64,7 +65,7 @@ router.post(
   requireWallet,
   writeLimiter,
   validateBody(TransactionIntentCreateSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const { requestId, txHash, walletAddress, eventType, campaignId } =
       req.body;
 
@@ -111,14 +112,14 @@ router.post(
     });
 
     jsonValidated(res, TransactionStatusResponseSchema, 201, response);
-  },
+  }),
 );
 
 router.get(
   '/transactions/:requestId',
   requireWallet,
   validateParams(TransactionRequestIdParamSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const tx = await prisma.transaction.findUnique({
       where: { id: req.params.requestId },
     });
@@ -138,13 +139,13 @@ router.get(
     }
 
     jsonValidated(res, TransactionStatusResponseSchema, 200, txToResponse(tx));
-  },
+  }),
 );
 
 router.get(
   '/transactions',
   requireWallet,
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
 
     const transactions = await prisma.transaction.findMany({
@@ -155,7 +156,7 @@ router.get(
 
     const results = transactions.map((tx) => txToResponse(tx, walletAddress));
     jsonValidated(res, TransactionStatusResponseSchema.array(), 200, results);
-  },
+  }),
 );
 
 router.patch(
@@ -164,7 +165,7 @@ router.patch(
   writeLimiter,
   validateParams(TransactionRequestIdParamSchema),
   validateBody(TransactionStatusUpdateSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const { status: newStatus, message } = req.body;
 
     const tx = await prisma.transaction.findUnique({
@@ -237,14 +238,14 @@ router.patch(
     });
 
     jsonValidated(res, TransactionStatusResponseSchema, 200, response);
-  },
+  }),
 );
 
 router.get(
   '/transactions/:requestId/reconcile',
   requireWallet,
   validateParams(TransactionRequestIdParamSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const tx = await prisma.transaction.findUnique({
       where: { id: req.params.requestId },
     });
@@ -275,7 +276,7 @@ router.get(
       createdAt: tx.processedAt.toISOString(),
       updatedAt: tx.processedAt.toISOString(),
     });
-  },
+  }),
 );
 
 export default router;
