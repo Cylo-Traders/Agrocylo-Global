@@ -148,6 +148,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     passphrase: string | null;
   } | null>(null);
   const networkRequestRef = useRef(0);
+  const connectInFlightRef = useRef<Promise<string | null> | null>(null);
 
   const computeWallets = useCallback(async (): Promise<WalletOption[]> => {
     try {
@@ -228,6 +229,17 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const handleExpired = () => {
+      clearConnection();
+      if (window.location.pathname !== "/farmer-dashboard") {
+        window.location.assign("/farmer-dashboard");
+      }
+    };
+    window.addEventListener("agrocylo:session-expired", handleExpired);
+    return () => window.removeEventListener("agrocylo:session-expired", handleExpired);
+  }, [clearConnection]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function restoreSession() {
@@ -263,6 +275,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
   const connect = useCallback(
     async (requestedWalletId?: string) => {
+      if (connectInFlightRef.current) return connectInFlightRef.current;
+      const attempt = (async () => {
       setLoading(true);
       setError(null);
       try {
@@ -289,6 +303,13 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         return null;
       } finally {
         setLoading(false);
+      }
+      })();
+      connectInFlightRef.current = attempt;
+      try {
+        return await attempt;
+      } finally {
+        if (connectInFlightRef.current === attempt) connectInFlightRef.current = null;
       }
     },
     [applyConnection, refreshWallets],

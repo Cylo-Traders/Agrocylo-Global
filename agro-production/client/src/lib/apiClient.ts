@@ -143,6 +143,10 @@ export class ApiClient {
             res.statusText ??
             `HTTP ${res.status}`;
           const err = new ApiError(res.status, message, body);
+          if (res.status === 401 && typeof window !== "undefined") {
+            setAccessToken(null);
+            window.dispatchEvent(new CustomEvent("agrocylo:session-expired"));
+          }
           console.error("[api][error]", { status: res.status, url, body });
           // Only retry 5xx on safe methods
           if (isRetryable(err, method) && attempt < retries) {
