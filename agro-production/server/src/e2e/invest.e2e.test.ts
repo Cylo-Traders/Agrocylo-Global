@@ -18,6 +18,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import WebSocket from 'ws';
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 
 import app from '../app.js';
 import {
@@ -89,7 +90,7 @@ function runE2ESuite() {
   // Setup / teardown
   // ---------------------------------------------------------------------------
   beforeAll(async () => {
-    prisma = new PrismaClient({ datasources: { db: { url: E2E_DB_URL } } });
+    prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: E2E_DB_URL }) });
     await prisma.$connect();
 
     // Wipe slate for this test run.

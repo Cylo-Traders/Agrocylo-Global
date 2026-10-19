@@ -75,11 +75,13 @@ vi.mock("./persister.js", () => ({
 
 vi.mock("@stellar/stellar-sdk", () => ({
   rpc: {
-    Server: vi.fn().mockImplementation(() => ({
-      getEvents: mockGetEvents,
-      getLatestLedger: mockGetLatestLedger,
-      getLedger: mockGetLedger,
-    })),
+    Server: vi.fn().mockImplementation(function () {
+      return {
+        getEvents: mockGetEvents,
+        getLatestLedger: mockGetLatestLedger,
+        getLedger: mockGetLedger,
+      };
+    }),
   },
 }));
 

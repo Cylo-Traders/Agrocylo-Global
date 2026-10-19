@@ -5,7 +5,7 @@
 #   1. governance          — standalone; every other contract verifies it before
 #                            accepting a governance address, so it goes first.
 #   2. escrow              — marketplace escrow (contracts/escrow)
-#      production_escrow   — campaign escrow (agro-production/contract/production_escrow)
+#      production_escrow   — campaign escrow (contracts/production_escrow)
 #      registry           — order / reputation registry
 #      investment_basket  — batched campaign investments
 #   3. cross-wiring, in this order (matters — see below):
@@ -148,11 +148,11 @@ NET_ARGS=(--rpc-url "$RPC_URL" --network-passphrase "$NETWORK_PASSPHRASE")
 # ---------------------------------------------------------------------------
 CONTRACTS=(governance escrow production_escrow registry investment_basket)
 declare -A DIR=(
-    [governance]="agro-production/contract/governance"
+    [governance]="contracts/governance"
     [escrow]="contracts/escrow"
-    [production_escrow]="agro-production/contract/production_escrow"
-    [registry]="agro-production/contract/registry"
-    [investment_basket]="agro-production/contract/investment_basket"
+    [production_escrow]="contracts/production_escrow"
+    [registry]="contracts/registry"
+    [investment_basket]="contracts/investment_basket"
 )
 declare -A WASM=(
     [governance]="governance.wasm"

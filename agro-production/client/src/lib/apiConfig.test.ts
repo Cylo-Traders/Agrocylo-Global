@@ -9,6 +9,11 @@ describe("production API configuration", () => {
     },
   );
 
+  it("names malformed configuration without echoing its value", () => {
+    expect(() => apiBaseUrl("secret-invalid-value")).toThrow(/NEXT_PUBLIC_API_URL/);
+    expect(() => apiBaseUrl("secret-invalid-value")).not.toThrow(/secret-invalid-value/);
+  });
+
   it("keeps the API mount when requesting campaigns", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }));
     const api = new ApiClient({ baseUrl: apiBaseUrl("http://localhost:5001/api/v1/"), fetchImpl });

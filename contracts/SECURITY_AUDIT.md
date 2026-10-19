@@ -1,6 +1,6 @@
 # Security Audit Checklist
 
-> **Scope:** 6 contracts: Registry, ProductionEscrow, Governance, InvestmentBasket, legacy Escrow (`contracts/escrow/src/lib.rs`), and Weather Insurance (`contracts/weather-insurance/src/lib.rs`)
+> **Scope:** 6 contracts: Registry, ProductionEscrow, Governance, InvestmentBasket, legacy Escrow (`contracts/escrow/src/lib.rs`), and Weather Insurance (`archive/weather-insurance/src/lib.rs`)
 >
 > **Audit Date:** 2026-05-29 (original review)
 > **Last Verified Against:** Commit TBD (tie re-audits to CI check — see §15 below)
@@ -24,7 +24,7 @@
 12. [Event Monitoring](#12-event-monitoring)
 13. [Findings Summary](#13-findings-summary)
 14. [Issue #652 Follow-up: Legacy/Production Escrow Drift Re-audit](#14-issue-652-follow-up-legacyproduction-escrow-drift-re-audit)
-15. [Issue #754: Full-Scope Audit — Governance, Investment Basket, Path-Payment Router](#15-issue-754-full-scope-audit--governance-investment-basket-path-payment-router)
+15. [Scope correction and staleness notice](#15-scope-correction--staleness-notice-2026-08-27)
 16. [Issues #840, #841, #842: Weather Insurance Hardening & Solvency Audit](#16-issues-840-841-842-weather-insurance-hardening--solvency-audit)
 
 ---
@@ -505,21 +505,21 @@ This audit is from **2026-05-29** (3+ months old) and the stated scope has drift
 
 1. **Issues #679–#680** (compile fixes, attester pattern sync) were applied in July without re-audit of the impact
 2. **Issue #777** (contract instance TTL extension) was just implemented across all four production contracts, adding `bump_instance()` calls to every state-changing entry point — an infrastructure change spanning governance, storage patterns, and initialization flows that affects the threat model (TTL management = archival prevention)
-3. **Scope never updated** after `governance` and `investment_basket` contracts were added and deployed to production — this document still references the dead orphaned `agro-production/contract/src/lib.rs` Campaign contract and omits two in-scope contracts
+3. **Scope never updated** after `governance` and `investment_basket` contracts were added and deployed to production — this document still references the dead orphaned `contracts/src/lib.rs` Campaign contract and omits two in-scope contracts
 
 ### Scope Correction
 
 **Original scope (stale):** Escrow (`contracts/escrow/src/lib.rs`), Registry, ProductionEscrow
 
 **Current production scope (6 contracts — all handle real user funds):**
-1. `agro-production/contract/production_escrow/src/lib.rs` — crowdfunded production campaigns (investor funds, farmer revenue)
-2. `agro-production/contract/governance/src/lib.rs` — governance contract for timelock + weighted-vote proposals (admin/governance configuration)
-3. `agro-production/contract/investment_basket/src/lib.rs` — investment baskets (investor funds across multiple campaigns)
-4. `agro-production/contract/registry/src/lib.rs` — campaign registry + reputation scoring (critical governance reference)
+1. `contracts/production_escrow/src/lib.rs` — crowdfunded production campaigns (investor funds, farmer revenue)
+2. `contracts/governance/src/lib.rs` — governance contract for timelock + weighted-vote proposals (admin/governance configuration)
+3. `contracts/investment_basket/src/lib.rs` — investment baskets (investor funds across multiple campaigns)
+4. `contracts/registry/src/lib.rs` — campaign registry + reputation scoring (critical governance reference)
 5. `contracts/escrow/src/lib.rs` — legacy direct buyer↔farmer marketplace escrow (still live, backed by root `client/` app)
-6. `contracts/weather-insurance/src/lib.rs` — parametric weather insurance policies (farmer premium collection, LP capital pool reserves, multi-oracle quorum, challenge window finalization)
+6. `archive/weather-insurance/src/lib.rs` — parametric weather insurance policies (farmer premium collection, LP capital pool reserves, multi-oracle quorum, challenge window finalization)
 
-**Out of scope:** `agro-production/contract/src/lib.rs` (dead, orphaned, superseded by the split into registry + production_escrow)
+**Out of scope:** `contracts/src/lib.rs` (dead, orphaned, superseded by the split into registry + production_escrow)
 
 ### Critical Changes Post-Audit (Unaudited in This Document)
 
@@ -560,7 +560,7 @@ The original audit (§1) claimed: "Transfers tokens to farmer BEFORE writing upd
 ## 16. Issues #840, #841, #842: Weather Insurance Hardening & Solvency Audit
 
 > **Date:** 2026-08-29
-> **Target:** `contracts/weather-insurance/src/lib.rs`
+> **Target:** `archive/weather-insurance/src/lib.rs`
 
 ### 16.1 Solvency & Reserve Accounting (#840)
 - **Capital Provider Deposit/Withdrawal:** Capital providers fund the contract via `deposit_capital` to maintain pool reserves. Unreserved capital can be withdrawn via `withdraw_capital`.

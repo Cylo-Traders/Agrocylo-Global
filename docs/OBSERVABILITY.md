@@ -2,7 +2,7 @@
 
 > **Status:** code-complete and unit-tested in this PR. **Not yet demonstrated
 > against a real Sentry project or a live staging environment** — see
-> [Verification status](#verification-status) at the bottom before treating
+> [Verification status](#verification-notes-updated-after-actually-running-things) at the bottom before treating
 > any alert as "proven" in the sense Issue #756's acceptance criteria mean.
 
 ## What's instrumented, and where

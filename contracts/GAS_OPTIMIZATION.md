@@ -1,6 +1,6 @@
 # Gas Optimization Analysis
 
-> **Contracts analyzed:** Escrow (`contracts/escrow/src/lib.rs`), Registry (`agro-production/contract/registry/src/lib.rs`), Campaign (`agro-production/contract/src/lib.rs`), ProductionEscrow (`agro-production/contract/production_escrow/src/lib.rs`)
+> **Contracts analyzed:** Escrow (`contracts/escrow/src/lib.rs`), Registry (`contracts/registry/src/lib.rs`), Campaign (`contracts/src/lib.rs`), ProductionEscrow (`contracts/production_escrow/src/lib.rs`)
 >
 > **Date:** 2026-05-29
 

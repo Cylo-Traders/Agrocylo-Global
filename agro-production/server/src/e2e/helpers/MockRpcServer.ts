@@ -132,12 +132,12 @@ export class MockRpcServer {
     const entries = keys.map((keyBase64) => {
       try {
         const ledgerKey = StellarSdk.xdr.LedgerKey.fromXDR(keyBase64, "base64");
-        if (ledgerKey.switch().value !== StellarSdk.xdr.LedgerEntryType.account().value) {
+        if (ledgerKey.type !== "account") {
           return null;
         }
-        const accountId = ledgerKey.account().accountId();
+        const accountId = ledgerKey.account.accountId;
         const publicKey = StellarSdk.StrKey.encodeEd25519PublicKey(
-          accountId.ed25519(),
+          accountId.ed25519.toBytes(),
         );
         const { keyBase64: k, entryBase64 } = buildAccountLedgerEntry(publicKey, 100);
         return { key: k, xdr: entryBase64, lastModifiedLedgerSeq: this.currentLedger };

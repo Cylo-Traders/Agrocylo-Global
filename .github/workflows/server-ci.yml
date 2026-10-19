@@ -29,6 +29,8 @@ jobs:
         working-directory: agro-production/server
 
       - name: Generate Prisma types
+        env:
+          PRISMA_GENERATE_DATABASE_URL: postgresql://prisma-generate:unused@localhost:5432/prisma_generate
         run: npx prisma generate
         working-directory: agro-production/server
 

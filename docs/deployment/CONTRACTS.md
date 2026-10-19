@@ -10,11 +10,11 @@ This guide includes the deploy-script runbook and the administration and WASM ve
 
 | Contract | Crate | Role |
 |---|---|---|
-| `governance` | `agro-production/contract/governance` | Proposals, voting, timelocked execution |
+| `governance` | `contracts/governance` | Proposals, voting, timelocked execution |
 | `escrow` | `contracts/escrow` | Marketplace order escrow + path-payment settlement |
-| `production_escrow` | `agro-production/contract/production_escrow` | Campaign escrow |
-| `registry` | `agro-production/contract/registry` | Order / reputation registry, escrow↔production link |
-| `investment_basket` | `agro-production/contract/investment_basket` | Batched campaign investments |
+| `production_escrow` | `contracts/production_escrow` | Campaign escrow |
+| `registry` | `contracts/registry` | Order / reputation registry, escrow↔production link |
+| `investment_basket` | `contracts/investment_basket` | Batched campaign investments |
 
 ## What the script does
 
@@ -144,7 +144,7 @@ gates on the admin's authorization as of #843):
 - **registry** — Tracks orders and cross-links escrow/production contracts
 - **investment_basket** — Manages batched fund investments
 - **escrow** — Marketplace escrow (`contracts/escrow`)
-- **weather-insurance** — Parametric weather policies (`contracts/weather-insurance`, deployed outside `deploy-contracts.sh`)
+- **weather-insurance** — Parametric weather policies (`archive/weather-insurance`, archived and excluded from deployment)
 
 They must be deployed and cross-wired in a specific dependency order to ensure all references are valid.
 

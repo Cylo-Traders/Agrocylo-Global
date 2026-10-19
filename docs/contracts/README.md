@@ -1,7 +1,7 @@
 # Agro-production contracts
 
 The canonical production escrow contract is
-[`production_escrow`](./production_escrow). It is the only production escrow
+[`production_escrow`](../../contracts/production_escrow). It is the only production escrow
 crate in the workspace and is the contract targeted by
 `NEXT_PUBLIC_PRODUCTION_CONTRACT_ID` and `PRODUCTION_ESCROW_CONTRACT_ID`.
 
@@ -14,13 +14,13 @@ and campaign registration metadata.
 Run the canonical escrow unit suite from the repository root:
 
 ```bash
-cargo test -p production_escrow
+cargo test -p production-escrow-v2
 ```
 
 Build its deployable Wasm artifact:
 
 ```bash
-cargo build -p production_escrow --target wasm32-unknown-unknown --release
+cargo build -p production-escrow-v2 --target wasm32v1-none --release
 ```
 
 ## Contract Wiring & Deployment
@@ -40,3 +40,13 @@ soroban contract invoke \
 ```
 
 Set `REGISTRY_CONTRACT_ID` in `agro-production/server/.env` so the server and health checks monitor registry status.
+
+## Supporting references
+
+- [Canonical contract scope](CANONICAL_CONTRACT.md)
+- [Event specification](EVENT_SPEC.md)
+- [Fee policy](FEE_POLICY.md)
+- [Audit scope](AUDIT_SCOPE.md)
+- [Cost baseline](COST_BASELINE.md)
+- [Deployment and administration](../deployment/CONTRACTS.md)
+- [Archived weather-insurance prototype](../../archive/weather-insurance/README.md)

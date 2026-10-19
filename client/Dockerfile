@@ -27,12 +27,12 @@ COPY package.json package-lock.json ./
 COPY scripts/check-toolchain.cjs ./scripts/check-toolchain.cjs
 COPY client/package.json ./client/package.json
 COPY agro-production/client/package.json ./agro-production/client/package.json
-COPY packages/wallet-core/package.json ./packages/wallet-core/package.json
+COPY packages/instrumentation/package.json ./packages/instrumentation/package.json
 
 RUN npm ci
 
 # Source needed to build the client workspace and its local dependencies.
-COPY packages/wallet-core ./packages/wallet-core
+COPY packages/instrumentation ./packages/instrumentation
 COPY client ./client
 
 RUN npm run build --workspace=client
