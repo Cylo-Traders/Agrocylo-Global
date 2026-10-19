@@ -15,7 +15,6 @@ export const metadata: Metadata = {
     template: `%s | ${siteConfig.title}`,
   },
   description: siteConfig.description,
-  icons: siteConfig.icons,
   manifest: "/manifest.webmanifest",
   openGraph: {
     title: siteConfig.ogTitle,

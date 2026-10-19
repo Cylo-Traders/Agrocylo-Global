@@ -66,7 +66,7 @@ function walletConnectModule(): ModuleInterface | undefined {
       name: "AgroCylo",
       description: "AgroCylo agricultural marketplace",
       url: appUrl,
-      icons: [`${appUrl.replace(/\/$/, "")}/favicon.ico`],
+      icons: [`${appUrl.replace(/\/$/, "")}/favicon.svg`],
     },
     allowedChains: [
       WalletConnectTargetChain.PUBLIC,

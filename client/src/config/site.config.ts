@@ -3,12 +3,6 @@ export const siteConfig = {
   description:
     "Peer-to-peer agro marketplace secured by Stellar escrow. Farmers sell directly to buyers — no middlemen, no chargebacks.",
 
-  icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
-    apple: "/favicon.svg",
-  },
-
   ogTitle: "AgroCylo — Fair Trade. On-chain. For Every Farmer.",
   ogDescription:
     "Our platform connects farmers directly with buyers — Stellar escrow guarantees fair settlement, lower fees, and faster payouts.",
