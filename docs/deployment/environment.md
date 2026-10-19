@@ -132,7 +132,7 @@ Validated in [`agro-production/server/src/config/index.ts`](../../agro-productio
 | `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX_REQUESTS` / `RATE_LIMIT_WRITE_MAX_REQUESTS` | | `60000` / `100` / `10` | |
 | `SHUTDOWN_TIMEOUT_MS` | | `15000` | Graceful shutdown |
 | `EVENT_POLL_INTERVAL_MS` / `CONFIRMATION_DEPTH` | | — | On-chain event watcher tuning |
-| `RUN_RECONCILIATION_SWEEP` / `RECONCILIATION_SWEEP_INTERVAL_MS` | | `false` / — | Ledger reconciliation job |
+| `RUN_RECONCILIATION_SWEEP` / `RECONCILIATION_SWEEP_INTERVAL_MS` | | `true` / `300000` | Ledger reconciliation drift sweep (`"false"` disables) |
 | `SENTRY_DSN` / `SENTRY_TRACES_SAMPLE_RATE` | | `""` / `0.1` | |
 | `PORT`, `NODE_ENV`, `LOG_LEVEL` | | `5001` / `development` / `debug` | |
 

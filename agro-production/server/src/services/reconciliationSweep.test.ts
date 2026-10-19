@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('../config/logger.js', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -20,7 +20,11 @@ vi.mock('./promMetrics.js', () => ({
   reconciliationDrift: { set: gaugeSet },
 }));
 
-import { runReconciliationSweep } from './reconciliationSweep.js';
+import {
+  runReconciliationSweep,
+  startReconciliationSweep,
+  stopReconciliationSweep,
+} from './reconciliationSweep.js';
 
 describe('reconciliationSweep', () => {
   beforeEach(() => {
@@ -90,5 +94,37 @@ describe('reconciliationSweep', () => {
 
     expect(reconcileTransaction).not.toHaveBeenCalled();
     expect(result).toEqual({ checked: 1, drifted: 0 });
+  });
+
+  describe('scheduling', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      findMany.mockResolvedValue([]);
+    });
+
+    afterEach(() => {
+      stopReconciliationSweep();
+      vi.useRealTimers();
+    });
+
+    it('runs the sweep on each interval tick once started', async () => {
+      startReconciliationSweep(1000);
+
+      await vi.advanceTimersByTimeAsync(2500);
+
+      expect(findMany).toHaveBeenCalledTimes(2);
+      expect(gaugeSet).toHaveBeenCalledWith(0);
+    });
+
+    it('stops running after stopReconciliationSweep', async () => {
+      startReconciliationSweep(1000);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(findMany).toHaveBeenCalledTimes(1);
+
+      stopReconciliationSweep();
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(findMany).toHaveBeenCalledTimes(1);
+    });
   });
 });
