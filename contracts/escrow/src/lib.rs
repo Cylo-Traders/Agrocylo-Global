@@ -55,6 +55,9 @@ pub enum EscrowError {
     ContractPaused = 40,
     AlreadyPaused = 41,
     NotPaused = 42,
+    /// Issue #1245: `set_arbitrators` must reject duplicate addresses so a
+    /// single stored vote cannot be counted more than once toward quorum.
+    DuplicateArbitrator = 43,
 }
 
 #[contracttype]
@@ -1761,6 +1764,16 @@ impl EscrowContract {
         if quorum == 0 || quorum > arbitrators.len() {
             return Err(EscrowError::InvalidSplitRatio);
         }
+        // Issue #1245: unique arbitrator addresses only. Because quorum is
+        // tallied by iterating the configured vector, a repeated address would
+        // otherwise let one stored vote count multiple times.
+        for i in 0..arbitrators.len() {
+            for j in (i + 1)..arbitrators.len() {
+                if arbitrators.get(i) == arbitrators.get(j) {
+                    return Err(EscrowError::DuplicateArbitrator);
+                }
+            }
+        }
         env.storage()
             .instance()
             .set(&DataKey::Arbitrators, &arbitrators);
@@ -1803,6 +1816,9 @@ impl EscrowContract {
             return Err(EscrowError::OrderNotDisputed);
         }
 
+        // Issue #1245: a vote is immutable once cast. Re-voting — whether to
+        // change one's mind or replay an earlier vote — is rejected; the
+        // recorded resolution is the one that counts toward quorum.
         let vote_key = DataKey::ArbitratorVote(order_id, arbitrator.clone());
         if env.storage().persistent().has(&vote_key) {
             return Err(EscrowError::AlreadyVoted);
@@ -1810,19 +1826,25 @@ impl EscrowContract {
 
         env.storage().persistent().set(&vote_key, &resolution);
 
+        // Issue #1245: tally only votes that match *this* proposed resolution.
+        // Conflicting votes therefore cannot combine to satisfy quorum and the
+        // outcome is independent of vote ordering. Each unique arbitrator
+        // contributes at most one vote (enforced by unique configuration).
         let quorum: u32 = env.storage().instance().get(&DataKey::Quorum).unwrap_or(0);
-        let mut yes_votes: u32 = 0;
+        let mut matching_votes: u32 = 0;
         for a in arbitrators.iter() {
-            if env
+            if let Some(vote) = env
                 .storage()
                 .persistent()
-                .has(&DataKey::ArbitratorVote(order_id, a))
+                .get::<_, DisputeResolution>(&DataKey::ArbitratorVote(order_id, a))
             {
-                yes_votes += 1;
+                if vote == resolution {
+                    matching_votes += 1;
+                }
             }
         }
 
-        if yes_votes >= quorum {
+        if matching_votes >= quorum {
             resolve_escrow_dispute_internal(&env, order_id, resolution)?;
         }
 

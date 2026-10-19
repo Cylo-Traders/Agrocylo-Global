@@ -520,3 +520,84 @@ fn test_mint_batch_unauthorized_source_rejected() {
         RegistryError::UnauthorizedContract
     );
 }
+
+// ---------------------------------------------------------------------------
+// Issue #1248: overflow-safe registry pagination
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_get_farmers_pagination_boundaries_and_overflow() {
+    let (_env, client, _, _, _, _, farmer_one, farmer_two) = setup_test();
+    client.register_farmer(&farmer_one);
+    client.register_farmer(&farmer_two);
+
+    // Zero limit returns an empty page.
+    assert_eq!(client.get_farmers(&0, &0).len(), 0);
+
+    // Exact boundary: page starting at the last index returns exactly one.
+    let last = client.get_farmers(&1, &50);
+    assert_eq!(last.len(), 1);
+    assert_eq!(last.get(0).unwrap(), farmer_two);
+
+    // start == count and start past the end both return empty.
+    assert_eq!(client.get_farmers(&2, &50).len(), 0);
+    assert_eq!(client.get_farmers(&100, &50).len(), 0);
+
+    // Near-u32::MAX must not trap (start + limit would overflow).
+    assert_eq!(client.get_farmers(&u32::MAX, &50).len(), 0);
+    assert_eq!(client.get_farmers(&(u32::MAX - 1), &50).len(), 0);
+}
+
+#[test]
+fn test_get_campaigns_pagination_boundaries_and_overflow() {
+    let (_env, client, _, _, production_contract, _, farmer_one, _) = setup_test();
+    client.register_farmer(&farmer_one);
+    client.register_campaign(&production_contract, &10, &farmer_one, &None);
+    client.register_campaign(&production_contract, &11, &farmer_one, &None);
+
+    assert_eq!(client.get_campaigns(&0, &0).len(), 0);
+
+    let last = client.get_campaigns(&1, &50);
+    assert_eq!(last.len(), 1);
+    assert_eq!(last.get(0).unwrap().campaign_id, 11);
+
+    assert_eq!(client.get_campaigns(&2, &50).len(), 0);
+    assert_eq!(client.get_campaigns(&100, &50).len(), 0);
+
+    // Near-u64::MAX must not trap (start + limit would overflow).
+    assert_eq!(client.get_campaigns(&u64::MAX, &50).len(), 0);
+    assert_eq!(client.get_campaigns(&(u64::MAX - 1), &50).len(), 0);
+}
+
+#[test]
+fn test_get_farmer_campaigns_pagination_boundaries_and_overflow() {
+    let (_env, client, _, _, production_contract, _, farmer_one, farmer_two) = setup_test();
+    client.register_farmer(&farmer_one);
+    client.register_farmer(&farmer_two);
+    client.register_campaign(&production_contract, &10, &farmer_one, &None);
+    client.register_campaign(&production_contract, &11, &farmer_one, &None);
+    client.register_campaign(&production_contract, &12, &farmer_two, &None);
+
+    assert_eq!(client.get_farmer_campaigns(&farmer_one, &0, &0).len(), 0);
+
+    let last = client.get_farmer_campaigns(&farmer_one, &1, &50);
+    assert_eq!(last.len(), 1);
+    assert_eq!(last.get(0).unwrap().campaign_id, 11);
+
+    assert_eq!(client.get_farmer_campaigns(&farmer_one, &2, &50).len(), 0);
+    assert_eq!(client.get_farmer_campaigns(&farmer_one, &100, &50).len(), 0);
+
+    // Near-u64::MAX must not trap (start + limit would overflow).
+    assert_eq!(
+        client
+            .get_farmer_campaigns(&farmer_one, &u64::MAX, &50)
+            .len(),
+        0
+    );
+    assert_eq!(
+        client
+            .get_farmer_campaigns(&farmer_one, &(u64::MAX - 1), &50)
+            .len(),
+        0
+    );
+}

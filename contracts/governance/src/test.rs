@@ -641,3 +641,119 @@ fn test_event_schema_cancelled() {
     let p = t.gov.get_proposal(&proposal_id);
     assert_eq!(p.status, ProposalStatus::Cancelled);
 }
+
+// ---------------------------------------------------------------------------
+// Issue #1247: voting power is snapshotted / frozen for open proposals
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_set_voter_weight_locked_while_proposal_accepting_votes() {
+    let t = setup();
+    let gov_id = t.gov.address.clone();
+    let args = set_fee_config_args(&t.env, &gov_id, &Address::generate(&t.env), 500);
+    let pid = t.gov.propose(
+        &t.voter1,
+        &t.escrow.address,
+        &Symbol::new(&t.env, "set_fee_config"),
+        &args,
+    );
+
+    // The proposal is open, so no weight may change.
+    let err = t
+        .gov
+        .try_set_voter_weight(&t.admin, &t.voter3, &100)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, GovernanceError::VoterWeightLocked);
+
+    // Still locked after a vote has been counted.
+    t.gov.vote(&t.voter1, &pid, &true);
+    let err = t
+        .gov
+        .try_set_voter_weight(&t.admin, &t.voter1, &0)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, GovernanceError::VoterWeightLocked);
+
+    // The original weights are untouched.
+    assert_eq!(t.gov.get_voter_weight(&t.voter1), 60);
+    assert_eq!(t.gov.get_voter_weight(&t.voter3), 10);
+}
+
+#[test]
+fn test_voter_weight_change_allowed_once_voting_window_ends() {
+    let t = setup();
+    let gov_id = t.gov.address.clone();
+    let args = set_fee_config_args(&t.env, &gov_id, &Address::generate(&t.env), 500);
+    let _pid = t.gov.propose(
+        &t.voter1,
+        &t.escrow.address,
+        &Symbol::new(&t.env, "set_fee_config"),
+        &args,
+    );
+
+    let err = t
+        .gov
+        .try_set_voter_weight(&t.admin, &t.voter3, &100)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, GovernanceError::VoterWeightLocked);
+
+    // Past the voting window no further votes can land, so weights unlock
+    // even before `queue` runs (an abandoned proposal must not lock weights
+    // forever).
+    advance_time(&t.env, VOTING_PERIOD + 1);
+    t.gov.set_voter_weight(&t.admin, &t.voter3, &100);
+    assert_eq!(t.gov.get_voter_weight(&t.voter3), 100);
+}
+
+/// Reproduces the reported A-to-B reassignment sequence and proves the tally
+/// can no longer be inflated beyond the eligible total.
+#[test]
+fn test_reassignment_cannot_inflate_active_proposal_tally() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+
+    let gov_id = env.register(GovernanceContract, ());
+    let gov = GovernanceContractClient::new(&env, &gov_id);
+    gov.initialize(
+        &admin,
+        &VOTING_PERIOD,
+        &TIMELOCK_DELAY,
+        &UPGRADE_TIMELOCK_DELAY,
+        &100,
+    );
+    // Total voting power is 100, all owned by A.
+    gov.set_voter_weight(&admin, &a, &100);
+
+    // Self-targeted proposal (no execution target needed for this test).
+    let mut args: soroban_sdk::Vec<Val> = soroban_sdk::Vec::new(&env);
+    args.push_back(gov_id.clone().into_val(&env));
+    args.push_back(Address::generate(&env).into_val(&env));
+    let pid = gov.propose(&a, &gov_id, &Symbol::new(&env, "set_guardian"), &args);
+
+    gov.vote(&a, &pid, &true);
+    assert_eq!(gov.get_proposal(&pid).votes_for, 100);
+
+    // Attack: revoke A's already-counted weight and hand it to B.
+    let err = gov
+        .try_set_voter_weight(&admin, &a, &0)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, GovernanceError::VoterWeightLocked);
+    let err = gov
+        .try_set_voter_weight(&admin, &b, &100)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, GovernanceError::VoterWeightLocked);
+
+    // Tally never exceeds the eligible total, and no power changed hands.
+    let p = gov.get_proposal(&pid);
+    assert!(p.votes_for + p.votes_against <= 100);
+    assert_eq!(p.votes_for, 100);
+    assert_eq!(gov.get_voter_weight(&a), 100);
+    assert_eq!(gov.get_voter_weight(&b), 0);
+}

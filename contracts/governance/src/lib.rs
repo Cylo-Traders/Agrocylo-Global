@@ -55,6 +55,10 @@ pub enum GovernanceError {
     NotVoter = 10,
     AlreadyVoted = 11,
     InvalidWeight = 12,
+    /// Issue #1247: voter weights are frozen while any proposal can still
+    /// accept votes, so an already-open proposal's tally can never be
+    /// inflated by reassigning weight mid-vote.
+    VoterWeightLocked = 13,
 
     ProposalNotFound = 20,
     VotingClosed = 21,
@@ -243,6 +247,13 @@ impl GovernanceContract {
     /// effectively revokes voting rights. This is the only privileged,
     /// single-key action left in the contract — assigning who gets to
     /// weight-vote is a bootstrapping concern, not a parameter change.
+    ///
+    /// Issue #1247: weights are frozen while any proposal can still accept
+    /// votes. Otherwise weight already counted toward an open proposal could
+    /// be revoked and re-assigned to a different voter, letting both votes
+    /// count and pushing `votes_for + votes_against` above the proposal's
+    /// eligible total. Freezing the whole voter table for the (bounded)
+    /// voting window keeps the proposal's total-weight/quorum basis stable.
     pub fn set_voter_weight(
         env: Env,
         admin_caller: Address,
@@ -253,6 +264,9 @@ impl GovernanceContract {
         let admin = read_admin(&env)?;
         if admin_caller != admin {
             return Err(GovernanceError::NotVoter);
+        }
+        if any_proposal_accepting_votes(&env) {
+            return Err(GovernanceError::VoterWeightLocked);
         }
         bump_instance(&env);
 
@@ -834,6 +848,32 @@ fn voter_weight(env: &Env, voter: &Address) -> u64 {
         .instance()
         .get(&DataKey::VoterWeight(voter.clone()))
         .unwrap_or(0)
+}
+
+/// Issue #1247: whether any proposal is still within its voting window and
+/// could therefore accept another vote. Once a proposal's `voting_ends_at`
+/// has passed it can no longer be voted on, so it no longer locks weights —
+/// this avoids requiring `queue()` to run before weights can change again
+/// (which would otherwise let an abandoned proposal lock weights forever).
+fn any_proposal_accepting_votes(env: &Env) -> bool {
+    let count: u64 = env
+        .storage()
+        .instance()
+        .get(&DataKey::ProposalCount)
+        .unwrap_or(0);
+    let now = env.ledger().timestamp();
+    for id in 1..=count {
+        if let Some(p) = env
+            .storage()
+            .persistent()
+            .get::<_, Proposal>(&DataKey::Proposal(id))
+        {
+            if p.status == ProposalStatus::Voting && now <= p.voting_ends_at {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn load_proposal(env: &Env, id: u64) -> Result<Proposal, GovernanceError> {
