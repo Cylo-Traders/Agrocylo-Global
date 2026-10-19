@@ -11,7 +11,7 @@ mainnet. It ties together the pieces that already exist in isolation:
 - `docs/CONTRACT_UPGRADES.md` — upgrade + migrate sequencing
 - `docs/deployment/README.md` — backend / frontend CI/CD and Fly.io rollback
 - `DISASTER_RECOVERY.md` — database backup / restore
-- `agro-production/contract/production_escrow/SETTLEMENT_POLICY.md` — fund-release rules
+- `contracts/production_escrow/SETTLEMENT_POLICY.md` — fund-release rules
 
 > **Irreversibility warning.** Contract deploys and `initialize` calls are
 > **permanent**. There is no "undo" for an on-chain deploy. Once mainnet contracts
@@ -241,7 +241,7 @@ is on-chain.**
 ## 7. Settlement Policy Compliance Checklist (Gate G8)
 
 Before launch, confirm each item from
-`agro-production/contract/production_escrow/SETTLEMENT_POLICY.md` §"Compliance
+`contracts/production_escrow/SETTLEMENT_POLICY.md` §"Compliance
 Checklist", with the verifying PR/commit or test noted:
 
 | Item | Verified by | Ref |

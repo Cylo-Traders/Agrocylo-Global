@@ -22,13 +22,15 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: .nvmrc
 
       - name: Install dependencies
         run: npm ci
         working-directory: agro-production/server
 
       - name: Generate Prisma types
+        env:
+          PRISMA_GENERATE_DATABASE_URL: postgresql://prisma-generate:unused@localhost:5432/prisma_generate
         run: npx prisma generate
         working-directory: agro-production/server
 
@@ -68,7 +70,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: .nvmrc
 
       - name: Install dependencies
         run: npm ci
@@ -116,7 +118,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: .nvmrc
 
       - name: Install dependencies
         run: npm ci
@@ -135,7 +137,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run TruffleHog secret scanning
-        uses: trufflesecurity/trufflehog@main
+        uses: trufflesecurity/trufflehog@048de9ff07098d943136cd5231a0e93fbb3ea443 # pinned reviewed revision
         with:
           path: ./agro-production/server
           base: ${{ github.event.repository.default_branch }}

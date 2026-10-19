@@ -58,3 +58,21 @@ npm run lint && npm run build && npm test
   (Issue #920)
 - `npm run reset:next:client` / `npm run reset:next:agro` — remove one app's
   generated `.next` output after fixing the underlying problem (Issue #921).
+
+## Server and shared-code policy
+
+The servers retain independent installs, schemas, migrations, and lockfiles.
+`npm run check:versions` covers both clients and both servers: every dependency
+declared by both servers must share a major, and both servers must declare
+identical Node/npm engines and `.nvmrc` versions. `scripts/check-prisma-versions.js`
+also validates each server's declared and locked CLI/client/adapter versions.
+Upgrade paired server dependencies together and run both server suites.
+
+Both clients import Sentry hooks from `@agrocylo/instrumentation`. The same
+version-policy check rejects replacing those imports with duplicated hooks.
+The unused wallet bridge package has been removed; the existing wallet adapters
+continue to own wallet behavior.
+
+Deployable Rust crates live only under `contracts/`, with supporting documents
+under `docs/contracts/`. The undeployed weather-insurance prototype is archived
+outside the active Cargo workspace. See its archive README before reviving it.

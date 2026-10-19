@@ -585,7 +585,7 @@ Contracts emit events with exact data shapes; capturing the real XDR bytes as go
 
 **Next Step**: Maintainer runs:
 ```bash
-cd agro-production/contract/{governance,investment_basket,production_escrow,registry}
+cd contracts/{governance,investment_basket,production_escrow,registry}
 cargo test 2>&1 | tee test_output.log
 # Extract event payloads from test output, store as golden fixtures
 # Add backend parser regression tests against fixtures

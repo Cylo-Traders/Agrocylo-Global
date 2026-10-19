@@ -103,13 +103,13 @@ export function buildAccountLedgerEntry(
     homeDomain: "",
     thresholds,
     signers: [],
-    ext: new xdr.AccountEntryExt(0),
+    ext: xdr.AccountEntryExt.v0(),
   });
 
   const ledgerEntry = new xdr.LedgerEntry({
     lastModifiedLedgerSeq: 100,
     data: xdr.LedgerEntryData.account(accountEntry),
-    ext: new xdr.LedgerEntryExt(0),
+    ext: xdr.LedgerEntryExt.v0(),
   });
 
   const ledgerKey = xdr.LedgerKey.account(

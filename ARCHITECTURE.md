@@ -1,6 +1,6 @@
 # Agrocylo-Global Architecture & Repository Map
 
-This document explains the repository structure, the relationship between the two main applications (root `client/server` vs `agro-production/client/server`), and how the 6 Soroban contract crates fit into the system.
+This document explains the repository structure, the relationship between the two main applications (root `client/server` vs `agro-production/client/server`), and how the five deployable Soroban contract crates fit into the system.
 
 ---
 
@@ -92,14 +92,14 @@ Both applications use Stellar wallets, on-chain escrow, and WebSocket-based real
   - `src/controllers/campaignController.ts` — campaign business logic
 
 **Contracts used:** 
-- `agro-production/contract/production_escrow/` — main crowdfunding escrow
-- `agro-production/contract/registry/` — campaign/farmer registration
-- `agro-production/contract/investment_basket/` — investor pool management
-- `agro-production/contract/governance/` — DAO/governance features (future)
+- `contracts/production_escrow/` — main crowdfunding escrow
+- `contracts/registry/` — campaign/farmer registration
+- `contracts/investment_basket/` — investor pool management
+- `contracts/governance/` — DAO/governance features (future)
 
 ---
 
-## Smart Contracts (6 Rust Crates)
+## Smart Contracts (5 Deployable Rust Crates)
 
 All contracts are written in Rust for Soroban (Stellar's smart contract platform).
 
@@ -114,14 +114,14 @@ All contracts are written in Rust for Soroban (Stellar's smart contract platform
   - `order.refunded` — payment returned to buyer
 - **Consumed by:** `server/` (contract watcher), `client/` (order management)
 
-#### 2. `contracts/weather-insurance/`
+#### Archived prototype: `archive/weather-insurance/`
 - **Purpose:** Weather-based parametric insurance for farmers (complementary feature)
 - **Status:** Standalone; future integration planned
 - **Consumed by:** Not yet integrated into main app flows
 
 ### Production Crowdfunding Contracts
 
-#### 3. `agro-production/contract/production_escrow/`
+#### 3. `contracts/production_escrow/`
 - **Purpose:** Campaign-based escrow for crowdfunded agricultural production
 - **Key interactions:**
   - `create_campaign()` — farmer initiates campaign (target amount, deadline)
@@ -135,7 +135,7 @@ All contracts are written in Rust for Soroban (Stellar's smart contract platform
   - `campaign.claimed` — investor withdrew returns
 - **Consumed by:** `agro-production/server/` (watcher), `agro-production/client/` (invest flow)
 
-#### 4. `agro-production/contract/registry/`
+#### 4. `contracts/registry/`
 - **Purpose:** Farmer/investor identity and KYC registration on-chain
 - **Key interactions:**
   - `register_farmer()` — on-board farmer with identity
@@ -143,7 +143,7 @@ All contracts are written in Rust for Soroban (Stellar's smart contract platform
   - `get_farmer()` — look up farmer details
 - **Consumed by:** `agro-production/server/` (campaign creation validation), `agro-production/client/` (farmer onboarding)
 
-#### 5. `agro-production/contract/investment_basket/`
+#### 5. `contracts/investment_basket/`
 - **Purpose:** Manages investor fund pooling and returns distribution
 - **Key interactions:**
   - `deposit()` — investor adds funds to pool
@@ -151,7 +151,7 @@ All contracts are written in Rust for Soroban (Stellar's smart contract platform
 - **Status:** Used by production_escrow for multi-investor campaigns
 - **Consumed by:** `production_escrow/` (internally)
 
-#### 6. `agro-production/contract/governance/`
+#### 6. `contracts/governance/`
 - **Purpose:** DAO-style governance for platform decisions (future feature)
 - **Status:** Under development; not yet integrated into main flows
 - **Planned interactions:**
@@ -246,8 +246,8 @@ Both apps use `classifyError()` utility to categorize contract errors:
 - Critical issues: wallet auth, contract integration, error handling, observability
 
 ### Next Phase
-- Weather insurance integration (`contracts/weather-insurance/`)
-- Governance features (`agro-production/contract/governance/`)
+- Archived weather-insurance reference (`archive/weather-insurance/`); excluded from active deployment
+- Governance features (`contracts/governance/`)
 - Root marketplace enhancements
 
 ### Not Active
@@ -287,7 +287,7 @@ PORT=3001
 2. **Pick an area:**
    - Backend: `agro-production/server/` (contract watcher, API routes, WebSocket)
    - Frontend: `agro-production/client/` (investment flow, campaign pages)
-   - Contracts: `agro-production/contract/` (Rust/Soroban)
+   - Contracts: `contracts/` (Rust/Soroban)
 
 3. **Run locally:**
    - See `agro-production/README.md` for E2E test setup
@@ -303,5 +303,5 @@ PORT=3001
 
 - **Repo structure:** See this ARCHITECTURE.md
 - **API endpoints:** See `server/API.md` or `agro-production/server/API.md`
-- **Contract interfaces:** See Rust crate READMEs in `contract/` and `agro-production/contract/`
+- **Contract interfaces:** See `contracts/` and the documentation in `docs/contracts/`
 - **Deployment:** Check CI workflows in `.github/workflows/`

@@ -58,10 +58,8 @@ DRILL_START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 if [[ "$NETWORK" == "testnet" ]]; then
     RPC_URL="${SOROBAN_RPC_URL:-https://soroban-testnet.stellar.org}"
-    NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
 else
     RPC_URL="${SOROBAN_RPC_URL:-https://soroban.stellar.org}"
-    NETWORK_PASSPHRASE="Public Global Stellar Network ; September 2015"
 fi
 
 # Contract IDs (should be sourced from environment or deployments/<network>.json)

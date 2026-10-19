@@ -262,7 +262,7 @@ fn cost_harness_summary() {
     println!("at their maximum input sizes, to ensure mainnet feasibility.");
     println!("");
     println!("Results should be recorded in:");
-    println!("  → agro-production/contract/COST_BASELINE.md");
+    println!("  → docs/contracts/COST_BASELINE.md");
     println!("");
     println!("Procedure:");
     println!("  1. Run: cargo test cost_harness -- --nocapture");

@@ -1,3 +1,6 @@
+// Test API host; real builds must configure their own endpoint.
+process.env.NEXT_PUBLIC_API_URL ??= "http://localhost:5001/api/v1";
+
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";

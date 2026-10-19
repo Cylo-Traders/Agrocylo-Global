@@ -7,8 +7,8 @@ disclosed publicly.
 ## Scope
 
 - **Smart contracts (highest priority):** `contracts/escrow`,
-  `contracts/weather-insurance`, and the four production contracts under
-  `agro-production/contract/` — `registry`, `production_escrow`,
+  `archive/weather-insurance`, and the four production contracts under
+  `contracts/` — `registry`, `production_escrow`,
   `investment_basket`, and `governance`.
 - **Backend services:** `agro-production/server` (API, auth, webhook/escrow
   event handling, database access).
@@ -48,7 +48,7 @@ Please include:
 
 Critical/High reports affecting a live contract trigger our incident
 response: the guardian address may call `pause` on the affected contract(s)
-per `agro-production/contract/governance` (see its module docs for the
+per `contracts/governance` (see its module docs for the
 pause/upgrade/migrate/unpause sequencing) to halt further exploitation while
 a fix is prepared, reviewed, and deployed via the governance timelock.
 

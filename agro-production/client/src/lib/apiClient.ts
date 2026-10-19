@@ -6,6 +6,7 @@
 */
 
 import { getAccessToken } from "./authToken";
+import { apiBaseUrl } from "./apiConfig";
 
 /** Thrown when no response is received (DNS failure, timeout, offline, etc.) */
 export class NetworkError extends Error {
@@ -81,7 +82,7 @@ export class ApiClient {
   private defaultRetries: number;
 
   constructor(opts: ApiClientOptions = {}) {
-    this.baseUrl = opts.baseUrl ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api/v1";
+    this.baseUrl = opts.baseUrl ?? apiBaseUrl(process.env.NEXT_PUBLIC_API_URL);
     this.fetchImpl = opts.fetchImpl;
     this.defaultTimeoutMs = opts.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.defaultRetries = opts.defaultRetries ?? DEFAULT_RETRIES;

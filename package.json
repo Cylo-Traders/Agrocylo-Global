@@ -39,7 +39,8 @@
     "reset:next:client": "node scripts/reset-next-cache.js --app=client",
     "reset:next:agro": "node scripts/reset-next-cache.js --app=agro",
     "smoke:dev": "node scripts/smoke-dev-start.js",
-    "test:scripts": "node --test scripts/__tests__/*.test.js"
+    "test:scripts": "node --test scripts/__tests__/*.test.js scripts/check-toolchain.test.cjs scripts/dev-frontend.test.cjs",
+    "check:links": "node scripts/check-markdown-links.js"
   },
   "devDependencies": {
     "react": "19.2.3",
@@ -51,5 +52,6 @@
       "name": "npm",
       "version": ">=10.0.0"
     }
-  }
+  },
+  "license": "ISC"
 }
