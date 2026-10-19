@@ -73,6 +73,9 @@ export const config = {
 
   shutdownTimeoutMs: parseInt(getEnv('SHUTDOWN_TIMEOUT_MS') ?? '15000', 10),
 
+  runReconciliationSweep: getEnv('RUN_RECONCILIATION_SWEEP') !== 'false',
+  reconciliationSweepIntervalMs: parseInt(getEnv('RECONCILIATION_SWEEP_INTERVAL_MS') ?? '300000', 10),
+
   supabaseUrl: getEnv('SUPABASE_URL') ?? '',
   supabaseAnonKey: getEnv('SUPABASE_ANON_KEY') ?? '',
   supabaseServiceRoleKey: getEnv('SUPABASE_SERVICE_ROLE_KEY') ?? '',

@@ -31,6 +31,12 @@ async function bootstrap() {
     registerWatcher(reconciliationInterval);
     logger.info('[Reconciliation] Scheduled to run every 15 minutes');
 
+    // Drift-detection sweep feeding reconciliation_drift_count (docs/OBSERVABILITY.md)
+    if (config.runReconciliationSweep) {
+      startReconciliationSweep(config.reconciliationSweepIntervalMs);
+      logger.info(`[reconciliationSweep] Scheduled every ${config.reconciliationSweepIntervalMs}ms`);
+    }
+
     const server = http.createServer(app);
     registerHttpServer(server);
     attachWebSocketServer(server);
