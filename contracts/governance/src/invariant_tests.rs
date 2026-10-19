@@ -648,3 +648,61 @@ fn test_invariant_total_weight_tracking() {
     h.gov.set_voter_weight(&admin, &v2, &0);
     assert_eq!(h.gov.get_voter_weight(&v2), 0);
 }
+
+// ---------------------------------------------------------------------------
+// Issue #1247: voter-weight mutation interleaved with voting
+// ---------------------------------------------------------------------------
+
+/// Proptest: interleave arbitrary `set_voter_weight` attempts with votes on an
+/// open proposal. Because weights are frozen for the whole voting window,
+/// every mutation must be rejected and `votes_for + votes_against` can never
+/// exceed the pre-proposal total weight.
+#[test]
+fn test_invariant_weight_mutation_interleaved_with_voting_proptest() {
+    let mut runner = TestRunner::new(ProptestConfig {
+        cases: 25,
+        ..ProptestConfig::default()
+    });
+
+    // (is_vote, voter_index, value)
+    let op_strategy =
+        proptest::collection::vec((any::<bool>(), 0usize..8usize, 0u64..=150u64), 0..=15usize);
+    let weights = [60u64, 50, 10, 20];
+    let total: u64 = weights.iter().sum(); // 140
+
+    runner
+        .run(&op_strategy, |ops| {
+            let h = make_gov_harness(&weights, QUORUM);
+            let pid = propose_set_fee_config(&h);
+
+            for (is_vote, idx, value) in ops {
+                let i = idx % h.voters.len();
+                let voter = h.voters[i].0.clone();
+                if is_vote {
+                    // Ignore AlreadyVoted on repeat votes.
+                    let _ = h.gov.try_vote(&voter, &pid, &(value % 2 == 0));
+                } else {
+                    let err = h
+                        .gov
+                        .try_set_voter_weight(&h.admin, &voter, &value)
+                        .unwrap_err()
+                        .unwrap();
+                    assert_eq!(
+                        err,
+                        GovernanceError::VoterWeightLocked,
+                        "weight change must be rejected while a proposal is open"
+                    );
+                }
+
+                let p = h.gov.get_proposal(&pid);
+                assert!(
+                    p.votes_for + p.votes_against <= total,
+                    "INVARIANT VIOLATED: tally ({}) exceeded eligible total ({})",
+                    p.votes_for + p.votes_against,
+                    total
+                );
+            }
+            Ok(())
+        })
+        .expect("weight-mutation/voting interleaving proptest failed");
+}

@@ -1814,3 +1814,147 @@ fn test_fund_split_order_non_co_buyer_fails() {
         .try_fund_split_order(&stranger, &order_id);
     assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotCoBuyer);
 }
+
+// ── Issue #1245: arbitrator quorum correctness ─────────────────────────────
+
+fn setup_arbitrated_dispute(
+    quorum: u32,
+) -> (
+    Env,
+    EscrowContractClient<'static>,
+    Address,
+    u64,
+    Vec<Address>,
+    Address,
+    token::Client<'static>,
+) {
+    let (env, client, buyer, farmer, _, token, _, admin, _, _) = setup_test();
+    let a1 = Address::generate(&env);
+    let a2 = Address::generate(&env);
+    let a3 = Address::generate(&env);
+    let mut arbitrators = Vec::new(&env);
+    arbitrators.push_back(a1);
+    arbitrators.push_back(a2);
+    arbitrators.push_back(a3);
+    client
+        .mock_all_auths()
+        .set_arbitrators(&admin, &arbitrators, &quorum);
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+    let reason = String::from_str(&env, "dispute");
+    let evidence_hash = String::from_str(&env, "hash");
+    client
+        .mock_all_auths()
+        .open_dispute(&buyer, &order_id, &reason, &evidence_hash);
+
+    (env, client, admin, order_id, arbitrators, farmer, token)
+}
+
+#[test]
+fn test_set_arbitrators_rejects_duplicate_addresses() {
+    let (env, client, _, _, _, _, _, admin, _, _) = setup_test();
+    let a1 = Address::generate(&env);
+    let a2 = Address::generate(&env);
+    let mut arbitrators = Vec::new(&env);
+    arbitrators.push_back(a1.clone());
+    arbitrators.push_back(a2);
+    arbitrators.push_back(a1);
+    let result = client
+        .mock_all_auths()
+        .try_set_arbitrators(&admin, &arbitrators, &2);
+    assert_eq!(
+        result.unwrap_err().unwrap(),
+        EscrowError::DuplicateArbitrator
+    );
+}
+
+#[test]
+fn test_vote_to_resolve_matching_quorum_resolves() {
+    let (_env, client, _admin, order_id, arbitrators, _farmer, _token) =
+        setup_arbitrated_dispute(2);
+    let a1 = arbitrators.get(0).unwrap();
+    let a2 = arbitrators.get(1).unwrap();
+
+    client
+        .mock_all_auths()
+        .vote_to_resolve(&a1, &order_id, &DisputeResolution::Release);
+    assert_eq!(
+        client.get_order_details(&order_id).status,
+        OrderStatus::Disputed
+    );
+
+    client
+        .mock_all_auths()
+        .vote_to_resolve(&a2, &order_id, &DisputeResolution::Release);
+    assert_eq!(
+        client.get_order_details(&order_id).status,
+        OrderStatus::Completed
+    );
+}
+
+#[test]
+fn test_vote_to_resolve_conflicting_votes_do_not_combine() {
+    let (_env, client, _admin, order_id, arbitrators, _farmer, _token) =
+        setup_arbitrated_dispute(2);
+    let a1 = arbitrators.get(0).unwrap();
+    let a2 = arbitrators.get(1).unwrap();
+    let a3 = arbitrators.get(2).unwrap();
+
+    client
+        .mock_all_auths()
+        .vote_to_resolve(&a1, &order_id, &DisputeResolution::Release);
+    client
+        .mock_all_auths()
+        .vote_to_resolve(&a2, &order_id, &DisputeResolution::Refund);
+
+    // Two conflicting votes must not satisfy a 2-of-3 quorum.
+    assert_eq!(
+        client.get_order_details(&order_id).status,
+        OrderStatus::Disputed
+    );
+
+    // A third vote for one side gives that resolution a real, matching quorum.
+    client
+        .mock_all_auths()
+        .vote_to_resolve(&a3, &order_id, &DisputeResolution::Refund);
+    assert_eq!(
+        client.get_order_details(&order_id).status,
+        OrderStatus::Refunded
+    );
+}
+
+#[test]
+fn test_vote_to_resolve_replay_rejected() {
+    let (_env, client, _admin, order_id, arbitrators, _farmer, _token) =
+        setup_arbitrated_dispute(3);
+    let a1 = arbitrators.get(0).unwrap();
+
+    client
+        .mock_all_auths()
+        .vote_to_resolve(&a1, &order_id, &DisputeResolution::Release);
+
+    // A voter may not change or replay their vote.
+    let result =
+        client
+            .mock_all_auths()
+            .try_vote_to_resolve(&a1, &order_id, &DisputeResolution::Refund);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::AlreadyVoted);
+}
+
+#[test]
+fn test_vote_to_resolve_non_arbitrator_rejected() {
+    let (env, client, _admin, order_id, _arbitrators, _farmer, _token) =
+        setup_arbitrated_dispute(2);
+    let stranger = Address::generate(&env);
+    let result = client.mock_all_auths().try_vote_to_resolve(
+        &stranger,
+        &order_id,
+        &DisputeResolution::Release,
+    );
+    assert_eq!(
+        result.unwrap_err().unwrap(),
+        EscrowError::ArbitratorNotFound
+    );
+}

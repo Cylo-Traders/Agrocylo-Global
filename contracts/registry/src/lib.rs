@@ -418,6 +418,13 @@ impl RegistryContract {
         Ok(env.storage().persistent().get(&DataKey::Farmer(farmer)))
     }
 
+    /// Paged list of registered farmers, ordered by registration.
+    ///
+    /// Pagination semantics (Issue #1248):
+    /// - `limit` is capped at `MAX_LIMIT` (50); larger values are rejected.
+    /// - `start >= FarmerCount` returns an empty page rather than an error.
+    /// - `start + limit` is computed with saturating arithmetic, so inputs
+    ///   near `u32::MAX` clamp to the stored count instead of trapping.
     pub fn get_farmers(env: Env, start: u32, limit: u32) -> Result<Vec<Address>, RegistryError> {
         require_initialized(&env)?;
         const MAX_LIMIT: u32 = 50;
@@ -430,7 +437,7 @@ impl RegistryContract {
             .get(&DataKey::FarmerCount)
             .unwrap_or(0);
         let mut result = Vec::new(&env);
-        let end = u32::min(start + limit, farmer_count);
+        let end = start.saturating_add(limit).min(farmer_count);
         for i in start..end {
             if let Some(farmer) = env
                 .storage()
@@ -542,6 +549,13 @@ impl RegistryContract {
             .get(&DataKey::Campaign(campaign_id)))
     }
 
+    /// Paged list of all registered campaigns, ordered by registration.
+    ///
+    /// Pagination semantics (Issue #1248):
+    /// - `limit` is capped at `MAX_LIMIT` (50); larger values are rejected.
+    /// - `start >= CampaignCount` returns an empty page rather than an error.
+    /// - `start + limit` is computed with saturating arithmetic, so inputs
+    ///   near `u64::MAX` clamp to the stored count instead of trapping.
     pub fn get_campaigns(
         env: Env,
         start: u64,
@@ -558,7 +572,7 @@ impl RegistryContract {
             .get(&DataKey::CampaignCount)
             .unwrap_or(0);
         let mut result = Vec::new(&env);
-        let end = u64::min(start + limit as u64, campaign_count);
+        let end = start.saturating_add(limit as u64).min(campaign_count);
         for i in start..end {
             if let Some(campaign_id) = env
                 .storage()
@@ -650,6 +664,14 @@ impl RegistryContract {
             }))
     }
 
+    /// Paged list of a farmer's campaigns, ordered by registration.
+    ///
+    /// Pagination semantics (Issue #1248), consistent with `get_farmers` and
+    /// `get_campaigns`:
+    /// - `limit` is capped at `MAX_LIMIT` (50); larger values are rejected.
+    /// - `start >= FarmerCampaignCount(farmer)` returns an empty page.
+    /// - `start + limit` is computed with saturating arithmetic, so inputs
+    ///   near `u64::MAX` clamp to the stored count instead of trapping.
     pub fn get_farmer_campaigns(
         env: Env,
         farmer: Address,
@@ -667,7 +689,7 @@ impl RegistryContract {
             .get(&DataKey::FarmerCampaignCount(farmer.clone()))
             .unwrap_or(0);
         let mut result = Vec::new(&env);
-        let end = u64::min(start + limit as u64, campaign_count);
+        let end = start.saturating_add(limit as u64).min(campaign_count);
         for i in start..end {
             if let Some(campaign_id) = env
                 .storage()

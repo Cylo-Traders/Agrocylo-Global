@@ -18,9 +18,16 @@
 extern crate std;
 use std::{format, println};
 
-use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+use soroban_sdk::{
+    testutils::{Address as _, Ledger},
+    token::{Client as TokenClient, StellarAssetClient},
+    Address, Env, Vec,
+};
 
-use crate::{ProductionEscrowContract, ProductionEscrowContractClient};
+use crate::{
+    CampaignStatus, EscrowError, Milestone, MilestoneConfig, ProductionEscrowContract,
+    ProductionEscrowContractClient, SplitOrderError, SplitOrderResolution, SplitOrderStatus,
+};
 
 // -----------------------------------------------------------------------
 // Pause-Gating Matrix
@@ -52,7 +59,56 @@ const PAUSE_GATING_MATRIX: &[(&str, bool, &str)] = &[
     ("resolve_dispute", true, "Dispute resolution blocked"),
     ("batch_refund_investors", true, "Batch refunds blocked"),
     ("batch_refund_orders", true, "Batch refunds blocked"),
+    // Issue #1246: milestone + split-order value-moving paths.
+    (
+        "advance_milestone",
+        true,
+        "Milestone tranche release moves funds to the farmer",
+    ),
+    (
+        "create_split_order",
+        true,
+        "Creating a split order creates a new payment obligation",
+    ),
+    (
+        "fund_split_order",
+        true,
+        "Funding a split order moves tokens into escrow",
+    ),
+    (
+        "confirm_split_receipt",
+        true,
+        "Confirmation credits revenue and may move the fee",
+    ),
+    (
+        "open_split_dispute",
+        true,
+        "Split dispute entry gated for parity with open_dispute",
+    ),
+    (
+        "resolve_split_dispute",
+        true,
+        "Both resolution branches move funds",
+    ),
     // production_escrow: NOT pause-gated (governance, reads, setters)
+    // Issue #1246 safety exits that deliberately remain available while
+    // paused so users can still reclaim funds/clean up state:
+    (
+        "cancel_order",
+        false,
+        "SAFETY EXIT: buyer cooling-off refund stays available while paused",
+    ),
+    (
+        "mark_campaign_failed",
+        false,
+        "SAFETY EXIT: state transition to Failed (no funds move); \
+         enables later refunds once unpaused",
+    ),
+    (
+        "finalize_failed",
+        false,
+        "SAFETY EXIT: cleanup transition after deadline (no funds move)",
+    ),
     ("initialize", false, "Initialization (bootstrap only)"),
     (
         "upgrade",
@@ -86,31 +142,6 @@ const PAUSE_GATING_MATRIX: &[(&str, bool, &str)] = &[
     ("get_admin", false, "Read-only view"),
     ("get_campaign", false, "Read-only view"),
     ("get_split_order", false, "Read-only view"),
-    (
-        "cancel_order",
-        false,
-        "Read-only state check (no funds moved)",
-    ),
-    (
-        "confirm_split_receipt",
-        false,
-        "Cross-contract call gating (not pause-gated)",
-    ),
-    (
-        "open_split_dispute",
-        false,
-        "Dispute (may be pause-gated; see code review)",
-    ),
-    (
-        "resolve_split_dispute",
-        false,
-        "Dispute (may be pause-gated; see code review)",
-    ),
-    (
-        "finalize_failed",
-        false,
-        "Cleanup operation (may remain during pause)",
-    ),
     ("refundable_amount", false, "Read-only calculation"),
     (
         "transfer_investment",
@@ -324,10 +355,15 @@ fn test_pause_gating_matrix_documentation() {
     println!("\n=== Production Contracts Pause-Gating Matrix ===\n");
 
     println!("production_escrow:");
-    println!("  Pause-gated (13): create_campaign, invest, start_production, mark_harvest,");
+    println!("  Pause-gated (19): create_campaign, invest, start_production, mark_harvest,");
     println!("                    create_order, confirm_order, settle, claim_returns, refund,");
     println!("                    open_dispute, resolve_dispute, batch_refund_investors,");
-    println!("                    batch_refund_orders");
+    println!("                    batch_refund_orders, advance_milestone, create_split_order,");
+    println!("                    fund_split_order, confirm_split_receipt, open_split_dispute,");
+    println!("                    resolve_split_dispute");
+    println!("  Safety exits kept enabled while paused (no value-moving progress):");
+    println!("                    cancel_order (buyer cooling-off refund), finalize_failed");
+    println!("                    (post-deadline state cleanup), mark_campaign_failed");
     println!("  Not gated: all reads, governance setters, admin setters, pause/unpause");
     println!("");
 
@@ -373,4 +409,306 @@ fn test_batch_refund_investors_max_batch_size() {
 fn test_batch_refund_orders_performance() {
     println!("TODO (Issue #781): Test batch_refund_orders performance");
     println!("  Measure cost as order count varies");
+}
+
+// -----------------------------------------------------------------------
+// Issue #1246: Behavior tests for the milestone + split-order pause policy
+// -----------------------------------------------------------------------
+//
+// These exercise the *actual* contract entry points while paused and after
+// unpausing, rather than only inspecting this file's own matrix.
+
+struct SplitFixture<'a> {
+    env: Env,
+    client: ProductionEscrowContractClient<'a>,
+    token_id: Address,
+    admin: Address,
+    guardian: Address,
+    attester: Address,
+    farmer: Address,
+    investor: Address,
+    buyer: Address,
+    co1: Address,
+    co2: Address,
+}
+
+fn setup_split_fixture() -> SplitFixture<'static> {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_000_000);
+
+    let admin = Address::generate(&env);
+    let guardian = Address::generate(&env);
+    let attester = Address::generate(&env);
+    let farmer = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let co1 = Address::generate(&env);
+    let co2 = Address::generate(&env);
+
+    let token_admin = Address::generate(&env);
+    let token_id = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+    let sac = StellarAssetClient::new(&env, &token_id);
+    sac.mint(&investor, &100_000);
+    sac.mint(&buyer, &100_000);
+    sac.mint(&co1, &100_000);
+    sac.mint(&co2, &100_000);
+
+    let contract_id = env.register(ProductionEscrowContract, ());
+    let client = ProductionEscrowContractClient::new(&env, &contract_id);
+
+    let mut tokens = Vec::new(&env);
+    tokens.push_back(token_id.clone());
+    let fee_collector = Address::generate(&env);
+    client.initialize(&admin, &tokens, &fee_collector, &300);
+    client.set_attester(&admin, &attester);
+    client.set_guardian(&admin, &guardian);
+
+    let client: ProductionEscrowContractClient<'static> = unsafe { std::mem::transmute(client) };
+
+    SplitFixture {
+        env,
+        client,
+        token_id,
+        admin,
+        guardian,
+        attester,
+        farmer,
+        investor,
+        buyer,
+        co1,
+        co2,
+    }
+}
+
+fn funded_in_production_campaign(t: &SplitFixture, target: i128) -> u64 {
+    let deadline = t.env.ledger().timestamp() + 7 * 24 * 3600;
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &target, &deadline);
+    t.client.invest(&t.investor, &id, &target);
+    t.client.start_production(&t.farmer, &id);
+    id
+}
+
+fn co_buyer_args(t: &SplitFixture) -> (Vec<Address>, Vec<i128>) {
+    let mut co_buyers = Vec::new(&t.env);
+    co_buyers.push_back(t.co1.clone());
+    co_buyers.push_back(t.co2.clone());
+    let mut shares = Vec::new(&t.env);
+    shares.push_back(500i128);
+    shares.push_back(500i128);
+    (co_buyers, shares)
+}
+
+/// Creates a split order in `Funding` state.
+fn make_funding_split(t: &SplitFixture, campaign_id: u64) -> u64 {
+    let (co_buyers, shares) = co_buyer_args(t);
+    t.client
+        .create_split_order(&t.co1, &campaign_id, &co_buyers, &shares)
+}
+
+/// Creates a fully funded (active) split order.
+fn make_active_split(t: &SplitFixture, campaign_id: u64) -> u64 {
+    let order_id = make_funding_split(t, campaign_id);
+    t.client.fund_split_order(&t.co1, &order_id);
+    t.client.fund_split_order(&t.co2, &order_id);
+    assert_eq!(
+        t.client.get_split_order(&order_id).status,
+        SplitOrderStatus::Active
+    );
+    order_id
+}
+
+#[test]
+fn test_pause_blocks_advance_milestone_then_unpause_allows() {
+    let t = setup_split_fixture();
+    let id = funded_in_production_campaign(&t, 10_000);
+    let mut configs = Vec::new(&t.env);
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Planted,
+        release_bps: 1_000,
+    });
+    t.client.set_milestone_configs(&t.admin, &id, &configs);
+
+    // `start_production` already released the start tranche (30%), so capture
+    // the current value rather than assuming zero.
+    let tranche_before = t.client.get_campaign(&id).tranche_released;
+
+    t.client.pause(&t.guardian);
+    let err = t
+        .client
+        .try_advance_milestone(&t.admin, &t.attester, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::ContractPaused);
+    // No tranche moved while paused.
+    assert_eq!(t.client.get_campaign(&id).tranche_released, tranche_before);
+
+    t.client.unpause(&t.admin);
+    t.client.advance_milestone(&t.admin, &t.attester, &id);
+    let c = t.client.get_campaign(&id);
+    assert_eq!(c.current_milestone, 1);
+    assert_eq!(c.tranche_released, tranche_before + 1_000);
+}
+
+#[test]
+fn test_pause_blocks_create_split_order_then_unpause_allows() {
+    let t = setup_split_fixture();
+    let campaign = funded_in_production_campaign(&t, 10_000);
+    let (co_buyers, shares) = co_buyer_args(&t);
+
+    t.client.pause(&t.guardian);
+    let err = t
+        .client
+        .try_create_split_order(&t.co1, &campaign, &co_buyers, &shares)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::ContractPaused);
+
+    t.client.unpause(&t.admin);
+    let order_id = t
+        .client
+        .create_split_order(&t.co1, &campaign, &co_buyers, &shares);
+    assert_eq!(
+        t.client.get_split_order(&order_id).status,
+        SplitOrderStatus::Funding
+    );
+}
+
+#[test]
+fn test_pause_blocks_fund_split_order_then_unpause_allows() {
+    let t = setup_split_fixture();
+    let campaign = funded_in_production_campaign(&t, 10_000);
+    let order_id = make_funding_split(&t, campaign);
+
+    t.client.pause(&t.guardian);
+    let err = t
+        .client
+        .try_fund_split_order(&t.co1, &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::ContractPaused);
+
+    t.client.unpause(&t.admin);
+    t.client.fund_split_order(&t.co1, &order_id);
+    assert!(t
+        .client
+        .get_split_order(&order_id)
+        .funded
+        .get(t.co1.clone())
+        .unwrap_or(false));
+}
+
+#[test]
+fn test_pause_blocks_confirm_split_receipt_then_unpause_allows() {
+    let t = setup_split_fixture();
+    let campaign = funded_in_production_campaign(&t, 10_000);
+    let order_id = make_active_split(&t, campaign);
+
+    t.client.pause(&t.guardian);
+    let err = t
+        .client
+        .try_confirm_split_receipt(&t.co1, &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::ContractPaused);
+
+    t.client.unpause(&t.admin);
+    t.client.confirm_split_receipt(&t.co1, &order_id);
+    assert!(t
+        .client
+        .get_split_order(&order_id)
+        .confirmed
+        .get(t.co1.clone())
+        .unwrap_or(false));
+}
+
+#[test]
+fn test_pause_blocks_open_split_dispute_then_unpause_allows() {
+    let t = setup_split_fixture();
+    let campaign = funded_in_production_campaign(&t, 10_000);
+    let order_id = make_active_split(&t, campaign);
+
+    t.client.pause(&t.guardian);
+    let err = t
+        .client
+        .try_open_split_dispute(&t.co1, &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::ContractPaused);
+
+    t.client.unpause(&t.admin);
+    t.client.open_split_dispute(&t.co1, &order_id);
+    assert_eq!(
+        t.client.get_split_order(&order_id).status,
+        SplitOrderStatus::Disputed
+    );
+}
+
+#[test]
+fn test_pause_blocks_resolve_split_dispute_then_unpause_allows() {
+    let t = setup_split_fixture();
+    let campaign = funded_in_production_campaign(&t, 10_000);
+    let order_id = make_active_split(&t, campaign);
+    t.client.open_split_dispute(&t.co1, &order_id);
+
+    let co1_before = TokenClient::new(&t.env, &t.token_id).balance(&t.co1);
+    t.client.pause(&t.guardian);
+    let err = t
+        .client
+        .try_resolve_split_dispute(&t.admin, &order_id, &SplitOrderResolution::RefundCoBuyers)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::ContractPaused);
+    assert_eq!(
+        TokenClient::new(&t.env, &t.token_id).balance(&t.co1),
+        co1_before
+    );
+
+    t.client.unpause(&t.admin);
+    t.client
+        .resolve_split_dispute(&t.admin, &order_id, &SplitOrderResolution::RefundCoBuyers);
+    assert_eq!(
+        t.client.get_split_order(&order_id).status,
+        SplitOrderStatus::Refunded
+    );
+    assert!(TokenClient::new(&t.env, &t.token_id).balance(&t.co1) > co1_before);
+}
+
+#[test]
+fn test_cancel_order_safety_exit_remains_available_while_paused() {
+    let t = setup_split_fixture();
+    let campaign = funded_in_production_campaign(&t, 10_000);
+    // `create_order` is itself pause-gated, so create the order first.
+    let order_id = t.client.create_order(&t.buyer, &campaign, &1_000);
+
+    t.client.pause(&t.guardian);
+
+    // The buyer refund/cooling-off safety exit still works while paused.
+    t.client.cancel_order(&t.buyer, &order_id);
+    assert_eq!(
+        t.client.get_order(&order_id).status,
+        crate::OrderStatus::Refunded
+    );
+}
+
+#[test]
+fn test_finalize_failed_safety_exit_remains_available_while_paused() {
+    let t = setup_split_fixture();
+    let deadline = t.env.ledger().timestamp() + 7 * 24 * 3600;
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+
+    // Move past the deadline without reaching the target.
+    t.env
+        .ledger()
+        .set_timestamp(t.env.ledger().timestamp() + 8 * 24 * 3600);
+    t.client.pause(&t.guardian);
+
+    t.client.finalize_failed(&id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
 }

@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 extern crate std;
 
 use soroban_sdk::{
@@ -61,8 +59,7 @@ fn setup() -> TestEnv<'static> {
     client.initialize(&admin, &tokens, &fee_collector, &300);
     client.set_attester(&admin, &attester);
 
-    // Leak lifetimes to 'static for convenience struct.
-    let env: Env = unsafe { std::mem::transmute(env) };
+    // Leak the client's lifetime to 'static for the convenience struct.
     let client: ProductionEscrowContractClient<'static> = unsafe { std::mem::transmute(client) };
 
     TestEnv {
@@ -3385,4 +3382,112 @@ fn test_registry_wired_campaign_creation() {
     assert_eq!(record.campaign_id, campaign_id);
     assert_eq!(record.farmer, t.farmer);
     assert_eq!(record.source_contract, t.client.address);
+}
+
+// ---------------------------------------------------------------------------
+// Issue #1245: arbitrator quorum correctness
+// ---------------------------------------------------------------------------
+
+fn setup_arbitrated_dispute(t: &TestEnv, quorum: u32) -> (u64, Vec<Address>) {
+    let deadline = future_deadline(t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.open_dispute(&t.farmer, &id);
+
+    let a1 = Address::generate(&t.env);
+    let a2 = Address::generate(&t.env);
+    let a3 = Address::generate(&t.env);
+    let mut arbitrators = Vec::new(&t.env);
+    arbitrators.push_back(a1);
+    arbitrators.push_back(a2);
+    arbitrators.push_back(a3);
+    t.client.set_arbitrators(&t.admin, &arbitrators, &quorum);
+    (id, arbitrators)
+}
+
+#[test]
+fn test_set_arbitrators_rejects_duplicate_addresses() {
+    let t = setup();
+    let a1 = Address::generate(&t.env);
+    let a2 = Address::generate(&t.env);
+    let mut arbitrators = Vec::new(&t.env);
+    arbitrators.push_back(a1.clone());
+    arbitrators.push_back(a2);
+    arbitrators.push_back(a1);
+    let err = t
+        .client
+        .try_set_arbitrators(&t.admin, &arbitrators, &2)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::InvalidAmount);
+}
+
+#[test]
+fn test_vote_to_resolve_matching_quorum_resolves() {
+    let t = setup();
+    let (id, arbitrators) = setup_arbitrated_dispute(&t, 2);
+    let a1 = arbitrators.get(0).unwrap();
+    let a2 = arbitrators.get(1).unwrap();
+
+    t.client
+        .vote_to_resolve(&a1, &id, &DisputeResolution::FullPayoutToInvestors);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Disputed);
+
+    t.client
+        .vote_to_resolve(&a2, &id, &DisputeResolution::FullPayoutToInvestors);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Settled);
+}
+
+#[test]
+fn test_vote_to_resolve_conflicting_votes_do_not_combine() {
+    let t = setup();
+    let (id, arbitrators) = setup_arbitrated_dispute(&t, 2);
+    let a1 = arbitrators.get(0).unwrap();
+    let a2 = arbitrators.get(1).unwrap();
+    let a3 = arbitrators.get(2).unwrap();
+
+    t.client
+        .vote_to_resolve(&a1, &id, &DisputeResolution::FullPayoutToInvestors);
+    t.client
+        .vote_to_resolve(&a2, &id, &DisputeResolution::RefundInvestors);
+
+    // Two conflicting votes must not satisfy a 2-of-3 quorum.
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Disputed);
+
+    // A third matching vote gives one resolution a real quorum.
+    t.client
+        .vote_to_resolve(&a3, &id, &DisputeResolution::RefundInvestors);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+}
+
+#[test]
+fn test_vote_to_resolve_replay_rejected() {
+    let t = setup();
+    let (id, arbitrators) = setup_arbitrated_dispute(&t, 3);
+    let a1 = arbitrators.get(0).unwrap();
+
+    t.client
+        .vote_to_resolve(&a1, &id, &DisputeResolution::FullPayoutToInvestors);
+    let err = t
+        .client
+        .try_vote_to_resolve(&a1, &id, &DisputeResolution::RefundInvestors)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::AlreadyVoted);
+}
+
+#[test]
+fn test_vote_to_resolve_non_arbitrator_rejected() {
+    let t = setup();
+    let (id, _arbitrators) = setup_arbitrated_dispute(&t, 2);
+    let stranger = Address::generate(&t.env);
+    let err = t
+        .client
+        .try_vote_to_resolve(&stranger, &id, &DisputeResolution::FullPayoutToInvestors)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::ArbitratorNotFound);
 }

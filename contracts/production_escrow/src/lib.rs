@@ -141,6 +141,8 @@ pub enum SplitOrderError {
     ContractNotInitialized = 23,
     NotBuyer = 24,
     NotAdmin = 25,
+    /// Issue #1246: split-order entry points must enforce the pause policy.
+    ContractPaused = 26,
 }
 
 impl From<EscrowError> for SplitOrderError {
@@ -152,6 +154,7 @@ impl From<EscrowError> for SplitOrderError {
             EscrowError::ContractNotInitialized => SplitOrderError::ContractNotInitialized,
             EscrowError::NotBuyer => SplitOrderError::NotBuyer,
             EscrowError::NotAdmin => SplitOrderError::NotAdmin,
+            EscrowError::ContractPaused => SplitOrderError::ContractPaused,
             // Every other `EscrowError` variant is unreachable from the
             // shared helpers the split-order flow actually calls; map to the
             // closest generic fallback rather than panicking.
@@ -974,6 +977,9 @@ impl ProductionEscrowContract {
     ) -> Result<(), EscrowError> {
         caller.require_auth();
         attester_caller.require_auth();
+        // Issue #1246: a milestone advance releases a tranche of escrowed
+        // funds to the farmer — value-moving progress blocked while paused.
+        require_not_paused(&env)?;
         let attester_addr = attester(&env)?;
         if attester_caller != attester_addr {
             return Err(EscrowError::NotAdmin);
@@ -1166,6 +1172,9 @@ impl ProductionEscrowContract {
         shares: Vec<i128>,
     ) -> Result<u64, SplitOrderError> {
         initiator.require_auth();
+        // Issue #1246: creating a split order creates a new payment
+        // obligation — blocked while paused.
+        require_not_paused(&env)?;
 
         if co_buyers.len() < 2 {
             return Err(SplitOrderError::EmptyCoBuyerList);
@@ -1252,6 +1261,8 @@ impl ProductionEscrowContract {
         order_id: u64,
     ) -> Result<(), SplitOrderError> {
         co_buyer.require_auth();
+        // Issue #1246: funding moves tokens into escrow — blocked while paused.
+        require_not_paused(&env)?;
 
         let mut order = load_split_order(&env, order_id)?;
         if order.status != SplitOrderStatus::Funding {
@@ -1299,6 +1310,9 @@ impl ProductionEscrowContract {
         order_id: u64,
     ) -> Result<(), SplitOrderError> {
         co_buyer.require_auth();
+        // Issue #1246: confirmation credits revenue and may move the fee —
+        // value-moving progress blocked while paused.
+        require_not_paused(&env)?;
 
         let mut order = load_split_order(&env, order_id)?;
         if order.status != SplitOrderStatus::Active {
@@ -1357,6 +1371,9 @@ impl ProductionEscrowContract {
         order_id: u64,
     ) -> Result<(), SplitOrderError> {
         caller.require_auth();
+        // Issue #1246: dispute entry is gated for parity with campaign
+        // `open_dispute`; it is not an emergency exit (no funds move).
+        require_not_paused(&env)?;
 
         let mut order = load_split_order(&env, order_id)?;
         if order.status != SplitOrderStatus::Active {
@@ -1387,6 +1404,9 @@ impl ProductionEscrowContract {
         resolution: SplitOrderResolution,
     ) -> Result<(), SplitOrderError> {
         admin_caller.require_auth();
+        // Issue #1246: both branches of split-dispute resolution move funds
+        // (pro-rata refund or release-to-farmer + fee) — blocked while paused.
+        require_not_paused(&env)?;
         let admin_addr = admin(&env)?;
         if admin_caller != admin_addr {
             return Err(SplitOrderError::NotAdmin);
@@ -2042,6 +2062,18 @@ impl ProductionEscrowContract {
         if admin_caller != admin {
             return Err(EscrowError::NotAdmin);
         }
+        // Issue #1245: unique arbitrator addresses only. Because quorum is
+        // tallied by iterating the configured vector, a repeated address would
+        // otherwise let one stored vote count multiple times. `EscrowError` is
+        // at Soroban's 50-variant cap, so this shares the invalid-configuration
+        // error used for a bad quorum above.
+        for i in 0..arbitrators.len() {
+            for j in (i + 1)..arbitrators.len() {
+                if arbitrators.get(i) == arbitrators.get(j) {
+                    return Err(EscrowError::InvalidAmount);
+                }
+            }
+        }
         if quorum == 0 || quorum > arbitrators.len() {
             return Err(EscrowError::InvalidAmount);
         }
@@ -2088,6 +2120,9 @@ impl ProductionEscrowContract {
             return Err(EscrowError::CampaignNotDisputed);
         }
 
+        // Issue #1245: a vote is immutable once cast. Re-voting — whether to
+        // change one's mind or replay an earlier vote — is rejected; the
+        // recorded resolution is the one that counts toward quorum.
         let vote_key = DataKey::ArbitratorVote(campaign_id, arbitrator.clone());
         if env.storage().persistent().has(&vote_key) {
             return Err(EscrowError::AlreadyVoted);
@@ -2095,19 +2130,25 @@ impl ProductionEscrowContract {
 
         env.storage().persistent().set(&vote_key, &resolution);
 
+        // Issue #1245: tally only votes that match *this* proposed resolution.
+        // Conflicting votes therefore cannot combine to satisfy quorum and the
+        // outcome is independent of vote ordering. Each unique arbitrator
+        // contributes at most one vote (enforced by unique configuration).
         let quorum: u32 = env.storage().instance().get(&DataKey::Quorum).unwrap_or(0);
-        let mut yes_votes: u32 = 0;
+        let mut matching_votes: u32 = 0;
         for a in arbitrators.iter() {
-            if env
+            if let Some(vote) = env
                 .storage()
                 .persistent()
-                .has(&DataKey::ArbitratorVote(campaign_id, a))
+                .get::<_, DisputeResolution>(&DataKey::ArbitratorVote(campaign_id, a))
             {
-                yes_votes += 1;
+                if vote == resolution {
+                    matching_votes += 1;
+                }
             }
         }
 
-        if yes_votes >= quorum {
+        if matching_votes >= quorum {
             resolve_dispute_internal(&env, campaign_id, resolution)?;
         }
 
