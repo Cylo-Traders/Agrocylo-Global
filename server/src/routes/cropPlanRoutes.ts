@@ -2,83 +2,102 @@ import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { prisma } from '../config/database.js';
 import { ApiError } from '../http/errors.js';
+import { requireWallet, requireAnyRole } from '../middleware/walletAuth.js';
 
 const router = Router();
 
+function assertBodyWalletMatchesSession(req: Request, bodyWallet: unknown): void {
+  if (bodyWallet && String(bodyWallet) !== req.walletAddress) {
+    throw new ApiError(
+      403,
+      'Forbidden',
+      'Body wallet does not match the authenticated wallet'
+    );
+  }
+}
+
 // Create a new CropPlan
-router.post('/crop-plans', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const {
-      farmerWallet,
-      cropName,
-      plantedDate,
-      expectedHarvestStart,
-      expectedHarvestEnd,
-      expectedVolume,
-      unit,
-      region,
-      linkedCampaignId,
-      reminderDaysBefore = 7,
-    } = req.body;
-
-    if (
-      !farmerWallet ||
-      !cropName ||
-      !plantedDate ||
-      !expectedHarvestStart ||
-      !expectedHarvestEnd
-    ) {
-      throw new ApiError(
-        400,
-        'Validation Error',
-        'farmerWallet, cropName, plantedDate, expectedHarvestStart, and expectedHarvestEnd are required'
-      );
-    }
-
-    const pDate = new Date(plantedDate);
-    const hStart = new Date(expectedHarvestStart);
-    const hEnd = new Date(expectedHarvestEnd);
-
-    if (isNaN(pDate.getTime()) || isNaN(hStart.getTime()) || isNaN(hEnd.getTime())) {
-      throw new ApiError(400, 'Invalid Date', 'Provided dates are invalid');
-    }
-
-    if (pDate > hStart) {
-      throw new ApiError(
-        400,
-        'Invalid Date Range',
-        'Planted date cannot be after expected harvest start date'
-      );
-    }
-
-    if (hStart > hEnd) {
-      throw new ApiError(
-        400,
-        'Invalid Date Range',
-        'Expected harvest start date cannot be after harvest end date'
-      );
-    }
-
-    const cropPlan = await prisma.cropPlan.create({
-      data: {
+router.post(
+  '/crop-plans',
+  requireWallet,
+  requireAnyRole('FARMER'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const {
         farmerWallet,
         cropName,
-        plantedDate: pDate,
-        expectedHarvestStart: hStart,
-        expectedHarvestEnd: hEnd,
-        expectedVolume: expectedVolume ? parseFloat(expectedVolume) : null,
+        plantedDate,
+        expectedHarvestStart,
+        expectedHarvestEnd,
+        expectedVolume,
         unit,
         region,
         linkedCampaignId,
-        reminderDaysBefore,
-      },
-    });
+        reminderDaysBefore = 7,
+      } = req.body;
 
-    res.status(201).json(cropPlan);
-  } catch (err) {
-    next(err);
+      assertBodyWalletMatchesSession(req, farmerWallet);
+
+      const sessionWallet = req.walletAddress as string;
+
+      if (
+        !cropName ||
+        !plantedDate ||
+        !expectedHarvestStart ||
+        !expectedHarvestEnd
+      ) {
+        throw new ApiError(
+          400,
+          'Validation Error',
+          'cropName, plantedDate, expectedHarvestStart, and expectedHarvestEnd are required'
+        );
+      }
+
+      const pDate = new Date(plantedDate);
+      const hStart = new Date(expectedHarvestStart);
+      const hEnd = new Date(expectedHarvestEnd);
+
+      if (isNaN(pDate.getTime()) || isNaN(hStart.getTime()) || isNaN(hEnd.getTime())) {
+        throw new ApiError(400, 'Invalid Date', 'Provided dates are invalid');
+      }
+
+      if (pDate > hStart) {
+        throw new ApiError(
+          400,
+          'Invalid Date Range',
+          'Planted date cannot be after expected harvest start date'
+        );
+      }
+
+      if (hStart > hEnd) {
+        throw new ApiError(
+          400,
+          'Invalid Date Range',
+          'Expected harvest start date cannot be after harvest end date'
+        );
+      }
+
+      const cropPlan = await prisma.cropPlan.create({
+        data: {
+          farmerWallet: sessionWallet,
+          cropName,
+          plantedDate: pDate,
+          expectedHarvestStart: hStart,
+          expectedHarvestEnd: hEnd,
+          expectedVolume: expectedVolume ? parseFloat(expectedVolume) : null,
+          unit,
+          region,
+          linkedCampaignId,
+          reminderDaysBefore,
+        },
+      });
+
+      res.status(201).json(cropPlan);
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
 // List farmer crop plans
 router.get('/crop-plans', async (req: Request, res: Response, next: NextFunction) => {
