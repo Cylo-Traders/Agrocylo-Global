@@ -221,15 +221,17 @@ export async function refreshAccessToken(
   await prisma.refreshToken.delete({ where: { token: tokenHash } });
 
   const role = await resolveWalletRole(row.walletAddress);
-  const accessToken = jwt.sign({ walletAddress: row.walletAddress, role }, JWT_SECRET, {
-    expiresIn: JWT_EXPIRES_IN,
-  });
+  const accessToken = jwt.sign(
+    { walletAddress: canonicalWalletAddress(row.walletAddress), role },
+    JWT_SECRET,
+    { expiresIn: JWT_EXPIRES_IN }
+  );
   const newRefreshToken = crypto.randomBytes(40).toString('hex');
   const refreshExpiresAt = new Date(Date.now() + REFRESH_TTL_MS);
 
   await prisma.refreshToken.create({
     data: {
-      walletAddress: row.walletAddress,
+      walletAddress: canonicalWalletAddress(row.walletAddress),
       token: hashRefreshToken(newRefreshToken),
       expiresAt: refreshExpiresAt,
     },
@@ -238,14 +240,36 @@ export async function refreshAccessToken(
   return { accessToken, refreshToken: newRefreshToken };
 }
 
-export async function logout(refreshToken: string): Promise<void> {
-  await prisma.refreshToken.deleteMany({ where: { token: hashRefreshToken(refreshToken) } });
+export function verifyAccessToken(token: string): { walletAddress: string; role: ServerProfileRole } {
+  try {
+    const payload = jwt.verify(token, JWT_SECRET) as {
+      walletAddress: string;
+      role: ServerProfileRole;
+    };
+    return {
+      walletAddress: canonicalWalletAddress(payload.walletAddress),
+      role: payload.role,
+    };
+  } catch {
+    throw new ApiError(401, 'Unauthorized', 'Invalid or expired access token');
+  }
 }
 
-export function generateHandoffToken(walletAddress: string): string {
-  return jwt.sign({ walletAddress }, JWT_SECRET, {
-    expiresIn: HANDOFF_EXPIRES_IN,
-    audience: HANDOFF_AUDIENCE,
-    jwtid: crypto.randomUUID(),
-  });
+export function signHandoffToken(walletAddress: string): string {
+  return jwt.sign(
+    { walletAddress: canonicalWalletAddress(walletAddress) },
+    JWT_SECRET,
+    { expiresIn: HANDOFF_EXPIRES_IN, audience: HANDOFF_AUDIENCE }
+  );
+}
+
+export function verifyHandoffToken(token: string): { walletAddress: string } {
+  try {
+    const payload = jwt.verify(token, JWT_SECRET, {
+      audience: HANDOFF_AUDIENCE,
+    }) as { walletAddress: string };
+    return { walletAddress: canonicalWalletAddress(payload.walletAddress) };
+  } catch {
+    throw new ApiError(401, 'Unauthorized', 'Invalid or expired handoff token');
+  }
 }

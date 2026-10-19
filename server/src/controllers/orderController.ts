@@ -10,6 +10,11 @@ import {
   sendProblem,
 } from "../http/errors.js";
 
+// Stellar addresses are checksummed mixed-case while identity/order rows are
+// persisted canonical-lowercase. Canonicalize once at the boundary so every
+// comparison and lookup below is case-insensitive (#1211).
+const canonicalizeWallet = (address: string): string => address.toLowerCase();
+
 export class OrderController {
   static async getAllOrders(req: Request, res: Response) {
     try {
@@ -19,7 +24,7 @@ export class OrderController {
         sendProblem(res, req, new AuthError("Authentication required to view orders"));
         return;
       }
-      const orders = await OrderService.getAllForWallet(walletAddress);
+      const orders = await OrderService.getAllForWallet(canonicalizeWallet(walletAddress));
       res.status(200).json(orders);
     } catch (error) {
       handleServiceError(error, req, res);
@@ -47,8 +52,8 @@ export class OrderController {
         return;
       }
       // Identity rows are stored lower-cased while callers send checksummed
-      // addresses — compare case-insensitively (#1184/#1185).
-      const principal = walletAddress.toLowerCase();
+      // addresses — compare case-insensitively (#1184/#1211).
+      const principal = canonicalizeWallet(walletAddress);
       if (
         order.buyerAddress?.toLowerCase() !== principal &&
         order.sellerAddress?.toLowerCase() !== principal
@@ -76,15 +81,15 @@ export class OrderController {
         sendProblem(res, req, new AuthError("Authentication required to view buyer orders"));
         return;
       }
-      if (walletAddress.toLowerCase() !== address.toLowerCase()) {
+      const buyerAddress = canonicalizeWallet(address);
+      if (canonicalizeWallet(walletAddress) !== buyerAddress) {
         return res.status(403).json({ error: "Forbidden: you can only view your own orders" });
       }
 
-      const orders = await OrderService.getByBuyerAddress(address);
+      const orders = await OrderService.getByBuyerAddress(buyerAddress);
       res.status(200).json(orders);
     } catch (error) {
-      logger.error("Error fetching buyer orders for " + address + ":", error);
-      return res.status(500).json({ error: "Internal server error" });
+      handleServiceError(error, req, res);
     }
   }
 
@@ -102,15 +107,15 @@ export class OrderController {
         sendProblem(res, req, new AuthError("Authentication required to view seller orders"));
         return;
       }
-      if (walletAddress.toLowerCase() !== address.toLowerCase()) {
+      const sellerAddress = canonicalizeWallet(address);
+      if (canonicalizeWallet(walletAddress) !== sellerAddress) {
         return res.status(403).json({ error: "Forbidden: you can only view your own orders" });
       }
 
-      const orders = await OrderService.getByFarmerAddress(address);
+      const orders = await OrderService.getByFarmerAddress(sellerAddress);
       res.status(200).json(orders);
     } catch (error) {
-      logger.error("Error fetching seller orders for " + address + ":", error);
-      return res.status(500).json({ error: "Internal server error" });
+      handleServiceError(error, req, res);
     }
   }
 
@@ -128,11 +133,12 @@ export class OrderController {
         sendProblem(res, req, new AuthError("Authentication required to view seller stats"));
         return;
       }
-      if (walletAddress.toLowerCase() !== sellerAddress.toLowerCase()) {
+      const canonicalSeller = canonicalizeWallet(sellerAddress);
+      if (canonicalizeWallet(walletAddress) !== canonicalSeller) {
         return res.status(403).json({ error: "Forbidden: you can only view your own stats" });
       }
 
-      const stats = await OrderService.getSellerStats(sellerAddress);
+      const stats = await OrderService.getSellerStats(canonicalSeller);
       res.status(200).json(stats);
     } catch (error) {
       handleServiceError(error, req, res);

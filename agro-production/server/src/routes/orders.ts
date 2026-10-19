@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "../db/client.js";
 import {
@@ -126,9 +127,14 @@ router.post(
         update: {},
       });
 
+      // Use a client-generated unique placeholder so consecutive intents do not
+      // collide on the @unique onChainId index. The indexer reconciles this row
+      // by replacing the placeholder with the real on-chain id.
+      const intentId = `intent:${randomUUID()}`;
+
       const order = await prisma.order.create({
         data: {
-          onChainId: "pending",
+          onChainId: intentId,
           campaignId: campaign.id,
           buyerAddress,
           amount,
@@ -141,7 +147,7 @@ router.post(
         data: {
           campaignId: campaign.id,
           eventType: "order.created_intent",
-          payload: { idempotencyKey, intent: true },
+          payload: { idempotencyKey, intent: true, intentId },
           ledger: 0,
           eventIndex: 0,
           txHash: null,

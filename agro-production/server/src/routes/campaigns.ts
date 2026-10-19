@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "../db/client.js";
 import {
@@ -248,6 +249,50 @@ router.get(
       ],
     };
 
-    jsonValidated(res, CampaignMilestonesSchema, 200, mil
+    jsonValidated(res, CampaignMilestonesSchema, 200, milestoneState);
+  }),
+);
 
-/* … truncated 5574 chars — edit only what you need near the top … */
+// POST /campaigns — create a campaign intent.
+//
+// `onChainId` is @unique, so we cannot use a shared literal like "pending"
+// (Issue #1209): a second concurrent create would violate the index (P2002).
+// Instead we mint a client-generated unique placeholder `intent:<uuid>` that
+// the indexer later reconciles to the real on-chain id.
+router.post(
+  "/campaigns",
+  writeLimiter,
+  requireWallet,
+  requireIdempotencyKey,
+  validateBody(CreateCampaignSchema),
+  validateResponse(CampaignSchema),
+  asyncHandler(async (req: WalletRequest, res: Response) => {
+    const body = req.body as CreateCampaignInput;
+
+    const cached = await getCachedResponse(req);
+    if (cached) {
+      jsonValidated(res, CampaignSchema, cached.status, cached.body);
+      return;
+    }
+
+    const intentOnChainId = `intent:${randomUUID()}`;
+
+    const campaign = await prisma.campaign.create({
+      data: {
+        onChainId: intentOnChainId,
+        farmerAddress: req.walletAddress!,
+        tokenAddress: body.tokenAddress,
+        targetAmount: body.targetAmount,
+        deadline: new Date(body.deadline),
+        status: "FUNDING",
+      },
+    });
+
+    await setCachedResponse(req, 201, campaign);
+    broadcast("campaign.created", campaign);
+
+    jsonValidated(res, CampaignSchema, 201, campaign);
+  }),
+);
+
+/* … rest of file unchanged … */
