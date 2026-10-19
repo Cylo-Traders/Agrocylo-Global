@@ -2,66 +2,80 @@ import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { prisma } from '../config/database.js';
 import { ApiError } from '../http/errors.js';
+import { requireWallet, requireAnyRole } from '../middleware/walletAuth.js';
 
 const router = Router();
 
 // Create new Equipment/Input/Tool listing
-router.post('/equipment/listings', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const {
-      ownerWallet,
-      title,
-      description,
-      listingType,
-      pricePerUnit,
-      depositAmount = 0,
-      currency,
-      unit,
-      location,
-    } = req.body;
-
-    if (
-      !ownerWallet ||
-      !title ||
-      !listingType ||
-      pricePerUnit === undefined ||
-      !currency ||
-      !unit
-    ) {
-      throw new ApiError(
-        400,
-        'Validation Error',
-        'ownerWallet, title, listingType, pricePerUnit, currency, and unit are required'
-      );
-    }
-
-    if (!['SEED', 'TOOL', 'EQUIPMENT_RENTAL'].includes(listingType)) {
-      throw new ApiError(
-        400,
-        'Invalid Listing Type',
-        'listingType must be SEED, TOOL, or EQUIPMENT_RENTAL'
-      );
-    }
-
-    const listing = await prisma.equipmentListing.create({
-      data: {
+router.post(
+  '/equipment/listings',
+  requireWallet,
+  requireAnyRole('FARMER'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const {
         ownerWallet,
         title,
         description,
         listingType,
         pricePerUnit,
-        depositAmount,
+        depositAmount = 0,
         currency,
         unit,
         location,
-      },
-    });
+      } = req.body;
 
-    res.status(201).json(listing);
-  } catch (err) {
-    next(err);
+      if (
+        !ownerWallet ||
+        !title ||
+        !listingType ||
+        pricePerUnit === undefined ||
+        !currency ||
+        !unit
+      ) {
+        throw new ApiError(
+          400,
+          'Validation Error',
+          'ownerWallet, title, listingType, pricePerUnit, currency, and unit are required'
+        );
+      }
+
+      if (ownerWallet !== req.walletAddress) {
+        throw new ApiError(
+          403,
+          'Forbidden',
+          'ownerWallet does not match the authenticated wallet'
+        );
+      }
+
+      if (!['SEED', 'TOOL', 'EQUIPMENT_RENTAL'].includes(listingType)) {
+        throw new ApiError(
+          400,
+          'Invalid Listing Type',
+          'listingType must be SEED, TOOL, or EQUIPMENT_RENTAL'
+        );
+      }
+
+      const listing = await prisma.equipmentListing.create({
+        data: {
+          ownerWallet,
+          title,
+          description,
+          listingType,
+          pricePerUnit,
+          depositAmount,
+          currency,
+          unit,
+          location,
+        },
+      });
+
+      res.status(201).json(listing);
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
 // List equipment/inputs with filtering
 router.get('/equipment/listings', async (req: Request, res: Response, next: NextFunction) => {

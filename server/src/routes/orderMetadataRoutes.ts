@@ -1,7 +1,7 @@
 import express from 'express';
 import { requireWallet, type WalletRequest } from '../middleware/walletAuth.js';
 import { writeLimiter } from '../middleware/rateLimiter.js';
-import { ApiError, sendProblem } from '../http/errors.js';
+import { ApiError } from '../http/errors.js';
 import { createOrderMetadata, getOrderMetadata } from '../services/orderMetadataService.js';
 
 const router = express.Router();
@@ -21,10 +21,5 @@ router.get('/:on_chain_order_id', requireWallet, async (req: WalletRequest, res,
     res.status(200).json(data);
   } catch (error) { next(error); }
 });
-
-export function orderErrorHandler(error: unknown, req: express.Request, res: express.Response, next: express.NextFunction): void {
-  if (error instanceof ApiError) { sendProblem(res, req, error); return; }
-  next(error);
-}
 
 export default router;

@@ -39,9 +39,13 @@ const envSchema = z.object({
   SENTRY_DSN: z.string().default(""),
   SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0.1),
   ADMIN_WALLETS: z.string().default(""),
+  // USSD provider shared secret (Issue #1214). Optional in the schema so the
+  // route can fail closed with a 503 when it is missing; required in
+  // production via the superRefine below so it is validated at startup.
+  USSD_PROVIDER_SECRET: z.string().default(""),
 }).superRefine((env, ctx) => {
   if (env.NODE_ENV !== "production") return;
-  for (const key of ["METRICS_API_KEY", "SUPABASE_SERVICE_ROLE_KEY"] as const) {
+  for (const key of ["METRICS_API_KEY", "SUPABASE_SERVICE_ROLE_KEY", "USSD_PROVIDER_SECRET"] as const) {
     if (!env[key].trim()) ctx.addIssue({ code: "custom", path: [key], message: `${key} is required in production` });
   }
   const origins = env.ALLOWED_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean);
@@ -98,4 +102,5 @@ export const config = {
   adminWallets: env.ADMIN_WALLETS.split(",")
     .map((w) => w.trim().toUpperCase())
     .filter(Boolean),
+  ussdProviderSecret: env.USSD_PROVIDER_SECRET,
 };
