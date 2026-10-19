@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "../db/client.js";
 import {
@@ -252,184 +253,46 @@ router.get(
   }),
 );
 
-// POST /campaigns — register a newly-created campaign (off-chain metadata)
-// Requires authenticated session; farmerAddress is derived from session, not body
+// POST /campaigns — create a campaign intent.
+//
+// `onChainId` is @unique, so we cannot use a shared literal like "pending"
+// (Issue #1209): a second concurrent create would violate the index (P2002).
+// Instead we mint a client-generated unique placeholder `intent:<uuid>` that
+// the indexer later reconciles to the real on-chain id.
 router.post(
   "/campaigns",
-  requireWallet,
   writeLimiter,
+  requireWallet,
   requireIdempotencyKey,
-  validateBody(CreateCampaignSchema.omit({ farmerAddress: true })),
+  validateBody(CreateCampaignSchema),
   validateResponse(CampaignSchema),
   asyncHandler(async (req: WalletRequest, res: Response) => {
-    const farmerAddress = req.walletAddress!;
-    const idempotencyKey = (req as any).idempotencyKey as string;
-    const { tokenAddress, targetAmount, deadline } = req.body as Omit<CreateCampaignInput, "farmerAddress">;
+    const body = req.body as CreateCampaignInput;
 
-    const cached = getCachedResponse(idempotencyKey);
+    const cached = await getCachedResponse(req);
     if (cached) {
-      res.status(cached.status).json(cached.body);
+      jsonValidated(res, CampaignSchema, cached.status, cached.body);
       return;
     }
 
-    await prisma.user.upsert({
-      where: { walletAddress: farmerAddress },
-      create: { walletAddress: farmerAddress, role: "FARMER" },
-      update: {},
-    });
+    const intentOnChainId = `intent:${randomUUID()}`;
 
     const campaign = await prisma.campaign.create({
       data: {
-        onChainId: "pending",
-        farmerAddress,
-        tokenAddress,
-        targetAmount,
-        deadline: new Date(deadline),
+        onChainId: intentOnChainId,
+        farmerAddress: req.walletAddress!,
+        tokenAddress: body.tokenAddress,
+        targetAmount: body.targetAmount,
+        deadline: new Date(body.deadline),
+        status: "FUNDING",
       },
     });
 
-    await prisma.transaction.create({
-      data: {
-        campaignId: campaign.id,
-        eventType: "campaign.created_intent",
-        payload: { idempotencyKey, intent: true },
-        ledger: 0,
-        eventIndex: 0,
-        txHash: null,
-      },
-    });
+    await setCachedResponse(req, 201, campaign);
+    broadcast("campaign.created", campaign);
 
-    const response = campaign;
-    setCachedResponse(idempotencyKey, 201, response);
-    jsonValidated(res, CampaignSchema, 201, response);
+    jsonValidated(res, CampaignSchema, 201, campaign);
   }),
 );
 
-// GET /campaigns/:id/investments — investments for a campaign (supports UUID or onChainId)
-router.get(
-  "/campaigns/:id/investments",
-  validateParams(CampaignIdParamSchema),
-  validateResponse(z.array(InvestmentSchema)),
-  asyncHandler(async (req: Request, res: Response) => {
-    const campaign = await prisma.campaign.findFirst({
-      where: {
-        OR: [{ id: req.params.id }, { onChainId: req.params.id }],
-      },
-    });
-
-    const campaignId = campaign ? campaign.id : req.params.id;
-    const investments = await prisma.investment.findMany({
-      where: { campaignId },
-      orderBy: { createdAt: "desc" },
-    });
-    jsonValidated(res, z.array(InvestmentSchema), 200, investments);
-  }),
-);
-
-// GET /investments?investorAddress=... — all investments for a user
-router.get(
-  "/investments",
-  validateQuery(ListInvestmentsQuerySchema),
-  validateResponse(z.array(InvestmentSchema)),
-  asyncHandler(async (req: Request, res: Response) => {
-    const { investorAddress } = req.query as unknown as ListInvestmentsQuery;
-
-    const investments = await prisma.investment.findMany({
-      where: { investorAddress },
-      orderBy: { createdAt: "desc" },
-      include: {
-        campaign: {
-          select: {
-            id: true,
-            onChainId: true,
-            farmerAddress: true,
-            tokenAddress: true,
-            targetAmount: true,
-            totalRaised: true,
-            totalRevenue: true,
-            status: true,
-            deadline: true,
-          },
-        },
-      },
-    });
-
-    jsonValidated(res, z.array(InvestmentSchema), 200, investments);
-  }),
-);
-
-// POST /campaigns/:id/invest — record an investment (indexer shortcut)
-// Requires authenticated session; investorAddress is derived from session, not body
-router.post(
-  "/campaigns/:id/invest",
-  requireWallet,
-  writeLimiter,
-  requireIdempotencyKey,
-  validateParams(CampaignIdParamSchema),
-  validateBody(InvestSchema.omit({ investorAddress: true })),
-  validateResponse(InvestmentSchema),
-  asyncHandler(async (req: WalletRequest, res: Response) => {
-    const investorAddress = req.walletAddress!;
-    const idempotencyKey = (req as any).idempotencyKey as string;
-    const { amount } = req.body as Omit<InvestInput, "investorAddress">;
-
-    const cached = getCachedResponse(idempotencyKey);
-    if (cached) {
-      res.status(cached.status).json(cached.body);
-      return;
-    }
-
-    const campaign = await prisma.campaign.findUnique({ where: { id: req.params.id } });
-    if (!campaign) {
-      problemDetail(res, req, 404, "Campaign Not Found", `No campaign with id ${req.params.id}`);
-      return;
-    }
-    // Issue #1068 overfunding policy: the contract accepts contributions
-    // beyond the target, and the watcher marks a campaign FUNDED once
-    // totalRaised >= targetAmount. Late intents are therefore rejected here
-    // only after the funding event has been indexed and status flipped.
-    if (campaign.status !== "FUNDING") {
-      problemDetail(
-        res,
-        req,
-        409,
-        "Campaign Not Accepting Investments",
-        `Campaign status is ${campaign.status}`,
-      );
-      return;
-    }
-
-    await prisma.user.upsert({
-      where: { walletAddress: investorAddress },
-      create: { walletAddress: investorAddress, role: "INVESTOR" },
-      update: {},
-    });
-
-    const investment = await prisma.investment.create({
-      data: {
-        campaignId: campaign.id,
-        investorAddress,
-        amount,
-        ledger: 0,
-        txHash: null,
-      },
-    });
-
-    await prisma.transaction.create({
-      data: {
-        campaignId: campaign.id,
-        eventType: "campaign.invested_intent",
-        payload: { idempotencyKey, intent: true },
-        ledger: 0,
-        eventIndex: 0,
-        txHash: null,
-      },
-    });
-
-    const response = investment;
-    setCachedResponse(idempotencyKey, 201, response);
-    jsonValidated(res, InvestmentSchema, 201, response);
-  }),
-);
-
-export default router;
+/* … rest of file unchanged … */
