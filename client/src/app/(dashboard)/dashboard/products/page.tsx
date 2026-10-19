@@ -229,7 +229,6 @@ export default function FarmerProductsDashboard() {
       <ProductFormModal
         open={modalOpen}
         mode={modalMode}
-        walletAddress={address ?? ""}
         initialProduct={editingProduct}
         onClose={() => setModalOpen(false)}
         onSuccess={async () => {

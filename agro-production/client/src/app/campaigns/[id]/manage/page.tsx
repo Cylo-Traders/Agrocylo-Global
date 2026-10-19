@@ -2,8 +2,7 @@
 
 import { useCallback, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { notFound } from "next/navigation";
+import { useParams, notFound } from "next/navigation";
 import { fetchCampaign, fundingProgress, formatAmount } from "@/services/campaignService";
 import { trackCampaignViewed } from "@/lib/analytics";
 import { classifyError, logErrorWithContext } from "@/lib/errorHandling";

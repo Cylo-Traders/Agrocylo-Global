@@ -60,7 +60,7 @@ Validated by a Zod schema in [`server/src/config/index.ts`](../../server/src/con
 | `PRISMA_GENERATE_DATABASE_URL` | generate only | — | Nonsecret, non-routable placeholder accepted only while generating Prisma artifacts. Do not set at runtime or for migrations. |
 | `SUPABASE_URL` | ✅ | — | Supabase project URL |
 | `SUPABASE_ANON_KEY` | ✅ | — | Supabase anon key |
-| `SUPABASE_SERVICE_ROLE_KEY` | ✅ prod | `""` | Server-side Supabase key (image uploads) |
+| `SUPABASE_SERVICE_ROLE_KEY` | ✅ prod | `""` | Server-side Supabase key for image uploads (see [`STORAGE.md`](./STORAGE.md)) |
 | `SUPABASE_PRODUCT_IMAGES_BUCKET` | | `product-images` | |
 | `PRODUCT_IMAGE_PLACEHOLDER_URL` | | placehold.co URL | |
 | `JWT_SECRET` | ✅ | — | API JWT signing key, HS256, ≥ 32 bytes. See rotation below. |
@@ -245,3 +245,20 @@ separate user sessions.
 
 Genuinely platform-injected variables (`NODE_ENV`, `VERCEL_*`, test-only
 toggles) are listed in `ALLOWLIST` at the top of the script.
+
+### Production client build configuration
+
+The canonical local API example is [agro-production/client/.env.example](../../agro-production/client/.env.example).
+The API base must end in `/api/v1`; services append paths such as `/campaigns`.
+Copy it to `agro-production/client/.env.local` for development. Docker Compose
+passes the same local values as build arguments; set a real deployed
+`NEXT_PUBLIC_PRODUCTION_CONTRACT_ID` before building the stack.
+
+In each GitHub deployment environment (staging and production), set
+`AGRO_NEXT_PUBLIC_API_URL` (HTTPS, including `/api/v1`), `AGRO_NEXT_PUBLIC_WS_URL`
+(WSS), `NEXT_PUBLIC_SOROBAN_RPC_URL`, `NEXT_PUBLIC_HORIZON_URL`,
+`NEXT_PUBLIC_NETWORK_PASSPHRASE`, `NEXT_PUBLIC_STELLAR_ENV`,
+`NEXT_PUBLIC_PRODUCTION_CONTRACT_ID`, and `NEXT_PUBLIC_AGRO_PRODUCTION_ENABLED`.
+The deployment workflow passes these explicitly into the image build. Public
+values are compiled into JavaScript; Fly runtime variables cannot replace them.
+An absent API URL, wrong API path or absent contract address aborts the build.

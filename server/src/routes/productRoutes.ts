@@ -12,23 +12,40 @@ import {
 
 const router = express.Router();
 
-router.get('/products', async (req, res) => {
-  const result = await listProducts({
-    farmer: typeof req.query['farmer'] === 'string' ? req.query['farmer'] : undefined,
-    category: typeof req.query['category'] === 'string' ? req.query['category'] : undefined,
-    search: typeof req.query['search'] === 'string' ? req.query['search'] : undefined,
-    location: typeof req.query['location'] === 'string' ? req.query['location'] : undefined,
-    minPrice: typeof req.query['minPrice'] === 'string' ? req.query['minPrice'] : undefined,
-    maxPrice: typeof req.query['maxPrice'] === 'string' ? req.query['maxPrice'] : undefined,
-    page: typeof req.query['page'] === 'string' ? req.query['page'] : undefined,
-    pageSize: typeof req.query['page_size'] === 'string' ? req.query['page_size'] : undefined,
-    includeUnavailable:
-      typeof req.query['include_unavailable'] === 'string'
-        ? req.query['include_unavailable'] === 'true' ||
-          req.query['include_unavailable'] === '1'
-        : undefined,
-  });
-  res.status(200).json(result);
+router.get('/products', async (req, res, next) => {
+  try {
+    const result = await listProducts({
+      farmer: typeof req.query['farmer'] === 'string' ? req.query['farmer'] : undefined,
+      category: typeof req.query['category'] === 'string' ? req.query['category'] : undefined,
+      categories: typeof req.query['categories'] === 'string' ? req.query['categories'] : undefined,
+      search: typeof req.query['search'] === 'string' ? req.query['search'] : undefined,
+      q: typeof req.query['q'] === 'string' ? req.query['q'] : undefined,
+      location: typeof req.query['location'] === 'string' ? req.query['location'] : undefined,
+      minPrice: typeof req.query['minPrice'] === 'string' ? req.query['minPrice'] : undefined,
+      maxPrice: typeof req.query['maxPrice'] === 'string' ? req.query['maxPrice'] : undefined,
+      price_min: typeof req.query['price_min'] === 'string' ? req.query['price_min'] : undefined,
+      price_max: typeof req.query['price_max'] === 'string' ? req.query['price_max'] : undefined,
+      page: typeof req.query['page'] === 'string' ? req.query['page'] : undefined,
+      pageSize: typeof req.query['page_size'] === 'string' ? req.query['page_size'] : undefined,
+      page_size: typeof req.query['page_size'] === 'string' ? req.query['page_size'] : undefined,
+      includeUnavailable:
+        typeof req.query['include_unavailable'] === 'string'
+          ? req.query['include_unavailable'] === 'true' ||
+            req.query['include_unavailable'] === '1'
+          : undefined,
+      include_unavailable:
+        typeof req.query['include_unavailable'] === 'string'
+          ? req.query['include_unavailable'] === 'true' ||
+            req.query['include_unavailable'] === '1'
+          : undefined,
+      sort: typeof req.query['sort'] === 'string' ? req.query['sort'] : undefined,
+      lat: typeof req.query['lat'] === 'string' ? req.query['lat'] : undefined,
+      lng: typeof req.query['lng'] === 'string' ? req.query['lng'] : undefined,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.get('/products/:id', async (req, res, next) => {

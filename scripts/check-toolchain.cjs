@@ -2,8 +2,8 @@
 
 const { execFileSync } = require("node:child_process");
 
-const NODE_RANGE = ">=22.13.0 <23";
-const NPM_RANGE = ">=10.9.0 <11";
+const NODE_RANGE = ">=22.13.0";
+const NPM_RANGE = ">=10.9.0";
 
 function parseVersion(version) {
   const match = String(version).trim().match(/^v?(\d+)\.(\d+)\.(\d+)/);
@@ -21,12 +21,12 @@ function isAtLeast(version, minimum) {
 
 function isSupportedNode(version) {
   const parsed = parseVersion(version);
-  return Boolean(parsed && parsed[0] === 22 && isAtLeast(parsed, [22, 13, 0]));
+  return Boolean(parsed && parsed[0] >= 22 && isAtLeast(parsed, [22, 13, 0]));
 }
 
 function isSupportedNpm(version) {
   const parsed = parseVersion(version);
-  return Boolean(parsed && parsed[0] === 10 && isAtLeast(parsed, [10, 9, 0]));
+  return Boolean(parsed && parsed[0] >= 10 && isAtLeast(parsed, [10, 9, 0]));
 }
 
 function npmVersion() {

@@ -6,11 +6,10 @@ import { useI18n } from "@/context/I18nContext";
 
 export default function AnalyticsConsent() {
   const { t } = useI18n();
-  const [choice, setChoice] = useState<ReturnType<typeof getAnalyticsConsent>>("unknown");
+  const [choice, setChoice] = useState(() => getAnalyticsConsent());
   const [editing, setEditing] = useState(false);
 
   useEffect(() => {
-    setChoice(getAnalyticsConsent());
     const update = () => setChoice(getAnalyticsConsent());
     window.addEventListener("agrocylo:analytics-consent", update);
     window.addEventListener("storage", update);

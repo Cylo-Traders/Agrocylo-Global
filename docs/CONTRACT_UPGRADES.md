@@ -1,7 +1,7 @@
 # Contract upgrade strategy
 
 Issue #757. Applies to all 5 Rust/Soroban contracts: `contracts/escrow`,
-`agro-production/contract/registry`, `.../production_escrow`,
+`contracts/registry`, `.../production_escrow`,
 `.../investment_basket`, `.../governance`.
 
 ## Why this exists

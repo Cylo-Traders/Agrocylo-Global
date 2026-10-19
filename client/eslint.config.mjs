@@ -1,6 +1,7 @@
 import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
+import noBrokenJsxUrls from "./eslint-rules/no-broken-jsx-urls.mjs";
 
 const eslintConfig = defineConfig([
   ...nextVitals,
@@ -26,6 +27,18 @@ const eslintConfig = defineConfig([
       "react-hooks/refs": "warn",
       "react-hooks/immutability": "warn",
       "no-unreachable": "error",
+    },
+  },
+  {
+    plugins: {
+      "custom-rules": {
+        rules: {
+          "no-broken-jsx-urls": noBrokenJsxUrls,
+        },
+      },
+    },
+    rules: {
+      "custom-rules/no-broken-jsx-urls": "error",
     },
   },
 ]);

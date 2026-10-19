@@ -7,10 +7,9 @@ import { initErrorTracking } from "@/lib/errorTracking";
 
 export default function AnalyticsInit() {
   const pathname = usePathname();
-  const [consent, setConsent] = useState<ReturnType<typeof getAnalyticsConsent>>("unknown");
+  const [consent, setConsent] = useState(() => getAnalyticsConsent());
 
   useEffect(() => {
-    setConsent(getAnalyticsConsent());
     initErrorTracking();
     const onConsent = () => setConsent(getAnalyticsConsent());
     window.addEventListener("agrocylo:analytics-consent", onConsent);

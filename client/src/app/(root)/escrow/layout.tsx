@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 
 import AuthGuard from "@/components/AuthGuard";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { getStellarEnv } from "@/services/stellar/networkConfig";
 
 /**
  * The escrow sandbox drives a real on-chain escrow transaction against a
@@ -13,7 +14,7 @@ export default function EscrowLayout({
 }: {
   children: React.ReactNode;
 }) {
-  if (process.env.NEXT_PUBLIC_STELLAR_NETWORK === "mainnet") {
+  if (getStellarEnv() === "mainnet") {
     notFound();
   }
 

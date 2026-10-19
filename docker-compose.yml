@@ -168,10 +168,19 @@ services:
     build:
       context: .
       dockerfile: agro-production/client/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:5001/api/v1}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:5001/ws}
+        NEXT_PUBLIC_SOROBAN_RPC_URL: ${NEXT_PUBLIC_SOROBAN_RPC_URL:-https://soroban-testnet.stellar.org}
+        NEXT_PUBLIC_HORIZON_URL: ${NEXT_PUBLIC_HORIZON_URL:-https://horizon-testnet.stellar.org}
+        NEXT_PUBLIC_NETWORK_PASSPHRASE: ${NEXT_PUBLIC_NETWORK_PASSPHRASE:-Test SDF Network ; September 2015}
+        NEXT_PUBLIC_STELLAR_ENV: ${NEXT_PUBLIC_STELLAR_ENV:-testnet}
+        NEXT_PUBLIC_PRODUCTION_CONTRACT_ID: ${NEXT_PUBLIC_PRODUCTION_CONTRACT_ID:?Set the deployed production escrow contract address}
+        NEXT_PUBLIC_AGRO_PRODUCTION_ENABLED: ${NEXT_PUBLIC_AGRO_PRODUCTION_ENABLED:-false}
     container_name: agrocylo-agro-client
     environment:
       NODE_ENV: development
-      NEXT_PUBLIC_API_URL: http://localhost:5001
+      NEXT_PUBLIC_API_URL: http://localhost:5001/api/v1
       NEXT_PUBLIC_WS_URL: ws://localhost:5001/ws
       NEXT_PUBLIC_BASE_PATH: /agro
       NEXT_PUBLIC_SOROBAN_RPC_URL: ${NEXT_PUBLIC_SOROBAN_RPC_URL:-https://soroban-testnet.stellar.org}

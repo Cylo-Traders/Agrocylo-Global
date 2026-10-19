@@ -549,4 +549,4 @@ Then in your CSS:
 
 ## Next: Testing
 
-See [Testing Guide](TESTING.md) for unit and integration tests.
+See [Testing Guide](TESTING_GUIDE.md) for unit and integration tests.

@@ -142,12 +142,38 @@ describe('GET /products query parameters (#1145)', () => {
     expect(where().category).toBeUndefined();
   });
 
-  // The client sends these names today; the route reads different ones.
-  // Tracked by #1132 (fix the query-parameter contract and add sort).
-  it.todo('reads q as an alias for search (#1132)');
-  it.todo('reads price_min / price_max (#1132)');
-  it.todo('reads sort (newest | price-asc | price-desc | rating | distance | popular) (#1132)');
-  it.todo('reads categories, rating_min, in_stock, max_age_days, stock_min (#1132)');
+  it('reads q as an alias for search (#1132)', async () => {
+    await request(app).get('/products').query({ q: 'tomato' });
+    expect(where().OR).toHaveLength(3);
+  });
+
+  it('reads price_min / price_max (#1132)', async () => {
+    await request(app).get('/products').query({ price_min: '2', price_max: '8' });
+    expect(String(where().pricePerUnit.gte)).toBe('2');
+    expect(String(where().pricePerUnit.lte)).toBe('8');
+  });
+
+  it('reads categories (comma-separated) (#1132)', async () => {
+    await request(app).get('/products').query({ categories: 'Vegetables,Fruits' });
+    expect(where().category.in).toEqual(['Vegetables', 'Fruits']);
+  });
+
+  it('reads sort and returns appropriate orderBy (#1132)', async () => {
+    await request(app).get('/products').query({ sort: 'price_asc' });
+    expect(query().orderBy).toMatchObject({ pricePerUnit: 'asc' });
+  });
+
+  it('rejects invalid sort values with 400', async () => {
+    const res = await request(app).get('/products').query({ sort: 'invalid' });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toContain('Invalid sort value');
+  });
+
+  it('rejects distance sort without lat/lng with 400', async () => {
+    const res = await request(app).get('/products').query({ sort: 'distance' });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toContain('lat and lng');
+  });
 });
 
 describe('product write role matrix (#1145)', () => {
@@ -173,6 +199,24 @@ describe('product write role matrix (#1145)', () => {
         .set('Authorization', bearer('FARMER', 'GCALLER'))
         .send({ ...validProduct, farmer_wallet: 'GSOMEONEELSE' });
       expect(vi.mocked(prisma.product.create).mock.calls[0]![0]!.data.farmerWallet).toBe('gcaller');
+    });
+
+    it('accepts XLM currency', async () => {
+      const res = await request(app)
+        .post('/products')
+        .set('Authorization', bearer('FARMER'))
+        .send({ ...validProduct, currency: 'XLM' });
+      expect(res.status).toBe(201);
+      expect(vi.mocked(prisma.product.create).mock.calls[0]![0]!.data.currency).toBe('XLM');
+    });
+
+    it('accepts USDC currency', async () => {
+      const res = await request(app)
+        .post('/products')
+        .set('Authorization', bearer('FARMER'))
+        .send({ ...validProduct, currency: 'USDC' });
+      expect(res.status).toBe(201);
+      expect(vi.mocked(prisma.product.create).mock.calls[0]![0]!.data.currency).toBe('USDC');
     });
 
     // Any authenticated wallet can list products today. #1133 adds requireRole.

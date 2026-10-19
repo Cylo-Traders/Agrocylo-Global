@@ -132,6 +132,7 @@ async function headers() {
 }
 
 const nextConfig: NextConfig = {
+  transpilePackages: ["@agrocylo/instrumentation"],
   output: "standalone",
   headers,
   turbopack: {

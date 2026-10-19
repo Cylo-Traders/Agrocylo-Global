@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { notFound } from "next/navigation";
+import { useParams, notFound } from "next/navigation";
 import { fetchProduct, formatPrice } from "@/services/productService";
 import { useTransaction } from "@/hooks/useTransaction";
 import { buildCreateOrder } from "@/lib/contractService";

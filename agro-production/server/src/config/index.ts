@@ -4,6 +4,7 @@ const REQUIRED_IN_PRODUCTION = [
   'RPC_URL',
   'PRODUCTION_CONTRACT_ID',
   'ESCROW_CONTRACT_ID',
+  'JWT_SECRET',
 ] as const;
 
 function getEnv(key: string): string | undefined {
@@ -60,6 +61,15 @@ export const config = {
     '',
 
   registryContractId: getEnv('REGISTRY_CONTRACT_ID') ?? '',
+
+  basketContractId: getEnv('BASKET_CONTRACT_ID') ?? '',
+
+  jwtSecret: isProduction
+    ? requireEnv('JWT_SECRET')
+    : (getEnv('JWT_SECRET') ?? 'dev-insecure-jwt-secret-do-not-use-in-production'),
+
+  sentryDsn: getEnv('SENTRY_DSN') ?? '',
+  sentryTracesSampleRate: parseFloat(getEnv('SENTRY_TRACES_SAMPLE_RATE') ?? '0.1'),
 
   rateLimitWindowMs: parseInt(getEnv('RATE_LIMIT_WINDOW_MS') ?? '60000', 10),
   rateLimitMaxRequests: parseInt(getEnv('RATE_LIMIT_MAX_REQUESTS') ?? '100', 10),

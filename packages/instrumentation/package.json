@@ -1,0 +1,14 @@
+{
+  "name": "@agrocylo/instrumentation",
+  "version": "0.1.0",
+  "private": true,
+  "license": "ISC",
+  "description": "Shared Next.js Sentry hooks for both clients.",
+  "exports": {
+    "./server": "./src/server.ts",
+    "./client": "./src/client.ts"
+  },
+  "peerDependencies": {
+    "@sentry/nextjs": "^10.70.0"
+  }
+}

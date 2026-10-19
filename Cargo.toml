@@ -1,12 +1,12 @@
 [workspace]
 resolver = "2"
+exclude = ["archive/weather-insurance"]
 members = [
     "contracts/escrow",
-    "contracts/weather-insurance",
-    "agro-production/contract/registry",
-    "agro-production/contract/production_escrow",
-    "agro-production/contract/investment_basket",
-    "agro-production/contract/governance",
+    "contracts/registry",
+    "contracts/production_escrow",
+    "contracts/investment_basket",
+    "contracts/governance",
 ]
 
 

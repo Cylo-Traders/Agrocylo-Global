@@ -71,14 +71,14 @@ describe("Turbopack workspace root resolution (Issue #918)", () => {
 
   it("preserves shared-package transpilation for agro-production client", async () => {
     // Cheap static check: agro-production/client/next.config.ts must declare
-    // transpilePackages: ["@agrocylo/wallet-core"] so @agrocylo/wallet-core
+    // transpilePackages: ["@agrocylo/instrumentation"] so @agrocylo/instrumentation
     // shared TS source is compiled in the production client.
     const fs = await import("node:fs");
     const content = fs.readFileSync(
       path.join(repoRoot, "agro-production/client/next.config.ts"),
       "utf8"
     );
-    expect(content).toContain("@agrocylo/wallet-core");
+    expect(content).toContain("@agrocylo/instrumentation");
     expect(content).toContain("transpilePackages");
   });
 

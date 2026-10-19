@@ -22,13 +22,15 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: .nvmrc
 
       - name: Install dependencies
         run: npm ci
         working-directory: agro-production/server
 
       - name: Generate Prisma types
+        env:
+          PRISMA_GENERATE_DATABASE_URL: postgresql://prisma-generate:unused@localhost:5432/prisma_generate
         run: npx prisma generate
         working-directory: agro-production/server
 
@@ -68,7 +70,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: .nvmrc
 
       - name: Install dependencies
         run: npm ci
@@ -78,6 +80,23 @@ jobs:
         env:
           DATABASE_URL: postgresql://test_user:test_password@localhost:5432/agrocylo_test
         run: npx prisma migrate deploy
+        working-directory: agro-production/server
+
+      - name: Check schema/migration drift
+        env:
+          PGPASSWORD: test_password
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/agrocylo_test
+          SHADOW_DATABASE_URL: postgresql://test_user:test_password@localhost:5432/agrocylo_shadow
+        # Fails the build when prisma/schema.prisma and prisma/migrations/ have
+        # diverged (e.g. a model added to the schema with no matching migration).
+        # Runs against a throwaway shadow DB so it never touches the test DB above.
+        run: |
+          psql -h localhost -U test_user -d agrocylo_test -c 'CREATE DATABASE agrocylo_shadow;'
+          npx prisma migrate diff \
+            --from-migrations prisma/migrations \
+            --to-schema-datamodel prisma/schema.prisma \
+            --shadow-database-url "$SHADOW_DATABASE_URL" \
+            --exit-code
         working-directory: agro-production/server
 
       - name: Run tests
@@ -99,7 +118,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: .nvmrc
 
       - name: Install dependencies
         run: npm ci
@@ -118,7 +137,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run TruffleHog secret scanning
-        uses: trufflesecurity/trufflehog@main
+        uses: trufflesecurity/trufflehog@048de9ff07098d943136cd5231a0e93fbb3ea443 # pinned reviewed revision
         with:
           path: ./agro-production/server
           base: ${{ github.event.repository.default_branch }}

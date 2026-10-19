@@ -23,7 +23,7 @@ Production backend for the Agrocylo platform. It exposes a REST API, indexes on-
 
 ## Prerequisites
 
-- Node.js ≥ 20
+- Node.js 22.13.x and npm 10.9.x
 - PostgreSQL (local or hosted, e.g. Supabase)
 - Docker & Docker Compose (for the Redis queue)
 - A deployed Stellar/Soroban contract ID
@@ -34,7 +34,8 @@ Production backend for the Agrocylo platform. It exposes a REST API, indexes on-
 
 ```bash
 cd agro-production/server
-npm install
+nvm use
+npm ci
 ```
 
 ---
@@ -390,8 +391,8 @@ npm test
 
 ### Node.js Version
 
-- **Minimum**: 20.x (LTS)
-- **Recommended**: 20.11.0 or later
+- **Supported**: Node 22.13.x (see `.nvmrc`) and npm 10.9.x
+- **Pinned**: Node 22.13.0 and npm 10.9.2
 - Check: `node --version`
 
 ### PostgreSQL Version

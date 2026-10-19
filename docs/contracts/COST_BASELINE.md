@@ -25,10 +25,10 @@ Any entry point measured above the soft threshold should either:
 Run the cost-harness test suite:
 
 ```bash
-cd agro-production/contract/production_escrow
+cd contracts/production_escrow
 cargo test cost_harness -- --nocapture
 # or for all cost tests across all contracts:
-cd agro-production/contract
+cd contracts
 find . -name "cost_harness_tests.rs" -exec cargo test cost_harness -- --nocapture \;
 ```
 
@@ -137,7 +137,7 @@ cost-baseline:
         toolchain: 1.89.0
         target: wasm32v1-none
     - name: Run cost harness
-      run: cd agro-production/contract && cargo test cost_harness -- --nocapture > cost-results.txt
+      run: cd contracts && cargo test cost_harness -- --nocapture > cost-results.txt
     - name: Check against thresholds
       run: |
         # Parse cost-results.txt and verify no entry point exceeds 80% of mainnet limits
@@ -152,7 +152,7 @@ cost-baseline:
       if: always()
       with:
         name: cost-baseline-results
-        path: agro-production/contract/cost-results.txt
+        path: contracts/cost-results.txt
 ```
 
 ## Future Optimizations
@@ -167,6 +167,6 @@ Once measurements are in place, file optimization issues if needed:
 ## References
 
 - **Issue #781:** Resource cost profiling (this document)
-- **Cost Harness Tests:** `agro-production/contract/*/src/cost_harness_tests.rs`
+- **Cost Harness Tests:** `contracts/*/src/cost_harness_tests.rs`
 - **Soroban Resource Estimation:** https://developers.stellar.org/learn/smart-contracts/resource-estimation
 - **Mainnet Resource Limits:** https://developers.stellar.org/learn/smart-contracts/resource-limits

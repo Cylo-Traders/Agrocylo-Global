@@ -4,7 +4,7 @@
   "private": true,
   "engines": {
     "node": ">=22.13.0 <23",
-    "npm": ">=10.9.0 <11"
+    "npm": ">=10.9.0 <12"
   },
   "scripts": {
     "dev": "next dev --port 3001",
@@ -20,7 +20,6 @@
     "reset:cache": "node ../../scripts/reset-next-cache.js --app=agro"
   },
   "dependencies": {
-    "@agrocylo/wallet-core": "*",
     "@creit.tech/stellar-wallets-kit": "2.6.0",
     "@sentry/nextjs": "^10.70.0",
     "@stellar/freighter-api": "^1.4.0",
@@ -29,7 +28,8 @@
     "next": "^16.3.5",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "sonner": "^2.0.7"
+    "sonner": "^2.0.7",
+    "@agrocylo/instrumentation": "*"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -47,5 +47,6 @@
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "5.0.1"
-  }
+  },
+  "license": "ISC"
 }

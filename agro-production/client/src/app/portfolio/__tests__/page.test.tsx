@@ -58,7 +58,7 @@ describe("PortfolioPage (#1051)", () => {
   it("renders loading state", () => {
     mockGet.mockImplementation(() => new Promise(() => {}));
     render(<PortfolioPage />);
-    expect(screen.getByTestId("price-chart")).toBeDefined();
+    expect(screen.getByTestId("price-chart")).toBeInTheDocument();
   });
 
   it("renders XLM units, not dollar signs", async () => {
@@ -66,7 +66,7 @@ describe("PortfolioPage (#1051)", () => {
 
     render(<PortfolioPage />);
     await waitFor(() => {
-      expect(screen.getAllByText(/XLM/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/XLM/i)[0]).toBeInTheDocument();
     });
     expect(screen.queryAllByText(/\$/).length).toBe(0);
   });

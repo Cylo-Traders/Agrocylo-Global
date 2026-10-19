@@ -12,17 +12,17 @@ interface InstallPromptEvent extends Event {
 
 export default function PwaSetup() {
   const [prompt, setPrompt] = useState<InstallPromptEvent | null>(null);
-  const [dismissed, setDismissed] = useState(true);
-  const [standalone, setStandalone] = useState(false);
+  const [dismissed, setDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(DISMISSED_KEY) === "yes";
+    } catch {
+      return true;
+    }
+  });
+  const [standalone, setStandalone] = useState(() => window.matchMedia?.("(display-mode: standalone)").matches ?? false);
 
   useEffect(() => {
     void registerProductionServiceWorker();
-    try {
-      setDismissed(localStorage.getItem(DISMISSED_KEY) === "yes");
-    } catch {
-      setDismissed(true);
-    }
-    setStandalone(window.matchMedia?.("(display-mode: standalone)").matches ?? false);
     const onBeforeInstall = (event: Event) => {
       event.preventDefault();
       setPrompt(event as InstallPromptEvent);

@@ -2,7 +2,7 @@
 
 ## Selection
 
-The **production_escrow** contract (located at `agro-production/contract/production_escrow/`) has been selected as the canonical Soroban contract for the Agrocylo production system.
+The **production_escrow** contract (located at `contracts/production_escrow/`) has been selected as the canonical Soroban contract for the Agrocylo production system.
 
 ### Rationale
 
@@ -18,7 +18,7 @@ The **production_escrow** contract (located at `agro-production/contract/product
 ### Current Structure
 
 ```
-agro-production/contract/
+contracts/
 ├── Cargo.toml                    (workspace root)
 ├── production_escrow/            (canonical contract)
 │   ├── Cargo.toml               (package name: "production_escrow")
@@ -30,8 +30,8 @@ agro-production/contract/
 ```
 
 The root `Cargo.toml` workspace members:
-- `agro-production/contract/registry` — Registry contract (name: "registry")
-- `agro-production/contract/production_escrow` — Canonical escrow contract (name: "production_escrow")
+- `contracts/registry` — Registry contract (name: "registry")
+- `contracts/production_escrow` — Canonical escrow contract (name: "production_escrow")
 
 ### Package Naming
 
@@ -140,7 +140,7 @@ const CONTRACT_ID = process.env.REACT_APP_PRODUCTION_ESCROW_CONTRACT_ID;
 ### Build Canonical Contract
 
 ```bash
-cd agro-production/contract
+cd contracts
 cargo build --target wasm32-unknown-unknown --release -p production_escrow
 # Output: target/wasm32-unknown-unknown/release/production_escrow.wasm
 ```
@@ -148,7 +148,7 @@ cargo build --target wasm32-unknown-unknown --release -p production_escrow
 ### Run Contract Tests
 
 ```bash
-cd agro-production/contract
+cd contracts
 cargo test --workspace
 # Runs tests for production_escrow, registry, and any other workspace members
 ```

@@ -4,6 +4,7 @@ import { useCallback } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
+import { apiBaseUrl } from "@/lib/apiConfig";
 
 const FarmerMap = dynamic(() => import("./FarmerMap").then((mod) => ({ default: mod.default })), {
   ssr: false,
@@ -38,7 +39,7 @@ export function WeatherAdvisoryWidget({ farmerId, location }: WeatherAdvisoryWid
       }
 
       const url =
-        (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api/v1") +
+        apiBaseUrl(process.env.NEXT_PUBLIC_API_URL) +
         `/weather/advisories?${params}`;
 
       const response = await fetch(url, { signal });
