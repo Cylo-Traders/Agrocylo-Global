@@ -11,6 +11,7 @@ import {
 import { problemDetail } from "../middleware/errors.js";
 import { writeLimiter } from "../middleware/rateLimit.js";
 import { requireWallet, type WalletRequest } from "../middleware/walletAuth.js";
+import { asyncHandler } from "../middleware/asyncHandler.js";
 
 const router = Router();
 
@@ -75,7 +76,7 @@ router.get(
   requireWallet,
   validateQuery(ListDisputesQuerySchema),
   validateResponse(DisputeListResponseSchema),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const { campaignId, page, limit } = req.query as unknown as z.infer<typeof ListDisputesQuerySchema>;
     const walletReq = req as WalletRequest;
     const userWalletAddress = walletReq.walletAddress;
@@ -112,7 +113,7 @@ router.get(
       data: items,
       meta: { total, page, limit },
     });
-  },
+  }),
 );
 
 // GET /disputes/:id — dispute detail with evidence list
@@ -121,7 +122,7 @@ router.get(
   requireWallet,
   validateParams(DisputeIdParamSchema),
   validateResponse(DisputeDetailResponseSchema),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const walletReq = req as WalletRequest;
     const userWalletAddress = walletReq.walletAddress;
 
@@ -158,7 +159,7 @@ router.get(
     }
 
     jsonValidated(res, DisputeDetailResponseSchema, 200, dispute);
-  },
+  }),
 );
 
 // POST /disputes/:id/evidence — submit evidence (dispute participants only)
@@ -169,7 +170,7 @@ router.post(
   validateParams(DisputeIdParamSchema),
   validateBody(SubmitEvidenceSchema),
   validateResponse(DisputeEvidenceResponseSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const { evidenceUrl, evidenceHash } = req.body as z.infer<typeof SubmitEvidenceSchema>;
 
     const dispute = await prisma.dispute.findUnique({
@@ -212,7 +213,7 @@ router.post(
     });
 
     jsonValidated(res, DisputeEvidenceResponseSchema, 201, evidence);
-  },
+  }),
 );
 
 // PATCH /disputes/:id/resolve — resolve dispute (admin only)
@@ -223,7 +224,7 @@ router.patch(
   validateParams(DisputeIdParamSchema),
   validateBody(ResolveDisputeSchema),
   validateResponse(DisputeResponseSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     // Check admin role
     const user = await prisma.user.findUnique({
       where: { walletAddress: req.walletAddress || "UNKNOWN" },
@@ -270,7 +271,7 @@ router.patch(
     });
 
     jsonValidated(res, DisputeResponseSchema, 200, updated);
-  },
+  }),
 );
 
 export default router;

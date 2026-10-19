@@ -71,6 +71,10 @@ export function startReconciliationSweep(intervalMs: number): void {
   }, intervalMs);
 }
 
+export function isReconciliationSweepRunning(): boolean {
+  return sweepTimer !== null;
+}
+
 export function stopReconciliationSweep(): void {
   if (sweepTimer) {
     clearInterval(sweepTimer);

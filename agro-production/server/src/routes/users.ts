@@ -4,6 +4,7 @@ import { prisma } from "../db/client.js";
 import { jsonValidated, validateParams, validateResponse } from "../middleware/validate.js";
 import { problemDetail } from "../middleware/errors.js";
 import { stellarAddress } from "../schemas/common.js";
+import { asyncHandler } from "../middleware/asyncHandler.js";
 
 const router = Router();
 
@@ -29,7 +30,7 @@ router.get(
   "/users/:walletAddress",
   validateParams(UserWalletParamSchema),
   validateResponse(UserProfileResponseSchema),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const { walletAddress } = req.params;
 
     const user = await prisma.user.findUnique({
@@ -77,7 +78,7 @@ router.get(
       },
       reputationScore,
     });
-  },
+  }),
 );
 
 export default router;

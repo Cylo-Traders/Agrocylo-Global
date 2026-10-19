@@ -19,6 +19,7 @@ import {
   type CreateProductInput,
   type UpdateProductInput,
 } from '../schemas/product.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 
 const router = Router();
 
@@ -80,133 +81,127 @@ function toProductDto(product: {
 router.get(
   '/products',
   validateResponse(ProductListResponseSchema),
-  (req: Request, res: Response, next) => {
-    void (async () => {
-      const parsed = ProductQuerySchema.safeParse(req.query);
-      if (!parsed.success) {
-        problemDetail(
-          res,
-          req,
-          400,
-          'Invalid Product Filters',
-          'Use valid category, location, minPrice, and maxPrice values',
-        );
-        return;
-      }
-      const { category, campaignId, isActive, location } = parsed.data;
-      const minPrice = parsed.data.minPrice ?? parsed.data.priceMin;
-      const maxPrice = parsed.data.maxPrice ?? parsed.data.priceMax;
-      const page = Math.max(Number(parsed.data.page ?? '1'), 1);
-      const limit = Math.min(
-        Math.max(Number(parsed.data.limit ?? '50'), 1),
-        100,
+  asyncHandler(async (req: Request, res: Response) => {
+    const parsed = ProductQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      problemDetail(
+        res,
+        req,
+        400,
+        'Invalid Product Filters',
+        'Use valid category, location, minPrice, and maxPrice values',
       );
-      const where = {
-        ...(category ? { category } : {}),
-        ...(campaignId ? { campaignId } : {}),
-        ...(isActive === undefined ? {} : { isActive }),
-        ...(location
-          ? {
-              campaign: {
-                farmerAddress: {
-                  contains: location,
-                  mode: 'insensitive' as const,
-                },
+      return;
+    }
+    const { category, campaignId, isActive, location } = parsed.data;
+    const minPrice = parsed.data.minPrice ?? parsed.data.priceMin;
+    const maxPrice = parsed.data.maxPrice ?? parsed.data.priceMax;
+    const page = Math.max(Number(parsed.data.page ?? '1'), 1);
+    const limit = Math.min(
+      Math.max(Number(parsed.data.limit ?? '50'), 1),
+      100,
+    );
+    const where = {
+      ...(category ? { category } : {}),
+      ...(campaignId ? { campaignId } : {}),
+      ...(isActive === undefined ? {} : { isActive }),
+      ...(location
+        ? {
+            campaign: {
+              farmerAddress: {
+                contains: location,
+                mode: 'insensitive' as const,
               },
-            }
-          : {}),
-        ...(minPrice || maxPrice
-          ? {
-              priceTokens: {
-                ...(minPrice ? { gte: BigInt(minPrice) } : {}),
-                ...(maxPrice ? { lte: BigInt(maxPrice) } : {}),
-              },
-            }
-          : {}),
-      };
-      const [total, products] = await Promise.all([
-        prisma.product.count({ where }),
-        prisma.product.findMany({
-          where,
-          include: { campaign: true },
-          orderBy: { createdAt: 'desc' },
-          skip: (page - 1) * limit,
-          take: limit,
-        }),
-      ]);
-      jsonValidated(res, ProductListResponseSchema, 200, {
-        data: products.map(toProductDto),
-        meta: {
-          total,
-          page,
-          limit,
-          serviceVersion: 'products-v1',
-          readiness: 'ready',
-        },
-      });
-    })().catch(next);
-  },
+            },
+          }
+        : {}),
+      ...(minPrice || maxPrice
+        ? {
+            priceTokens: {
+              ...(minPrice ? { gte: BigInt(minPrice) } : {}),
+              ...(maxPrice ? { lte: BigInt(maxPrice) } : {}),
+            },
+          }
+        : {}),
+    };
+    const [total, products] = await Promise.all([
+      prisma.product.count({ where }),
+      prisma.product.findMany({
+        where,
+        include: { campaign: true },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
+    jsonValidated(res, ProductListResponseSchema, 200, {
+      data: products.map(toProductDto),
+      meta: {
+        total,
+        page,
+        limit,
+        serviceVersion: 'products-v1',
+        readiness: 'ready',
+      },
+    });
+  }),
 );
 
 router.get(
   '/products/:id',
   validateParams(ProductIdParamSchema),
   validateResponse(ProductSchema),
-  (req: Request, res: Response, next) => {
-    void (async () => {
-      const { id } = req.params;
-      const product = await prisma.product.findUnique({
-        where: { id },
-        include: { campaign: true },
-      });
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const product = await prisma.product.findUnique({
+      where: { id },
+      include: { campaign: true },
+    });
 
-      if (!product) {
-        problemDetail(
-          res,
-          req,
-          404,
-          'Product Not Found',
-          `No product with id ${id}`,
-        );
-        return;
-      }
+    if (!product) {
+      problemDetail(
+        res,
+        req,
+        404,
+        'Product Not Found',
+        `No product with id ${id}`,
+      );
+      return;
+    }
 
-      jsonValidated(res, ProductSchema, 200, toProductDto(product));
-    })().catch(next);
-  },
+    jsonValidated(res, ProductSchema, 200, toProductDto(product));
+  }),
 );
 
 // GET /campaigns/:id/products — list all products associated with a campaign
 router.get(
   '/campaigns/:id/products',
   validateResponse(ProductListResponseSchema),
-  (req: Request, res: Response, next) => {
-    void (async () => {
-      const { id } = req.params;
-      // Allow searching by campaign UUID or contract onChainId
-      const campaign = await prisma.campaign.findFirst({
-        where: { OR: [{ id }, { onChainId: id }] },
-      });
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params;
+    // Allow searching by campaign UUID or contract onChainId
+    const campaign = await prisma.campaign.findFirst({
+      where: { OR: [{ id }, { onChainId: id }] },
+    });
 
-      const campaignId = campaign ? campaign.id : id;
-      const products = await prisma.product.findMany({
-        where: { campaignId },
-        include: { campaign: true },
-        orderBy: { createdAt: 'desc' },
-      });
+    const campaignId = campaign ? campaign.id : id;
+    const products = await prisma.product.findMany({
+      where: { campaignId },
+      include: { campaign: true },
+      orderBy: { createdAt: 'desc' },
+    });
 
-      jsonValidated(res, ProductListResponseSchema, 200, {
-        data: products.map(toProductDto),
-        meta: {
-          total: products.length,
-          page: 1,
-          limit: 100,
-          serviceVersion: 'products-v1',
-          readiness: 'ready',
-        },
-      });
-    })().catch(next);
-  },
+    jsonValidated(res, ProductListResponseSchema, 200, {
+      data: products.map(toProductDto),
+      meta: {
+        total: products.length,
+        page: 1,
+        limit: 100,
+        serviceVersion: 'products-v1',
+        readiness: 'ready',
+      },
+    });
+  }),
 );
 
 // POST /products — create a new product for a campaign (Issue #1189)
@@ -216,42 +211,40 @@ router.post(
   writeLimiter,
   validateBody(CreateProductSchema),
   validateResponse(ProductSchema),
-  (req: WalletRequest, res: Response, next) => {
-    void (async () => {
-      const walletAddress = req.walletAddress!;
-      const input = req.body as CreateProductInput;
+  asyncHandler(async (req: WalletRequest, res: Response) => {
+    const walletAddress = req.walletAddress!;
+    const input = req.body as CreateProductInput;
 
-      if (input.campaignId) {
-        const campaign = await prisma.campaign.findUnique({
-          where: { id: input.campaignId },
-        });
-        if (!campaign) {
-          problemDetail(res, req, 404, 'Campaign Not Found', `No campaign with id ${input.campaignId}`);
-          return;
-        }
-        if (campaign.farmerAddress.toLowerCase() !== walletAddress.toLowerCase()) {
-          problemDetail(res, req, 403, 'Forbidden', 'You can only create products for your own campaigns');
-          return;
-        }
-      }
-
-      const created = await prisma.product.create({
-        data: {
-          name: input.name,
-          description: input.description ?? '',
-          category: input.category,
-          priceTokens: BigInt(input.priceTokens),
-          inventoryCount: input.inventoryCount,
-          campaignId: input.campaignId ?? null,
-          imageUrl: input.imageUrl ?? null,
-          isActive: input.isActive ?? true,
-        },
-        include: { campaign: true },
+    if (input.campaignId) {
+      const campaign = await prisma.campaign.findUnique({
+        where: { id: input.campaignId },
       });
+      if (!campaign) {
+        problemDetail(res, req, 404, 'Campaign Not Found', `No campaign with id ${input.campaignId}`);
+        return;
+      }
+      if (campaign.farmerAddress.toLowerCase() !== walletAddress.toLowerCase()) {
+        problemDetail(res, req, 403, 'Forbidden', 'You can only create products for your own campaigns');
+        return;
+      }
+    }
 
-      jsonValidated(res, ProductSchema, 201, toProductDto(created));
-    })().catch(next);
-  },
+    const created = await prisma.product.create({
+      data: {
+        name: input.name,
+        description: input.description ?? '',
+        category: input.category,
+        priceTokens: BigInt(input.priceTokens),
+        inventoryCount: input.inventoryCount,
+        campaignId: input.campaignId ?? null,
+        imageUrl: input.imageUrl ?? null,
+        isActive: input.isActive ?? true,
+      },
+      include: { campaign: true },
+    });
+
+    jsonValidated(res, ProductSchema, 201, toProductDto(created));
+  }),
 );
 
 // PATCH /products/:id — update a product (Issue #1189)
@@ -262,45 +255,43 @@ router.patch(
   validateParams(ProductIdParamSchema),
   validateBody(UpdateProductSchema),
   validateResponse(ProductSchema),
-  (req: WalletRequest, res: Response, next) => {
-    void (async () => {
-      const { id } = req.params;
-      const walletAddress = req.walletAddress!;
-      const input = req.body as UpdateProductInput;
+  asyncHandler(async (req: WalletRequest, res: Response) => {
+    const { id } = req.params;
+    const walletAddress = req.walletAddress!;
+    const input = req.body as UpdateProductInput;
 
-      const existing = await prisma.product.findUnique({
-        where: { id },
-        include: { campaign: true },
-      });
+    const existing = await prisma.product.findUnique({
+      where: { id },
+      include: { campaign: true },
+    });
 
-      if (!existing) {
-        problemDetail(res, req, 404, 'Product Not Found', `No product with id ${id}`);
-        return;
-      }
+    if (!existing) {
+      problemDetail(res, req, 404, 'Product Not Found', `No product with id ${id}`);
+      return;
+    }
 
-      if (existing.campaign && existing.campaign.farmerAddress.toLowerCase() !== walletAddress.toLowerCase()) {
-        problemDetail(res, req, 403, 'Forbidden', 'You can only update your own products');
-        return;
-      }
+    if (existing.campaign && existing.campaign.farmerAddress.toLowerCase() !== walletAddress.toLowerCase()) {
+      problemDetail(res, req, 403, 'Forbidden', 'You can only update your own products');
+      return;
+    }
 
-      const updated = await prisma.product.update({
-        where: { id },
-        data: {
-          ...(input.name !== undefined ? { name: input.name } : {}),
-          ...(input.description !== undefined ? { description: input.description ?? '' } : {}),
-          ...(input.category !== undefined ? { category: input.category } : {}),
-          ...(input.priceTokens !== undefined ? { priceTokens: BigInt(input.priceTokens) } : {}),
-          ...(input.inventoryCount !== undefined ? { inventoryCount: input.inventoryCount } : {}),
-          ...(input.campaignId !== undefined ? { campaignId: input.campaignId } : {}),
-          ...(input.imageUrl !== undefined ? { imageUrl: input.imageUrl } : {}),
-          ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
-        },
-        include: { campaign: true },
-      });
+    const updated = await prisma.product.update({
+      where: { id },
+      data: {
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.description !== undefined ? { description: input.description ?? '' } : {}),
+        ...(input.category !== undefined ? { category: input.category } : {}),
+        ...(input.priceTokens !== undefined ? { priceTokens: BigInt(input.priceTokens) } : {}),
+        ...(input.inventoryCount !== undefined ? { inventoryCount: input.inventoryCount } : {}),
+        ...(input.campaignId !== undefined ? { campaignId: input.campaignId } : {}),
+        ...(input.imageUrl !== undefined ? { imageUrl: input.imageUrl } : {}),
+        ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+      },
+      include: { campaign: true },
+    });
 
-      jsonValidated(res, ProductSchema, 200, toProductDto(updated));
-    })().catch(next);
-  },
+    jsonValidated(res, ProductSchema, 200, toProductDto(updated));
+  }),
 );
 
 // DELETE /products/:id — deactivate/soft delete a product (Issue #1189)
@@ -309,34 +300,32 @@ router.delete(
   requireWallet,
   writeLimiter,
   validateParams(ProductIdParamSchema),
-  (req: WalletRequest, res: Response, next) => {
-    void (async () => {
-      const { id } = req.params;
-      const walletAddress = req.walletAddress!;
+  asyncHandler(async (req: WalletRequest, res: Response) => {
+    const { id } = req.params;
+    const walletAddress = req.walletAddress!;
 
-      const existing = await prisma.product.findUnique({
-        where: { id },
-        include: { campaign: true },
-      });
+    const existing = await prisma.product.findUnique({
+      where: { id },
+      include: { campaign: true },
+    });
 
-      if (!existing) {
-        problemDetail(res, req, 404, 'Product Not Found', `No product with id ${id}`);
-        return;
-      }
+    if (!existing) {
+      problemDetail(res, req, 404, 'Product Not Found', `No product with id ${id}`);
+      return;
+    }
 
-      if (existing.campaign && existing.campaign.farmerAddress.toLowerCase() !== walletAddress.toLowerCase()) {
-        problemDetail(res, req, 403, 'Forbidden', 'You can only delete your own products');
-        return;
-      }
+    if (existing.campaign && existing.campaign.farmerAddress.toLowerCase() !== walletAddress.toLowerCase()) {
+      problemDetail(res, req, 403, 'Forbidden', 'You can only delete your own products');
+      return;
+    }
 
-      await prisma.product.update({
-        where: { id },
-        data: { isActive: false },
-      });
+    await prisma.product.update({
+      where: { id },
+      data: { isActive: false },
+    });
 
-      res.status(204).send();
-    })().catch(next);
-  },
+    res.status(204).send();
+  }),
 );
 
 export default router;
