@@ -83,6 +83,8 @@ jobs:
               - 'package.json'
               - 'package-lock.json'
             scripts:
+              - '**/*.md'
+              - 'LICENSE'
               - 'scripts/**'
               - 'package.json'
               - '.github/workflows/ci.yml'
@@ -136,6 +138,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y shellcheck
           shellcheck scripts/*.sh
+
+      - name: Markdown relative links
+        run: npm run check:links
 
       - name: Shared dependency policy check
         run: npm run check:versions

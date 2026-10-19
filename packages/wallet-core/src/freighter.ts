@@ -5,7 +5,7 @@
  * `client`'s wallet layer (`src/lib/walletAdapters.ts`, `src/lib/signTransaction.ts`)
  * solves the same `window.freighter`/`window.freighterApi` detection problem
  * independently — migrating it onto this shared implementation is the next
- * incremental step (see root MIGRATION_NOTES.md).
+ * incremental step (see root ARCHITECTURE.md).
  */
 
 export interface FreighterSignTransaction {
