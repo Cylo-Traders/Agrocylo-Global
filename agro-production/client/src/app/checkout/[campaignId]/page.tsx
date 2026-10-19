@@ -14,8 +14,7 @@ import { classifyError, logErrorWithContext } from "@/lib/errorHandling";
 import { useWalletNetworkGuard } from "@/hooks/useWalletNetworkGuard";
 import { ButtonSpinner } from "@/components/Skeletons";
 import TransactionProgress from "@/components/TransactionProgress";
-import { idleMachine, advanceMachine } from "@/types/transaction";
-import type { TxMachineState } from "@/types/transaction";
+import { idleMachine, advanceMachine, type TxMachineState } from "@/types/transaction";
 import type { CampaignDetail, Order } from "@/types";
 
 export default function CheckoutPage() {
