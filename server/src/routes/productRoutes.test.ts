@@ -257,3 +257,29 @@ describe('product write role matrix (#1145)', () => {
     });
   });
 });
+
+describe('product write rate limiting (#1216)', () => {
+  it('returns 429 as problem+json after the write limit is exceeded', async () => {
+    process.env['ENABLE_TEST_RATE_LIMIT'] = 'true';
+    try {
+      for (let i = 0; i < 10; i += 1) {
+        const res = await request(app)
+          .post('/products')
+          .set('Authorization', bearer('FARMER'))
+          .send(validProduct);
+        expect(res.status).toBe(201);
+      }
+
+      const res = await request(app)
+        .post('/products')
+        .set('Authorization', bearer('FARMER'))
+        .send(validProduct);
+
+      expect(res.status).toBe(429);
+      expect(res.headers['content-type']).toContain('application/problem+json');
+      expect(res.body).toMatchObject({ status: 429, title: 'Too Many Requests' });
+    } finally {
+      delete process.env['ENABLE_TEST_RATE_LIMIT'];
+    }
+  });
+});

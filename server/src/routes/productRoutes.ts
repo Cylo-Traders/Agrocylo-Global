@@ -1,5 +1,6 @@
 import express from 'express';
 import { requireWallet, type WalletRequest } from '../middleware/walletAuth.js';
+import { writeRateLimiter } from '../middleware/rateLimiter.js';
 import { ApiError, sendProblem } from '../http/errors.js';
 import {
   createProduct,
@@ -30,13 +31,11 @@ router.get('/products', async (req, res, next) => {
       page_size: typeof req.query['page_size'] === 'string' ? req.query['page_size'] : undefined,
       includeUnavailable:
         typeof req.query['include_unavailable'] === 'string'
-          ? req.query['include_unavailable'] === 'true' ||
-            req.query['include_unavailable'] === '1'
+          ? req.query['include_unavailable'] === 'true' || req.query['include_unavailable'] === '1'
           : undefined,
       include_unavailable:
         typeof req.query['include_unavailable'] === 'string'
-          ? req.query['include_unavailable'] === 'true' ||
-            req.query['include_unavailable'] === '1'
+          ? req.query['include_unavailable'] === 'true' || req.query['include_unavailable'] === '1'
           : undefined,
       sort: typeof req.query['sort'] === 'string' ? req.query['sort'] : undefined,
       lat: typeof req.query['lat'] === 'string' ? req.query['lat'] : undefined,
@@ -57,17 +56,21 @@ router.get('/products/:id', async (req, res, next) => {
   }
 });
 
-router.get('/products/:id/suggested-price', requireWallet, async (req: WalletRequest, res, next) => {
-  try {
-    if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet');
-    const data = await getSuggestedPrice(String(req.params['id']), req.walletAddress);
-    res.status(200).json(data);
-  } catch (error) {
-    next(error);
+router.get(
+  '/products/:id/suggested-price',
+  requireWallet,
+  async (req: WalletRequest, res, next) => {
+    try {
+      if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet');
+      const data = await getSuggestedPrice(String(req.params['id']), req.walletAddress);
+      res.status(200).json(data);
+    } catch (error) {
+      next(error);
+    }
   }
-});
+);
 
-router.post('/products', requireWallet, async (req: WalletRequest, res, next) => {
+router.post('/products', requireWallet, writeRateLimiter, async (req: WalletRequest, res, next) => {
   try {
     if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet');
     const created = await createProduct(req.walletAddress, req.body ?? {});
@@ -77,27 +80,46 @@ router.post('/products', requireWallet, async (req: WalletRequest, res, next) =>
   }
 });
 
-router.patch('/products/:id', requireWallet, async (req: WalletRequest, res, next) => {
-  try {
-    if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet');
-    const updated = await updateProduct(String(req.params['id']), req.walletAddress, req.body ?? {});
-    res.status(200).json(updated);
-  } catch (error) {
-    next(error);
+router.patch(
+  '/products/:id',
+  requireWallet,
+  writeRateLimiter,
+  async (req: WalletRequest, res, next) => {
+    try {
+      if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet');
+      const updated = await updateProduct(
+        String(req.params['id']),
+        req.walletAddress,
+        req.body ?? {}
+      );
+      res.status(200).json(updated);
+    } catch (error) {
+      next(error);
+    }
   }
-});
+);
 
-router.delete('/products/:id', requireWallet, async (req: WalletRequest, res, next) => {
-  try {
-    if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet');
-    const updated = await softDeleteProduct(String(req.params['id']), req.walletAddress);
-    res.status(200).json(updated);
-  } catch (error) {
-    next(error);
+router.delete(
+  '/products/:id',
+  requireWallet,
+  writeRateLimiter,
+  async (req: WalletRequest, res, next) => {
+    try {
+      if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet');
+      const updated = await softDeleteProduct(String(req.params['id']), req.walletAddress);
+      res.status(200).json(updated);
+    } catch (error) {
+      next(error);
+    }
   }
-});
+);
 
-export function apiErrorHandler(error: unknown, req: express.Request, res: express.Response, next: express.NextFunction): void {
+export function apiErrorHandler(
+  error: unknown,
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+): void {
   if (error instanceof ApiError) {
     sendProblem(res, req, error);
     return;

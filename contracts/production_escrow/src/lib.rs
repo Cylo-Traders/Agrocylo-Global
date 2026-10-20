@@ -245,6 +245,9 @@ pub struct Order {
     pub id: u64,
     pub campaign_id: u64,
     pub buyer: Address,
+    /// Gross amount transferred into escrow. The platform fee is included in
+    /// this amount; pending orders refund it in full, while confirmation
+    /// credits only `amount - fee` as settlement revenue.
     pub amount: i128,
     pub fee: i128,
     pub created_at: u64,
@@ -278,6 +281,8 @@ pub enum SplitOrderResolution {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SplitOrder {
     pub campaign_id: u64,
+    /// Gross amount pledged and funded by the co-buyers. The fee is included
+    /// in this amount and is deducted only when the order is confirmed.
     pub total_amount: i128,
     pub fee: i128,
     pub co_buyers: Vec<Address>,
@@ -1108,10 +1113,8 @@ impl ProductionEscrowContract {
     /// `CANCEL_WINDOW_SECS` of creation instead of waiting the full
     /// `ORDER_EXPIRY_SECS` window.
     ///
-    /// Fee-refund semantics: refunds `amount + fee` (both are still held in
-    /// escrow — `fee` is only transferred out to the fee collector on
-    /// `confirm_order`), matching `batch_refund_orders`' existing refund
-    /// amount for the same not-yet-confirmed state.
+    /// Fee model: `amount` is the gross amount transferred into escrow and
+    /// already includes `fee`, so cancellation refunds exactly `amount`.
     pub fn cancel_order(env: Env, buyer: Address, order_id: u64) -> Result<(), EscrowError> {
         buyer.require_auth();
         bump_instance(&env);
@@ -1139,7 +1142,7 @@ impl ProductionEscrowContract {
             .extend_ttl(&DataKey::Order(order_id), TTL_THRESHOLD, TTL_EXTEND);
 
         let campaign = load_campaign(&env, order.campaign_id)?;
-        let refund_amount = checked_add(order.amount, order.fee)?;
+        let refund_amount = order.amount;
         let token_client = token::Client::new(&env, &campaign.token);
         token_client.transfer(
             &env.current_contract_address(),
@@ -1217,7 +1220,7 @@ impl ProductionEscrowContract {
             .instance()
             .get(&DataKey::FeeRateBps)
             .unwrap_or(0);
-        let fee = (total_amount * fee_rate_bps as i128) / 10_000;
+        let fee = checked_mul(total_amount, fee_rate_bps as i128)? / 10_000;
 
         let mut order_id: u64 = env
             .storage()
@@ -1336,10 +1339,12 @@ impl ProductionEscrowContract {
 
         if majority_by_value || unanimous {
             let mut campaign = load_campaign(&env, order.campaign_id)?;
-            if campaign.status != CampaignStatus::Settled {
-                campaign.total_revenue = checked_add(campaign.total_revenue, order.total_amount)?;
-                save_campaign(&env, &campaign);
+            if campaign.status == CampaignStatus::Settled {
+                return Err(SplitOrderError::CampaignNotHarvested);
             }
+            let net_revenue = checked_sub(order.total_amount, order.fee)?;
+            campaign.total_revenue = checked_add(campaign.total_revenue, net_revenue)?;
+            save_campaign(&env, &campaign);
             if order.fee > 0 {
                 if let Some(fee_collector) = env
                     .storage()
@@ -1425,11 +1430,12 @@ impl ProductionEscrowContract {
             }
             SplitOrderResolution::ReleaseToFarmer => {
                 let mut campaign = campaign.clone();
-                if campaign.status != CampaignStatus::Settled {
-                    campaign.total_revenue =
-                        checked_add(campaign.total_revenue, order.total_amount)?;
-                    save_campaign(&env, &campaign);
+                if campaign.status == CampaignStatus::Settled {
+                    return Err(SplitOrderError::CampaignNotHarvested);
                 }
+                let net_revenue = checked_sub(order.total_amount, order.fee)?;
+                campaign.total_revenue = checked_add(campaign.total_revenue, net_revenue)?;
+                save_campaign(&env, &campaign);
                 if order.fee > 0 {
                     if let Some(fee_collector) = env
                         .storage()
@@ -1458,8 +1464,8 @@ impl ProductionEscrowContract {
         load_split_order(&env, order_id)
     }
 
-    /// Buyer confirms receipt. Payment counts toward campaign revenue and fee is collected.
-    /// Buyer confirms receipt. Payment counts toward campaign revenue.
+    /// Buyer confirms receipt. The gross order amount includes the fee;
+    /// only the net amount retained by escrow is credited as campaign revenue.
     /// Cannot confirm orders after campaign is settled (Issue #455).
     pub fn confirm_order(env: Env, buyer: Address, order_id: u64) -> Result<(), EscrowError> {
         buyer.require_auth();
@@ -1482,7 +1488,8 @@ impl ProductionEscrowContract {
             return Err(EscrowError::CampaignNotHarvested);
         }
 
-        campaign.total_revenue = checked_add(campaign.total_revenue, order.amount)?;
+        let net_revenue = checked_sub(order.amount, order.fee)?;
+        campaign.total_revenue = checked_add(campaign.total_revenue, net_revenue)?;
         order.status = OrderStatus::Confirmed;
 
         // Transfer fee to collector if fee > 0.
@@ -1955,8 +1962,9 @@ impl ProductionEscrowContract {
                 TTL_EXTEND,
             );
 
-            // Refund full amount (net + fee) to buyer since order was not delivered.
-            let refund_amount = checked_add(order.amount, order.fee)?;
+            // The fee is included in the gross order amount and has not been
+            // collected, so an expired order refunds exactly what entered.
+            let refund_amount = order.amount;
             let token_client = token::Client::new(&env, &campaign.token);
             token_client.transfer(
                 &env.current_contract_address(),

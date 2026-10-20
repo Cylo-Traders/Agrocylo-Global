@@ -8,7 +8,7 @@ use soroban_sdk::{
 
 use crate::{
     CampaignStatus, DisputeResolution, EscrowError, OrderStatus, ProductionEscrowContract,
-    ProductionEscrowContractClient, ORDER_EXPIRY_SECS,
+    ProductionEscrowContractClient, SplitOrderStatus, ORDER_EXPIRY_SECS,
 };
 
 // ---------------------------------------------------------------------------
@@ -21,6 +21,7 @@ struct TestEnv<'a> {
     token_id: Address,
     admin: Address,
     attester: Address,
+    fee_collector: Address,
     farmer: Address,
     investor1: Address,
     investor2: Address,
@@ -68,6 +69,7 @@ fn setup() -> TestEnv<'static> {
         token_id,
         admin,
         attester,
+        fee_collector,
         farmer,
         investor1,
         investor2,
@@ -653,7 +655,7 @@ fn test_confirm_order_adds_to_revenue() {
     t.client.confirm_order(&t.buyer, &order_id);
 
     let c = t.client.get_campaign(&id);
-    assert_eq!(c.total_revenue, 500);
+    assert_eq!(c.total_revenue, 485);
 }
 
 #[test]
@@ -730,9 +732,76 @@ fn test_settlement_includes_order_revenue() {
 
     let before = balance(&t, &t.investor1);
     let payout = t.client.claim_returns(&t.investor1, &id);
-    // Pool = 10_000 + 2_000 (revenue) - 7_000 (tranches) = 5_000
-    assert_eq!(payout, 5_000);
-    assert_eq!(balance(&t, &t.investor1), before + 5_000);
+    // The 3% fee is included in 2_000, so net revenue is 1_940.
+    // Pool = 10_000 + 1_940 - 7_000 = 4_940.
+    assert_eq!(payout, 4_940);
+    assert_eq!(balance(&t, &t.investor1), before + 4_940);
+}
+
+#[test]
+fn test_non_zero_fee_liabilities_match_balance_through_dispute_and_claim() {
+    let t = setup();
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &future_deadline(&t));
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &t.attester, &id);
+
+    let fee_before = balance(&t, &t.fee_collector);
+    let order_id = t.client.create_order(&t.buyer, &id, &2_000);
+    assert_eq!(balance(&t, &t.client.address), 5_000);
+    t.client.confirm_order(&t.buyer, &order_id);
+
+    let campaign = t.client.get_campaign(&id);
+    assert_eq!(campaign.total_revenue, 1_940);
+    assert_eq!(balance(&t, &t.fee_collector) - fee_before, 60);
+    let tracked_liabilities =
+        campaign.total_raised + campaign.total_revenue - campaign.tranche_released;
+    assert_eq!(balance(&t, &t.client.address), tracked_liabilities);
+
+    t.client.open_dispute(&t.farmer, &id);
+    t.client
+        .resolve_dispute(&t.admin, &id, &DisputeResolution::FullPayoutToInvestors);
+    assert_eq!(t.client.claim_returns(&t.investor1, &id), 4_940);
+    assert_eq!(balance(&t, &t.client.address), 0);
+}
+
+#[test]
+fn test_split_order_uses_same_fee_included_model() {
+    let t = setup();
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &future_deadline(&t));
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+
+    let co_buyer = Address::generate(&t.env);
+    StellarAssetClient::new(&t.env, &t.token_id).mint(&co_buyer, &500);
+    let mut co_buyers = Vec::new(&t.env);
+    co_buyers.push_back(t.buyer.clone());
+    co_buyers.push_back(co_buyer.clone());
+    let mut shares = Vec::new(&t.env);
+    shares.push_back(500);
+    shares.push_back(500);
+
+    let order_id = t
+        .client
+        .create_split_order(&t.buyer, &id, &co_buyers, &shares);
+    t.client.fund_split_order(&t.buyer, &order_id);
+    t.client.fund_split_order(&co_buyer, &order_id);
+    t.client.confirm_split_receipt(&t.buyer, &order_id);
+    t.client.confirm_split_receipt(&co_buyer, &order_id);
+
+    assert_eq!(
+        t.client.get_split_order(&order_id).status,
+        SplitOrderStatus::Confirmed
+    );
+    let campaign = t.client.get_campaign(&id);
+    assert_eq!(campaign.total_revenue, 970);
+    let tracked_liabilities =
+        campaign.total_raised + campaign.total_revenue - campaign.tranche_released;
+    assert_eq!(balance(&t, &t.client.address), tracked_liabilities);
 }
 
 // ---------------------------------------------------------------------------
@@ -2626,7 +2695,7 @@ fn test_confirm_order_before_settlement_allowed() {
     // Should transition to Harvested with revenue recorded
     let campaign = t.client.get_campaign(&id);
     assert_eq!(campaign.status, CampaignStatus::Harvested);
-    assert_eq!(campaign.total_revenue, 2_000);
+    assert_eq!(campaign.total_revenue, 1_940);
 
     // Now settle
     t.client.settle(&t.farmer, &id);
@@ -2672,17 +2741,17 @@ fn test_mark_campaign_failed_from_harvested_proportional_refund() {
     // Add some revenue via an order
     let order_id = t.client.create_order(&t.buyer, &id, &2_000);
     t.client.confirm_order(&t.buyer, &order_id);
-    assert_eq!(t.client.get_campaign(&id).total_revenue, 2_000);
+    assert_eq!(t.client.get_campaign(&id).total_revenue, 1_940);
 
     // Admin marks campaign as failed after harvest
     t.client.mark_campaign_failed(&t.admin, &id);
     assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
 
-    // Pool = 10_000 (raised) + 2_000 (revenue) - 7_000 (tranches) = 5_000
+    // Pool = 10_000 (raised) + 1_940 (net revenue) - 7_000 (tranches) = 4_940
     let before = balance(&t, &t.investor1);
     let r = t.client.refund(&t.investor1, &id);
-    assert_eq!(r, 5_000);
-    assert_eq!(balance(&t, &t.investor1), before + 5_000);
+    assert_eq!(r, 4_940);
+    assert_eq!(balance(&t, &t.investor1), before + 4_940);
 }
 
 #[test]
@@ -2904,11 +2973,11 @@ fn test_batch_refund_investors_proportional_with_revenue() {
     let mut investors = Vec::new(&t.env);
     investors.push_back(t.investor1.clone());
 
-    // Pool = 10_000 + 2_000 - 7_000 = 5_000
+    // Pool = 10_000 + 1_940 net revenue - 7_000 = 4_940
     let (count, total) = t.client.batch_refund_investors(&id, &investors);
     assert_eq!(count, 1);
-    assert_eq!(total, 5_000);
-    assert_eq!(balance(&t, &t.investor1), before + 5_000);
+    assert_eq!(total, 4_940);
+    assert_eq!(balance(&t, &t.investor1), before + 4_940);
 }
 
 // ---------------------------------------------------------------------------

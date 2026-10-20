@@ -15,8 +15,8 @@
 //!
 //! 4. **Fee accounting**: fees are only transferred out via the configured
 //!    `fee_collector` path. The fee collector balance only increases; it never
-//!    decreases. No fee is charged before `confirm_order` / `confirm_split_receipt`
-//!    (cancelled / expired orders return `amount + fee`).
+//!    decreases. Order amounts include the fee: no fee is charged before
+//!    confirmation, and cancelled / expired orders return exactly `amount`.
 //!
 //! # State-machine fuzzer (Task 5)
 //!
@@ -509,7 +509,7 @@ fn test_invariant_terminal_state_lock_proptest() {
 // ---------------------------------------------------------------------------
 
 /// Fees only exit via fee_collector. Fee collector balance only ever increases.
-/// Cancelled or expired orders refund both `amount` AND `fee` (fee is not taken).
+/// Cancelled or expired orders refund the gross `amount` (fee is included and not taken).
 #[test]
 fn test_invariant_fee_only_via_fee_collector_on_confirm() {
     let h = make_harness(1);
@@ -583,12 +583,11 @@ fn test_invariant_fee_not_collected_on_cancel() {
         fee_collector_before, fee_collector_after,
         "fee_collector must NOT receive fee when order is cancelled"
     );
-    // Buyer should get back amount + fee
-    let expected_fee = (order_amount * 300) / 10_000;
+    // Buyer gets back exactly the gross amount that entered escrow.
     assert_eq!(
         buyer_after - buyer_before,
-        order_amount + expected_fee,
-        "buyer should get back amount + fee on cancel"
+        order_amount,
+        "buyer should get back the gross order amount on cancel"
     );
 }
 
