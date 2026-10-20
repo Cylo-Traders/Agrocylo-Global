@@ -10,6 +10,15 @@ const env = {
   NEXT_PUBLIC_SENTRY_DSN: "https://key@errors.example.test/123",
 };
 
+function parseDirectives(policy: string): Map<string, string[]> {
+  return new Map(
+    policy.split("; ").map((directive) => {
+      const [name, ...sources] = directive.split(" ");
+      return [name, sources];
+    }),
+  );
+}
+
 describe("buildContentSecurityPolicy", () => {
   it("allows only the configured HTTP and WebSocket connection origins", () => {
     const policy = buildContentSecurityPolicy({
@@ -19,11 +28,21 @@ describe("buildContentSecurityPolicy", () => {
       env,
     });
 
-    expect(policy).toContain(
-      "connect-src 'self' http://localhost:5000 ws://localhost:5000 https://rpc.example.test https://horizon.example.test https://analytics.example.test https://errors.example.test",
+    const connectSources = parseDirectives(policy).get("connect-src");
+    expect(connectSources).toEqual(
+      expect.arrayContaining([
+        "'self'",
+        "http://localhost:5000",
+        "ws://localhost:5000",
+        "https://rpc.example.test",
+        "https://horizon.example.test",
+        "https://nominatim.openstreetmap.org",
+        "https://analytics.example.test",
+        "https://errors.example.test",
+      ]),
     );
-    expect(policy).not.toContain("unrelated.example.test");
-    expect(policy).not.toContain("connect-src *");
+    expect(connectSources).not.toContain("https://unrelated.example.test");
+    expect(connectSources).not.toContain("*");
   });
 
   it("keeps unsafe-eval and the exact HMR WebSocket origin development-only", () => {

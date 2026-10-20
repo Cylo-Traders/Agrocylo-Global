@@ -14,6 +14,8 @@ const farmer: FarmerLocation = {
   country: "Nigeria",
 };
 
+const coordinates = { latitude: 6.5, longitude: 3.3 };
+
 function jsonResponse(body: unknown, ok = true, status = 200) {
   return {
     ok,
@@ -34,7 +36,7 @@ describe("useFarmerLocations", () => {
       vi.fn().mockResolvedValue(jsonResponse({ farmers: [farmer] })),
     );
 
-    const { result } = renderHook(() => useFarmerLocations());
+    const { result } = renderHook(() => useFarmerLocations(coordinates));
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -51,7 +53,7 @@ describe("useFarmerLocations", () => {
       vi.fn().mockResolvedValue(jsonResponse({ data: [farmer] })),
     );
 
-    const { result } = renderHook(() => useFarmerLocations());
+    const { result } = renderHook(() => useFarmerLocations(coordinates));
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -76,19 +78,17 @@ describe("useFarmerLocations", () => {
     expect(url).toContain("radius=25");
   });
 
-  it("omits the query string when no filters are supplied", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(jsonResponse({ farmers: [] })),
-    );
+  it("does not fetch without coordinates and stops loading", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
 
     const { result } = renderHook(() => useFarmerLocations());
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    const url = vi.mocked(fetch).mock.calls[0][0] as string;
-    expect(url).not.toContain("?");
-    expect(url).not.toContain("radius=");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.current.farmers).toEqual([]);
+    expect(result.current.error).toBeNull();
   });
 
   it("surfaces an error and clears farmers when the request fails", async () => {
@@ -97,7 +97,7 @@ describe("useFarmerLocations", () => {
       vi.fn().mockResolvedValue(jsonResponse({}, false, 500)),
     );
 
-    const { result } = renderHook(() => useFarmerLocations());
+    const { result } = renderHook(() => useFarmerLocations(coordinates));
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -106,12 +106,9 @@ describe("useFarmerLocations", () => {
   });
 
   it("surfaces network failures as errors", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockRejectedValue(new Error("offline")),
-    );
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
 
-    const { result } = renderHook(() => useFarmerLocations());
+    const { result } = renderHook(() => useFarmerLocations(coordinates));
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -126,7 +123,7 @@ describe("useFarmerLocations", () => {
       .mockResolvedValueOnce(jsonResponse({ farmers: [farmer] }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const { result } = renderHook(() => useFarmerLocations());
+    const { result } = renderHook(() => useFarmerLocations(coordinates));
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.farmers).toEqual([]);
