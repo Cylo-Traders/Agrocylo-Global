@@ -8,6 +8,7 @@ import {
   verifySignatureAndCreateSession,
   verifyHandoffAndCreateSession,
   revokeSession,
+  refreshAccessToken,
   AuthError,
 } from '../services/walletAuthService.js';
 
@@ -31,12 +32,22 @@ const SessionRequestSchema = z.object({
 const SessionResponseSchema = z.object({
   accessToken: z.string(),
   sessionToken: z.string(),
+  refreshToken: z.string(),
   walletAddress: z.string(),
   expiresAt: z.string(),
 });
 
+const RefreshResponseSchema = z.object({
+  accessToken: z.string(),
+  refreshToken: z.string(),
+});
+
 const RevokeSessionBodySchema = z.object({
   sessionToken: z.string(),
+});
+
+const RefreshTokenBodySchema = z.object({
+  refreshToken: z.string().min(1, 'Refresh token is required'),
 });
 
 const HandoffRequestSchema = z.object({
@@ -120,6 +131,26 @@ router.post(
       res.status(204).send();
     } catch (err) {
       problemDetail(res, req, 500, 'Internal Server Error', 'Failed to revoke session');
+    }
+  },
+);
+
+// POST /auth/refresh — refresh access token using refresh token
+router.post(
+  '/auth/refresh',
+  authLimiter,
+  validateBody(RefreshTokenBodySchema),
+  async (req: Request, res: Response) => {
+    try {
+      const { refreshToken } = req.body as { refreshToken: string };
+      const result = await refreshAccessToken(refreshToken);
+      jsonValidated(res, RefreshResponseSchema, 200, result);
+    } catch (err) {
+      if (err instanceof AuthError) {
+        problemDetail(res, req, err.status, err.message);
+        return;
+      }
+      problemDetail(res, req, 500, 'Internal Server Error', 'Failed to refresh token');
     }
   },
 );

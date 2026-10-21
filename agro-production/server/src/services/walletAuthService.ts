@@ -1,4 +1,4 @@
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual, randomBytes } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { Keypair } from '@stellar/stellar-sdk';
 import { config } from '../config/index.js';
@@ -6,6 +6,7 @@ import { prisma } from '../db/client.js';
 
 const NONCE_EXPIRY_SECS = 300;
 const SESSION_EXPIRY_SECS = 900;
+const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // Cross-app SSO handoff (Issue #686): audience claim the root server signs
 // its handoff tokens with, and the `AuthNonce.audience` used to record a
 // consumed handoff token's jti so it can never be replayed.
@@ -30,6 +31,7 @@ export interface ChallengeResult {
 export interface SessionResult {
   accessToken: string;
   sessionToken: string;
+  refreshToken: string;
   walletAddress: string;
   expiresAt: string;
 }
@@ -111,13 +113,14 @@ export async function verifySignatureAndCreateSession(
     data: { usedAt: new Date() },
   });
 
+  const canonical = canonicalWalletAddress(walletAddress);
   const sessionToken = randomUUID();
   const expiresAt = new Date(Date.now() + SESSION_EXPIRY_SECS * 1000);
 
   // Store session in auth_nonces table for simplicity (reuse infrastructure)
   await prisma.authNonce.create({
     data: {
-      walletAddress,
+      walletAddress: canonical,
       nonce: sessionToken,
       audience: 'session',
       expiresAt,
@@ -126,15 +129,30 @@ export async function verifySignatureAndCreateSession(
 
   // Issue JWT access token for consistency with root server
   const accessToken = jwt.sign(
-    { walletAddress, role: 'USER' },
+    { walletAddress: canonical, role: 'USER' },
     config.jwtSecret,
     { expiresIn: '15m' },
   );
 
+  // Generate refresh token for session renewal
+  const refreshToken = randomBytes(40).toString('hex');
+  const refreshHash = hashRefreshToken(refreshToken);
+  const refreshExpiresAt = new Date(Date.now() + REFRESH_TTL_MS);
+
+  await prisma.authNonce.create({
+    data: {
+      walletAddress: canonical,
+      nonce: refreshHash,
+      audience: 'refresh',
+      expiresAt: refreshExpiresAt,
+    },
+  });
+
   return {
     accessToken,
     sessionToken,
-    walletAddress,
+    refreshToken,
+    walletAddress: canonical,
     expiresAt: expiresAt.toISOString(),
   };
 }
@@ -157,6 +175,8 @@ export async function verifyHandoffAndCreateSession(
     throw new AuthError(401, 'Invalid or expired handoff token.');
   }
 
+  const canonical = canonicalWalletAddress(walletAddress);
+
   // Single-use: `nonce` is unique, so a replayed jti fails this insert with
   // Prisma error P2002. Any other failure (e.g. a transient DB error) is not
   // a replay and should surface as a server error instead of masquerading
@@ -164,7 +184,7 @@ export async function verifyHandoffAndCreateSession(
   try {
     await prisma.authNonce.create({
       data: {
-        walletAddress,
+        walletAddress: canonical,
         nonce: jti,
         audience: HANDOFF_NONCE_AUDIENCE,
         expiresAt: new Date(Date.now() + 60_000),
@@ -183,7 +203,7 @@ export async function verifyHandoffAndCreateSession(
 
   await prisma.authNonce.create({
     data: {
-      walletAddress,
+      walletAddress: canonical,
       nonce: sessionToken,
       audience: 'session',
       expiresAt,
@@ -191,15 +211,30 @@ export async function verifyHandoffAndCreateSession(
   });
 
   const accessToken = jwt.sign(
-    { walletAddress, role: 'USER' },
+    { walletAddress: canonical, role: 'USER' },
     config.jwtSecret,
     { expiresIn: '15m' },
   );
 
+  // Generate refresh token for session renewal
+  const refreshToken = randomBytes(40).toString('hex');
+  const refreshHash = hashRefreshToken(refreshToken);
+  const refreshExpiresAt = new Date(Date.now() + REFRESH_TTL_MS);
+
+  await prisma.authNonce.create({
+    data: {
+      walletAddress: canonical,
+      nonce: refreshHash,
+      audience: 'refresh',
+      expiresAt: refreshExpiresAt,
+    },
+  });
+
   return {
     accessToken,
     sessionToken,
-    walletAddress,
+    refreshToken,
+    walletAddress: canonical,
     expiresAt: expiresAt.toISOString(),
   };
 }
@@ -238,4 +273,59 @@ export async function revokeSession(sessionToken: string): Promise<void> {
     where: { nonce: sessionToken, audience: 'session' },
     data: { usedAt: new Date() },
   });
+}
+
+function hashRefreshToken(token: string): string {
+  return randomBytes(32).toString('hex');
+}
+
+function canonicalWalletAddress(addr: string): string {
+  return addr.trim().toLowerCase();
+}
+
+export async function refreshAccessToken(
+  refreshToken: string,
+): Promise<{ accessToken: string; refreshToken: string }> {
+  const tokenHash = hashRefreshToken(refreshToken);
+  const row = await prisma.authNonce.findUnique({
+    where: { nonce: tokenHash },
+  });
+
+  if (!row || row.audience !== 'refresh') {
+    throw new AuthError(401, 'Invalid refresh token.');
+  }
+
+  if (new Date() > row.expiresAt) {
+    await prisma.authNonce.delete({
+      where: { id: row.id },
+    });
+    throw new AuthError(401, 'Refresh token expired.');
+  }
+
+  // Rotate: invalidate the used token and issue a fresh one
+  await prisma.authNonce.delete({
+    where: { id: row.id },
+  });
+
+  const walletAddress = canonicalWalletAddress(row.walletAddress);
+  const accessToken = jwt.sign(
+    { walletAddress, role: 'USER' },
+    config.jwtSecret,
+    { expiresIn: '15m' },
+  );
+
+  const newRefreshToken = randomBytes(40).toString('hex');
+  const newRefreshHash = hashRefreshToken(newRefreshToken);
+  const refreshExpiresAt = new Date(Date.now() + REFRESH_TTL_MS);
+
+  await prisma.authNonce.create({
+    data: {
+      walletAddress,
+      nonce: newRefreshHash,
+      audience: 'refresh',
+      expiresAt: refreshExpiresAt,
+    },
+  });
+
+  return { accessToken, refreshToken: newRefreshToken };
 }

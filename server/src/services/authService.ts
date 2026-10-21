@@ -257,7 +257,7 @@ export function verifyAccessToken(token: string): { walletAddress: string; role:
 
 export function signHandoffToken(walletAddress: string): string {
   return jwt.sign(
-    { walletAddress: canonicalWalletAddress(walletAddress) },
+    { walletAddress: canonicalWalletAddress(walletAddress), jti: crypto.randomBytes(16).toString('hex') },
     JWT_SECRET,
     { expiresIn: HANDOFF_EXPIRES_IN, audience: HANDOFF_AUDIENCE }
   );
