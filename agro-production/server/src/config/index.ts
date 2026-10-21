@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const REQUIRED_IN_PRODUCTION = [
+  'DATABASE_URL',
   'RPC_URL',
   'PRODUCTION_CONTRACT_ID',
   'ESCROW_CONTRACT_ID',
@@ -19,9 +20,9 @@ function getEnv(key: string): string | undefined {
   return value === undefined || value === '' ? undefined : value;
 }
 
-function validateJwtSecret(value: string | undefined): string | undefined {
+function validateJwtSecret(value: string | undefined): string {
   if (process.env.NODE_ENV !== 'production') {
-    return value;
+    return value ?? DEV_JWT_SECRET;
   }
   if (!value) {
     throw new Error('JWT_SECRET is required in production');
@@ -45,18 +46,33 @@ function validateMetricsApiKey(value: string | undefined): string {
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(3000),
-  RPC_URL: z.string().url().optional(),
-  PRODUCTION_CONTRACT_ID: z.string().optional(),
-  ESCROW_CONTRACT_ID: z.string().optional(),
-  BASKET_CONTRACT_ID: z.string().optional(),
-  SUPABASE_URL: z.string().url().optional(),
-  SUPABASE_ANON_KEY: z.string().optional(),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  LOG_LEVEL: z.string().default('debug'),
+  DATABASE_URL: z.string().default(''),
+  RPC_URL: z.string().url().default('https://soroban-testnet.stellar.org'),
+  PRODUCTION_CONTRACT_ID: z.string().default(''),
+  ESCROW_CONTRACT_ID: z.string().default(''),
+  PRODUCTION_ESCROW_CONTRACT_ID: z.string().optional(),
+  REGISTRY_CONTRACT_ID: z.string().default(''),
+  BASKET_CONTRACT_ID: z.string().default(''),
+  SUPABASE_URL: z.string().default(''),
+  SUPABASE_ANON_KEY: z.string().default(''),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().default(''),
+  SUPABASE_CAMPAIGN_IMAGES_BUCKET: z.string().default('campaign-images'),
+  CAMPAIGN_IMAGE_PLACEHOLDER_URL: z
+    .string()
+    .default('https://placehold.co/800x800/png?text=No+Image'),
   JWT_SECRET: z.string().optional(),
   METRICS_API_KEY: z.string().optional(),
-  SENTRY_DSN: z.string().optional(),
-  CORS_ORIGINS: z.string().optional(),
-  REDIS_URL: z.string().optional(),
+  SENTRY_DSN: z.string().default(''),
+  SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().default(0.1),
+  CORS_ORIGINS: z.string().default(''),
+  REDIS_URL: z.string().default(''),
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60000),
+  RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(100),
+  RATE_LIMIT_WRITE_MAX_REQUESTS: z.coerce.number().default(10),
+  SHUTDOWN_TIMEOUT_MS: z.coerce.number().default(15000),
+  RUN_RECONCILIATION_SWEEP: z.string().optional(),
+  RECONCILIATION_SWEEP_INTERVAL_MS: z.coerce.number().default(300000),
 });
 
 const parsed = envSchema.parse(process.env);
@@ -76,18 +92,34 @@ const metricsApiKey = validateMetricsApiKey(parsed.METRICS_API_KEY);
 export const config = {
   nodeEnv: parsed.NODE_ENV,
   port: parsed.PORT,
+  logLevel: parsed.LOG_LEVEL,
+  databaseUrl: parsed.DATABASE_URL,
   rpcUrl: parsed.RPC_URL,
   productionContractId: parsed.PRODUCTION_CONTRACT_ID,
+  /** Production contract the event watcher and indexer follow. */
+  contractId: parsed.PRODUCTION_CONTRACT_ID,
   escrowContractId: parsed.ESCROW_CONTRACT_ID,
+  productionEscrowContractId:
+    parsed.PRODUCTION_ESCROW_CONTRACT_ID || parsed.PRODUCTION_CONTRACT_ID,
+  registryContractId: parsed.REGISTRY_CONTRACT_ID,
   basketContractId: parsed.BASKET_CONTRACT_ID,
   supabaseUrl: parsed.SUPABASE_URL,
   supabaseAnonKey: parsed.SUPABASE_ANON_KEY,
   supabaseServiceRoleKey: parsed.SUPABASE_SERVICE_ROLE_KEY,
+  campaignImagesBucket: parsed.SUPABASE_CAMPAIGN_IMAGES_BUCKET,
+  campaignImagePlaceholderUrl: parsed.CAMPAIGN_IMAGE_PLACEHOLDER_URL,
   jwtSecret,
   metricsApiKey,
   sentryDsn: parsed.SENTRY_DSN,
-  corsOrigins: parsed.CORS_ORIGINS,
+  sentryTracesSampleRate: parsed.SENTRY_TRACES_SAMPLE_RATE,
+  corsOrigins: parsed.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean),
   redisUrl: parsed.REDIS_URL,
+  rateLimitWindowMs: parsed.RATE_LIMIT_WINDOW_MS,
+  rateLimitMaxRequests: parsed.RATE_LIMIT_MAX_REQUESTS,
+  rateLimitWriteMaxRequests: parsed.RATE_LIMIT_WRITE_MAX_REQUESTS,
+  shutdownTimeoutMs: parsed.SHUTDOWN_TIMEOUT_MS,
+  runReconciliationSweep: parsed.RUN_RECONCILIATION_SWEEP !== 'false',
+  reconciliationSweepIntervalMs: parsed.RECONCILIATION_SWEEP_INTERVAL_MS,
 };
 
 export type Config = typeof config;

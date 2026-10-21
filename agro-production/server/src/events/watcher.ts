@@ -34,7 +34,7 @@ const BASKET_CONTRACT_ID = config.basketContractId;
  */
 async function loadCursor(
   server: rpc.Server,
-): Promise<{ ledger: number; eventIndex: number }> {
+): Promise<{ ledger: number; eventIndex: number; ledgerHash: string | null }> {
   const cursor = await prisma.eventCursor.findUnique({
     where: { contractId: CONTRACT_ID },
   });
@@ -43,7 +43,11 @@ async function loadCursor(
       ledger: cursor.ledger,
       eventIndex: cursor.eventIndex,
     });
-    return { ledger: cursor.ledger, eventIndex: cursor.eventIndex };
+    return {
+      ledger: cursor.ledger,
+      eventIndex: cursor.eventIndex,
+      ledgerHash: cursor.ledgerHash ?? null,
+    };
   }
   const latest = await server.getLatestLedger();
   logger.info(
@@ -52,7 +56,7 @@ async function loadCursor(
       ledger: latest.sequence,
     },
   );
-  return { ledger: latest.sequence, eventIndex: 0 };
+  return { ledger: latest.sequence, eventIndex: 0, ledgerHash: null };
 }
 
 /**
@@ -245,6 +249,16 @@ export async function replayDeadLetterEvents(
   return { replayed, failed };
 }
 
+/** SDK 17 dropped `getLedger(seq)`; fetch one ledger via `getLedgers` instead. */
+async function getLedgerHash(server: rpc.Server, sequence: number): Promise<string> {
+  const { ledgers } = await server.getLedgers({ startLedger: sequence, pagination: { limit: 1 } });
+  const ledger = ledgers[0];
+  if (!ledger || ledger.sequence !== sequence) {
+    throw new Error(`Ledger ${sequence} not available from RPC`);
+  }
+  return ledger.hash;
+}
+
 function parseEventIndex(id: string): number {
   const parts = id.split('-');
   return parts.length >= 2 ? parseInt(parts[1], 10) || 0 : 0;
@@ -265,12 +279,12 @@ async function detectReorg(
   }
 
   try {
-    const ledger = await server.getLedger(trackedLedger);
-    if (ledger.hash !== trackedHash) {
+    const observedHash = await getLedgerHash(server, trackedLedger);
+    if (observedHash !== trackedHash) {
       logger.warn('Reorg detected: ledger hash mismatch', {
         trackedLedger,
         expectedHash: trackedHash,
-        observedHash: ledger.hash,
+        observedHash,
       });
       return trackedLedger; // Fork point is at this ledger
     }
@@ -393,7 +407,8 @@ export async function startProductionWatcher(): Promise<
   let currentLedger = cursor.ledger;
   let currentEventIndex = cursor.eventIndex;
 
-  let trackedLedgerHash: string | null = cursor.ledger > 0 ? null : null;
+  // Resume reorg detection from the hash persisted alongside the cursor.
+  let trackedLedgerHash: string | null = cursor.ledgerHash;
 
   const interval = setInterval(async () => {
     try {
@@ -505,8 +520,7 @@ export async function startProductionWatcher(): Promise<
       if (maxEventLedger > currentLedger || maxEventIndex > currentEventIndex) {
         // Fetch the hash of the new cursor ledger for future reorg detection
         try {
-          const ledger = await server.getLedger(maxEventLedger);
-          trackedLedgerHash = ledger.hash;
+          trackedLedgerHash = await getLedgerHash(server, maxEventLedger);
         } catch (err) {
           logger.warn('Failed to fetch ledger hash for cursor tracking', {
             ledger: maxEventLedger,

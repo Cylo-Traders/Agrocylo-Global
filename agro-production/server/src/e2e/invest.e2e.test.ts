@@ -33,6 +33,7 @@ import {
   makeCampaignCreatedRawEvent,
   makeCampaignInvestedRawEvent,
 } from './helpers/xdrBuilder.js';
+import { EVENT_SCHEMA_VERSION } from '../events/schema.js';
 
 /**
  * Races `promise` against a timeout, always clearing the timer so a fast
@@ -135,6 +136,7 @@ function runE2ESuite() {
     it('indexes a campaign.created event and exposes it via REST', async () => {
       await EventPersister.persist({
         action: 'campaign.created',
+        schemaVersion: EVENT_SCHEMA_VERSION,
         ledger: 200,
         eventIndex: 0,
         timestamp: new Date(),
@@ -169,6 +171,7 @@ function runE2ESuite() {
       // Persist the investment event.
       await EventPersister.persist({
         action: 'campaign.invested',
+        schemaVersion: EVENT_SCHEMA_VERSION,
         ledger: 201,
         eventIndex: 0,
         timestamp: new Date(),
@@ -343,6 +346,7 @@ function runE2ESuite() {
       // Passing an invalid event type should reject, not silently swallow.
       const badEvent = {
         action: 'campaign.created' as const,
+        schemaVersion: EVENT_SCHEMA_VERSION,
         ledger: 9999,
         eventIndex: 999,
         timestamp: new Date(),
