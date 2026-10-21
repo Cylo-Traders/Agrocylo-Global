@@ -28,7 +28,8 @@ vi.mock("@stellar/stellar-sdk", () => {
     build() { return {}; }
   }
   return {
-    rpc: { Server: MockServer, Account: vi.fn() },
+    rpc: { Server: MockServer },
+    Account: vi.fn(),
     Contract: MockContract,
     nativeToScVal: vi.fn((val: unknown) => ({ type: "u64", value: val })),
     scValToNative: vi.fn(),

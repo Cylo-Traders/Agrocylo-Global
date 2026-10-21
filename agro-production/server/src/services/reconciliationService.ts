@@ -1,4 +1,5 @@
-import { rpc, Contract, nativeToScVal, scValToNative as sdkScValToNative, TransactionBuilder, xdr } from "@stellar/stellar-sdk";
+import { Account, rpc, Contract, nativeToScVal, scValToNative as sdkScValToNative, TransactionBuilder, xdr } from "@stellar/stellar-sdk";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../db/client.js";
 import { config } from "../config/index.js";
 import logger from "../config/logger.js";
@@ -78,7 +79,7 @@ async function simulateContractFn(
   args: xdr.ScVal[],
 ): Promise<xdr.ScVal | null> {
   const contract = new Contract(contractId);
-  const sourceAccount = new rpc.Account(
+  const sourceAccount = new Account(
     "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     "0",
   );
@@ -437,8 +438,8 @@ async function persistAlerts(findings: DriftFinding[]): Promise<void> {
           entityId: finding.entityId,
           contractSet: finding.contractSet,
           driftType: finding.driftType,
-          dbValue: finding.dbValue,
-          chainValue: finding.chainValue,
+          dbValue: finding.dbValue as Prisma.InputJsonObject,
+          chainValue: finding.chainValue as Prisma.InputJsonObject,
         },
       });
     } catch (err) {

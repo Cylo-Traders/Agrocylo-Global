@@ -24,6 +24,7 @@ vi.mock("../services/wsServer.js", () => ({
 import app from "../app.js";
 import { prisma } from "../db/client.js";
 import { EventPersister } from "../events/persister.js";
+import { EVENT_SCHEMA_VERSION } from "../events/schema.js";
 
 describe("Campaign Milestones API & Event Handling (Issue #645)", () => {
   beforeEach(() => {
@@ -93,13 +94,14 @@ describe("Campaign Milestones API & Event Handling (Issue #645)", () => {
     });
 
     const produceEvent = {
-      id: "100-1",
+      rawId: "100-1",
       action: "campaign.produce" as const,
+      timestamp: new Date(),
+      schemaVersion: EVENT_SCHEMA_VERSION,
       campaignId: "10",
       ledger: 100,
       eventIndex: 1,
       txHash: "0xabc1",
-      extra: [],
     };
 
     await EventPersister.persist(produceEvent);

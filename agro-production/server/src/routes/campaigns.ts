@@ -11,7 +11,12 @@ import {
 } from "../middleware/validate.js";
 import { writeLimiter } from "../middleware/rateLimit.js";
 import { requireWallet, type WalletRequest } from "../middleware/walletAuth.js";
-import { requireIdempotencyKey } from "../middleware/idempotency.js";
+import {
+  buildIdempotencyCacheKey,
+  getCachedResponse,
+  requireIdempotencyKey,
+  setCachedResponse,
+} from "../middleware/idempotency.js";
 import { problemDetail } from "../middleware/errors.js";
 import {
   CampaignIdParamSchema,
@@ -33,7 +38,6 @@ import {
   InvestorPortfolioSummarySchema,
 } from "../schemas/responses.js";
 import { broadcast } from "../services/wsServer.js";
-import { getCachedResponse, setCachedResponse } from "../middleware/idempotency.js";
 import { getStatusMetadata } from "../services/campaignStatusService.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 
@@ -253,46 +257,191 @@ router.get(
   }),
 );
 
-// POST /campaigns — create a campaign intent.
-//
-// `onChainId` is @unique, so we cannot use a shared literal like "pending"
-// (Issue #1209): a second concurrent create would violate the index (P2002).
-// Instead we mint a client-generated unique placeholder `intent:<uuid>` that
-// the indexer later reconciles to the real on-chain id.
+// POST /campaigns — register a newly-created campaign (off-chain metadata)
+// Requires authenticated session; farmerAddress is derived from session, not body
 router.post(
   "/campaigns",
-  writeLimiter,
   requireWallet,
+  writeLimiter,
   requireIdempotencyKey,
-  validateBody(CreateCampaignSchema),
+  validateBody(CreateCampaignSchema.omit({ farmerAddress: true })),
   validateResponse(CampaignSchema),
   asyncHandler(async (req: WalletRequest, res: Response) => {
-    const body = req.body as CreateCampaignInput;
+    const farmerAddress = req.walletAddress!;
+    const idempotencyKey = (req as any).idempotencyKey as string;
+    const { tokenAddress, targetAmount, deadline } = req.body as Omit<CreateCampaignInput, "farmerAddress">;
 
-    const cached = await getCachedResponse(req);
+    const cacheKey = buildIdempotencyCacheKey(req);
+    const cached = await getCachedResponse(cacheKey);
     if (cached) {
-      jsonValidated(res, CampaignSchema, cached.status, cached.body);
+      res.status(cached.status).json(cached.body);
       return;
     }
 
-    const intentOnChainId = `intent:${randomUUID()}`;
+    await prisma.user.upsert({
+      where: { walletAddress: farmerAddress },
+      create: { walletAddress: farmerAddress, role: "FARMER" },
+      update: {},
+    });
+
+    // `onChainId` is @unique, so a shared "pending" literal collides on the
+    // second concurrent create (Issue #1209). Mint a unique placeholder that
+    // the indexer later reconciles to the real on-chain id.
+    const intentId = `intent:${randomUUID()}`;
 
     const campaign = await prisma.campaign.create({
       data: {
-        onChainId: intentOnChainId,
-        farmerAddress: req.walletAddress!,
-        tokenAddress: body.tokenAddress,
-        targetAmount: body.targetAmount,
-        deadline: new Date(body.deadline),
-        status: "FUNDING",
+        onChainId: intentId,
+        farmerAddress,
+        tokenAddress,
+        targetAmount,
+        deadline: new Date(deadline),
       },
     });
 
-    await setCachedResponse(req, 201, campaign);
-    broadcast("campaign.created", campaign);
+    await prisma.transaction.create({
+      data: {
+        campaignId: campaign.id,
+        eventType: "campaign.created_intent",
+        payload: { idempotencyKey, intent: true, intentId },
+        ledger: 0,
+        eventIndex: 0,
+        txHash: null,
+      },
+    });
 
-    jsonValidated(res, CampaignSchema, 201, campaign);
+    const response = campaign;
+    await setCachedResponse(cacheKey, 201, response);
+    jsonValidated(res, CampaignSchema, 201, response);
   }),
 );
 
-/* … rest of file unchanged … */
+// GET /campaigns/:id/investments — investments for a campaign (supports UUID or onChainId)
+router.get(
+  "/campaigns/:id/investments",
+  validateParams(CampaignIdParamSchema),
+  validateResponse(z.array(InvestmentSchema)),
+  asyncHandler(async (req: Request, res: Response) => {
+    const campaign = await prisma.campaign.findFirst({
+      where: {
+        OR: [{ id: req.params.id }, { onChainId: req.params.id }],
+      },
+    });
+
+    const campaignId = campaign ? campaign.id : req.params.id;
+    const investments = await prisma.investment.findMany({
+      where: { campaignId },
+      orderBy: { createdAt: "desc" },
+    });
+    jsonValidated(res, z.array(InvestmentSchema), 200, investments);
+  }),
+);
+
+// GET /investments?investorAddress=... — all investments for a user
+router.get(
+  "/investments",
+  validateQuery(ListInvestmentsQuerySchema),
+  validateResponse(z.array(InvestmentSchema)),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { investorAddress } = req.query as unknown as ListInvestmentsQuery;
+
+    const investments = await prisma.investment.findMany({
+      where: { investorAddress },
+      orderBy: { createdAt: "desc" },
+      include: {
+        campaign: {
+          select: {
+            id: true,
+            onChainId: true,
+            farmerAddress: true,
+            tokenAddress: true,
+            targetAmount: true,
+            totalRaised: true,
+            totalRevenue: true,
+            status: true,
+            deadline: true,
+          },
+        },
+      },
+    });
+
+    jsonValidated(res, z.array(InvestmentSchema), 200, investments);
+  }),
+);
+
+// POST /campaigns/:id/invest — record an investment (indexer shortcut)
+// Requires authenticated session; investorAddress is derived from session, not body
+router.post(
+  "/campaigns/:id/invest",
+  requireWallet,
+  writeLimiter,
+  requireIdempotencyKey,
+  validateParams(CampaignIdParamSchema),
+  validateBody(InvestSchema.omit({ investorAddress: true })),
+  validateResponse(InvestmentSchema),
+  asyncHandler(async (req: WalletRequest, res: Response) => {
+    const investorAddress = req.walletAddress!;
+    const idempotencyKey = (req as any).idempotencyKey as string;
+    const { amount } = req.body as Omit<InvestInput, "investorAddress">;
+
+    const cacheKey = buildIdempotencyCacheKey(req);
+    const cached = await getCachedResponse(cacheKey);
+    if (cached) {
+      res.status(cached.status).json(cached.body);
+      return;
+    }
+
+    const campaign = await prisma.campaign.findUnique({ where: { id: req.params.id } });
+    if (!campaign) {
+      problemDetail(res, req, 404, "Campaign Not Found", `No campaign with id ${req.params.id}`);
+      return;
+    }
+    // Issue #1068 overfunding policy: the contract accepts contributions
+    // beyond the target, and the watcher marks a campaign FUNDED once
+    // totalRaised >= targetAmount. Late intents are therefore rejected here
+    // only after the funding event has been indexed and status flipped.
+    if (campaign.status !== "FUNDING") {
+      problemDetail(
+        res,
+        req,
+        409,
+        "Campaign Not Accepting Investments",
+        `Campaign status is ${campaign.status}`,
+      );
+      return;
+    }
+
+    await prisma.user.upsert({
+      where: { walletAddress: investorAddress },
+      create: { walletAddress: investorAddress, role: "INVESTOR" },
+      update: {},
+    });
+
+    const investment = await prisma.investment.create({
+      data: {
+        campaignId: campaign.id,
+        investorAddress,
+        amount,
+        ledger: 0,
+        txHash: null,
+      },
+    });
+
+    await prisma.transaction.create({
+      data: {
+        campaignId: campaign.id,
+        eventType: "campaign.invested_intent",
+        payload: { idempotencyKey, intent: true },
+        ledger: 0,
+        eventIndex: 0,
+        txHash: null,
+      },
+    });
+
+    const response = investment;
+    await setCachedResponse(cacheKey, 201, response);
+    jsonValidated(res, InvestmentSchema, 201, response);
+  }),
+);
+
+export default router;

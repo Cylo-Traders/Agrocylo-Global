@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../db/client.js";
 import { runProductionReconciliation, reconcileSingleCampaign } from "../services/reconciliationService.js";
 import { requireRole, type RoleRequest } from "../middleware/requireRole.js";
@@ -29,7 +30,7 @@ async function logAdminAction(
         action,
         resourceType,
         resourceId,
-        details: details ?? {},
+        details: (details ?? {}) as Prisma.InputJsonObject,
       },
     });
   } catch (err) {

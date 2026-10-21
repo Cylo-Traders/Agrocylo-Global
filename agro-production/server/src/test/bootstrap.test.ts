@@ -41,7 +41,7 @@ describe('bootstrap (Issue #1205)', () => {
     await vi.waitFor(() => expect(listen).toHaveBeenCalled());
     // Drop the signal handlers index.ts registered so they do not leak.
     for (const sig of ['SIGTERM', 'SIGINT', 'unhandledRejection', 'uncaughtException'] as const) {
-      for (const l of process.listeners(sig)) if (!before.has(l as never)) process.removeListener(sig, l);
+      for (const l of process.listeners(sig as NodeJS.Signals)) if (!before.has(l as never)) process.removeListener(sig, l);
     }
   }
 

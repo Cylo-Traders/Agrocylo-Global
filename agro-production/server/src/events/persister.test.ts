@@ -13,6 +13,7 @@ import type {
   BasketWithdrawnEvent,
   BasketClaimedEvent,
 } from './types.js';
+import { EVENT_SCHEMA_VERSION } from './schema.js';
 
 // ---------------------------------------------------------------------------
 // Mock Prisma and logger so tests stay unit-level and don't need a real DB.
@@ -112,6 +113,7 @@ const baseEvent = {
   eventIndex: 0,
   timestamp: new Date('2024-06-01T00:00:00Z'),
   rawId: '200-0',
+  schemaVersion: EVENT_SCHEMA_VERSION,
 };
 
 function makeCampaignCreated(
@@ -653,7 +655,7 @@ describe('EventPersister', () => {
     async function runAgainstRollback(run: () => Promise<unknown>): Promise<void> {
       const { prisma } = await import('../db/client.js');
       vi.mocked(prisma.$transaction).mockImplementationOnce(
-        async (fn: (tx: unknown) => Promise<unknown>) => {
+        async (fn: (tx: any) => Promise<unknown>) => {
           await fn(buildTx());
           throw new Error('simulated commit failure');
         },
@@ -728,7 +730,7 @@ describe('EventPersister', () => {
       const { prisma } = await import('../db/client.js');
       const { broadcast } = await import('../services/wsServer.js');
       vi.mocked(prisma.$transaction).mockImplementationOnce(
-        async (fn: (tx: unknown) => Promise<unknown>) => fn(buildTx()),
+        async (fn: (tx: any) => Promise<unknown>) => fn(buildTx()),
       );
 
       await EventPersister.persist(makeOrderCreated());
@@ -751,7 +753,7 @@ describe('EventPersister', () => {
       const tx = buildTx();
       tx.transaction.findUnique = vi.fn().mockResolvedValue({ id: 'tx-inside' });
       vi.mocked(prisma.$transaction).mockImplementationOnce(
-        async (fn: (txArg: unknown) => Promise<unknown>) => fn(tx),
+        async (fn: (txArg: any) => Promise<unknown>) => fn(tx),
       );
 
       await EventPersister.persist(makeCampaignInvested());
@@ -785,7 +787,7 @@ describe('EventPersister', () => {
         const { prisma } = await import('../db/client.js');
         vi.mocked(prisma.transaction.findUnique).mockResolvedValueOnce(null);
         vi.mocked(prisma.$transaction).mockImplementationOnce(
-          async (fn: (tx: unknown) => Promise<unknown>) => fn(missingCampaignTx()),
+          async (fn: (tx: any) => Promise<unknown>) => fn(missingCampaignTx()),
         );
 
         await expect(run()).rejects.toMatchObject({
@@ -801,7 +803,7 @@ describe('EventPersister', () => {
       const txInvestmentUpsert = vi.fn().mockResolvedValue({});
       vi.mocked(prisma.transaction.findUnique).mockResolvedValueOnce(null);
       vi.mocked(prisma.$transaction).mockImplementationOnce(
-        async (fn: (tx: unknown) => Promise<unknown>) =>
+        async (fn: (tx: any) => Promise<unknown>) =>
           fn({
             user: { upsert: vi.fn().mockResolvedValue({}) },
             campaign: { findUnique: vi.fn().mockResolvedValue(null) },
@@ -831,7 +833,7 @@ describe('EventPersister', () => {
       const txCampaignUpdate = vi.fn().mockResolvedValue({});
       vi.mocked(prisma.transaction.findUnique).mockResolvedValueOnce(null);
       vi.mocked(prisma.$transaction).mockImplementationOnce(
-        async (fn: (tx: unknown) => Promise<unknown>) =>
+        async (fn: (tx: any) => Promise<unknown>) =>
           fn({
             user: { upsert: vi.fn().mockResolvedValue({}) },
             campaign: {

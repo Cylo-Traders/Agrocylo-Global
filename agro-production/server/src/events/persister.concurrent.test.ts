@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EventPersister } from "./persister.js";
 import type { CampaignCreatedEvent, OrderCreatedEvent } from "./types.js";
+import { EVENT_SCHEMA_VERSION } from "./schema.js";
 
 // ---------------------------------------------------------------------------
 // Mock Prisma, logger, and wsServer for unit-level concurrency tests
@@ -68,6 +69,7 @@ const baseEvent = {
   eventIndex: 0,
   timestamp: new Date("2024-07-01T00:00:00Z"),
   rawId: "300-0",
+  schemaVersion: EVENT_SCHEMA_VERSION,
 };
 
 function makeCampaignCreated(

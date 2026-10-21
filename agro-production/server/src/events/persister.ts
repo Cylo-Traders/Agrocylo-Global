@@ -1,4 +1,4 @@
-import type { CampaignStatus, OrderStatus, Prisma } from "@prisma/client";
+import type { CampaignStatus, OrderStatus, Prisma, UserRole } from "@prisma/client";
 import { prisma } from "../db/client.js";
 import logger from "../config/logger.js";
 import { broadcast, type WsEventType } from "../services/wsServer.js";
@@ -553,7 +553,7 @@ async function recordTransaction(event: ParsedEvent, campaignId: string | null) 
 async function upsertUser(
   tx: Prisma.TransactionClient,
   walletAddress: string,
-  role: string,
+  role: UserRole,
 ) {
   await tx.user.upsert({
     where: { walletAddress },

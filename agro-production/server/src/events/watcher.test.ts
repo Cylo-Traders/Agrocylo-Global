@@ -79,7 +79,11 @@ vi.mock("@stellar/stellar-sdk", () => ({
       return {
         getEvents: mockGetEvents,
         getLatestLedger: mockGetLatestLedger,
-        getLedger: mockGetLedger,
+        // Watcher fetches single ledgers via SDK 17 getLedgers; mockGetLedger
+        // supplies the per-sequence ledger fields.
+        getLedgers: async ({ startLedger }: { startLedger: number }) => ({
+          ledgers: [{ ...(await mockGetLedger(startLedger)), sequence: startLedger }],
+        }),
       };
     }),
   },
@@ -93,6 +97,7 @@ import { DependencyMissingError } from "./persister.js";
 import { ProductionEventParser } from "./parser.js";
 import { EventPersister } from "./persister.js";
 import logger from "../config/logger.js";
+import { EVENT_SCHEMA_VERSION } from "./schema.js";
 
 describe("startProductionWatcher", () => {
   beforeEach(() => {
@@ -288,6 +293,7 @@ describe("startProductionWatcher", () => {
       };
       const parsedEvent = {
         action: "campaign.created" as const,
+        schemaVersion: EVENT_SCHEMA_VERSION,
         ledger: 501,
         eventIndex: 0,
         timestamp: new Date(),
@@ -323,6 +329,7 @@ describe("startProductionWatcher", () => {
       };
       const parsedEvent = {
         action: "campaign.settled" as const,
+        schemaVersion: EVENT_SCHEMA_VERSION,
         ledger: 501,
         eventIndex: 0,
         timestamp: new Date(),
@@ -374,6 +381,7 @@ describe("startProductionWatcher", () => {
       };
       const parsedEvent = {
         action: "campaign.invested" as const,
+        schemaVersion: EVENT_SCHEMA_VERSION,
         ledger: 302,
         eventIndex: 0,
         timestamp: new Date(),
@@ -437,6 +445,7 @@ describe("startProductionWatcher", () => {
       };
       const parentEvent = {
         action: "campaign.created" as const,
+        schemaVersion: EVENT_SCHEMA_VERSION,
         ledger: 302,
         eventIndex: 0,
         timestamp: new Date(),
@@ -449,6 +458,7 @@ describe("startProductionWatcher", () => {
       };
       const childEvent = {
         action: "campaign.invested" as const,
+        schemaVersion: EVENT_SCHEMA_VERSION,
         ledger: 301,
         eventIndex: 0,
         timestamp: new Date(),
@@ -508,6 +518,7 @@ describe("startProductionWatcher", () => {
       mockTransactionFindMany.mockResolvedValueOnce([row]);
       vi.mocked(ProductionEventParser.tryParse).mockReturnValueOnce({
         action: "campaign.invested" as const,
+        schemaVersion: EVENT_SCHEMA_VERSION,
         ledger: 301,
         eventIndex: 0,
         timestamp: new Date(),
@@ -564,6 +575,7 @@ describe("startProductionWatcher", () => {
 
       const parsedEvent = {
         action: "campaign.created" as const,
+        schemaVersion: EVENT_SCHEMA_VERSION,
         ledger: 485,
         eventIndex: 0,
         timestamp: new Date(),
