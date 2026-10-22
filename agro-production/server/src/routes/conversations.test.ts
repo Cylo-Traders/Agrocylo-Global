@@ -16,6 +16,7 @@ vi.mock('../db/client.js', () => ({
     message: {
       findUnique: vi.fn(),
       create: vi.fn(),
+      update: vi.fn(),
     },
     blockedUser: {
       findUnique: vi.fn(),
@@ -35,9 +36,9 @@ app.use('/api/v1', conversationRoutes);
 const mockToken = 'valid-session-token';
 const mockWalletA = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const mockWalletB = 'GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
-const mockConversationId = '11111111-1111-1111-1111-111111111111';
-const mockMessageId = '22222222-2222-2222-2222-222222222222';
-const mockCampaignId = '33333333-3333-3333-3333-333333333333';
+const mockConversationId = '11111111-1111-4111-8111-111111111111';
+const mockMessageId = '22222222-2222-4222-8222-222222222222';
+const mockCampaignId = '33333333-3333-4333-8333-333333333333';
 
 describe('POST /api/v1/conversations/:id/messages', () => {
   beforeEach(() => {
@@ -86,15 +87,66 @@ describe('POST /api/v1/conversations/:id/messages', () => {
     expect(response.body.title).toBe('Forbidden');
   });
 
-  it('should reject oversized message content', async () => {
-    const oversizedContent = 'x'.repeat(5001);
+  it('should accept message content at boundary max - 1 (3999 chars)', async () => {
+    (prisma.conversation.findUnique as any).mockResolvedValue({
+      id: mockConversationId,
+      investorAddress: mockWalletA.toLowerCase(),
+      farmerAddress: mockWalletB.toLowerCase(),
+      campaignId: mockCampaignId,
+    });
+    (prisma.blockedUser.findUnique as any).mockResolvedValue(null);
+    (prisma.message.create as any).mockResolvedValue({
+      id: mockMessageId,
+      conversationId: mockConversationId,
+      senderAddress: mockWalletA,
+      content: 'x'.repeat(3999),
+      createdAt: new Date().toISOString(),
+    });
+    (prisma.conversation.update as any).mockResolvedValue({});
 
     const response = await request(app)
       .post(`/api/v1/conversations/${mockConversationId}/messages`)
       .set('Authorization', `Bearer ${mockToken}`)
-      .send({ content: oversizedContent });
+      .send({ content: 'x'.repeat(3999) });
+
+    expect(response.status).toBe(201);
+    expect(response.body.content).toBe('x'.repeat(3999));
+  });
+
+  it('should accept message content at boundary max (4000 chars)', async () => {
+    (prisma.conversation.findUnique as any).mockResolvedValue({
+      id: mockConversationId,
+      investorAddress: mockWalletA.toLowerCase(),
+      farmerAddress: mockWalletB.toLowerCase(),
+      campaignId: mockCampaignId,
+    });
+    (prisma.blockedUser.findUnique as any).mockResolvedValue(null);
+    (prisma.message.create as any).mockResolvedValue({
+      id: mockMessageId,
+      conversationId: mockConversationId,
+      senderAddress: mockWalletA,
+      content: 'x'.repeat(4000),
+      createdAt: new Date().toISOString(),
+    });
+    (prisma.conversation.update as any).mockResolvedValue({});
+
+    const response = await request(app)
+      .post(`/api/v1/conversations/${mockConversationId}/messages`)
+      .set('Authorization', `Bearer ${mockToken}`)
+      .send({ content: 'x'.repeat(4000) });
+
+    expect(response.status).toBe(201);
+    expect(response.body.content).toBe('x'.repeat(4000));
+  });
+
+  it('should reject message content at boundary max + 1 (4001 chars) with 400 validation error', async () => {
+    const response = await request(app)
+      .post(`/api/v1/conversations/${mockConversationId}/messages`)
+      .set('Authorization', `Bearer ${mockToken}`)
+      .send({ content: 'x'.repeat(4001) });
 
     expect(response.status).toBe(400);
+    expect(response.body.title).toBe('Validation Failed');
   });
 
   // Runs last: exhausts the shared per-wallet message rate limiter, which
@@ -225,5 +277,86 @@ describe('POST /api/v1/conversations/:id/messages/:messageId/report', () => {
       .send({ reason: 'Abusive language' });
 
     expect(response.status).toBe(403);
+  });
+});
+
+describe('PATCH /api/v1/conversations/:id/messages/:messageId', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (verifySession as any).mockResolvedValue({ walletAddress: mockWalletA, sessionToken: mockToken });
+  });
+
+  it('should accept message edit at boundary max - 1 (3999 chars)', async () => {
+    (prisma.conversation.findUnique as any).mockResolvedValue({
+      id: mockConversationId,
+      investorAddress: mockWalletA.toLowerCase(),
+      farmerAddress: mockWalletB.toLowerCase(),
+      campaignId: mockCampaignId,
+    });
+    (prisma.message.findUnique as any).mockResolvedValue({
+      id: mockMessageId,
+      conversationId: mockConversationId,
+      senderAddress: mockWalletA,
+      content: 'Original message',
+      deletedAt: null,
+      createdAt: new Date().toISOString(),
+    });
+    (prisma.message.update as any).mockResolvedValue({
+      id: mockMessageId,
+      conversationId: mockConversationId,
+      senderAddress: mockWalletA,
+      content: 'x'.repeat(3999),
+      createdAt: new Date().toISOString(),
+    });
+
+    const response = await request(app)
+      .patch(`/api/v1/conversations/${mockConversationId}/messages/${mockMessageId}`)
+      .set('Authorization', `Bearer ${mockToken}`)
+      .send({ content: 'x'.repeat(3999) });
+
+    expect(response.status).toBe(200);
+    expect(response.body.content).toBe('x'.repeat(3999));
+  });
+
+  it('should accept message edit at boundary max (4000 chars)', async () => {
+    (prisma.conversation.findUnique as any).mockResolvedValue({
+      id: mockConversationId,
+      investorAddress: mockWalletA.toLowerCase(),
+      farmerAddress: mockWalletB.toLowerCase(),
+      campaignId: mockCampaignId,
+    });
+    (prisma.message.findUnique as any).mockResolvedValue({
+      id: mockMessageId,
+      conversationId: mockConversationId,
+      senderAddress: mockWalletA,
+      content: 'Original message',
+      deletedAt: null,
+      createdAt: new Date().toISOString(),
+    });
+    (prisma.message.update as any).mockResolvedValue({
+      id: mockMessageId,
+      conversationId: mockConversationId,
+      senderAddress: mockWalletA,
+      content: 'x'.repeat(4000),
+      createdAt: new Date().toISOString(),
+    });
+
+    const response = await request(app)
+      .patch(`/api/v1/conversations/${mockConversationId}/messages/${mockMessageId}`)
+      .set('Authorization', `Bearer ${mockToken}`)
+      .send({ content: 'x'.repeat(4000) });
+
+    expect(response.status).toBe(200);
+    expect(response.body.content).toBe('x'.repeat(4000));
+  });
+
+  it('should reject message edit at boundary max + 1 (4001 chars) with 400 validation error', async () => {
+    const response = await request(app)
+      .patch(`/api/v1/conversations/${mockConversationId}/messages/${mockMessageId}`)
+      .set('Authorization', `Bearer ${mockToken}`)
+      .send({ content: 'x'.repeat(4001) });
+
+    expect(response.status).toBe(400);
+    expect(response.body.title).toBe('Validation Failed');
   });
 });

@@ -33,11 +33,11 @@ const MessagePaginationSchema = z.object({
 });
 
 const SendMessageSchema = z.object({
-  content: z.string().min(1).max(5000),
+  content: z.string().min(1).max(4000),
 });
 
 const EditMessageSchema = z.object({
-  content: z.string().min(1).max(5000),
+  content: z.string().min(1).max(4000),
 });
 
 const BlockUserSchema = z.object({
