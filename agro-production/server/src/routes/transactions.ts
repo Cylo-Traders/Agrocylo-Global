@@ -74,33 +74,74 @@ router.post(
       return;
     }
 
+    // Issue #1253: scope duplicate lookup to the authenticated wallet and define
+    // an explicit conflict response when a globally unique request ID or hash already
+    // belongs elsewhere, preventing cross-tenant transaction metadata leaks.
     const existing = await prisma.transaction.findFirst({
       where: { OR: [{ id: requestId }, { txHash }] },
     });
 
     if (existing) {
-      jsonValidated(
+      if (existing.walletAddress === walletAddress) {
+        jsonValidated(
+          res,
+          TransactionStatusResponseSchema,
+          200,
+          txToResponse(existing, walletAddress),
+        );
+        return;
+      }
+      problemDetail(
         res,
-        TransactionStatusResponseSchema,
-        200,
-        txToResponse(existing, walletAddress),
+        req,
+        409,
+        'Conflict',
+        'Transaction reference already exists',
       );
       return;
     }
 
-    const tx = await prisma.transaction.create({
-      data: {
-        id: requestId,
-        campaignId: campaignId ?? null,
-        walletAddress,
-        eventType: eventType ?? 'transaction.submitted',
-        status: 'awaiting_signature',
-        payload: {},
-        ledger: 0,
-        eventIndex: 0,
-        txHash,
-      },
-    });
+    let tx;
+    try {
+      tx = await prisma.transaction.create({
+        data: {
+          id: requestId,
+          campaignId: campaignId ?? null,
+          walletAddress,
+          eventType: eventType ?? 'transaction.submitted',
+          status: 'awaiting_signature',
+          payload: {},
+          ledger: 0,
+          eventIndex: 0,
+          txHash,
+        },
+      });
+    } catch (err: unknown) {
+      // Database unique-constraint races map to the same safe behavior.
+      if ((err as { code?: string } | null)?.code === 'P2002') {
+        const raced = await prisma.transaction.findFirst({
+          where: { OR: [{ id: requestId }, { txHash }] },
+        });
+        if (raced && raced.walletAddress === walletAddress) {
+          jsonValidated(
+            res,
+            TransactionStatusResponseSchema,
+            200,
+            txToResponse(raced, walletAddress),
+          );
+          return;
+        }
+        problemDetail(
+          res,
+          req,
+          409,
+          'Conflict',
+          'Transaction reference already exists',
+        );
+        return;
+      }
+      throw err;
+    }
 
     const response = txToResponse(tx, walletAddress);
     // Issue #1065: status updates are addressed to the owning wallet only and
