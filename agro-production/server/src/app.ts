@@ -36,15 +36,37 @@ const app = express();
 let _requestTotal = 0;
 
 const corsOptions: cors.CorsOptions = {
-  origin:
-    config.corsOrigins.length > 0
-      ? config.corsOrigins
-      : config.nodeEnv === 'production'
-        ? false
-        : '*',
+  origin: (origin, callback) => {
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+    const allowedOrigins = config.corsOrigins
+      ? config.corsOrigins.split(',').map((o) => o.trim())
+      : [];
+    if (allowedOrigins.length === 0 && config.nodeEnv !== 'production') {
+      callback(null, true);
+      return;
+    }
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-wallet-address', 'x-metrics-api-key', 'x-request-id'],
-  credentials: config.nodeEnv === 'production' && config.corsOrigins.length > 0,
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'Idempotency-Key',
+    'x-api-key',
+    'x-request-id',
+    'x-wallet-address',
+    'x-metrics-api-key',
+  ],
+  credentials: true,
+  exposedHeaders: ['x-request-id'],
+  maxAge: 3600,
 };
 
 app.use(cors(corsOptions));

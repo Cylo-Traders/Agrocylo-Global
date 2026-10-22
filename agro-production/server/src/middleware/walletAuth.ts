@@ -22,13 +22,13 @@ export function requireWallet(
   const authHeader = req.header('authorization');
 
   if (!authHeader) {
-    res.status(401).json({ message: 'Authentication required. Provide Authorization: Bearer <token>.' });
+    res.status(401).json({ message: 'Missing or invalid Authorization header' });
     return;
   }
 
   const parts = authHeader.split(' ');
   if (parts.length !== 2 || parts[0] !== 'Bearer') {
-    res.status(401).json({ message: 'Invalid Authorization header format. Expected: Bearer <token>.' });
+    res.status(401).json({ message: 'Missing or invalid Authorization header' });
     return;
   }
 
@@ -38,14 +38,14 @@ export function requireWallet(
   try {
     const decoded = jwt.verify(token, config.jwtSecret) as JWTPayload;
     if (!decoded.walletAddress) {
-      res.status(401).json({ message: 'Invalid token: missing walletAddress.' });
+      res.status(401).json({ message: 'Invalid token: missing walletAddress' });
       return;
     }
     // A cross-app SSO handoff token (Issue #686) is single-purpose: it may
     // only be redeemed via POST /auth/handoff, never used directly as a
     // general session credential.
     if (decoded.aud === HANDOFF_AUDIENCE) {
-      res.status(401).json({ message: 'Invalid token: not a session token.' });
+      res.status(401).json({ message: 'Invalid token: not a session token' });
       return;
     }
     req.walletAddress = decoded.walletAddress;
@@ -67,6 +67,6 @@ export function requireWallet(
         res.status(err.status).json({ message: err.message });
         return;
       }
-      res.status(401).json({ message: 'Authentication failed.' });
+      res.status(401).json({ message: 'Invalid or expired token' });
     });
 }
