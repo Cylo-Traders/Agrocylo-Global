@@ -1,9 +1,8 @@
 import { WebSocket, WebSocketServer } from 'ws';
 import type { Server } from 'http';
 import type { RawData } from 'ws';
-import jwt from 'jsonwebtoken';
+import { verifySessionToken } from './walletAuthService.js';
 import logger from '../config/logger.js';
-import { config } from '../config/index.js';
 
 /**
  * Versioned WebSocket event types. All emitted events conform to WsEventEnvelope,
@@ -75,7 +74,7 @@ export class WsServer {
       this.clientQueues.set(socket, []);
 
       socket.on('message', (data: RawData) => {
-        this.handleClientMessage(socket, data);
+        void this.handleClientMessage(socket, data);
       });
 
       socket.on('close', () => {
@@ -95,10 +94,20 @@ export class WsServer {
     });
   }
 
-  private handleClientMessage(socket: WebSocket, data: RawData): void {
+  private async handleClientMessage(
+    socket: WebSocket,
+    data: RawData,
+  ): Promise<void> {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(data.toString());
+      const text = Buffer.isBuffer(data)
+        ? data.toString('utf8')
+        : Array.isArray(data)
+          ? Buffer.concat(data).toString('utf8')
+          : typeof data === 'string'
+            ? data
+            : Buffer.from(data).toString('utf8');
+      parsed = JSON.parse(text);
     } catch {
       logger.warn('WebSocket received non-JSON message; closing connection');
       socket.close(4001, 'Bad Request');
@@ -112,10 +121,8 @@ export class WsServer {
     if (!client) return;
 
     try {
-      const payload = jwt.verify(msg.token, config.jwtSecret) as {
-        walletAddress: string;
-      };
-      client.walletAddress = payload.walletAddress;
+      const session = await verifySessionToken(msg.token);
+      client.walletAddress = session.walletAddress;
       logger.debug(`WebSocket client authenticated: ${client.walletAddress}`);
     } catch (error) {
       logger.warn('WebSocket auth token invalid; closing connection', {

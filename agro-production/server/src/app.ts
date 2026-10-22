@@ -5,7 +5,11 @@ import { config } from './config/index.js';
 import { defaultLimiter } from './middleware/rateLimit.js';
 import { jsonValidated } from './middleware/validate.js';
 import { requireMetricsAuth } from './middleware/metricsAuth.js';
-import { isGracefullyShuttingDown, getShutdownPhase, getShutdownSignal } from './services/lifecycle.js';
+import {
+  isGracefullyShuttingDown,
+  getShutdownPhase,
+  getShutdownSignal,
+} from './services/lifecycle.js';
 import authRoutes from './routes/auth.js';
 import campaignImageRoutes from './routes/campaignImageRoutes.js';
 import campaignRoutes from './routes/campaigns.js';
@@ -22,7 +26,11 @@ import indexerRoutes from './routes/indexer.js';
 import weatherRoutes from './routes/weather.js';
 import analyticsRoutes from './routes/analytics.js';
 import { globalErrorHandler } from './middleware/errors.js';
-import { HealthResponseSchema, LivezResponseSchema, ReadyzResponseSchema } from './schemas/health.js';
+import {
+  HealthResponseSchema,
+  LivezResponseSchema,
+  ReadyzResponseSchema,
+} from './schemas/health.js';
 import { serveOpenApiDocument } from './openapi/document.js';
 import { getRateLimitMetrics } from './middleware/rateLimitMetrics.js';
 import { getEventMetrics } from './events/metrics.js';
@@ -41,9 +49,13 @@ const corsOptions: cors.CorsOptions = {
       callback(null, true);
       return;
     }
-    const allowedOrigins = config.corsOrigins
-      ? config.corsOrigins.split(',').map((o) => o.trim())
-      : [];
+    const allowedOrigins = Array.isArray(config.corsOrigins)
+      ? config.corsOrigins
+      : typeof (config.corsOrigins as unknown) === 'string'
+        ? (config.corsOrigins as unknown as string)
+            .split(',')
+            .map((o: string) => o.trim())
+        : [];
     if (allowedOrigins.length === 0 && config.nodeEnv !== 'production') {
       callback(null, true);
       return;
@@ -72,7 +84,10 @@ const corsOptions: cors.CorsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 app.use(defaultLimiter);
-app.use((_req: Request, _res: Response, next: express.NextFunction) => { _requestTotal++; next(); });
+app.use((_req: Request, _res: Response, next: express.NextFunction) => {
+  _requestTotal++;
+  next();
+});
 
 app.use((req: Request, _res: Response, next: express.NextFunction) => {
   if (isGracefullyShuttingDown()) {
@@ -129,7 +144,12 @@ app.get('/readyz', async (_req: Request, res: Response) => {
   if (isGracefullyShuttingDown()) {
     jsonValidated(res, ReadyzResponseSchema, 503, {
       status: 'not_ready',
-      checks: { shutdown: { status: 'DOWN', message: `Server shutting down: ${getShutdownPhase()}` } },
+      checks: {
+        shutdown: {
+          status: 'DOWN',
+          message: `Server shutting down: ${getShutdownPhase()}`,
+        },
+      },
       lastLedger: 0,
       timestamp: new Date().toISOString(),
     });
@@ -145,7 +165,8 @@ app.get('/readyz', async (_req: Request, res: Response) => {
   } catch (err) {
     checks.database = {
       status: 'DOWN',
-      message: err instanceof Error ? 'database unreachable' : 'database unreachable',
+      message:
+        err instanceof Error ? 'database unreachable' : 'database unreachable',
     };
   }
 
@@ -156,21 +177,28 @@ app.get('/readyz', async (_req: Request, res: Response) => {
   } catch (err) {
     checks.rpc = {
       status: 'DOWN',
-      message: err instanceof Error ? 'RPC endpoint unreachable' : 'RPC endpoint unreachable',
+      message:
+        err instanceof Error
+          ? 'RPC endpoint unreachable'
+          : 'RPC endpoint unreachable',
     };
   }
 
   if (config.registryContractId) {
     checks.registry = { status: 'UP' };
   } else {
-    logger.warn('[HealthCheck] WARNING: production_escrow has no REGISTRY_CONTRACT_ID configured');
+    logger.warn(
+      '[HealthCheck] WARNING: production_escrow has no REGISTRY_CONTRACT_ID configured',
+    );
     checks.registry = {
       status: 'WARN',
       message: 'REGISTRY_CONTRACT_ID not set',
     };
   }
 
-  const ready = Object.values(checks).every((c) => c.status === 'UP' || c.status === 'WARN');
+  const ready = Object.values(checks).every(
+    (c) => c.status === 'UP' || c.status === 'WARN',
+  );
   const statusCode = ready ? 200 : 503;
 
   jsonValidated(res, ReadyzResponseSchema, statusCode, {
@@ -199,16 +227,26 @@ app.get('/metrics', requireMetricsAuth, (_req: Request, res: Response) => {
     '# TYPE api_requests_total counter',
     `api_requests_total ${_requestTotal}`,
   ];
-  res.set('Content-Type', 'text/plain; version=0.0.4').send(lines.join('\n') + '\n');
+  res
+    .set('Content-Type', 'text/plain; version=0.0.4')
+    .send(lines.join('\n') + '\n');
 });
 
-app.get('/metrics/rate-limits', requireMetricsAuth, (_req: Request, res: Response) => {
-  res.status(200).json(getRateLimitMetrics());
-});
+app.get(
+  '/metrics/rate-limits',
+  requireMetricsAuth,
+  (_req: Request, res: Response) => {
+    res.status(200).json(getRateLimitMetrics());
+  },
+);
 
-app.get('/metrics/events', requireMetricsAuth, (_req: Request, res: Response) => {
-  res.status(200).json(getEventMetrics());
-});
+app.get(
+  '/metrics/events',
+  requireMetricsAuth,
+  (_req: Request, res: Response) => {
+    res.status(200).json(getEventMetrics());
+  },
+);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({ error: 'Not found' });
