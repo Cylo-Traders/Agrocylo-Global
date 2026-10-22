@@ -180,6 +180,110 @@ describe('Transaction Status & Reconciliation API', () => {
 
       expect(res.status).toBe(403);
     });
+
+    it('rejects cross-wallet requestId collision with 409 conflict and does not leak foreign metadata', async () => {
+      (prisma.transaction.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeTx({ walletAddress: OTHER_WALLET, status: 'confirmed', ledger: 999 }),
+      );
+
+      const res = await request(app)
+        .post('/api/v1/transactions')
+        .set('Authorization', 'Bearer test-session')
+        .send({
+          requestId: REQUEST_ID,
+          txHash: TX_HASH,
+          walletAddress: WALLET,
+        });
+
+      expect(res.status).toBe(409);
+      expect(res.body.status).toBe(409);
+      expect(res.body.title).toBe('Conflict');
+      expect(res.body.detail).toBe('Transaction reference already exists');
+      expect(res.body).not.toHaveProperty('walletAddress');
+      expect(res.body).not.toHaveProperty('ledger');
+      expect(res.body).not.toHaveProperty('eventType');
+      expect(prisma.transaction.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects cross-wallet txHash collision with 409 conflict and does not leak foreign metadata', async () => {
+      (prisma.transaction.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeTx({
+          id: 'cccccccc-cccc-4ccc-cccc-cccccccccccc',
+          walletAddress: OTHER_WALLET,
+          status: 'indexed',
+        }),
+      );
+
+      const res = await request(app)
+        .post('/api/v1/transactions')
+        .set('Authorization', 'Bearer test-session')
+        .send({
+          requestId: REQUEST_ID,
+          txHash: TX_HASH,
+          walletAddress: WALLET,
+        });
+
+      expect(res.status).toBe(409);
+      expect(res.body.status).toBe(409);
+      expect(res.body.title).toBe('Conflict');
+      expect(res.body.detail).toBe('Transaction reference already exists');
+      expect(res.body).not.toHaveProperty('walletAddress');
+      expect(res.body).not.toHaveProperty('id');
+      expect(res.body).not.toHaveProperty('eventType');
+      expect(prisma.transaction.create).not.toHaveBeenCalled();
+    });
+
+    it('handles database unique-constraint race for same-wallet retry by returning existing transaction with 200', async () => {
+      // First findFirst returns null, simulating race condition where initial check passes
+      (prisma.transaction.findFirst as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(makeTx({ status: 'awaiting_signature' }));
+
+      (prisma.transaction.create as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        Object.assign(new Error('Unique constraint failed'), { code: 'P2002' }),
+      );
+
+      const res = await request(app)
+        .post('/api/v1/transactions')
+        .set('Authorization', 'Bearer test-session')
+        .send({
+          requestId: REQUEST_ID,
+          txHash: TX_HASH,
+          walletAddress: WALLET,
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('awaiting_signature');
+      expect(res.body.requestId).toBe(REQUEST_ID);
+      expect(res.body.walletAddress).toBe(WALLET);
+    });
+
+    it('handles database unique-constraint race for cross-wallet collision by returning 409 conflict', async () => {
+      // First findFirst returns null, second findFirst in P2002 catch discovers foreign owner
+      (prisma.transaction.findFirst as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(makeTx({ walletAddress: OTHER_WALLET, status: 'confirmed' }));
+
+      (prisma.transaction.create as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        Object.assign(new Error('Unique constraint failed'), { code: 'P2002' }),
+      );
+
+      const res = await request(app)
+        .post('/api/v1/transactions')
+        .set('Authorization', 'Bearer test-session')
+        .send({
+          requestId: REQUEST_ID,
+          txHash: TX_HASH,
+          walletAddress: WALLET,
+        });
+
+      expect(res.status).toBe(409);
+      expect(res.body.status).toBe(409);
+      expect(res.body.title).toBe('Conflict');
+      expect(res.body.detail).toBe('Transaction reference already exists');
+      expect(res.body).not.toHaveProperty('walletAddress');
+      expect(res.body).not.toHaveProperty('eventType');
+    });
   });
 
   describe('GET /api/v1/transactions/:requestId', () => {
