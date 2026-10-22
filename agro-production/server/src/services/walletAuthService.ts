@@ -1,4 +1,9 @@
-import { randomUUID, timingSafeEqual, randomBytes } from 'node:crypto';
+import {
+  randomUUID,
+  timingSafeEqual,
+  randomBytes,
+  createHash,
+} from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { Keypair } from '@stellar/stellar-sdk';
 import { config } from '../config/index.js';
@@ -41,7 +46,15 @@ export interface VerifiedSession {
   sessionToken: string;
 }
 
-export async function createChallenge(walletAddress: string): Promise<ChallengeResult> {
+export interface VerifiedSessionPrincipal {
+  walletAddress: string;
+  sessionToken?: string;
+  role?: string;
+}
+
+export async function createChallenge(
+  walletAddress: string,
+): Promise<ChallengeResult> {
   const nonce = randomUUID();
   const expiresAt = new Date(Date.now() + NONCE_EXPIRY_SECS * 1000);
 
@@ -60,7 +73,7 @@ export async function createChallenge(walletAddress: string): Promise<ChallengeR
   };
 }
 
-function constantTimeEqual(a: Buffer, b: Buffer): boolean {
+export function constantTimeEqual(a: Buffer, b: Buffer): boolean {
   if (a.length !== b.length) return false;
   try {
     return timingSafeEqual(a, b);
@@ -166,7 +179,10 @@ export async function verifyHandoffAndCreateSession(
     const decoded = jwt.verify(handoffToken, config.jwtSecret, {
       audience: HANDOFF_AUDIENCE,
     }) as jwt.JwtPayload;
-    if (typeof decoded.walletAddress !== 'string' || typeof decoded.jti !== 'string') {
+    if (
+      typeof decoded.walletAddress !== 'string' ||
+      typeof decoded.jti !== 'string'
+    ) {
       throw new Error('Malformed handoff token payload.');
     }
     walletAddress = decoded.walletAddress;
@@ -276,7 +292,7 @@ export async function revokeSession(sessionToken: string): Promise<void> {
 }
 
 function hashRefreshToken(token: string): string {
-  return randomBytes(32).toString('hex');
+  return createHash('sha256').update(token).digest('hex');
 }
 
 function canonicalWalletAddress(addr: string): string {
@@ -328,4 +344,135 @@ export async function refreshAccessToken(
   });
 
   return { accessToken, refreshToken: newRefreshToken };
+}
+
+const ALLOWED_SESSION_AUDIENCES = new Set([
+  'agro-production',
+  'session',
+  'agrocylo',
+]);
+
+const VALID_ROLES = new Set([
+  'INVESTOR',
+  'FARMER',
+  'BUYER',
+  'DISTRIBUTOR',
+  'ADMIN',
+  'USER',
+]);
+
+/**
+ * Synchronously verifies a JWT session token.
+ * Validates walletAddress, ensures no handoff audience, checks valid audience if present,
+ * and validates role and type claims.
+ */
+export function verifySessionTokenSync(
+  token: string,
+): VerifiedSessionPrincipal {
+  if (!token || typeof token !== 'string') {
+    throw new AuthError(401, 'Invalid or expired token');
+  }
+
+  let decoded: jwt.JwtPayload | string;
+  try {
+    decoded = jwt.verify(token, config.jwtSecret);
+  } catch (err) {
+    if (err instanceof jwt.TokenExpiredError) {
+      throw new AuthError(401, 'Session token has expired.');
+    }
+    throw err;
+  }
+
+  if (!decoded || typeof decoded !== 'object') {
+    throw new AuthError(401, 'Invalid token: malformed payload');
+  }
+
+  const payload = decoded as {
+    walletAddress?: unknown;
+    role?: unknown;
+    type?: unknown;
+    aud?: unknown;
+  };
+
+  // A cross-app SSO handoff token (Issue #686, #1252) is single-purpose: it may
+  // only be redeemed via POST /auth/handoff, never used directly as a session credential.
+  const audList = Array.isArray(payload.aud)
+    ? payload.aud
+    : payload.aud !== undefined
+      ? [payload.aud]
+      : [];
+
+  if (
+    audList.includes(HANDOFF_AUDIENCE) ||
+    audList.includes(HANDOFF_NONCE_AUDIENCE)
+  ) {
+    throw new AuthError(401, 'Invalid token: not a session token');
+  }
+
+  if (audList.length > 0) {
+    const hasInvalidAudience = audList.some(
+      (a) => typeof a !== 'string' || !ALLOWED_SESSION_AUDIENCES.has(a),
+    );
+    if (hasInvalidAudience) {
+      throw new AuthError(401, 'Invalid token: wrong audience');
+    }
+  }
+
+  if (
+    !payload.walletAddress ||
+    typeof payload.walletAddress !== 'string' ||
+    payload.walletAddress.trim() === ''
+  ) {
+    throw new AuthError(401, 'Invalid token: missing walletAddress');
+  }
+
+  if (payload.type !== undefined) {
+    if (
+      typeof payload.type !== 'string' ||
+      !['session', 'access', 'auth'].includes(payload.type.toLowerCase())
+    ) {
+      throw new AuthError(401, 'Invalid token: invalid type');
+    }
+  }
+
+  if (payload.role !== undefined) {
+    if (
+      typeof payload.role !== 'string' ||
+      !VALID_ROLES.has(payload.role.toUpperCase())
+    ) {
+      throw new AuthError(401, 'Invalid token: invalid role');
+    }
+  }
+
+  return {
+    walletAddress: payload.walletAddress,
+    role: typeof payload.role === 'string' ? payload.role : undefined,
+  };
+}
+
+/**
+ * Shared session token verifier for HTTP and WebSocket authentication (Issue #1252).
+ * Verifies JWT session tokens first, then falls back to opaque DB session tokens.
+ * Rejects SSO handoff tokens, tokens with wrong audience, missing wallet, or invalid role/type.
+ */
+export async function verifySessionToken(
+  token: string,
+): Promise<VerifiedSessionPrincipal> {
+  try {
+    return verifySessionTokenSync(token);
+  } catch (err) {
+    if (
+      err instanceof AuthError &&
+      (err.message.startsWith('Invalid token:') ||
+        err.message === 'Session token has expired.')
+    ) {
+      throw err;
+    }
+    // Not a valid JWT, try database session token lookup
+    const session = await verifySession(token);
+    return {
+      walletAddress: session.walletAddress,
+      sessionToken: session.sessionToken,
+    };
+  }
 }

@@ -1,17 +1,13 @@
 import type { NextFunction, Request, Response } from 'express';
-import jwt from 'jsonwebtoken';
-import { verifySession, AuthError, HANDOFF_AUDIENCE } from '../services/walletAuthService.js';
-import { config } from '../config/index.js';
+import {
+  verifySession,
+  verifySessionTokenSync,
+  AuthError,
+} from '../services/walletAuthService.js';
 
 export interface WalletRequest extends Request {
   walletAddress?: string;
   sessionToken?: string;
-}
-
-interface JWTPayload {
-  walletAddress: string;
-  role?: string;
-  aud?: string;
 }
 
 export function requireWallet(
@@ -22,37 +18,43 @@ export function requireWallet(
   const authHeader = req.header('authorization');
 
   if (!authHeader) {
-    res.status(401).json({ message: 'Missing or invalid Authorization header' });
+    res
+      .status(401)
+      .json({ message: 'Missing or invalid Authorization header' });
     return;
   }
 
   const parts = authHeader.split(' ');
   if (parts.length !== 2 || parts[0] !== 'Bearer') {
-    res.status(401).json({ message: 'Missing or invalid Authorization header' });
+    res
+      .status(401)
+      .json({ message: 'Missing or invalid Authorization header' });
     return;
   }
 
   const token = parts[1];
 
-  // Try JWT verification first (faster, no DB lookup)
+  // Try JWT verification first using the unified session token verifier (faster, no DB lookup)
   try {
-    const decoded = jwt.verify(token, config.jwtSecret) as JWTPayload;
-    if (!decoded.walletAddress) {
-      res.status(401).json({ message: 'Invalid token: missing walletAddress' });
+    if (typeof verifySessionTokenSync === 'function') {
+      const session = verifySessionTokenSync(token);
+      req.walletAddress = session.walletAddress;
+      if (session.sessionToken) {
+        req.sessionToken = session.sessionToken;
+      }
+      next();
       return;
     }
-    // A cross-app SSO handoff token (Issue #686) is single-purpose: it may
-    // only be redeemed via POST /auth/handoff, never used directly as a
-    // general session credential.
-    if (decoded.aud === HANDOFF_AUDIENCE) {
-      res.status(401).json({ message: 'Invalid token: not a session token' });
+  } catch (err: unknown) {
+    if (
+      err instanceof AuthError &&
+      (err.message.startsWith('Invalid token:') ||
+        err.message === 'Session token has expired.')
+    ) {
+      res.status(err.status).json({ message: err.message });
       return;
     }
-    req.walletAddress = decoded.walletAddress;
-    next();
-    return;
-  } catch {
-    // Not a valid JWT, try session token lookup
+    // Not a valid JWT session token, try DB session token lookup
   }
 
   // Fall back to session token verification (for backward compatibility)
