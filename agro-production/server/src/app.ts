@@ -21,6 +21,7 @@ import adminReconciliationRoutes from './routes/adminReconciliation.js';
 import indexerRoutes from './routes/indexer.js';
 import weatherRoutes from './routes/weather.js';
 import analyticsRoutes from './routes/analytics.js';
+import groupOrderRoutes from './routes/groupOrders.js';
 import { globalErrorHandler } from './middleware/errors.js';
 import { HealthResponseSchema, LivezResponseSchema, ReadyzResponseSchema } from './schemas/health.js';
 import { serveOpenApiDocument } from './openapi/document.js';
@@ -59,6 +60,7 @@ const corsOptions: cors.CorsOptions = {
     'Content-Type',
     'Authorization',
     'Idempotency-Key',
+    'x-idempotency-key',
     'x-api-key',
     'x-request-id',
     'x-wallet-address',
@@ -106,6 +108,9 @@ app.use('/api/v1/indexer', indexerRoutes);
 app.use('/api/v1', weatherRoutes);
 app.use('/api/v1', analyticsRoutes);
 app.use(analyticsRoutes);
+app.use('/api/v1', groupOrderRoutes);
+app.use('/api', groupOrderRoutes);
+app.use(groupOrderRoutes);
 
 app.get('/health', (_req: Request, res: Response) => {
   logger.info('Health check endpoint hit');

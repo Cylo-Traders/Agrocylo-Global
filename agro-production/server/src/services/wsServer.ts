@@ -16,6 +16,7 @@ export type WsEventType =
   | 'investment.indexed'
   | 'order.created'
   | 'order.confirmed'
+  | 'group_order.updated'
   | 'dispute.opened'
   | 'dispute.evidence_submitted'
   | 'dispute.resolved'
