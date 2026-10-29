@@ -15,3 +15,23 @@ playwright-report
 .idea
 .DS_Store
 target
+
+# Every image builds from the repository root. Exclude generated output and
+# local secrets in nested workspaces as well as at the top level.
+**/node_modules
+**/.next
+**/dist
+**/build
+**/target
+**/test_snapshots
+**/.turbo
+**/.cache
+**/coverage
+**/test-results
+**/playwright-report
+**/.smoke-logs
+**/*.tsbuildinfo
+**/*.log
+**/.env*
+!**/.env.example
+!**/.env.testnet.example

@@ -2,7 +2,6 @@ import { Prisma } from '@prisma/client';
 import type { Product } from '@prisma/client';
 import { prisma } from '../config/database.js';
 import { ApiError } from '../http/errors.js';
-import { assertCurrency, type CurrencyCode } from '../constants/currencies.js';
 import { toClientProfile } from '../lib/profileDto.js';
 import { listReviewsForSubject } from './reviewService.js';
 import { wsManager } from './wsManager.js';
@@ -106,10 +105,17 @@ export async function listProducts(params: {
   sort?: SortOption;
   lat?: string;
   lng?: string;
-}): Promise<{ page: number; page_size: number; total: number; totalPages: number; items: ProductDto[] }> {
+}): Promise<{
+  page: number;
+  page_size: number;
+  total: number;
+  totalPages: number;
+  items: ProductDto[];
+}> {
   const page = parsePage(params.page, 1);
   const pageSize = Math.min(parsePage(params.pageSize || params.page_size, 20), 100);
-  const where: Prisma.ProductWhereInput = (params.includeUnavailable || params.include_unavailable) ? {} : { isAvailable: true };
+  const where: Prisma.ProductWhereInput =
+    params.includeUnavailable || params.include_unavailable ? {} : { isAvailable: true };
 
   if (params.farmer) {
     where.farmerWallet = params.farmer.toLowerCase();
@@ -119,7 +125,10 @@ export async function listProducts(params: {
   if (params.category) {
     where.category = params.category;
   } else if (params.categories) {
-    const categoryList = params.categories.split(',').map(c => c.trim()).filter(Boolean);
+    const categoryList = params.categories
+      .split(',')
+      .map((c) => c.trim())
+      .filter(Boolean);
     if (categoryList.length > 0) {
       where.category = { in: categoryList };
     }
@@ -156,7 +165,11 @@ export async function listProducts(params: {
   };
 
   if (!isValidSort(sort)) {
-    throw new ApiError(400, 'Invalid sort value', `Sort must be one of: price_asc, price_desc, newest, distance. Got: ${sort}`);
+    throw new ApiError(
+      400,
+      'Invalid sort value',
+      `Invalid sort value: must be one of price_asc, price_desc, newest, distance. Got: ${sort}`
+    );
   }
 
   // Distance sorting requires lat/lng
@@ -165,10 +178,13 @@ export async function listProducts(params: {
   }
 
   const orderBy: Prisma.ProductOrderByWithRelationInput =
-    sort === 'price_asc' ? { pricePerUnit: 'asc' }
-    : sort === 'price_desc' ? { pricePerUnit: 'desc' }
-    : sort === 'distance' ? { createdAt: 'asc' } // Fallback: will compute actual distance in app
-    : { createdAt: 'desc' }; // newest
+    sort === 'price_asc'
+      ? { pricePerUnit: 'asc' }
+      : sort === 'price_desc'
+        ? { pricePerUnit: 'desc' }
+        : sort === 'distance'
+          ? { createdAt: 'asc' } // Fallback: will compute actual distance in app
+          : { createdAt: 'desc' }; // newest
 
   const [total, products] = await prisma.$transaction([
     prisma.product.count({ where }),
@@ -229,7 +245,10 @@ export async function getProductGraphData(productId: string): Promise<ProductGra
 
 const ALLOWED_CURRENCIES = new Set(['USDC', 'XLM', 'EURC', 'STRK']);
 
-export async function createProduct(farmerWallet: string, input: ProductWriteInput): Promise<ProductDto> {
+export async function createProduct(
+  farmerWallet: string,
+  input: ProductWriteInput
+): Promise<ProductDto> {
   if (!input.name || !input.price_per_unit || !input.currency || !input.unit) {
     throw new ApiError(400, 'Bad Request', 'name, price_per_unit, currency, and unit are required');
   }
@@ -237,13 +256,25 @@ export async function createProduct(farmerWallet: string, input: ProductWriteInp
   // Issue #1125: Currency validation
   const normalizedCurrency = input.currency.toUpperCase();
   if (!ALLOWED_CURRENCIES.has(normalizedCurrency)) {
-    throw new ApiError(400, 'Bad Request', `Invalid currency: ${input.currency}. Supported currencies are USDC, XLM, EURC, STRK.`);
+    throw new ApiError(
+      400,
+      'Bad Request',
+      `Invalid currency: ${input.currency}. Supported currencies are USDC, XLM, EURC, STRK.`
+    );
   }
 
-  // Issue #1128: Enforce farmer/seller role
-  const profile = await prisma.profile.findUnique({ where: { walletAddress: farmerWallet.toLowerCase() } });
-  if (profile && profile.role !== 'farmer' && profile.role !== 'seller') {
-    throw new ApiError(403, 'Forbidden', 'Only users with farmer or seller role can create products');
+  // Issue #1128: Enforce farmer/seller role. Profile roles are persisted
+  // upper-cased ("FARMER"), so compare case-insensitively.
+  const profile = await prisma.profile.findUnique({
+    where: { walletAddress: farmerWallet.toLowerCase() },
+  });
+  const profileRole = profile?.role.trim().toUpperCase();
+  if (profile && profileRole !== 'FARMER' && profileRole !== 'SELLER') {
+    throw new ApiError(
+      403,
+      'Forbidden',
+      'Only users with farmer or seller role can create products'
+    );
   }
 
   const product = await prisma.product.create({
@@ -267,41 +298,60 @@ export async function createProduct(farmerWallet: string, input: ProductWriteInp
   return result;
 }
 
-export async function updateProduct(productId: string, farmerWallet: string, input: ProductWriteInput): Promise<ProductDto> {
+export async function updateProduct(
+  productId: string,
+  farmerWallet: string,
+  input: ProductWriteInput
+): Promise<ProductDto> {
   const existing = await prisma.product.findUnique({ where: { id: productId } });
   if (!existing) throw new ApiError(404, 'Not Found', 'Product not found');
   if (existing.farmerWallet.toLowerCase() !== farmerWallet.toLowerCase()) {
     throw new ApiError(403, 'Forbidden', 'You do not own this product');
   }
 
-  // Issue #1128: Enforce farmer/seller role
-  const profile = await prisma.profile.findUnique({ where: { walletAddress: farmerWallet.toLowerCase() } });
-  if (profile && profile.role !== 'farmer' && profile.role !== 'seller') {
-    throw new ApiError(403, 'Forbidden', 'Only users with farmer or seller role can update products');
+  // Issue #1128: Enforce farmer/seller role. Profile roles are persisted
+  // upper-cased ("FARMER"), so compare case-insensitively.
+  const profile = await prisma.profile.findUnique({
+    where: { walletAddress: farmerWallet.toLowerCase() },
+  });
+  const profileRole = profile?.role.trim().toUpperCase();
+  if (profile && profileRole !== 'FARMER' && profileRole !== 'SELLER') {
+    throw new ApiError(
+      403,
+      'Forbidden',
+      'Only users with farmer or seller role can update products'
+    );
   }
 
   const data: Prisma.ProductUpdateInput = {};
   if (input.name !== undefined) data.name = input.name;
   if (input.description !== undefined) data.description = input.description;
   if (input.category !== undefined) data.category = input.category;
-  if (input.price_per_unit !== undefined) data.pricePerUnit = new Prisma.Decimal(input.price_per_unit);
+  if (input.price_per_unit !== undefined)
+    data.pricePerUnit = new Prisma.Decimal(input.price_per_unit);
   if (input.currency !== undefined) {
     const normalizedCurrency = input.currency.toUpperCase();
     if (!ALLOWED_CURRENCIES.has(normalizedCurrency)) {
-      throw new ApiError(400, 'Bad Request', `Invalid currency: ${input.currency}. Supported currencies are USDC, XLM, EURC, STRK.`);
+      throw new ApiError(
+        400,
+        'Bad Request',
+        `Invalid currency: ${input.currency}. Supported currencies are USDC, XLM, EURC, STRK.`
+      );
     }
     data.currency = normalizedCurrency;
   }
   if (input.unit !== undefined) data.unit = input.unit;
   if (input.stock_quantity !== undefined) {
-    data.stockQuantity = input.stock_quantity === null ? null : new Prisma.Decimal(input.stock_quantity);
+    data.stockQuantity =
+      input.stock_quantity === null ? null : new Prisma.Decimal(input.stock_quantity);
   }
   if (input.location !== undefined) data.location = input.location;
   if (input.chain_network !== undefined) data.chainNetwork = input.chain_network;
   if (input.delivery_window !== undefined) data.deliveryWindow = input.delivery_window;
   if (input.is_available !== undefined) data.isAvailable = input.is_available;
 
-  if (Object.keys(data).length === 0) throw new ApiError(400, 'Bad Request', 'No fields provided to update');
+  if (Object.keys(data).length === 0)
+    throw new ApiError(400, 'Bad Request', 'No fields provided to update');
   const product = await prisma.product.update({ where: { id: productId }, data });
   const result = toProductDto(product);
   emitProductEvent('product:updated', result);
@@ -353,7 +403,7 @@ export function computeSuggestedPrice(prices: number[]): number | null {
  */
 export async function getSuggestedPrice(
   productId: string,
-  farmerWallet: string,
+  farmerWallet: string
 ): Promise<SuggestedPriceResult> {
   const product = await prisma.product.findUnique({ where: { id: productId } });
   if (!product) throw new ApiError(404, 'Not Found', 'Product not found');

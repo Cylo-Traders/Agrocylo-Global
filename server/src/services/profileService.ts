@@ -43,11 +43,15 @@ export async function createProfile(walletAddress: string, body: unknown): Promi
   const name = pickProfileName(record);
   const roleRaw = typeof record['role'] === 'string' ? record['role'] : 'BUYER';
   const bio = typeof record['bio'] === 'string' ? record['bio'] : undefined;
-  const avatarUrl =
-    typeof record['avatar_url'] === 'string' ? record['avatar_url'] : undefined;
+  const avatarUrl = typeof record['avatar_url'] === 'string' ? record['avatar_url'] : undefined;
 
   if (!name) {
-    throw new ApiError(400, 'Bad Request', 'display_name is required', 'https://cylos.io/errors/validation');
+    throw new ApiError(
+      400,
+      'Bad Request',
+      'display_name is required',
+      'https://cylos.io/errors/validation'
+    );
   }
 
   const existing = await prisma.profile.findUnique({ where: { walletAddress: canonical } });
@@ -63,7 +67,7 @@ export async function createProfile(walletAddress: string, body: unknown): Promi
     if (name) data.name = name;
     if (bio !== undefined) data.bio = bio;
     if (avatarUrl !== undefined) data.avatar_url = avatarUrl;
-    if (existing.role === 'BUYER' && requestedRole !== 'ADMIN') {
+    if (existing.role.trim().toUpperCase() === 'BUYER' && requestedRole !== 'ADMIN') {
       data.role = requestedRole;
     }
     if (Object.keys(data).length === 0) {
@@ -92,16 +96,26 @@ export async function createProfile(walletAddress: string, body: unknown): Promi
 export async function updateProfile(
   wallet_address: string,
   requester: string,
-  body: unknown,
+  body: unknown
 ): Promise<ClientProfile> {
   const target = canonicalWallet(wallet_address);
   if (canonicalWallet(requester) !== target) {
-    throw new ApiError(403, 'Forbidden', 'You can only update your own profile', 'https://cylos.io/errors/forbidden');
+    throw new ApiError(
+      403,
+      'Forbidden',
+      'You can only update your own profile',
+      'https://cylos.io/errors/forbidden'
+    );
   }
 
   const parsed = updateProfileSchema.safeParse(body ?? {});
   if (!parsed.success) {
-    throw new ApiError(400, 'Bad Request', parsed.error.message, 'https://cylos.io/errors/validation');
+    throw new ApiError(
+      400,
+      'Bad Request',
+      parsed.error.message,
+      'https://cylos.io/errors/validation'
+    );
   }
 
   const data: { name?: string; bio?: string | null; avatar_url?: string | null } = {};
@@ -111,7 +125,12 @@ export async function updateProfile(
   if (parsed.data.avatar_url !== undefined) data.avatar_url = parsed.data.avatar_url;
 
   if (Object.keys(data).length === 0) {
-    throw new ApiError(400, 'Bad Request', 'No valid fields to update', 'https://cylos.io/errors/validation');
+    throw new ApiError(
+      400,
+      'Bad Request',
+      'No valid fields to update',
+      'https://cylos.io/errors/validation'
+    );
   }
 
   const profile = await prisma.profile.update({

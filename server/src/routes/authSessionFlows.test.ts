@@ -58,6 +58,7 @@ vi.mock('../middleware/rateLimiter.js', () => ({
   authRateLimiter: (_req: any, _res: any, next: any) => next(),
   nonceWalletRateLimiter: (_req: any, _res: any, next: any) => next(),
   uploadRateLimiter: (_req: any, _res: any, next: any) => next(),
+  writeRateLimiter: (_req: any, _res: any, next: any) => next(),
   sharedRedisClient: null,
 }));
 
@@ -71,8 +72,10 @@ vi.mock('@stellar/stellar-sdk', () => ({
 
 const { prisma } = await import('../config/database.js');
 const { default: authRoutes } = await import('./authRoutes.js');
-const { default: productRoutes, apiErrorHandler: productErrorHandler } = await import('./productRoutes.js');
-const { default: notificationRoutes, notificationErrorHandler } = await import('./notificationRoutes.js');
+const { default: productRoutes, apiErrorHandler: productErrorHandler } =
+  await import('./productRoutes.js');
+const { default: notificationRoutes, notificationErrorHandler } =
+  await import('./notificationRoutes.js');
 
 const app = express();
 app.use(express.json());
@@ -123,8 +126,14 @@ describe('Auth & Session Flows (Issue #1190)', () => {
 
       (prisma.nonce.findUnique as any).mockResolvedValue(row);
       (prisma.nonce.delete as any).mockResolvedValue(row);
-      (prisma.user.findUnique as any).mockResolvedValue({ walletAddress: FARMER_WALLET, role: 'FARMER' });
-      (prisma.profile.findUnique as any).mockResolvedValue({ walletAddress: FARMER_WALLET, role: 'farmer' });
+      (prisma.user.findUnique as any).mockResolvedValue({
+        walletAddress: FARMER_WALLET,
+        role: 'FARMER',
+      });
+      (prisma.profile.findUnique as any).mockResolvedValue({
+        walletAddress: FARMER_WALLET,
+        role: 'farmer',
+      });
       (prisma.refreshToken.create as any).mockResolvedValue({
         id: 'token-id-1',
         tokenHash: 'hashed-token',
@@ -197,7 +206,10 @@ describe('Auth & Session Flows (Issue #1190)', () => {
 
     it('POST /products fails with 403 when authenticated as a BUYER', async () => {
       const buyerToken = makeToken({ walletAddress: BUYER_WALLET, role: 'buyer' });
-      (prisma.profile.findUnique as any).mockResolvedValue({ walletAddress: BUYER_WALLET, role: 'buyer' });
+      (prisma.profile.findUnique as any).mockResolvedValue({
+        walletAddress: BUYER_WALLET,
+        role: 'buyer',
+      });
 
       const res = await request(app)
         .post('/products')
@@ -217,7 +229,10 @@ describe('Auth & Session Flows (Issue #1190)', () => {
 
     it('POST /products succeeds with 201 when authenticated as a FARMER', async () => {
       const farmerToken = makeToken({ walletAddress: FARMER_WALLET, role: 'farmer' });
-      (prisma.profile.findUnique as any).mockResolvedValue({ walletAddress: FARMER_WALLET, role: 'farmer' });
+      (prisma.profile.findUnique as any).mockResolvedValue({
+        walletAddress: FARMER_WALLET,
+        role: 'farmer',
+      });
       (prisma.product.create as any).mockResolvedValue({
         id: 'prod-new-1',
         farmerWallet: FARMER_WALLET.toLowerCase(),
@@ -281,7 +296,10 @@ describe('Auth & Session Flows (Issue #1190)', () => {
         farmerWallet: FARMER_WALLET.toLowerCase(),
         name: 'Tomato',
       });
-      (prisma.profile.findUnique as any).mockResolvedValue({ walletAddress: FARMER_WALLET.toLowerCase(), role: 'farmer' });
+      (prisma.profile.findUnique as any).mockResolvedValue({
+        walletAddress: FARMER_WALLET.toLowerCase(),
+        role: 'farmer',
+      });
       (prisma.product.update as any).mockResolvedValue({
         id: 'prod-1',
         farmerWallet: FARMER_WALLET.toLowerCase(),

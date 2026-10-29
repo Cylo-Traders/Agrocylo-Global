@@ -29,6 +29,7 @@ vi.mock('../config/database.js', () => ({
       update: vi.fn(),
     },
     priceHistory: { findMany: vi.fn() },
+    profile: { findUnique: vi.fn() },
   },
 }));
 vi.mock('../services/wsManager.js', () => ({ wsManager: { broadcast: vi.fn() } }));
@@ -71,6 +72,7 @@ beforeEach(() => {
   vi.mocked(prisma.product.create).mockResolvedValue(row() as any);
   vi.mocked(prisma.product.findUnique).mockResolvedValue(row() as any);
   vi.mocked(prisma.product.update).mockResolvedValue(row() as any);
+  vi.mocked(prisma.profile.findUnique).mockResolvedValue({ role: 'FARMER' } as any);
 });
 
 describe('GET /products query parameters (#1145)', () => {

@@ -42,6 +42,9 @@
     "test:scripts": "node --test scripts/__tests__/*.test.js scripts/check-toolchain.test.cjs scripts/dev-frontend.test.cjs",
     "check:links": "node scripts/check-markdown-links.js"
   },
+  "dependencies": {
+    "react-is": "^19.2.3"
+  },
   "devDependencies": {
     "react": "19.2.3",
     "react-dom": "19.2.3",

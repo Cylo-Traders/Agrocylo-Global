@@ -240,7 +240,10 @@ export async function refreshAccessToken(
   return { accessToken, refreshToken: newRefreshToken };
 }
 
-export function verifyAccessToken(token: string): { walletAddress: string; role: ServerProfileRole } {
+export function verifyAccessToken(token: string): {
+  walletAddress: string;
+  role: ServerProfileRole;
+} {
   try {
     const payload = jwt.verify(token, JWT_SECRET) as {
       walletAddress: string;
@@ -255,9 +258,20 @@ export function verifyAccessToken(token: string): { walletAddress: string; role:
   }
 }
 
+export async function logout(refreshToken: string): Promise<void> {
+  await prisma.refreshToken.deleteMany({ where: { token: hashRefreshToken(refreshToken) } });
+}
+
+export function generateHandoffToken(walletAddress: string): string {
+  return signHandoffToken(walletAddress);
+}
+
 export function signHandoffToken(walletAddress: string): string {
   return jwt.sign(
-    { walletAddress: canonicalWalletAddress(walletAddress), jti: crypto.randomBytes(16).toString('hex') },
+    {
+      walletAddress: canonicalWalletAddress(walletAddress),
+      jti: crypto.randomBytes(16).toString('hex'),
+    },
     JWT_SECRET,
     { expiresIn: HANDOFF_EXPIRES_IN, audience: HANDOFF_AUDIENCE }
   );
