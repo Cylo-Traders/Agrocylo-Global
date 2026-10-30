@@ -2,44 +2,83 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-// ── Price-index widget (#696) ──────────────────────────────────────────────
-interface PriceIndexEntry {
-  crop: string;
-  region: string;
-  averagePrice: number;
-  sampleCount: number;
-  computedAt: string;
-}
+// ── Price-index widget (#696, #1258) ────────────────────────────────────────
+import Link from "next/link";
+import WalletConnect from "@/components/WalletConnect";
+import { OrderTableSkeleton } from "@/components/Skeletons";
+import { useWallet } from "@/context/WalletContext";
+import { useAsyncResource } from "@/hooks/useAsyncResource";
+import { useWebSocket, type WsMessage } from "@/hooks/useWebSocket";
+import {
+  fetchFarmerPriceIndex,
+  filterOrdersForFarmer,
+  isPriceIndexStale,
+  summarizeFarmerOrders,
+  type PriceIndexResponse,
+} from "@/lib/farmerDashboard";
+import { formatAmount } from "@/services/campaignService";
+import { fetchOrdersByFarmer } from "@/services/orderService";
+import type { Order } from "@/types";
 
 function PriceIndexWidget() {
-  const [entries, setEntries] = useState<PriceIndexEntry[]>([]);
+  const [priceIndex, setPriceIndex] = useState<PriceIndexResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/v1/analytics/price-index")
-      .then(async (res) => {
-        if (!res.ok) throw new Error("Failed to load price index");
-        const json: { data: PriceIndexEntry[] } = await res.json();
-        setEntries(json.data ?? []);
+    const controller = new AbortController();
+    fetchFarmerPriceIndex({ signal: controller.signal })
+      .then((res) => {
+        if (!controller.signal.aborted) {
+          setPriceIndex(res);
+          setError(null);
+        }
       })
-      .catch((err: unknown) =>
-        setError(err instanceof Error ? err.message : "Price index unavailable"),
-      )
-      .finally(() => setLoading(false));
+      .catch((err: unknown) => {
+        if (!controller.signal.aborted) {
+          setError(err instanceof Error ? err.message : "Price index unavailable");
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      });
+
+    return () => controller.abort();
   }, []);
+
+  const entries = priceIndex?.data ?? [];
+  const isStale = isPriceIndexStale(priceIndex);
 
   return (
     <section aria-labelledby="price-index-heading" className="rounded-xl border border-border bg-surface p-5">
-      <h2 id="price-index-heading" className="text-base font-semibold text-foreground mb-3">
-        Regional Price Index
-      </h2>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 id="price-index-heading" className="text-base font-semibold text-foreground">
+            Regional Price Index
+          </h2>
+          <p className="text-xs text-muted">
+            Computed from active marketplace listings (XLM per unit, grouped by farmer wallet prefix)
+          </p>
+        </div>
+        {!loading && !error && priceIndex?.meta?.computedAt && entries.length > 0 && (
+          <span className="text-xs text-muted">
+            Updated {new Date(priceIndex.meta.computedAt).toLocaleTimeString()}
+          </span>
+        )}
+      </div>
       {loading && <p className="text-sm text-muted animate-pulse">Loading price data…</p>}
       {!loading && error && (
         <p className="text-sm text-red-600" role="alert">{error}</p>
       )}
+      {!loading && !error && isStale && (
+        <p className="mb-3 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-800" role="status">
+          Price index data is stale (last computed at {new Date(priceIndex!.meta.computedAt).toLocaleString()}). Figures reflect the latest available marketplace snapshot.
+        </p>
+      )}
       {!loading && !error && entries.length === 0 && (
-        <p className="text-sm text-muted">No price data available yet. Index updates hourly as orders are confirmed.</p>
+        <p className="text-sm text-muted">No price data available yet. Index updates as active marketplace listings are published.</p>
       )}
       {!loading && !error && entries.length > 0 && (
         <div className="overflow-x-auto">
@@ -49,12 +88,12 @@ function PriceIndexWidget() {
                 <th scope="col" className="pb-2 font-medium">Crop</th>
                 <th scope="col" className="pb-2 font-medium">Region</th>
                 <th scope="col" className="pb-2 text-right font-medium">Avg. Price (XLM)</th>
-                <th scope="col" className="pb-2 text-right font-medium">Samples</th>
+                <th scope="col" className="pb-2 text-right font-medium">Active Listings</th>
               </tr>
             </thead>
             <tbody>
               {entries.map((e, i) => (
-                <tr key={i} className="border-b border-border last:border-0">
+                <tr key={`${e.crop}-${e.region}-${i}`} className="border-b border-border last:border-0">
                   <td className="py-2 font-medium text-foreground">{e.crop}</td>
                   <td className="py-2 text-muted">{e.region}</td>
                   <td className="py-2 text-right text-foreground">{e.averagePrice.toLocaleString()}</td>
@@ -69,19 +108,6 @@ function PriceIndexWidget() {
   );
 }
 // ── end PriceIndexWidget ──────────────────────────────────────────────────
-import Link from "next/link";
-import WalletConnect from "@/components/WalletConnect";
-import { OrderTableSkeleton } from "@/components/Skeletons";
-import { useWallet } from "@/context/WalletContext";
-import { useAsyncResource } from "@/hooks/useAsyncResource";
-import { useWebSocket, type WsMessage } from "@/hooks/useWebSocket";
-import {
-  filterOrdersForFarmer,
-  summarizeFarmerOrders,
-} from "@/lib/farmerDashboard";
-import { formatAmount } from "@/services/campaignService";
-import { fetchOrdersByFarmer } from "@/services/orderService";
-import type { Order } from "@/types";
 
 function FulfilmentState({ status }: { status: Order["status"] }) {
   if (status === "CONFIRMED") {
