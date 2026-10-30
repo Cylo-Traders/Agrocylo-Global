@@ -90,6 +90,19 @@ Emitted when an order is confirmed (confirmed on-chain).
 }
 ```
 
+### group_order.updated
+Emitted when a buyer joins a group-buy pool and its committed quantity or status changes.
+
+**Payload:**
+```typescript
+{
+  orderId: string;          // GroupOrder UUID
+  currentQuantity: number;  // Updated committed quantity across participants
+  targetQuantity: number;   // Pool target quantity threshold
+  status: "open" | "expired" | "completed";
+}
+```
+
 ## Broadcasting Behavior
 
 - Events are broadcast to all connected WebSocket clients

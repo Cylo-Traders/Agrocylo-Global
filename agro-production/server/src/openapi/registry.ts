@@ -47,6 +47,12 @@ import {
   ProductQuerySchema,
   ProductSchema,
 } from "../schemas/product.js";
+import {
+  GroupOrderIdParamSchema,
+  GroupOrderListSchema,
+  JoinGroupOrderBodySchema,
+  JoinGroupOrderResponseSchema,
+} from "../schemas/groupOrder.js";
 
 extendZodWithOpenApi(z);
 
@@ -526,3 +532,38 @@ registry.registerPath({
     404: problemResponse,
   },
 });
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/group-orders",
+  tags: ["Group Orders"],
+  summary: "List active and historical group-buy pools",
+  responses: {
+    200: {
+      description: "Group order summaries",
+      content: { "application/json": { schema: GroupOrderListSchema } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/group-orders/{id}/join",
+  tags: ["Group Orders"],
+  summary: "Join an open group-buy pool (authenticated & idempotent)",
+  request: {
+    params: GroupOrderIdParamSchema,
+    body: { content: { "application/json": { schema: JoinGroupOrderBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Joined pool or replayed idempotent join",
+      content: { "application/json": { schema: JoinGroupOrderResponseSchema } },
+    },
+    400: validationResponse,
+    401: problemResponse,
+    404: problemResponse,
+    409: problemResponse,
+  },
+});
+

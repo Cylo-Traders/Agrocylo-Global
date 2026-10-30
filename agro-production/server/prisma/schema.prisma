@@ -499,3 +499,45 @@ enum UserRole {
   BUYER
   ADMIN
 }
+
+enum GroupOrderStatus {
+  open
+  expired
+  completed
+}
+
+model GroupOrder {
+  id              String           @id @default(uuid())
+  productId       String?
+  productName     String
+  currentQuantity Int              @default(0)
+  targetQuantity  Int
+  pricePerUnit    Int
+  expiresAt       DateTime
+  status          GroupOrderStatus @default(open)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  participants GroupOrderParticipant[]
+
+  @@index([status])
+  @@index([expiresAt])
+  @@map("group_orders")
+}
+
+model GroupOrderParticipant {
+  id            String   @id @default(uuid())
+  groupOrderId  String
+  walletAddress String
+  quantity      Int      @default(1)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  groupOrder GroupOrder @relation(fields: [groupOrderId], references: [id], onDelete: Cascade)
+
+  @@unique([groupOrderId, walletAddress])
+  @@index([groupOrderId])
+  @@index([walletAddress])
+  @@map("group_order_participants")
+}
+
