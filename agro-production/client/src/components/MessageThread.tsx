@@ -125,7 +125,7 @@ export default function MessageThread({
             onChange={(e) => setPendingMessage(e.target.value)}
             placeholder="Type a message..."
             disabled={sending}
-            maxLength={5000}
+            maxLength={4000}
             className="flex-1 px-3 py-2 border border-border rounded-lg bg-background text-foreground placeholder-muted disabled:opacity-50"
           />
           <button
@@ -137,7 +137,7 @@ export default function MessageThread({
           </button>
         </div>
         <p className="text-xs text-muted text-right">
-          {pendingMessage.length}/5000
+          {pendingMessage.length}/4000
         </p>
       </form>
     </div>
