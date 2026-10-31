@@ -32,20 +32,52 @@ env:
   NODE_VERSION: "22"
 
 jobs:
-  # ── Check that CI passed (Issue #910) ───────────────────────────────────────
-  # Ensures we never deploy when CI is failing. The CI workflow must pass
-  # before any deployment steps run.
+  # ── Check that CI passed (Issue #1301) ───────────────────────────────────────
+  # Verifies that required CI check-runs / workflows for the exact commit SHA
+  # have concluded with 'success'. Prevents deployment on red builds.
   ci-gate:
     name: CI gate check
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      checks: read
     steps:
-      - name: Check if CI workflow passed
+      - name: Verify commit CI status via GitHub API
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
         run: |
-          echo "CI must pass before deployment proceeds"
-          # Note: In practice, this is enforced by branch protection rules.
-          # This job exists as a clear gate and future extensibility point
-          # for CI status checks via GitHub API if needed.
+          echo "========================================================"
+          echo "🔍 Verifying CI Status for commit $COMMIT_SHA on $REPO"
+          echo "========================================================"
+
+          # Query workflow runs for the exact commit SHA
+          RUNS_JSON=$(gh api "repos/$REPO/actions/runs?head_sha=$COMMIT_SHA" --jq '[.workflow_runs[] | select(.name != "Deploy" and .name != "CI gate check") | {name: .name, status: .status, conclusion: .conclusion}]' || echo "[]")
+          echo "CI workflow runs evaluated on SHA $COMMIT_SHA:"
+          echo "$RUNS_JSON"
+
+          # Check for any failing workflow runs (conclusion not success)
+          FAILED_RUNS=$(echo "$RUNS_JSON" | jq '[.[] | select(.conclusion != null and .conclusion != "success")]' 2>/dev/null || echo "[]")
+          FAILED_COUNT=$(echo "$FAILED_RUNS" | jq 'length' 2>/dev/null || echo "0")
+
+          IN_PROGRESS_RUNS=$(echo "$RUNS_JSON" | jq '[.[] | select(.status != "completed")]' 2>/dev/null || echo "[]")
+          IN_PROGRESS_COUNT=$(echo "$IN_PROGRESS_RUNS" | jq 'length' 2>/dev/null || echo "0")
+
+          if [ "$FAILED_COUNT" -gt 0 ]; then
+            echo "❌ CI Gate Failed: The following required CI workflows failed on $COMMIT_SHA:"
+            echo "$FAILED_RUNS"
+            exit 1
+          fi
+
+          if [ "$IN_PROGRESS_COUNT" -gt 0 ]; then
+            echo "⚠️ CI Gate Pending: Required CI workflows are still running on $COMMIT_SHA:"
+            echo "$IN_PROGRESS_RUNS"
+            exit 1
+          fi
+
+          echo "✅ CI verification passed: All required CI checks for $COMMIT_SHA are green!"
 
   # ── Determine target environment ────────────────────────────────────────────
   resolve-env:
