@@ -680,7 +680,7 @@ impl ProductionEscrowContract {
         env.storage().instance().get(&DataKey::GovernanceContract)
     }
 
-    /// Set the independent attester role. Can be called by admin.
+    /// Set (or update) the independent attester role. Can be called by admin or governance.
     /// The attester is required to sign off on mark_harvest to prevent farmer self-attest exploits.
     pub fn set_attester(
         env: Env,
@@ -688,13 +688,14 @@ impl ProductionEscrowContract {
         attester: Address,
     ) -> Result<(), EscrowError> {
         admin_caller.require_auth();
-        let admin = admin(&env)?;
-        if admin_caller != admin {
-            return Err(EscrowError::NotAdmin);
-        }
+        require_governed_caller(&env, &admin_caller)?;
         bump_instance(&env);
         env.storage().instance().set(&DataKey::Attester, &attester);
         Ok(())
+    }
+
+    pub fn get_attester(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Attester)
     }
 
     // -----------------------------------------------------------------------
@@ -931,10 +932,11 @@ impl ProductionEscrowContract {
     // Milestone-based partial release
     // -----------------------------------------------------------------------
 
-    /// Admin sets the milestone release configuration for a campaign.
+    /// Governance-gated (with admin fallback) configuration of milestone releases (Issue #1298).
     /// Each config entry maps a milestone stage to a percentage (basis points)
     /// of total_raised to release when that milestone is advanced.
     /// Configs must be provided in sequential order (Planted -> Growing -> ...).
+    /// Cumulative release is capped at MAX_TRANCHE_BPS (70%).
     pub fn set_milestone_configs(
         env: Env,
         admin_caller: Address,
@@ -942,16 +944,14 @@ impl ProductionEscrowContract {
         configs: Vec<MilestoneConfig>,
     ) -> Result<(), EscrowError> {
         admin_caller.require_auth();
-        let admin_addr = admin(&env)?;
-        if admin_caller != admin_addr {
-            return Err(EscrowError::NotAdmin);
-        }
+        require_governed_caller(&env, &admin_caller)?;
         let campaign = load_campaign(&env, campaign_id)?;
         // Only allow config before any milestones have been advanced.
         if campaign.current_milestone > 0 {
             return Err(EscrowError::MilestoneAlreadyAdvanced);
         }
-        // Validate sequential order of milestones.
+        // Validate sequential order and cumulative tranche cap at write time.
+        let mut total_bps: u32 = 0;
         for i in 0..configs.len() {
             let cfg = configs.get(i).unwrap();
             if cfg.release_bps == 0 || cfg.release_bps > 10000 {
@@ -960,6 +960,12 @@ impl ProductionEscrowContract {
             if !validate_milestone_order(i, &cfg.milestone) {
                 return Err(EscrowError::InvalidMilestone);
             }
+            total_bps = total_bps
+                .checked_add(cfg.release_bps)
+                .ok_or(EscrowError::InvalidAmount)?;
+        }
+        if total_bps as i128 > MAX_TRANCHE_BPS {
+            return Err(EscrowError::InvalidTranche);
         }
         env.storage()
             .persistent()
