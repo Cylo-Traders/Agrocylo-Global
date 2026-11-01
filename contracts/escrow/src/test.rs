@@ -2,7 +2,7 @@
 
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Events, Ledger},
+    testutils::{Address as _, Events, Ledger, MockAuth, MockAuthInvoke},
     token, Address, Env, IntoVal, String,
 };
 
@@ -1957,4 +1957,373 @@ fn test_vote_to_resolve_non_arbitrator_rejected() {
         result.unwrap_err().unwrap(),
         EscrowError::ArbitratorNotFound
     );
+}
+
+// ── Explicit Soroban Authorization Tests (Issue #1280) ────────────────────────
+// These tests deliberately avoid `mock_all_auths()` on the calls under test and
+// instead use `env.set_auths(&[])` / `client.mock_auths(&[...])` to verify that
+// critical state-mutating entrypoints trap when required signatures are missing
+// or forged by the wrong party, and succeed only when the exact required
+// `MockAuthInvoke` tree is authorized.
+
+#[test]
+fn test_initialize_explicit_auth_required() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let stranger = Address::generate(&env);
+    let fee_collector = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let xlm = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+    let usdc = env
+        .register_stellar_asset_contract_v2(token_admin)
+        .address();
+    let mut supported_tokens = Vec::new(&env);
+    supported_tokens.push_back(xlm);
+    supported_tokens.push_back(usdc);
+
+    let contract_id = env.register(EscrowContract, ());
+    let client = EscrowContractClient::new(&env, &contract_id);
+
+    // 1. Unauthenticated initialize call must trap and leave contract uninitialized.
+    assert!(client
+        .try_initialize(&admin, &fee_collector, &supported_tokens)
+        .is_err());
+    assert_eq!(client.get_schema_version(), 0);
+
+    // 2. Signature from a non-admin address while claiming `admin` must also trap.
+    let wrong_signer_res = client
+        .mock_auths(&[MockAuth {
+            address: &stranger,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&admin, &fee_collector, &supported_tokens).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_initialize(&admin, &fee_collector, &supported_tokens);
+    assert!(wrong_signer_res.is_err());
+    assert_eq!(client.get_schema_version(), 0);
+
+    // 3. Explicit authorization from `admin` succeeds.
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&admin, &fee_collector, &supported_tokens).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .initialize(&admin, &fee_collector, &supported_tokens);
+    assert_eq!(client.get_schema_version(), CURRENT_SCHEMA_VERSION);
+}
+
+#[test]
+fn test_create_order_explicit_auth() {
+    let (env, client, buyer, farmer, fee_collector, token, _, _, _, contract_id) = setup_test();
+    let stranger = Address::generate(&env);
+    let amount: i128 = 1000;
+    let expected_fee: i128 = 30;
+    let expected_net: i128 = 970;
+
+    // Clear global mock_all_auths inherited from setup_test().
+    env.set_auths(&[]);
+
+    // 1. Missing buyer auth must trap before any funds move.
+    assert!(client
+        .try_create_order(&buyer, &farmer, &token.address, &amount)
+        .is_err());
+
+    // 2. Farmer or stranger signing in place of buyer must trap.
+    let forged_res = client
+        .mock_auths(&[MockAuth {
+            address: &stranger,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "create_order",
+                args: (&buyer, &farmer, &token.address, &amount).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_create_order(&buyer, &farmer, &token.address, &amount);
+    assert!(forged_res.is_err());
+
+    // 3. Buyer authorizing `create_order` AND the two token `transfer` sub-invokes
+    //    (platform fee to fee_collector + net escrow deposit to contract_id) succeeds.
+    let order_id = client
+        .mock_auths(&[MockAuth {
+            address: &buyer,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "create_order",
+                args: (&buyer, &farmer, &token.address, &amount).into_val(&env),
+                sub_invokes: &[
+                    MockAuthInvoke {
+                        contract: &token.address,
+                        fn_name: "transfer",
+                        args: (&buyer, &fee_collector, &expected_fee).into_val(&env),
+                        sub_invokes: &[],
+                    },
+                    MockAuthInvoke {
+                        contract: &token.address,
+                        fn_name: "transfer",
+                        args: (&buyer, &contract_id, &expected_net).into_val(&env),
+                        sub_invokes: &[],
+                    },
+                ],
+            },
+        }])
+        .create_order(&buyer, &farmer, &token.address, &amount);
+
+    assert_eq!(order_id, 1);
+    let order = client.get_order_details(&order_id);
+    assert_eq!(order.amount, expected_net);
+    assert_eq!(order.status, OrderStatus::Pending);
+}
+
+#[test]
+fn test_mark_delivered_explicit_dual_auth() {
+    let (env, client, buyer, farmer, _, token, _, admin, _, contract_id) = setup_test();
+    let attester = Address::generate(&env);
+    client.mock_all_auths().set_attester(&admin, &attester);
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &1000);
+
+    // Clear global mock_all_auths before testing mark_delivered.
+    env.set_auths(&[]);
+
+    // 1. Neither farmer nor attester signs -> traps.
+    assert!(client
+        .try_mark_delivered(&farmer, &attester, &order_id)
+        .is_err());
+
+    // 2. Only farmer signs (missing attester co-signature) -> traps.
+    let farmer_only = client
+        .mock_auths(&[MockAuth {
+            address: &farmer,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "mark_delivered",
+                args: (&farmer, &attester, &order_id).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_mark_delivered(&farmer, &attester, &order_id);
+    assert!(farmer_only.is_err());
+    assert_eq!(client.get_order_details(&order_id).delivery_timestamp, 0);
+
+    // 3. Only attester signs (missing farmer signature) -> traps.
+    let attester_only = client
+        .mock_auths(&[MockAuth {
+            address: &attester,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "mark_delivered",
+                args: (&farmer, &attester, &order_id).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_mark_delivered(&farmer, &attester, &order_id);
+    assert!(attester_only.is_err());
+    assert_eq!(client.get_order_details(&order_id).delivery_timestamp, 0);
+
+    // 4. Both farmer and attester explicitly authorize `mark_delivered` -> succeeds.
+    client
+        .mock_auths(&[
+            MockAuth {
+                address: &farmer,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "mark_delivered",
+                    args: (&farmer, &attester, &order_id).into_val(&env),
+                    sub_invokes: &[],
+                },
+            },
+            MockAuth {
+                address: &attester,
+                invoke: &MockAuthInvoke {
+                    contract: &contract_id,
+                    fn_name: "mark_delivered",
+                    args: (&farmer, &attester, &order_id).into_val(&env),
+                    sub_invokes: &[],
+                },
+            },
+        ])
+        .mark_delivered(&farmer, &attester, &order_id);
+
+    assert_eq!(
+        client.get_order_details(&order_id).delivery_timestamp,
+        1_000_000
+    );
+}
+
+#[test]
+fn test_confirm_receipt_explicit_auth() {
+    let (env, client, buyer, farmer, _, token, _, _, _, contract_id) = setup_test();
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &1000);
+
+    env.set_auths(&[]);
+
+    // 1. Missing buyer signature -> traps.
+    assert!(client.try_confirm_receipt(&buyer, &order_id).is_err());
+
+    // 2. Farmer attempting to sign `confirm_receipt` on behalf of `buyer` -> traps.
+    let farmer_forged = client
+        .mock_auths(&[MockAuth {
+            address: &farmer,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "confirm_receipt",
+                args: (&buyer, &order_id).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_confirm_receipt(&buyer, &order_id);
+    assert!(farmer_forged.is_err());
+    assert_eq!(
+        client.get_order_details(&order_id).status,
+        OrderStatus::Pending
+    );
+
+    // 3. Explicit buyer authorization -> succeeds and releases funds to farmer.
+    client
+        .mock_auths(&[MockAuth {
+            address: &buyer,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "confirm_receipt",
+                args: (&buyer, &order_id).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .confirm_receipt(&buyer, &order_id);
+
+    assert_eq!(
+        client.get_order_details(&order_id).status,
+        OrderStatus::Completed
+    );
+    assert_eq!(token.balance(&farmer), 970);
+}
+
+#[test]
+fn test_refund_expired_order_explicit_auth() {
+    let (env, client, buyer, farmer, _, token, _, _, _, contract_id) = setup_test();
+    let stranger = Address::generate(&env);
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &1000);
+
+    // Advance ledger past the 96-hour expiry window.
+    let order_ts = client.get_order_details(&order_id).timestamp;
+    env.ledger()
+        .set_timestamp(order_ts + NINETY_SIX_HOURS_IN_SECONDS + 1);
+
+    env.set_auths(&[]);
+
+    // 1. No signature -> traps.
+    assert!(client.try_refund_expired_order(&buyer, &order_id).is_err());
+
+    // 2. Stranger signing while passing `buyer` as caller -> traps.
+    let forged = client
+        .mock_auths(&[MockAuth {
+            address: &stranger,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "refund_expired_order",
+                args: (&buyer, &order_id).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_refund_expired_order(&buyer, &order_id);
+    assert!(forged.is_err());
+    assert_eq!(
+        client.get_order_details(&order_id).status,
+        OrderStatus::Pending
+    );
+
+    // 3. Explicit buyer authorization -> succeeds and refunds escrowed balance.
+    client
+        .mock_auths(&[MockAuth {
+            address: &buyer,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "refund_expired_order",
+                args: (&buyer, &order_id).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .refund_expired_order(&buyer, &order_id);
+
+    assert_eq!(
+        client.get_order_details(&order_id).status,
+        OrderStatus::Refunded
+    );
+    assert_eq!(token.balance(&buyer), 970);
+}
+
+#[test]
+fn test_resolve_dispute_explicit_admin_auth() {
+    let (env, client, buyer, farmer, _, token, _, admin, _, contract_id) = setup_test();
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &1000);
+
+    let reason = String::from_str(&env, "Damaged shipment");
+    let evidence = String::from_str(&env, "ipfs://QmEvidenceHash");
+    client
+        .mock_all_auths()
+        .open_dispute(&buyer, &order_id, &reason, &evidence);
+
+    env.set_auths(&[]);
+
+    // 1. Unauthenticated resolve_dispute call -> traps.
+    assert!(client
+        .try_resolve_dispute(&admin, &order_id, &DisputeResolution::Refund)
+        .is_err());
+
+    // 2. Buyer or farmer signing while passing `admin` as caller -> traps.
+    let buyer_forged = client
+        .mock_auths(&[MockAuth {
+            address: &buyer,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "resolve_dispute",
+                args: (&admin, &order_id, &DisputeResolution::Refund).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_resolve_dispute(&admin, &order_id, &DisputeResolution::Refund);
+    assert!(buyer_forged.is_err());
+    assert_eq!(
+        client.get_order_details(&order_id).status,
+        OrderStatus::Disputed
+    );
+
+    // 3. Explicit admin authorization -> succeeds and resolves dispute.
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "resolve_dispute",
+                args: (&admin, &order_id, &DisputeResolution::Refund).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .resolve_dispute(&admin, &order_id, &DisputeResolution::Refund);
+
+    assert_eq!(
+        client.get_order_details(&order_id).status,
+        OrderStatus::Refunded
+    );
+    assert!(client.get_dispute_details(&order_id).resolved);
+    assert_eq!(token.balance(&buyer), 970);
 }
