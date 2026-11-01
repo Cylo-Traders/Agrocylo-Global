@@ -3364,8 +3364,18 @@ fn test_advance_milestone_refund_after_partial_release() {
 }
 
 // ---------------------------------------------------------------------------
-// Governance gating (Issue #660)
+// Governance gating (Issue #660, #1297)
 // ---------------------------------------------------------------------------
+
+#[soroban_sdk::contract]
+struct MockGovernance;
+
+#[soroban_sdk::contractimpl]
+impl MockGovernance {
+    pub fn get_admin(env: Env) -> Address {
+        env.current_contract_address()
+    }
+}
 
 #[test]
 fn test_fee_config_admin_fallback_before_governance_set() {
@@ -3378,13 +3388,13 @@ fn test_fee_config_admin_fallback_before_governance_set() {
 #[test]
 fn test_fee_config_rejects_admin_once_governance_set() {
     let t = setup();
-    let governance = Address::generate(&t.env);
+    let governance = t.env.register(MockGovernance, ());
     let fee_collector = Address::generate(&t.env);
 
     t.client.set_governance_contract(&t.admin, &governance);
 
     let result = t.client.try_set_fee_config(&t.admin, &fee_collector, &500);
-    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAdmin);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotGoverned);
 
     // The governance contract address is now the sole authorized caller.
     t.client.set_fee_config(&governance, &fee_collector, &500);
@@ -3393,13 +3403,13 @@ fn test_fee_config_rejects_admin_once_governance_set() {
 #[test]
 fn test_registry_contract_rejects_admin_once_governance_set() {
     let t = setup();
-    let governance = Address::generate(&t.env);
+    let governance = t.env.register(MockGovernance, ());
     let registry = Address::generate(&t.env);
 
     t.client.set_governance_contract(&t.admin, &governance);
 
     let result = t.client.try_set_registry_contract(&t.admin, &registry);
-    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAdmin);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotGoverned);
 
     t.client.set_registry_contract(&governance, &registry);
 }
@@ -3407,17 +3417,50 @@ fn test_registry_contract_rejects_admin_once_governance_set() {
 #[test]
 fn test_update_supported_tokens_governance_gated() {
     let t = setup();
-    let governance = Address::generate(&t.env);
+    let governance = t.env.register(MockGovernance, ());
     t.client.set_governance_contract(&t.admin, &governance);
 
     let mut tokens = Vec::new(&t.env);
     tokens.push_back(t.token_id.clone());
 
     let result = t.client.try_update_supported_tokens(&t.admin, &tokens);
-    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAdmin);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotGoverned);
 
     t.client.update_supported_tokens(&governance, &tokens);
     assert_eq!(t.client.get_supported_tokens().len(), 1);
+}
+
+#[test]
+fn test_set_attester_admin_fallback_before_governance_set() {
+    let t = setup();
+    let attester = Address::generate(&t.env);
+    // Before governance is set, admin can configure the attester.
+    t.client.set_attester(&t.admin, &attester);
+    assert_eq!(t.client.get_attester(), Some(attester));
+}
+
+#[test]
+fn test_set_attester_governance_gated_rejects_admin_once_governance_set() {
+    let t = setup();
+    let initial_attester = Address::generate(&t.env);
+    t.client.set_attester(&t.admin, &initial_attester);
+    assert_eq!(t.client.get_attester(), Some(initial_attester.clone()));
+
+    let governance = t.env.register(MockGovernance, ());
+    t.client.set_governance_contract(&t.admin, &governance);
+
+    let fake_attester = Address::generate(&t.env);
+    // Raw admin is rejected once governance is set
+    let result = t.client.try_set_attester(&t.admin, &fake_attester);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotGoverned);
+
+    // Stored attester remains unchanged
+    assert_eq!(t.client.get_attester(), Some(initial_attester));
+
+    // Governance caller can successfully update attester
+    let new_attester = Address::generate(&t.env);
+    t.client.set_attester(&governance, &new_attester);
+    assert_eq!(t.client.get_attester(), Some(new_attester));
 }
 
 #[test]

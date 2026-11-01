@@ -680,21 +680,23 @@ impl ProductionEscrowContract {
         env.storage().instance().get(&DataKey::GovernanceContract)
     }
 
-    /// Set the independent attester role. Can be called by admin.
+    /// Set (or update) the independent attester role (Issue #1297).
     /// The attester is required to sign off on mark_harvest to prevent farmer self-attest exploits.
+    /// Governance-gated with admin fallback before governance is configured.
     pub fn set_attester(
         env: Env,
         admin_caller: Address,
         attester: Address,
     ) -> Result<(), EscrowError> {
         admin_caller.require_auth();
-        let admin = admin(&env)?;
-        if admin_caller != admin {
-            return Err(EscrowError::NotAdmin);
-        }
+        require_governed_caller(&env, &admin_caller)?;
         bump_instance(&env);
         env.storage().instance().set(&DataKey::Attester, &attester);
         Ok(())
+    }
+
+    pub fn get_attester(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Attester)
     }
 
     // -----------------------------------------------------------------------
