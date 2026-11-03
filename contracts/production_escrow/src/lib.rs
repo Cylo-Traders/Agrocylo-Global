@@ -1806,9 +1806,17 @@ impl ProductionEscrowContract {
                 return Err(EscrowError::NotInvestor);
             }
         }
-        if campaign.status == CampaignStatus::Disputed || campaign.status == CampaignStatus::Settled
+        if campaign.status == CampaignStatus::Disputed
+            || campaign.status == CampaignStatus::Settled
+            || campaign.status == CampaignStatus::Failed
         {
             return Err(EscrowError::CampaignAlreadyDisputed);
+        }
+        if campaign.status != CampaignStatus::Funded
+            && campaign.status != CampaignStatus::InProduction
+            && campaign.status != CampaignStatus::Harvested
+        {
+            return Err(EscrowError::CampaignNotFundedOrBeyond);
         }
         campaign.status = CampaignStatus::Disputed;
         save_campaign(&env, &campaign);
