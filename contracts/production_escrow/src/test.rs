@@ -1495,6 +1495,69 @@ fn test_cannot_open_dispute_on_failed_campaign() {
 }
 
 #[test]
+fn test_cannot_open_dispute_during_funding_state() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &5_000);
+
+    // Verify campaign is in Funding status
+    let c_before = t.client.get_campaign(&id);
+    assert_eq!(c_before.status, CampaignStatus::Funding);
+    let bal_before = balance(&t, &t.investor1);
+
+    // Investor attempts to open dispute while still in Funding
+    let err = t
+        .client
+        .try_open_dispute(&t.investor1, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignNotFundedOrBeyond);
+
+    // Verify campaign status and investor balance are unchanged
+    let c_after = t.client.get_campaign(&id);
+    assert_eq!(c_after.status, CampaignStatus::Funding);
+    assert_eq!(balance(&t, &t.investor1), bal_before);
+
+    // Farmer also cannot open dispute during Funding
+    let err_farmer = t
+        .client
+        .try_open_dispute(&t.farmer, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err_farmer, EscrowError::CampaignNotFundedOrBeyond);
+
+    // Advance ledger past deadline
+    advance_ledger(&t.env, 8 * 24 * 3600);
+
+    // Attempting dispute past deadline while still Funding is still rejected
+    let err_late = t
+        .client
+        .try_open_dispute(&t.investor1, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err_late, EscrowError::CampaignNotFundedOrBeyond);
+
+    // Finalize failed can proceed unhindered by dispute deadlock
+    t.client.finalize_failed(&id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+
+    // Investor can claim full refund
+    t.client.claim_refund(&t.investor1, &id);
+    assert_eq!(balance(&t, &t.investor1), bal_before + 5_000);
+
+    // Attempting dispute on Failed campaign returns CampaignAlreadyDisputed
+    let err_failed = t
+        .client
+        .try_open_dispute(&t.investor1, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err_failed, EscrowError::CampaignAlreadyDisputed);
+}
+
+#[test]
 fn test_state_persisted_after_start_production() {
     let t = setup();
     let deadline = future_deadline(&t);
