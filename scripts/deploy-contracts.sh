@@ -217,14 +217,21 @@ invoke_read() {  # same, read-only; strips surrounding quotes from scalar JSON
 }
 
 # tolerate "already done" style contract errors, fail on everything else
+# Issue #1281: capture command exit code directly in the failure branch
+# so unexpected invocation failures propagate non-zero instead of returning 0.
 invoke_idempotent() {
-    local out rc
-    if out="$("$@" 2>&1)"; then printf '%s\n' "$out"; return 0; fi
-    rc=$?
-    if grep -qiE "AlreadyInitialized|already.initialized" <<<"$out"; then
-        echo "  (already initialized — skipping)"; return 0
+    local out rc=0
+    out="$("$@" 2>&1)" || rc=$?
+    if (( rc == 0 )); then
+        printf '%s\n' "$out"
+        return 0
     fi
-    printf '%s\n' "$out" >&2; return $rc
+    if grep -qiE "AlreadyInitialized|already.initialized" <<<"$out"; then
+        echo "  (already initialized — skipping)"
+        return 0
+    fi
+    printf '%s\n' "$out" >&2
+    return "$rc"
 }
 
 # ---------------------------------------------------------------------------
