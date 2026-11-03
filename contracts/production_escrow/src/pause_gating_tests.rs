@@ -25,7 +25,7 @@ use soroban_sdk::{
 };
 
 use crate::{
-    CampaignStatus, EscrowError, Milestone, MilestoneConfig, ProductionEscrowContract,
+    CampaignStatus, DisputeResolution, EscrowError, Milestone, MilestoneConfig, ProductionEscrowContract,
     ProductionEscrowContractClient, SplitOrderError, SplitOrderResolution, SplitOrderStatus,
 };
 
@@ -90,6 +90,11 @@ const PAUSE_GATING_MATRIX: &[(&str, bool, &str)] = &[
         true,
         "Both resolution branches move funds",
     ),
+    (
+        "vote_to_resolve",
+        true,
+        "Arbitrator resolution flow moves funds or finalizes campaign",
+    ),
     // production_escrow: NOT pause-gated (governance, reads, setters)
     // Issue #1246 safety exits that deliberately remain available while
     // paused so users can still reclaim funds/clean up state:
@@ -151,11 +156,6 @@ const PAUSE_GATING_MATRIX: &[(&str, bool, &str)] = &[
     ("set_arbitrators", false, "Admin/governance setter"),
     ("get_arbitrators", false, "Read-only view"),
     ("get_quorum", false, "Read-only view"),
-    (
-        "vote_to_resolve",
-        false,
-        "Governance flow (not pause-gated?)",
-    ),
 ];
 
 #[test]
@@ -711,4 +711,117 @@ fn test_finalize_failed_safety_exit_remains_available_while_paused() {
 
     t.client.finalize_failed(&id);
     assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+}
+#[test]
+fn test_pause_blocks_vote_to_resolve_then_unpause_allows() {
+    let t = setup_split_fixture();
+    let id = funded_in_production_campaign(&t, 10_000);
+    t.client.open_dispute(&t.farmer, &id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Disputed);
+
+    let a1 = Address::generate(&t.env);
+    let a2 = Address::generate(&t.env);
+    let a3 = Address::generate(&t.env);
+    let mut arbitrators = Vec::new(&t.env);
+    arbitrators.push_back(a1.clone());
+    arbitrators.push_back(a2.clone());
+    arbitrators.push_back(a3.clone());
+    t.client.set_arbitrators(&t.admin, &arbitrators, &2);
+
+    let inv_bal_before = TokenClient::new(&t.env, &t.token_id).balance(&t.investor);
+    let farmer_bal_before = TokenClient::new(&t.env, &t.token_id).balance(&t.farmer);
+
+    // Pause contract
+    t.client.pause(&t.guardian);
+
+    // 1. First vote (non-final) blocked by pause
+    let err = t
+        .client
+        .try_vote_to_resolve(&a1, &id, &DisputeResolution::FullPayoutToInvestors)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::ContractPaused);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Disputed);
+    assert_eq!(TokenClient::new(&t.env, &t.token_id).balance(&t.investor), inv_bal_before);
+    assert_eq!(TokenClient::new(&t.env, &t.token_id).balance(&t.farmer), farmer_bal_before);
+
+    // Unpause and cast first vote
+    t.client.unpause(&t.admin);
+    t.client
+        .vote_to_resolve(&a1, &id, &DisputeResolution::FullPayoutToInvestors);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Disputed);
+
+    // Pause contract again before second vote (which would reach quorum)
+    t.client.pause(&t.guardian);
+
+    // 2. Second vote (quorum-reaching) blocked by pause
+    let err2 = t
+        .client
+        .try_vote_to_resolve(&a2, &id, &DisputeResolution::FullPayoutToInvestors)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err2, EscrowError::ContractPaused);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Disputed);
+    assert_eq!(TokenClient::new(&t.env, &t.token_id).balance(&t.investor), inv_bal_before);
+
+    // Unpause and cast quorum-reaching vote
+    t.client.unpause(&t.admin);
+    t.client
+        .vote_to_resolve(&a2, &id, &DisputeResolution::FullPayoutToInvestors);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Settled);
+}
+
+#[test]
+fn test_pause_blocks_vote_to_resolve_all_variants() {
+    // Test RefundInvestors variant
+    {
+        let t = setup_split_fixture();
+        let id = funded_in_production_campaign(&t, 10_000);
+        t.client.open_dispute(&t.farmer, &id);
+
+        let a1 = Address::generate(&t.env);
+        let mut arbitrators = Vec::new(&t.env);
+        arbitrators.push_back(a1.clone());
+        t.client.set_arbitrators(&t.admin, &arbitrators, &1);
+
+        t.client.pause(&t.guardian);
+        let err = t
+            .client
+            .try_vote_to_resolve(&a1, &id, &DisputeResolution::RefundInvestors)
+            .unwrap_err()
+            .unwrap();
+        assert_eq!(err, EscrowError::ContractPaused);
+        assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Disputed);
+
+        t.client.unpause(&t.admin);
+        t.client
+            .vote_to_resolve(&a1, &id, &DisputeResolution::RefundInvestors);
+        assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+    }
+
+    // Test Partial variant
+    {
+        let t = setup_split_fixture();
+        let id = funded_in_production_campaign(&t, 10_000);
+        t.client.open_dispute(&t.farmer, &id);
+
+        let a1 = Address::generate(&t.env);
+        let mut arbitrators = Vec::new(&t.env);
+        arbitrators.push_back(a1.clone());
+        t.client.set_arbitrators(&t.admin, &arbitrators, &1);
+
+        t.client.pause(&t.guardian);
+        let err = t
+            .client
+            .try_vote_to_resolve(&a1, &id, &DisputeResolution::Partial(5000))
+            .unwrap_err()
+            .unwrap();
+        assert_eq!(err, EscrowError::ContractPaused);
+        assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Disputed);
+
+        t.client.unpause(&t.admin);
+        t.client
+            .vote_to_resolve(&a1, &id, &DisputeResolution::Partial(5000));
+        assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Settled);
+    }
 }
