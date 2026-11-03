@@ -3560,3 +3560,110 @@ fn test_vote_to_resolve_non_arbitrator_rejected() {
         .unwrap();
     assert_eq!(err, EscrowError::ArbitratorNotFound);
 }
+// ---------------------------------------------------------------------------
+// Issue #1276 - Validate Token Receipts When Funding Split Orders
+// ---------------------------------------------------------------------------
+
+#[soroban_sdk::contract]
+pub struct ShortReceiptTokenMock;
+
+#[soroban_sdk::contractimpl]
+impl ShortReceiptTokenMock {
+    pub fn balance(env: soroban_sdk::Env, id: soroban_sdk::Address) -> i128 {
+        env.storage().instance().get(&id).unwrap_or(0)
+    }
+    pub fn transfer(
+        env: soroban_sdk::Env,
+        _from: soroban_sdk::Address,
+        to: soroban_sdk::Address,
+        amount: i128,
+    ) {
+        // Deliberately short-deliver 10% (fee-on-transfer simulation)
+        let delivered = amount * 9 / 10;
+        let prev: i128 = env.storage().instance().get(&to).unwrap_or(0);
+        env.storage().instance().set(&to, &(prev + delivered));
+    }
+}
+
+#[test]
+fn test_fund_split_order_rejects_short_delivering_token() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let farmer = Address::generate(&env);
+    let co1 = Address::generate(&env);
+    let co2 = Address::generate(&env);
+
+    // Register ShortReceiptTokenMock
+    let token_id = env.register(ShortReceiptTokenMock, ());
+
+    let contract_id = env.register(ProductionEscrowContract, ());
+    let client = ProductionEscrowContractClient::new(&env, &contract_id);
+
+    let mut tokens = Vec::new(&env);
+    tokens.push_back(token_id.clone());
+    let fee_collector = Address::generate(&env);
+    client.initialize(&admin, &tokens, &fee_collector, &300);
+
+    let deadline = env.ledger().timestamp() + 7 * 24 * 3600;
+    let campaign_id = client.create_campaign(&farmer, &token_id, &10_000, &deadline);
+
+    let mut co_buyers = Vec::new(&env);
+    co_buyers.push_back(co1.clone());
+    co_buyers.push_back(co2.clone());
+    let mut shares = Vec::new(&env);
+    shares.push_back(500);
+    shares.push_back(500);
+
+    let order_id = client.create_split_order(&co1, &campaign_id, &co_buyers, &shares);
+
+    // Attempting to fund with fee-on-transfer / short-delivering token must fail
+    let err = client
+        .try_fund_split_order(&co1, &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::UnsupportedToken);
+
+    // Verify order state was not modified (atomically rolled back)
+    let order = client.get_split_order(&order_id);
+    assert_eq!(order.status, SplitOrderStatus::Funding);
+    assert_eq!(order.funded_count, 0);
+    assert_eq!(order.funded.get(co1).unwrap_or(false), false);
+}
+
+#[test]
+fn test_fund_split_order_succeeds_with_exact_standard_token() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+
+    let co_buyer = Address::generate(&t.env);
+    StellarAssetClient::new(&t.env, &t.token_id).mint(&co_buyer, &500);
+    let mut co_buyers = Vec::new(&t.env);
+    co_buyers.push_back(t.buyer.clone());
+    co_buyers.push_back(co_buyer.clone());
+    let mut shares = Vec::new(&t.env);
+    shares.push_back(500);
+    shares.push_back(500);
+
+    let order_id = t
+        .client
+        .create_split_order(&t.buyer, &id, &co_buyers, &shares);
+
+    // Exact SAC transfer succeeds
+    t.client.fund_split_order(&t.buyer, &order_id);
+    let order1 = t.client.get_split_order(&order_id);
+    assert_eq!(order1.funded_count, 1);
+    assert_eq!(order1.funded.get(t.buyer.clone()).unwrap(), true);
+    assert_eq!(order1.status, SplitOrderStatus::Funding);
+
+    // Second co-buyer funds exact share
+    t.client.fund_split_order(&co_buyer, &order_id);
+    let order2 = t.client.get_split_order(&order_id);
+    assert_eq!(order2.funded_count, 2);
+    assert_eq!(order2.funded.get(co_buyer).unwrap(), true);
+    assert_eq!(order2.status, SplitOrderStatus::Active);
+}

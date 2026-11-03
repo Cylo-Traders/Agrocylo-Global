@@ -143,6 +143,8 @@ pub enum SplitOrderError {
     NotAdmin = 25,
     /// Issue #1246: split-order entry points must enforce the pause policy.
     ContractPaused = 26,
+    /// Issue #1276: fee-on-transfer or short-receipt tokens are rejected during split funding.
+    UnsupportedToken = 27,
 }
 
 impl From<EscrowError> for SplitOrderError {
@@ -155,6 +157,7 @@ impl From<EscrowError> for SplitOrderError {
             EscrowError::NotBuyer => SplitOrderError::NotBuyer,
             EscrowError::NotAdmin => SplitOrderError::NotAdmin,
             EscrowError::ContractPaused => SplitOrderError::ContractPaused,
+            EscrowError::UnsupportedToken => SplitOrderError::UnsupportedToken,
             // Every other `EscrowError` variant is unreachable from the
             // shared helpers the split-order flow actually calls; map to the
             // closest generic fallback rather than panicking.
@@ -1280,8 +1283,8 @@ impl ProductionEscrowContract {
         }
 
         let campaign = load_campaign(&env, order.campaign_id)?;
-        let token_client = token::Client::new(&env, &campaign.token);
-        token_client.transfer(&co_buyer, &env.current_contract_address(), &share);
+        // Issue #1276: validate actual token receipts to defend against fee-on-transfer / short receipts.
+        measure_token_transfer(&env, &campaign.token, &co_buyer, share)?;
 
         order.funded.set(co_buyer.clone(), true);
         order.funded_count += 1;
