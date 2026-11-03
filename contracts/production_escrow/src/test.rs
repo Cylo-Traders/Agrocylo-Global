@@ -3560,3 +3560,178 @@ fn test_vote_to_resolve_non_arbitrator_rejected() {
         .unwrap();
     assert_eq!(err, EscrowError::ArbitratorNotFound);
 }
+// ---------------------------------------------------------------------------
+// Issue #1274 - Reject Deposits and Confirmations After Campaign Failure / Settlement
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_reject_split_order_deposit_after_campaign_failed_and_settled() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &5_000);
+
+    let co_buyer = Address::generate(&t.env);
+    StellarAssetClient::new(&t.env, &t.token_id).mint(&co_buyer, &500);
+    let mut co_buyers = Vec::new(&t.env);
+    co_buyers.push_back(t.buyer.clone());
+    co_buyers.push_back(co_buyer.clone());
+    let mut shares = Vec::new(&t.env);
+    shares.push_back(500);
+    shares.push_back(500);
+
+    let order_id = t
+        .client
+        .create_split_order(&t.buyer, &id, &co_buyers, &shares);
+
+    // Fail the campaign via deadline expiry + finalize_failed
+    advance_ledger(&t.env, 8 * 24 * 3600);
+    t.client.finalize_failed(&id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+
+    // Funding split order on a failed campaign must be rejected
+    let err = t
+        .client
+        .try_fund_split_order(&t.buyer, &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::CampaignNotHarvested);
+
+    // Now test settled campaign
+    let id2 = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &future_deadline(&t));
+    t.client.invest(&t.investor1, &id2, &10_000);
+    t.client.start_production(&t.farmer, &id2);
+    t.client.mark_harvest(&t.farmer, &t.attester, &id2);
+
+    let order_id2 = t
+        .client
+        .create_split_order(&t.buyer, &id2, &co_buyers, &shares);
+    t.client.settle(&t.farmer, &id2);
+    assert_eq!(t.client.get_campaign(&id2).status, CampaignStatus::Settled);
+
+    // Funding split order on a settled campaign must be rejected
+    let err2 = t
+        .client
+        .try_fund_split_order(&t.buyer, &order_id2)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err2, SplitOrderError::CampaignNotHarvested);
+}
+
+#[test]
+fn test_reject_confirmations_and_split_dispute_release_after_campaign_failed() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+
+    // Create ordinary order
+    let ord_id = t.client.create_order(&t.buyer, &id, &2_000);
+
+    // Create and fully fund split order
+    let co_buyer = Address::generate(&t.env);
+    StellarAssetClient::new(&t.env, &t.token_id).mint(&co_buyer, &500);
+    let mut co_buyers = Vec::new(&t.env);
+    co_buyers.push_back(t.buyer.clone());
+    co_buyers.push_back(co_buyer.clone());
+    let mut shares = Vec::new(&t.env);
+    shares.push_back(500);
+    shares.push_back(500);
+
+    let split_id = t
+        .client
+        .create_split_order(&t.buyer, &id, &co_buyers, &shares);
+    t.client.fund_split_order(&t.buyer, &split_id);
+    t.client.fund_split_order(&co_buyer, &split_id);
+    assert_eq!(
+        t.client.get_split_order(&split_id).status,
+        SplitOrderStatus::Active
+    );
+
+    // Fail the campaign via admin mark_campaign_failed
+    t.client.mark_campaign_failed(&t.admin, &id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+
+    // 1. Confirming ordinary order after failure must be rejected
+    let err_ord = t
+        .client
+        .try_confirm_order(&t.buyer, &ord_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err_ord, EscrowError::CampaignNotHarvested);
+
+    // 2. Confirming split receipt after failure must be rejected
+    let err_split = t
+        .client
+        .try_confirm_split_receipt(&t.buyer, &split_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err_split, SplitOrderError::CampaignNotHarvested);
+
+    // 3. Open dispute on split order, attempt ReleaseToFarmer after failure must be rejected
+    t.client.open_split_dispute(&t.buyer, &split_id);
+    let err_res = t
+        .client
+        .try_resolve_split_dispute(&t.admin, &split_id, &SplitOrderResolution::ReleaseToFarmer)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err_res, SplitOrderError::CampaignNotHarvested);
+
+    // Co-buyers can still be refunded via RefundCoBuyers
+    t.client
+        .resolve_split_dispute(&t.admin, &split_id, &SplitOrderResolution::RefundCoBuyers);
+    assert_eq!(
+        t.client.get_split_order(&split_id).status,
+        SplitOrderStatus::Refunded
+    );
+}
+
+#[test]
+fn test_interleaved_investor_refunds_and_rejected_confirmations() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &5_000);
+    t.client.invest(&t.investor2, &id, &5_000);
+    t.client.start_production(&t.farmer, &id); // 3_000 released to farmer, pool = 7_000
+
+    let ord_id = t.client.create_order(&t.buyer, &id, &2_000);
+
+    // Fail campaign
+    t.client.mark_campaign_failed(&t.admin, &id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+
+    let inv1_bal_before = balance(&t, &t.investor1);
+    let inv2_bal_before = balance(&t, &t.investor2);
+
+    // First investor claims refund: gets 50% of 7_000 = 3_500
+    t.client.claim_refund(&t.investor1, &id);
+    assert_eq!(balance(&t, &t.investor1), inv1_bal_before + 3_500);
+
+    // Attempted late confirmation must be rejected and cannot change revenue/basis
+    let err = t
+        .client
+        .try_confirm_order(&t.buyer, &ord_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignNotHarvested);
+    assert_eq!(t.client.get_campaign(&id).total_revenue, 0);
+
+    // Second investor claims refund: still gets their exact 3_500 without corruption
+    t.client.claim_refund(&t.investor2, &id);
+    assert_eq!(balance(&t, &t.investor2), inv2_bal_before + 3_500);
+
+    // Buyer recovers their pending funds via cancel_order within window
+    let buyer_bal_before = balance(&t, &t.buyer);
+    t.client.cancel_order(&t.buyer, &ord_id);
+    assert_eq!(balance(&t, &t.buyer), buyer_bal_before + 2_000);
+}

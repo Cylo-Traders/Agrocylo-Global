@@ -1280,6 +1280,9 @@ impl ProductionEscrowContract {
         }
 
         let campaign = load_campaign(&env, order.campaign_id)?;
+        if campaign.status == CampaignStatus::Settled || campaign.status == CampaignStatus::Failed {
+            return Err(SplitOrderError::CampaignNotHarvested);
+        }
         let token_client = token::Client::new(&env, &campaign.token);
         token_client.transfer(&co_buyer, &env.current_contract_address(), &share);
 
@@ -1339,7 +1342,7 @@ impl ProductionEscrowContract {
 
         if majority_by_value || unanimous {
             let mut campaign = load_campaign(&env, order.campaign_id)?;
-            if campaign.status == CampaignStatus::Settled {
+            if campaign.status == CampaignStatus::Settled || campaign.status == CampaignStatus::Failed {
                 return Err(SplitOrderError::CampaignNotHarvested);
             }
             let net_revenue = checked_sub(order.total_amount, order.fee)?;
@@ -1430,7 +1433,7 @@ impl ProductionEscrowContract {
             }
             SplitOrderResolution::ReleaseToFarmer => {
                 let mut campaign = campaign.clone();
-                if campaign.status == CampaignStatus::Settled {
+                if campaign.status == CampaignStatus::Settled || campaign.status == CampaignStatus::Failed {
                     return Err(SplitOrderError::CampaignNotHarvested);
                 }
                 let net_revenue = checked_sub(order.total_amount, order.fee)?;
@@ -1483,8 +1486,8 @@ impl ProductionEscrowContract {
         }
 
         let mut campaign = load_campaign(&env, order.campaign_id)?;
-        // Reject late confirmations after settlement (Issue #455).
-        if campaign.status == CampaignStatus::Settled {
+        // Reject late confirmations after settlement or failure (Issue #455, #1274).
+        if campaign.status == CampaignStatus::Settled || campaign.status == CampaignStatus::Failed {
             return Err(EscrowError::CampaignNotHarvested);
         }
 
