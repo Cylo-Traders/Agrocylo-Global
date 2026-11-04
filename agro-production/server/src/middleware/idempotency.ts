@@ -12,9 +12,17 @@ interface CachedResponse {
 }
 
 /**
+ * Hard ceiling on in-memory entries. TTL eviction alone bounds *age*, not
+ * *count*: a burst of unique idempotency keys inside the 24h window would grow
+ * the map without limit. At the cap the oldest insertion is dropped first, so
+ * the store behaves as an LRU-bounded cache.
+ */
+const MEMORY_STORE_MAX_ENTRIES = 5000;
+
+/**
  * Storage abstraction so idempotency state can be shared across instances.
  * When REDIS_URL is set, a Redis-backed store is used; otherwise an in-memory
- * store with TTL eviction keeps memory bounded.
+ * store with TTL eviction and a hard entry cap keeps memory bounded.
  */
 export interface IdempotencyStore {
   get(key: string): Promise<CachedResponse | null>;
@@ -51,6 +59,13 @@ class MemoryStore implements IdempotencyStore {
   }
 
   async set(key: string, value: CachedResponse): Promise<void> {
+    // Re-inserting keeps Map insertion order meaningful as eviction order.
+    this.cache.delete(key);
+    while (this.cache.size >= MEMORY_STORE_MAX_ENTRIES) {
+      const oldest = this.cache.keys().next();
+      if (oldest.done) break;
+      this.cache.delete(oldest.value);
+    }
     this.cache.set(key, value);
   }
 
