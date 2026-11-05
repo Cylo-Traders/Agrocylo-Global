@@ -1,5 +1,7 @@
 # Canonical Contract: production_escrow
 
+> **Last verified against commit**: `e54fafd` (Issue #1300)
+
 ## Selection
 
 The **production_escrow** contract (located at `contracts/production_escrow/`) has been selected as the canonical Soroban contract for the Agrocylo production system.
@@ -19,51 +21,56 @@ The **production_escrow** contract (located at `contracts/production_escrow/`) h
 
 ```
 contracts/
-├── Cargo.toml                    (workspace root)
+├── escrow/                       (standalone escrow crate)
+├── governance/                   (governance multisig and timelock)
+├── investment_basket/            (basket custody contract)
 ├── production_escrow/            (canonical contract)
-│   ├── Cargo.toml               (package name: "production_escrow")
+│   ├── Cargo.toml                (package name: "production-escrow-v2")
 │   └── src/lib.rs
-├── registry/                     (registry contract)
-│   ├── Cargo.toml               (package name: "registry")
-│   └── src/lib.rs
-└── src/                         (shared utilities)
+└── registry/                     (registry contract)
+    ├── Cargo.toml                (package name: "registry")
+    └── src/lib.rs
 ```
 
 The root `Cargo.toml` workspace members:
-- `contracts/registry` — Registry contract (name: "registry")
-- `contracts/production_escrow` — Canonical escrow contract (name: "production_escrow")
+- `contracts/escrow`
+- `contracts/registry`
+- `contracts/production_escrow` (package name: `production-escrow-v2`)
+- `contracts/investment_basket`
+- `contracts/governance`
 
 ### Package Naming
 
-- **production_escrow** → Canonical contract WASM output
+- **production-escrow-v2** → Package name in `contracts/production_escrow/Cargo.toml`
+- **production_escrow_v2.wasm** → Canonical contract WASM compiler output
 - **registry** → Product/marketplace registry contract
-- (Legacy) production-escrow (hyphen) → Deprecated; removed from workspace
 
 ## ABI Summary
 
 ### production_escrow Public Functions
 
+**Initialization & Config:**
+- `initialize(admin: Address, supported_tokens: Vec<Address>, fee_collector: Address, fee_rate_bps: u32)` — Initialize contract
+- `set_attester(admin: Address, attester: Address)` — Configure attester address
+- `set_arbitrators(admin: Address, arbitrators: Vec<Address>)` — Configure dispute arbitrators
+
 **Campaign Management:**
-- `initialize(admin: Address)` — Initialize contract with admin
-- `create_campaign(farmer: Address, token: Address, target: i128, deadline: u64)` → Campaign ID
-- `invest(campaign_id: u64, investor: Address, amount: i128)` → Investment recorded
-- `settle_campaign(campaign_id: u64)` → Revenue distribution
-- `produce(campaign_id: u64)` → Transition to IN_PRODUCTION
-- `harvest(campaign_id: u64)` → Transition to HARVESTED
-- `mark_failed(campaign_id: u64)` → Transition to FAILED
-- `mark_disputed(campaign_id: u64)` → Transition to DISPUTED
-- `claim_tranche(campaign_id: u64, investor: Address)` → Release tranche payment
-- `refund_investment(campaign_id: u64, investor: Address)` → Refund if failed
+- `create_campaign(farmer: Address, token: Address, target_amount: i128, deadline: u64)` → Campaign ID
+- `invest(investor: Address, campaign_id: u64, amount: i128)` → Investment recorded
+- `start_production(farmer: Address, campaign_id: u64)` → Transition to `InProduction`
+- `mark_harvest(farmer: Address, attester_caller: Address, campaign_id: u64)` → Attester-verified transition to `Harvested`
+- `settle(farmer: Address, campaign_id: u64)` → Transition to `Settled` and transfer farmer net earnings
+- `mark_campaign_failed(caller: Address, campaign_id: u64)` → Mark campaign failed if deadline passed
+- `claim_returns(investor: Address, campaign_id: u64)` → Release proportional investor returns after settlement
+- `refund(investor: Address, campaign_id: u64)` → Refund investment principal if campaign failed
 
 **Order Management:**
-- `create_order(campaign_id: u64, buyer: Address, quantity: u64, price_per_unit: i128)` → Order ID
-- `confirm_order(order_id: u64)` → Mark CONFIRMED
+- `create_order(buyer: Address, farmer: Address, campaign_id: u64, amount: i128, token: Address)` → Order ID
+- `confirm_order(order_id: u64, buyer: Address)` → Mark `Confirmed` and transfer funds to farmer
 
 **Dispute Resolution:**
-- `open_dispute(campaign_id: u64, order_id: Option<u64>, initiator: Address, respondent: Address)` → Dispute ID
-- `submit_evidence(dispute_id: u64, submitter: Address, evidence_url: String, evidence_hash: String)` → Recorded
-- `resolve_dispute(dispute_id: u64, outcome: String, notes: Option<String>)` → Marked RESOLVED
-- `dismiss_dispute(dispute_id: u64, reason: Option<String>)` → Marked DISMISSED
+- `open_dispute(caller: Address, order_id: u64, reason: String)` → Dispute recorded
+- `resolve_dispute(caller: Address, order_id: u64, refund_buyer: bool)` → Resolve dispute with refund or release
 
 ### Event Topics
 

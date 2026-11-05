@@ -1,5 +1,7 @@
 # External Audit Scope: Production Contracts
 
+> **Last verified against commit**: `e54fafd` (Issue #1300)
+
 **Status**: Ready for external security review (technical review completed; external sign-off pending)
 
 This document describes the four production contracts that will custody mainnet funds: `production_escrow`, `governance`, `investment_basket`, and `registry`. It covers the threat model, trust assumptions, money flows, and invariants that together form the security scope of this system.
