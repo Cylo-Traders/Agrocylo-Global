@@ -1,5 +1,7 @@
 # Persistent Storage TTL Extension Policy (Issue #456)
 
+> **Last verified against commit**: `e54fafd` (Issue #1300)
+
 ## Overview
 
 All data stored in Soroban persistent contract storage must have their Time-To-Live (TTL) explicitly managed to prevent loss. This document specifies when and how TTL is extended for each data key across the production escrow contract.
@@ -48,9 +50,9 @@ These constants ensure:
 |---------|-------------------|--------|
 | Creation (first investment) | ✅ Extended on first `invest()` | Must survive entire funding phase |
 | Investment added | ✅ Extended in `invest()` | Each new investor access needs refresh |
-| Claim/Refund read | ⚠️ **Currently NOT extended** | **Issue**: Should extend on each claim/refund for access verification |
+| Claim/Refund read | ✅ Extended in `claim_returns()` and `refund()` | Protects investment records during payout/refund phase |
 
-**Implementation**: Should extend in `claim_returns()` and `refund()` before reading contributions.
+**Implementation**: `env.storage().persistent().extend_ttl(&contribution_key, TTL_THRESHOLD, TTL_EXTEND)` is called in `claim_returns()` and `refund()` before reading contributions.
 
 ---
 

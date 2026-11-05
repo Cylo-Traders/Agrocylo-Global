@@ -1,21 +1,23 @@
 # Settlement Policy for Production Escrow Contract
 
+> **Last verified against commit**: `e54fafd` (Issue #1300)
+
 ## Issue #454 - Self-Reported Harvest Fund Release Governance
 
 This document establishes the settlement and fund release policy for the production escrow contract.
 
 ### The Problem with Self-Reported Harvest Release
 
-Direct farmer-initiated fund release on harvest claims (via `mark_harvest`) presents a critical governance and auditability problem:
+Direct farmer-initiated fund release on harvest claims without independent verification presents a critical governance and auditability problem:
 
-1. **No Independent Verification**: Farmers can unilaterally claim harvest completion without independent production evidence.
-2. **Economic Incentive Misalignment**: Farmers are incentivized to falsely claim harvest to access funds before actual production completion.
-3. **Investor Vulnerability**: Investors have no mechanism to dispute or verify harvest claims before funds are released.
-4. **Lack of Auditable Trail**: Fund release is directly tied to self-reported status, making post-mortem audits impossible.
+1. **No Independent Verification**: Farmers could unilaterally claim harvest completion without independent production evidence.
+2. **Economic Incentive Misalignment**: Farmers are incentivized to claim harvest early to access funds before actual production completion.
+3. **Investor Vulnerability**: Investors need mechanisms to ensure harvest milestones are legitimately verified before funds are released.
+4. **Lack of Auditable Trail**: Fund release must be tied to verified status with auditable cryptographic signatures.
 
 ### Current Implementation
 
-The `mark_harvest()` function is **deprecated and frozen**. It remains in the binary for ABI compatibility but should not be called in new integrations. The function releases a harvest tranche (40% of total raised) automatically upon farmer assertion.
+The `mark_harvest(farmer, attester_caller, campaign_id)` function is **active and protected by attester co-signature**. It requires both `farmer.require_auth()` and `attester_caller.require_auth()`, where `attester_caller` must match the configured `attester` address in contract storage. Unilateral farmer assertions are rejected (`EscrowError::NotAdmin`), ensuring harvest claims are independently attested by a designated verifier before transitioning the campaign status to `Harvested` and releasing the harvest tranche.
 
 ### Required Auditable Settlement Framework
 
