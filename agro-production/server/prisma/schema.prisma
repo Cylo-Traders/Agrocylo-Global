@@ -46,19 +46,9 @@ model Campaign {
   disputes      Dispute[]
   conversations Conversation[]
   products      Product[]
-  // No `conversations` relation here either: `Conversation` only carries an
-  // `orderId` (conversations are per-order, buyer/seller messaging), never a
-  // `campaignId` — this was the same class of half-finished relation as
-  // `products` below, unbacked and with no callers. Reach a campaign's
-  // conversations by joining through its `orders`, not a direct relation.
-  // No `products` relation here: a harvested campaign becoming sellable
-  // marketplace inventory is a real, wanted feature, but Prisma can't
-  // relate across the two independent schemas/databases (this used to be
-  // `products Product[]` pointing at a model that only exists in
-  // server/prisma/schema.prisma — dead, would fail `prisma generate` the
-  // moment anything tried to use it). See docs/architecture/backend-unification.md:
-  // cross-backend links go through `walletAddress`/an opaque id scalar and
-  // an application-level join, never a schema-level relation.
+  // `conversations` links a Campaign to farmer-investor chats (`model Conversation`,
+  // Issue #674). `products` links a Campaign to its local marketplace listings
+  // (`model Product` below, Issue #744).
 
   @@index([farmerAddress])
   @@index([status])
