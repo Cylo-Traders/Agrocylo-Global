@@ -579,3 +579,403 @@ fn test_state_machine_interleaved_claim_and_fail() {
         .expect("contract error");
     assert_eq!(err2, EscrowError::CampaignNotHarvested);
 }
+
+
+// ---------------------------------------------------------------------------
+// Issue #1278: Multi-campaign, multi-token pooled solvency state-machine model
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+enum PooledOp {
+    Invest { campaign_idx: usize, investor_idx: usize, amount: i128 },
+    TransferInvestment { campaign_idx: usize, from_idx: usize, to_idx: usize },
+    StartProduction { campaign_idx: usize },
+    MarkHarvest { campaign_idx: usize },
+    CreateOrder { campaign_idx: usize, buyer_idx: usize, amount: i128 },
+    ConfirmOrder { order_seq: usize },
+    CancelOrder { order_seq: usize },
+    BatchExpireOrders,
+    CreateAndFundSplitOrder { campaign_idx: usize, share_a: i128, share_b: i128 },
+    ConfirmSplitOrder { split_seq: usize },
+    OpenDispute { campaign_idx: usize },
+    ArbitrateDispute { campaign_idx: usize, mode: u8 },
+    Settle { campaign_idx: usize },
+    MarkFailed { campaign_idx: usize },
+    ClaimReturns { campaign_idx: usize, investor_idx: usize },
+    Refund { campaign_idx: usize, investor_idx: usize },
+    BatchRefundInvestors { campaign_idx: usize },
+    DonateDust { token_idx: usize, amount: i128 },
+    AdvanceTime { secs: u64 },
+}
+
+fn pooled_op_strategy() -> impl Strategy<Value = StdVec<PooledOp>> {
+    let op_gen = prop_oneof![
+        (0usize..3usize, 0usize..3usize, 1_000i128..=6_000i128).prop_map(|(c, i, amt)| {
+            PooledOp::Invest { campaign_idx: c, investor_idx: i, amount: amt }
+        }),
+        (0usize..3usize, 0usize..3usize, 0usize..3usize).prop_map(|(c, f, t)| {
+            PooledOp::TransferInvestment { campaign_idx: c, from_idx: f, to_idx: t }
+        }),
+        (0usize..3usize).prop_map(|c| PooledOp::StartProduction { campaign_idx: c }),
+        (0usize..3usize).prop_map(|c| PooledOp::MarkHarvest { campaign_idx: c }),
+        (0usize..3usize, 0usize..2usize, 300i128..=1_500i128).prop_map(|(c, b, amt)| {
+            PooledOp::CreateOrder { campaign_idx: c, buyer_idx: b, amount: amt }
+        }),
+        (0usize..6usize).prop_map(|s| PooledOp::ConfirmOrder { order_seq: s }),
+        (0usize..6usize).prop_map(|s| PooledOp::CancelOrder { order_seq: s }),
+        Just(PooledOp::BatchExpireOrders),
+        (0usize..3usize, 200i128..=800i128, 200i128..=800i128).prop_map(|(c, a, b)| {
+            PooledOp::CreateAndFundSplitOrder { campaign_idx: c, share_a: a, share_b: b }
+        }),
+        (0usize..4usize).prop_map(|s| PooledOp::ConfirmSplitOrder { split_seq: s }),
+        (0usize..3usize).prop_map(|c| PooledOp::OpenDispute { campaign_idx: c }),
+        (0usize..3usize, 0u8..3u8).prop_map(|(c, m)| {
+            PooledOp::ArbitrateDispute { campaign_idx: c, mode: m }
+        }),
+        (0usize..3usize).prop_map(|c| PooledOp::Settle { campaign_idx: c }),
+        (0usize..3usize).prop_map(|c| PooledOp::MarkFailed { campaign_idx: c }),
+        (0usize..3usize, 0usize..3usize).prop_map(|(c, i)| {
+            PooledOp::ClaimReturns { campaign_idx: c, investor_idx: i }
+        }),
+        (0usize..3usize, 0usize..3usize).prop_map(|(c, i)| {
+            PooledOp::Refund { campaign_idx: c, investor_idx: i }
+        }),
+        (0usize..3usize).prop_map(|c| PooledOp::BatchRefundInvestors { campaign_idx: c }),
+        (0usize..2usize, 1i128..=25i128).prop_map(|(t, amt)| {
+            PooledOp::DonateDust { token_idx: t, amount: amt }
+        }),
+        (60u64..=400_000u64).prop_map(|secs| PooledOp::AdvanceTime { secs }),
+    ];
+    proptest::collection::vec(op_gen, 10..=22)
+}
+
+/// Independent cash-flow and unpaid-obligation model across multiple campaigns
+/// sharing token_a (campaigns 1 and 2) plus a separate token_b (campaign 3).
+#[test]
+fn prop_pooled_multi_campaign_multi_token_solvency() {
+    use crate::{DisputeResolution, OrderStatus, SplitOrderStatus};
+
+    let mut runner = TestRunner::new(ProptestConfig {
+        cases: 25,
+        max_shrink_iters: 30,
+        ..ProptestConfig::default()
+    });
+
+    runner
+        .run(&pooled_op_strategy(), |ops| {
+            let env = Env::default();
+            env.mock_all_auths();
+
+            let admin = Address::generate(&env);
+            let attester = Address::generate(&env);
+            let fee_collector = Address::generate(&env);
+            let farmer = Address::generate(&env);
+            let arb1 = Address::generate(&env);
+            let arb2 = Address::generate(&env);
+
+            let token_admin = Address::generate(&env);
+            let token_a = env
+                .register_stellar_asset_contract_v2(token_admin.clone())
+                .address();
+            let token_b = env
+                .register_stellar_asset_contract_v2(token_admin)
+                .address();
+            let sac_a = StellarAssetClient::new(&env, &token_a);
+            let sac_b = StellarAssetClient::new(&env, &token_b);
+
+            let mut investors = StdVec::new();
+            for _ in 0..3 {
+                let inv = Address::generate(&env);
+                sac_a.mint(&inv, &500_000);
+                sac_b.mint(&inv, &500_000);
+                investors.push(inv);
+            }
+            let mut buyers = StdVec::new();
+            for _ in 0..2 {
+                let b = Address::generate(&env);
+                sac_a.mint(&b, &500_000);
+                sac_b.mint(&b, &500_000);
+                buyers.push(b);
+            }
+            let donor = Address::generate(&env);
+            sac_a.mint(&donor, &10_000);
+            sac_b.mint(&donor, &10_000);
+
+            let contract_id = env.register(ProductionEscrowContract, ());
+            let client = ProductionEscrowContractClient::new(&env, &contract_id);
+
+            let mut supported = Vec::new(&env);
+            supported.push_back(token_a.clone());
+            supported.push_back(token_b.clone());
+            client.initialize(&admin, &supported, &fee_collector, &300);
+            client.set_attester(&admin, &attester);
+
+            let mut arbs = Vec::new(&env);
+            arbs.push_back(arb1.clone());
+            arbs.push_back(arb2.clone());
+            client.set_arbitrators(&admin, &arbs, &2);
+
+            let deadline = env.ledger().timestamp() + 30 * 24 * 3600;
+            // Campaigns 1 and 2 share token_a; Campaign 3 uses token_b
+            let c1 = client.create_campaign(&farmer, &token_a, &9_000, &deadline);
+            let c2 = client.create_campaign(&farmer, &token_a, &9_000, &deadline);
+            let c3 = client.create_campaign(&farmer, &token_b, &9_000, &deadline);
+            let campaigns = [c1, c2, c3];
+
+            let mut order_ids: StdVec<u64> = StdVec::new();
+            let mut split_order_ids: StdVec<u64> = StdVec::new();
+            let mut claimed: HashSet<(u64, usize)> = HashSet::new();
+            let mut donated_a: i128 = 0;
+            let mut donated_b: i128 = 0;
+            let mut rounding_allowance_a: i128 = 0;
+            let mut rounding_allowance_b: i128 = 0;
+
+            for op in ops.iter() {
+                match op {
+                    PooledOp::Invest { campaign_idx, investor_idx, amount } => {
+                        let cid = campaigns[*campaign_idx % 3];
+                        let inv = &investors[*investor_idx % 3];
+                        let _ = client.try_invest(inv, &cid, amount);
+                    }
+                    PooledOp::TransferInvestment { campaign_idx, from_idx, to_idx } => {
+                        let cid = campaigns[*campaign_idx % 3];
+                        let from = &investors[*from_idx % 3];
+                        let to = &investors[*to_idx % 3];
+                        let _ = client.try_transfer_investment(from, to, &cid);
+                    }
+                    PooledOp::StartProduction { campaign_idx } => {
+                        let cid = campaigns[*campaign_idx % 3];
+                        let _ = client.try_start_production(&farmer, &cid);
+                    }
+                    PooledOp::MarkHarvest { campaign_idx } => {
+                        let cid = campaigns[*campaign_idx % 3];
+                        let _ = client.try_mark_harvest(&farmer, &attester, &cid);
+                    }
+                    PooledOp::CreateOrder { campaign_idx, buyer_idx, amount } => {
+                        let cid = campaigns[*campaign_idx % 3];
+                        let buyer = &buyers[*buyer_idx % 2];
+                        if let Ok(Ok(oid)) = client.try_create_order(buyer, &cid, amount) {
+                            order_ids.push(oid);
+                        }
+                    }
+                    PooledOp::ConfirmOrder { order_seq } => {
+                        if !order_ids.is_empty() {
+                            let oid = order_ids[*order_seq % order_ids.len()];
+                            if let Ok(Ok(o)) = client.try_get_order(&oid) {
+                                let _ = client.try_confirm_order(&o.buyer, &oid);
+                            }
+                        }
+                    }
+                    PooledOp::CancelOrder { order_seq } => {
+                        if !order_ids.is_empty() {
+                            let oid = order_ids[*order_seq % order_ids.len()];
+                            if let Ok(Ok(o)) = client.try_get_order(&oid) {
+                                let _ = client.try_cancel_order(&o.buyer, &oid);
+                            }
+                        }
+                    }
+                    PooledOp::BatchExpireOrders => {
+                        if !order_ids.is_empty() {
+                            let mut batch = Vec::new(&env);
+                            for oid in order_ids.iter().take(10) {
+                                batch.push_back(*oid);
+                            }
+                            let _ = client.try_batch_refund_orders(&batch);
+                        }
+                    }
+                    PooledOp::CreateAndFundSplitOrder { campaign_idx, share_a, share_b } => {
+                        let cid = campaigns[*campaign_idx % 3];
+                        let mut co = Vec::new(&env);
+                        co.push_back(buyers[0].clone());
+                        co.push_back(buyers[1].clone());
+                        let mut sh = Vec::new(&env);
+                        sh.push_back(*share_a);
+                        sh.push_back(*share_b);
+                        if let Ok(Ok(soid)) = client.try_create_split_order(&buyers[0], &cid, &co, &sh) {
+                            let _ = client.try_fund_split_order(&buyers[0], &soid);
+                            let _ = client.try_fund_split_order(&buyers[1], &soid);
+                            split_order_ids.push(soid);
+                        }
+                    }
+                    PooledOp::ConfirmSplitOrder { split_seq } => {
+                        if !split_order_ids.is_empty() {
+                            let soid = split_order_ids[*split_seq % split_order_ids.len()];
+                            let _ = client.try_confirm_split_receipt(&buyers[0], &soid);
+                            let _ = client.try_confirm_split_receipt(&buyers[1], &soid);
+                        }
+                    }
+                    PooledOp::OpenDispute { campaign_idx } => {
+                        let cid = campaigns[*campaign_idx % 3];
+                        let _ = client.try_open_dispute(&farmer, &cid);
+                    }
+                    PooledOp::ArbitrateDispute { campaign_idx, mode } => {
+                        let cid = campaigns[*campaign_idx % 3];
+                        let res = match mode % 3 {
+                            0 => DisputeResolution::FullPayoutToInvestors,
+                            1 => DisputeResolution::RefundInvestors,
+                            _ => DisputeResolution::Partial(2_500),
+                        };
+                        let _ = client.try_vote_to_resolve(&arb1, &cid, &res);
+                        let _ = client.try_vote_to_resolve(&arb2, &cid, &res);
+                    }
+                    PooledOp::Settle { campaign_idx } => {
+                        let cid = campaigns[*campaign_idx % 3];
+                        let _ = client.try_settle(&farmer, &cid);
+                    }
+                    PooledOp::MarkFailed { campaign_idx } => {
+                        let cid = campaigns[*campaign_idx % 3];
+                        let _ = client.try_mark_campaign_failed(&admin, &cid);
+                    }
+                    PooledOp::ClaimReturns { campaign_idx, investor_idx } => {
+                        let cid = campaigns[*campaign_idx % 3];
+                        let idx = *investor_idx % 3;
+                        if client.try_claim_returns(&investors[idx], &cid).is_ok() {
+                            claimed.insert((cid, idx));
+                            if cid == c3 {
+                                rounding_allowance_b += 1;
+                            } else {
+                                rounding_allowance_a += 1;
+                            }
+                        }
+                    }
+                    PooledOp::Refund { campaign_idx, investor_idx } => {
+                        let cid = campaigns[*campaign_idx % 3];
+                        let idx = *investor_idx % 3;
+                        if client.try_refund(&investors[idx], &cid).is_ok() {
+                            claimed.insert((cid, idx));
+                            if cid == c3 {
+                                rounding_allowance_b += 1;
+                            } else {
+                                rounding_allowance_a += 1;
+                            }
+                        }
+                    }
+                    PooledOp::BatchRefundInvestors { campaign_idx } => {
+                        let cid = campaigns[*campaign_idx % 3];
+                        let mut batch = Vec::new(&env);
+                        for inv in &investors {
+                            batch.push_back(inv.clone());
+                        }
+                        if let Ok(Ok((cnt, _))) = client.try_batch_refund_investors(&cid, &batch) {
+                            if cnt > 0 {
+                                for idx in 0..3 {
+                                    if client.get_contribution(&cid, &investors[idx]) > 0 {
+                                        claimed.insert((cid, idx));
+                                    }
+                                }
+                                if cid == c3 {
+                                    rounding_allowance_b += cnt as i128;
+                                } else {
+                                    rounding_allowance_a += cnt as i128;
+                                }
+                            }
+                        }
+                    }
+                    PooledOp::DonateDust { token_idx, amount } => {
+                        if *token_idx % 2 == 0 {
+                            TokenClient::new(&env, &token_a).transfer(&donor, &contract_id, amount);
+                            donated_a += amount;
+                        } else {
+                            TokenClient::new(&env, &token_b).transfer(&donor, &contract_id, amount);
+                            donated_b += amount;
+                        }
+                    }
+                    PooledOp::AdvanceTime { secs } => {
+                        env.ledger().set(LedgerInfo {
+                            timestamp: env.ledger().timestamp() + secs,
+                            protocol_version: env.ledger().protocol_version(),
+                            sequence_number: env.ledger().sequence() + 1,
+                            network_id: Default::default(),
+                            base_reserve: 10,
+                            min_temp_entry_ttl: 1,
+                            min_persistent_entry_ttl: 1,
+                            max_entry_ttl: 100_000_001,
+                        });
+                    }
+                }
+
+                // After every single operation, compute modeled unpaid obligations per token
+                // and assert actual token holdings cover them (accounting for rounding dust & donations).
+                let mut unpaid_a: i128 = 0;
+                let mut unpaid_b: i128 = 0;
+
+                for &cid in &campaigns {
+                    let camp = client.get_campaign(&cid);
+                    let pool = camp.total_raised + camp.total_revenue - camp.tranche_released;
+                    let mut camp_unpaid: i128 = 0;
+                    if camp.total_raised > 0 && pool > 0 {
+                        for (idx, inv) in investors.iter().enumerate() {
+                            if claimed.contains(&(cid, idx)) {
+                                continue;
+                            }
+                            let contrib = client.get_contribution(&cid, inv);
+                            if contrib > 0 {
+                                let owed = if camp.status == CampaignStatus::Failed && camp.tranche_released <= 0 {
+                                    contrib
+                                } else {
+                                    (pool * contrib) / camp.total_raised
+                                };
+                                camp_unpaid += owed;
+                            }
+                        }
+                    }
+                    if cid == c3 {
+                        unpaid_b += camp_unpaid;
+                    } else {
+                        unpaid_a += camp_unpaid;
+                    }
+                }
+
+                for &oid in &order_ids {
+                    if let Ok(Ok(o)) = client.try_get_order(&oid) {
+                        if o.status == OrderStatus::Pending {
+                            if o.campaign_id == c3 {
+                                unpaid_b += o.amount;
+                            } else {
+                                unpaid_a += o.amount;
+                            }
+                        }
+                    }
+                }
+
+                for &soid in &split_order_ids {
+                    if let Ok(Ok(so)) = client.try_get_split_order(&soid) {
+                        if so.status == SplitOrderStatus::Funding || so.status == SplitOrderStatus::Active {
+                            let mut funded_sum: i128 = 0;
+                            for b in so.co_buyers.iter() {
+                                if so.funded.get(b.clone()).unwrap_or(false) {
+                                    funded_sum += so.shares.get(b).unwrap_or(0);
+                                }
+                            }
+                            if so.campaign_id == c3 {
+                                unpaid_b += funded_sum;
+                            } else {
+                                unpaid_a += funded_sum;
+                            }
+                        }
+                    }
+                }
+
+                let actual_a = TokenClient::new(&env, &token_a).balance(&contract_id);
+                let actual_b = TokenClient::new(&env, &token_b).balance(&contract_id);
+
+                assert!(
+                    actual_a + rounding_allowance_a >= unpaid_a + donated_a,
+                    "POOLED SOLVENCY VIOLATION (token_a): actual={} < unpaid={} + donated={}",
+                    actual_a,
+                    unpaid_a,
+                    donated_a
+                );
+                assert!(
+                    actual_b + rounding_allowance_b >= unpaid_b + donated_b,
+                    "POOLED SOLVENCY VIOLATION (token_b): actual={} < unpaid={} + donated={}",
+                    actual_b,
+                    unpaid_b,
+                    donated_b
+                );
+            }
+
+            Ok(())
+        })
+        .expect("pooled multi-campaign solvency fuzzer failed");
+}

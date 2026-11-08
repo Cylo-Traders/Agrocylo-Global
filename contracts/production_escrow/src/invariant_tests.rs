@@ -798,3 +798,188 @@ fn test_regression_batch_refund_no_double_payout() {
         "REGRESSION: investor was refunded more than once in batch"
     );
 }
+
+
+// ---------------------------------------------------------------------------
+// Issue #1278: Pooled solvency 100-cycle regression & disposable bug fixture
+// ---------------------------------------------------------------------------
+
+/// Deterministic regression (Issue #1278 / #1244):
+/// Repeats 100 create_order + cancel_order cycles and exercises an expiry batch
+/// (batch_refund_orders) with a nonzero 3% fee across two campaigns sharing a
+/// single token pool. Asserts zero attacker profit, intact pooled token
+/// solvency, and 100% preserved investor claims/refunds on both campaigns.
+#[test]
+fn test_regression_100_create_cancel_and_expiry_batch_cycles_preserve_solvency() {
+    let h = make_harness(2);
+    let deadline = future_deadline(&h);
+    let target = 10_000i128;
+
+    // Campaign 1 (Harvested, accepting orders) and Campaign 2 (Funded, sharing token pool)
+    let c1 = h
+        .client
+        .create_campaign(&h.farmer, &h.token_id, &target, &deadline);
+    let c2 = h
+        .client
+        .create_campaign(&h.farmer, &h.token_id, &target, &deadline);
+
+    h.client.invest(&h.investors[0], &c1, &target);
+    h.client.invest(&h.investors[1], &c2, &target);
+
+    h.client.start_production(&h.farmer, &c1);
+    h.client.mark_harvest(&h.farmer, &h.attester, &c1);
+    // c1 has 3,000 remaining (after 70% tranches); c2 has 10,000 remaining -> 13,000 pooled obligation.
+
+    let attacker = Address::generate(&h.env);
+    let attacker_initial = 1_000i128;
+    StellarAssetClient::new(&h.env, &h.token_id).mint(&attacker, &attacker_initial);
+
+    let fee_before = token_balance(&h, &h.fee_collector);
+    let pool_before = token_balance(&h, &h.client.address);
+    assert_eq!(pool_before, 13_000);
+
+    // 100 create/cancel cycles with nonzero fee (300 bps = 3%)
+    for _ in 0..100 {
+        let oid = h.client.create_order(&attacker, &c1, &attacker_initial);
+        h.client.cancel_order(&attacker, &oid);
+    }
+
+    assert_eq!(
+        token_balance(&h, &attacker),
+        attacker_initial,
+        "attacker must make zero profit across 100 create/cancel cycles"
+    );
+    assert_eq!(
+        token_balance(&h, &h.fee_collector),
+        fee_before,
+        "fee collector must receive zero fees from cancelled orders"
+    );
+    assert_eq!(
+        token_balance(&h, &h.client.address),
+        pool_before,
+        "pooled escrow holdings must remain intact after 100 create/cancel cycles"
+    );
+
+    // Exercise expiry batch with nonzero fees (5 expired orders)
+    let mut expired_ids = Vec::new(&h.env);
+    let mut batch_buyers = StdVec::new();
+    for _ in 0..5 {
+        let b = Address::generate(&h.env);
+        StellarAssetClient::new(&h.env, &h.token_id).mint(&b, &500);
+        let oid = h.client.create_order(&b, &c1, &500);
+        expired_ids.push_back(oid);
+        batch_buyers.push(b);
+    }
+    advance(&h, crate::ORDER_EXPIRY_SECS + 10);
+    let (refunded_count, refunded_total) = h.client.batch_refund_orders(&expired_ids);
+    assert_eq!(refunded_count, 5);
+    assert_eq!(refunded_total, 2_500);
+    for b in &batch_buyers {
+        assert_eq!(token_balance(&h, b), 500);
+    }
+
+    // Settle c1 and fail c2 -> both investors must recover their full owed obligations
+    h.client.settle(&h.farmer, &c1);
+    h.client.mark_campaign_failed(&h.admin, &c2);
+
+    let c1_claim = h.client.claim_returns(&h.investors[0], &c1);
+    let c2_refund = h.client.refund(&h.investors[1], &c2);
+    assert_eq!(c1_claim, 3_000);
+    assert_eq!(c2_refund, 10_000);
+    assert_eq!(token_balance(&h, &h.client.address), 0);
+}
+
+/// Disposable solvency model fixture (Issue #1278):
+/// Demonstrates that the independent cash-flow & unpaid-obligation solvency
+/// check catches both:
+///   (a) the prior #1244 fee over-refund bug when its fix is intentionally reverted, and
+///   (b) the refunded-pool reuse bug (Failed -> refund -> Disputed -> Partial/Settled)
+///       when its terminal-state/pool-deduction fix is intentionally reverted.
+#[test]
+fn test_disposable_fixture_catches_reverted_fee_over_refund_and_refunded_pool_reuse() {
+    #[derive(Clone)]
+    struct DisposablePoolFixture {
+        actual_token_balance: i128,
+        unpaid_investor_obligations: i128,
+        unpaid_order_obligations: i128,
+        donated_dust: i128,
+        max_rounding_dust: i128,
+        fee_bps: i128,
+        revert_fix_1244_fee_over_refund: bool,
+        revert_fix_refunded_pool_reuse: bool,
+    }
+
+    impl DisposablePoolFixture {
+        fn new(revert_1244: bool, revert_pool_reuse: bool) -> Self {
+            Self {
+                actual_token_balance: 20_000, // Two 10,000-unit campaigns sharing one token pool
+                unpaid_investor_obligations: 20_000,
+                unpaid_order_obligations: 0,
+                donated_dust: 0,
+                max_rounding_dust: 2,
+                fee_bps: 300,
+                revert_fix_1244_fee_over_refund: revert_1244,
+                revert_fix_refunded_pool_reuse: revert_pool_reuse,
+            }
+        }
+
+        fn create_and_cancel_order(&mut self, gross_amount: i128) {
+            let fee = (gross_amount * self.fee_bps) / 10_000;
+            if self.revert_fix_1244_fee_over_refund {
+                // Reverted bug: fee routed out on order creation while cancel refunds gross_amount
+                self.actual_token_balance += gross_amount - fee;
+            } else {
+                // Fixed behavior: full gross_amount held in escrow until confirmation
+                self.actual_token_balance += gross_amount;
+            }
+            self.unpaid_order_obligations += gross_amount;
+
+            // Cancel order refunds gross_amount
+            self.actual_token_balance -= gross_amount;
+            self.unpaid_order_obligations -= gross_amount;
+        }
+
+        fn partial_refund_then_settle_dispute(&mut self, refunded_investor_share: i128, campaign_raised: i128) {
+            // Investor 1 refunds on Failed campaign
+            self.actual_token_balance -= refunded_investor_share;
+            self.unpaid_investor_obligations -= refunded_investor_share;
+
+            if self.revert_fix_refunded_pool_reuse {
+                // Reverted bug: campaign re-enters Disputed -> Partial(5000) and computes
+                // farmer cut from full campaign_raised without subtracting refunded_investor_share
+                let farmer_cut = (campaign_raised * 5_000) / 10_000;
+                self.actual_token_balance -= farmer_cut;
+            }
+        }
+
+        fn is_solvent(&self) -> bool {
+            let total_unpaid = self.unpaid_investor_obligations + self.unpaid_order_obligations;
+            self.actual_token_balance >= total_unpaid - self.max_rounding_dust
+                && self.actual_token_balance <= total_unpaid + self.donated_dust + self.max_rounding_dust
+        }
+    }
+
+    // 1. Fixed implementation remains solvent
+    let mut fixed = DisposablePoolFixture::new(false, false);
+    for _ in 0..100 {
+        fixed.create_and_cancel_order(1_000);
+    }
+    fixed.partial_refund_then_settle_dispute(5_000, 10_000);
+    assert!(fixed.is_solvent(), "fixed fixture must satisfy pooled solvency");
+
+    // 2. Reverted #1244 fee over-refund is immediately caught by the solvency model
+    let mut reverted_1244 = DisposablePoolFixture::new(true, false);
+    reverted_1244.create_and_cancel_order(1_000);
+    assert!(
+        !reverted_1244.is_solvent(),
+        "model must catch reverted #1244 fee over-refund after a single create/cancel cycle"
+    );
+
+    // 3. Reverted refunded-pool reuse is immediately caught by the solvency model
+    let mut reverted_pool_reuse = DisposablePoolFixture::new(false, true);
+    reverted_pool_reuse.partial_refund_then_settle_dispute(5_000, 10_000);
+    assert!(
+        !reverted_pool_reuse.is_solvent(),
+        "model must catch reverted refunded-pool reuse when a refunded campaign pool is tapped again"
+    );
+}
