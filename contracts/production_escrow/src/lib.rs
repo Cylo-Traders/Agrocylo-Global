@@ -361,14 +361,14 @@ const MAX_TRANCHE_BPS: i128 = 7_000;
 const TTL_THRESHOLD: u32 = 1_000;
 const TTL_EXTEND: u32 = 100_000;
 
-/// Instance storage TTL threshold (ledgers). Set conservatively to detect imminent expiry
-/// well before actual archival. A threshold of 1000 ledgers (~83 minutes at 5s/ledger)
-/// gives operators a reasonable window to bump before the instance is archived.
-const INSTANCE_TTL_THRESHOLD: u32 = 1_000;
-/// Instance storage TTL extension (ledgers). Set to ~6.6 days (100_000 ledgers at 5s/ledger),
-/// assuming a quiet campaign with no traffic will go at least that long between bumpings;
-/// on mainnet with actual user activity, bump calls via entry points will be far more frequent.
-const INSTANCE_TTL_EXTEND: u32 = 100_000;
+/// Instance storage TTL threshold (ledgers). Set to 50,000 ledgers (~2.89 days at 5s/ledger)
+/// so both normal contract traffic and scheduled keeper runs refresh instance TTL well before
+/// archival rather than waiting until the final 1,000 ledgers (~83 minutes).
+pub const INSTANCE_TTL_THRESHOLD: u32 = 50_000;
+/// Instance storage TTL extension target (ledgers). Sets `live_until_ledger_seq` to
+/// `current_ledger + 100_000` (~5.79 days at 5s/ledger). Quiet instances require a periodic
+/// keeper (`scripts/instance-ttl-keeper.sh`) calling `bump_instance_ttl()`.
+pub const INSTANCE_TTL_EXTEND: u32 = 100_000;
 
 /// Orders expire and become refundable after 96 hours of inactivity.
 pub const ORDER_EXPIRY_SECS: u64 = 96 * 3600;
@@ -551,7 +551,9 @@ impl ProductionEscrowContract {
     /// automatically, but also callable directly by keepers/cron to extend TTL during
     /// quiet periods with no user-initiated transactions. Requires no auth.
     pub fn bump_instance_ttl(env: Env) {
-        bump_instance(&env);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_TTL_EXTEND, INSTANCE_TTL_EXTEND);
     }
 
     /// Storage migration hook. This contract's schema hasn't changed since

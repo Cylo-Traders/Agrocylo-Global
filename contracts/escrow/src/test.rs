@@ -1958,3 +1958,39 @@ fn test_vote_to_resolve_non_arbitrator_rejected() {
         EscrowError::ArbitratorNotFound
     );
 }
+
+
+#[test]
+fn test_marketplace_escrow_bump_instance_ttl_and_inactivity_rehearsal() {
+    use soroban_sdk::testutils::storage::Instance as _;
+    let (env, client, admin, _farmer, _buyer, _xlm, _usdc, _inv1, _inv2, _fee_collector) =
+        setup_test();
+
+    let initial_ttl = env.as_contract(&client.address, || env.storage().instance().get_ttl());
+    assert!(initial_ttl >= INSTANCE_TTL_EXTEND);
+
+    // Near-threshold check: advance so 800 ledgers remain.
+    env.ledger().with_mut(|li| {
+        li.min_persistent_entry_ttl = 1;
+        li.max_entry_ttl = 100_000_001;
+        li.sequence_number += initial_ttl - 800;
+    });
+    let remaining = env.as_contract(&client.address, || env.storage().instance().get_ttl());
+    assert_eq!(remaining, 800);
+
+    client.bump_instance_ttl();
+    let after_bump = env.as_contract(&client.address, || env.storage().instance().get_ttl());
+    assert_eq!(after_bump, INSTANCE_TTL_EXTEND);
+
+    // Multi-cycle inactivity rehearsal across 240,000 additional ledgers.
+    for _ in 0..6 {
+        env.ledger().with_mut(|li| {
+            li.sequence_number += 40_000;
+        });
+        client.bump_instance_ttl();
+        let ttl = env.as_contract(&client.address, || env.storage().instance().get_ttl());
+        assert_eq!(ttl, INSTANCE_TTL_EXTEND);
+    }
+
+    assert_eq!(client.get_admin(), admin);
+}
