@@ -1,6 +1,7 @@
 extern crate std;
 
 use soroban_sdk::{
+    contract, contractimpl,
     testutils::{Address as _, Ledger, LedgerInfo},
     token::{Client as TokenClient, StellarAssetClient},
     Address, Env, Vec,
@@ -2761,13 +2762,13 @@ fn test_mark_campaign_failed_from_funding_state_rejected() {
     let id = t
         .client
         .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
-    // Still in Funding state
+    // Still in Funding state: mark_campaign_failed rejects unsupported lifecycle state with NotAdmin.
     let err = t
         .client
         .try_mark_campaign_failed(&t.farmer, &id)
         .unwrap_err()
         .unwrap();
-    assert_eq!(err, EscrowError::CampaignNotFundedOrBeyond);
+    assert_eq!(err, EscrowError::NotAdmin);
 }
 
 #[test]
@@ -2854,8 +2855,7 @@ fn test_refundable_amount_proportional_after_production() {
         .client
         .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
     t.client.invest(&t.investor1, &id, &10_000);
-    t.client.start_production(&t.farmer, &id);
-    t.client.mark_harvest(&t.farmer, &t.attester, &id);
+    t.client.start_production(&t.farmer, &id); // 3_000 (30%) released once on production start
 
     let order_id = t.client.create_order(&t.buyer, &id, &2_000);
 
@@ -2871,7 +2871,6 @@ fn test_refundable_amount_proportional_after_production() {
 
     let order = t.client.get_order(&order_id);
     assert_eq!(order.status, OrderStatus::Refunded);
-    t.client.start_production(&t.farmer, &id); // 3_000 released
     t.client.mark_campaign_failed(&t.admin, &id);
 
     // Pool = 10_000 - 3_000 = 7_000
@@ -3139,78 +3138,100 @@ fn test_set_milestone_configs_rejects_wrong_order() {
     assert_eq!(err, EscrowError::InvalidMilestone);
 }
 
-#[test]
-fn test_advance_milestone_planted_ok() {
-    let t = setup();
-    let deadline = future_deadline(&t);
+/// 5 milestones x 800 bps (8% each = 40% total).
+/// Combined with `start_production`'s 30% (`TRANCHE_START_BPS = 3_000`), all 5
+/// milestones reach 70% (`MAX_TRANCHE_BPS = 7_000`) without exceeding the cap (Issue #1277).
+fn milestone_configs_40pct(t: &TestEnv) -> Vec<MilestoneConfig> {
+    let mut configs = Vec::new(&t.env);
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Planted,
+        release_bps: 800,
+    });
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Growing,
+        release_bps: 800,
+    });
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Harvested,
+        release_bps: 800,
+    });
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Shipped,
+        release_bps: 800,
+    });
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Delivered,
+        release_bps: 800,
+    });
+    configs
+}
+
+/// Shared lifecycle fixture for buyer-driven milestone tests (Issue #1277):
+/// creates a 10,000-unit campaign, funds it, calls `start_production` (releasing
+/// 3,000 = 30% so orders are permitted in `InProduction`), and creates + confirms
+/// a 1,000-unit qualifying buyer order.
+fn setup_in_production_with_confirmed_buyer(t: &TestEnv) -> u64 {
+    let deadline = future_deadline(t);
     let id = t
         .client
         .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
     t.client.invest(&t.investor1, &id, &10_000);
-    let configs = milestone_configs_50pct(&t);
-    t.client.set_milestone_configs(&t.admin, &id, &configs);
-
-    // Buyer must have a confirmed order — create and confirm one first.
+    t.client.start_production(&t.farmer, &id); // 30% (3_000) released
     let order_id = t.client.create_order(&t.buyer, &id, &1_000);
     t.client.confirm_order(&t.buyer, &order_id);
+    id
+}
+
+#[test]
+fn test_advance_milestone_planted_ok() {
+    let t = setup();
+    let id = setup_in_production_with_confirmed_buyer(&t);
+    let configs = milestone_configs_40pct(&t);
+    t.client.set_milestone_configs(&t.admin, &id, &configs);
 
     let farmer_before = balance(&t, &t.farmer);
     t.client.advance_milestone(&t.buyer, &t.attester, &id);
-    // 10% of 10_000 = 1_000
-    assert_eq!(balance(&t, &t.farmer), farmer_before + 1_000);
+    // 8% of 10_000 = 800 (on top of 3_000 start_production tranche)
+    assert_eq!(balance(&t, &t.farmer), farmer_before + 800);
 
     let c = t.client.get_campaign(&id);
     assert_eq!(c.current_milestone, 1);
-    assert_eq!(c.tranche_released, 1_000);
+    assert_eq!(c.tranche_released, 3_800);
 }
 
 #[test]
 fn test_advance_milestone_growing_ok() {
     let t = setup();
-    let deadline = future_deadline(&t);
-    let id = t
-        .client
-        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
-    t.client.invest(&t.investor1, &id, &10_000);
-    let configs = milestone_configs_50pct(&t);
+    let id = setup_in_production_with_confirmed_buyer(&t);
+    let configs = milestone_configs_40pct(&t);
     t.client.set_milestone_configs(&t.admin, &id, &configs);
 
-    let order_id = t.client.create_order(&t.buyer, &id, &1_000);
-    t.client.confirm_order(&t.buyer, &order_id);
-
-    t.client.advance_milestone(&t.buyer, &t.attester, &id); // Planted: 1_000
+    t.client.advance_milestone(&t.buyer, &t.attester, &id); // Planted: 800
     let farmer_before = balance(&t, &t.farmer);
-    t.client.advance_milestone(&t.buyer, &t.attester, &id); // Growing: 1_000
-    assert_eq!(balance(&t, &t.farmer), farmer_before + 1_000);
+    t.client.advance_milestone(&t.buyer, &t.attester, &id); // Growing: 800
+    assert_eq!(balance(&t, &t.farmer), farmer_before + 800);
 
     let c = t.client.get_campaign(&id);
     assert_eq!(c.current_milestone, 2);
-    assert_eq!(c.tranche_released, 2_000);
+    assert_eq!(c.tranche_released, 4_600);
 }
 
 #[test]
 fn test_advance_milestone_all_five_ok() {
     let t = setup();
-    let deadline = future_deadline(&t);
-    let id = t
-        .client
-        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
-    t.client.invest(&t.investor1, &id, &10_000);
-    let configs = milestone_configs_50pct(&t);
+    let id = setup_in_production_with_confirmed_buyer(&t);
+    let configs = milestone_configs_40pct(&t);
     t.client.set_milestone_configs(&t.admin, &id, &configs);
-
-    let order_id = t.client.create_order(&t.buyer, &id, &1_000);
-    t.client.confirm_order(&t.buyer, &order_id);
 
     let farmer_before = balance(&t, &t.farmer);
     for _ in 0..5 {
         t.client.advance_milestone(&t.buyer, &t.attester, &id);
     }
-    // 5 x 1_000 = 5_000 (50% of 10_000)
-    assert_eq!(balance(&t, &t.farmer), farmer_before + 5_000);
+    // 5 x 800 = 4_000 (40% of 10_000); cumulative with 3_000 start_production = 7_000 (70% cap)
+    assert_eq!(balance(&t, &t.farmer), farmer_before + 4_000);
     let c = t.client.get_campaign(&id);
     assert_eq!(c.current_milestone, 5);
-    assert_eq!(c.tranche_released, 5_000);
+    assert_eq!(c.tranche_released, 7_000);
 }
 
 #[test]
@@ -3253,14 +3274,7 @@ fn test_advance_milestone_admin_as_oracle_ok() {
 #[test]
 fn test_advance_milestone_rejects_no_config() {
     let t = setup();
-    let deadline = future_deadline(&t);
-    let id = t
-        .client
-        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
-    t.client.invest(&t.investor1, &id, &10_000);
-
-    let order_id = t.client.create_order(&t.buyer, &id, &1_000);
-    t.client.confirm_order(&t.buyer, &order_id);
+    let id = setup_in_production_with_confirmed_buyer(&t);
 
     let err = t
         .client
@@ -3273,16 +3287,9 @@ fn test_advance_milestone_rejects_no_config() {
 #[test]
 fn test_advance_milestone_rejects_past_end() {
     let t = setup();
-    let deadline = future_deadline(&t);
-    let id = t
-        .client
-        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
-    t.client.invest(&t.investor1, &id, &10_000);
-    let configs = milestone_configs_50pct(&t);
+    let id = setup_in_production_with_confirmed_buyer(&t);
+    let configs = milestone_configs_40pct(&t);
     t.client.set_milestone_configs(&t.admin, &id, &configs);
-
-    let order_id = t.client.create_order(&t.buyer, &id, &1_000);
-    t.client.confirm_order(&t.buyer, &order_id);
 
     for _ in 0..5 {
         t.client.advance_milestone(&t.buyer, &t.attester, &id);
@@ -3298,14 +3305,11 @@ fn test_advance_milestone_rejects_past_end() {
 
 #[test]
 fn test_advance_milestone_over_release_prevented() {
-    // 5 milestones each at 30% = 150% total. The 70% MAX_TRANCHE_BPS cap
-    // should reject the 3rd milestone (cumulative 90% > 70%).
+    // start_production releases 30% (3_000). With 5 milestones each at 25% (2_500),
+    // the 1st milestone succeeds (3_000 + 2_500 = 5_500 <= 7_000 cap) and the 2nd
+    // milestone is rejected (5_500 + 2_500 = 8_000 > 7_000 MAX_TRANCHE_BPS cap).
     let t = setup();
-    let deadline = future_deadline(&t);
-    let id = t
-        .client
-        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
-    t.client.invest(&t.investor1, &id, &10_000);
+    let id = setup_in_production_with_confirmed_buyer(&t);
 
     let mut configs = Vec::new(&t.env);
     for i in 0..5 {
@@ -3317,55 +3321,56 @@ fn test_advance_milestone_over_release_prevented() {
                 3 => Milestone::Shipped,
                 _ => Milestone::Delivered,
             },
-            release_bps: 3000, // 30% each
+            release_bps: 2500, // 25% each
         });
     }
     t.client.set_milestone_configs(&t.admin, &id, &configs);
 
-    let order_id = t.client.create_order(&t.buyer, &id, &1_000);
-    t.client.confirm_order(&t.buyer, &order_id);
-
-    t.client.advance_milestone(&t.buyer, &t.attester, &id); // 30% = 3_000
-    t.client.advance_milestone(&t.buyer, &t.attester, &id); // 30% = 3_000 (total 6_000)
+    t.client.advance_milestone(&t.buyer, &t.attester, &id); // +25% = 2_500 (cumulative 5_500)
     let err = t
         .client
         .try_advance_milestone(&t.buyer, &t.attester, &id)
         .unwrap_err()
         .unwrap();
-    // 3rd milestone would push to 9_000 > 7_000 max.
+    // 2nd milestone would push cumulative release to 8_000 > 7_000 max.
     assert_eq!(err, EscrowError::InvalidTranche);
 }
 
 #[test]
 fn test_advance_milestone_refund_after_partial_release() {
-    // After advancing some milestones, campaign fails.
-    // Investor gets proportional refund from remaining pool.
+    // After start_production (3_000) and 2 milestones (2 x 800 = 1_600), campaign fails.
+    // Confirmed 1_000 order adds 970 net revenue (3% fee).
+    // Remaining pool = 10_000 (raised) + 970 (net revenue) - 4_600 (tranches) = 6_370.
     let t = setup();
-    let deadline = future_deadline(&t);
-    let id = t
-        .client
-        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
-    t.client.invest(&t.investor1, &id, &10_000);
-    let configs = milestone_configs_50pct(&t);
+    let id = setup_in_production_with_confirmed_buyer(&t);
+    let configs = milestone_configs_40pct(&t);
     t.client.set_milestone_configs(&t.admin, &id, &configs);
 
-    let order_id = t.client.create_order(&t.buyer, &id, &1_000);
-    t.client.confirm_order(&t.buyer, &order_id);
-
-    // Advance 2 milestones: 2_000 released (20%).
+    // Advance 2 milestones: 2 x 800 = 1_600 released (cumulative 4_600 with start_production).
     t.client.advance_milestone(&t.buyer, &t.attester, &id);
     t.client.advance_milestone(&t.buyer, &t.attester, &id);
 
-    // Campaign fails. Remaining pool = 10_000 - 2_000 = 8_000.
-    t.client.mark_campaign_failed(&t.farmer, &id);
+    // InProduction failure requires admin authorization.
+    t.client.mark_campaign_failed(&t.admin, &id);
     let refund = t.client.refund(&t.investor1, &id);
-    // Investor has 100% of contribution -> 100% of pool = 8_000.
-    assert_eq!(refund, 8_000);
+    // Investor has 100% of contribution -> 100% of remaining pool = 6_370.
+    assert_eq!(refund, 6_370);
 }
 
 // ---------------------------------------------------------------------------
-// Governance gating (Issue #660)
+// Governance gating (Issue #660 / Issue #1277)
 // ---------------------------------------------------------------------------
+
+/// Stand-in governance contract exposing `get_admin` for `governance_client::verify`.
+#[contract]
+struct MockGovernance;
+
+#[contractimpl]
+impl MockGovernance {
+    pub fn get_admin(env: Env) -> Address {
+        env.current_contract_address()
+    }
+}
 
 #[test]
 fn test_fee_config_admin_fallback_before_governance_set() {
@@ -3378,13 +3383,13 @@ fn test_fee_config_admin_fallback_before_governance_set() {
 #[test]
 fn test_fee_config_rejects_admin_once_governance_set() {
     let t = setup();
-    let governance = Address::generate(&t.env);
+    let governance = t.env.register(MockGovernance, ());
     let fee_collector = Address::generate(&t.env);
 
     t.client.set_governance_contract(&t.admin, &governance);
 
     let result = t.client.try_set_fee_config(&t.admin, &fee_collector, &500);
-    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAdmin);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotGoverned);
 
     // The governance contract address is now the sole authorized caller.
     t.client.set_fee_config(&governance, &fee_collector, &500);
@@ -3393,13 +3398,13 @@ fn test_fee_config_rejects_admin_once_governance_set() {
 #[test]
 fn test_registry_contract_rejects_admin_once_governance_set() {
     let t = setup();
-    let governance = Address::generate(&t.env);
+    let governance = t.env.register(MockGovernance, ());
     let registry = Address::generate(&t.env);
 
     t.client.set_governance_contract(&t.admin, &governance);
 
     let result = t.client.try_set_registry_contract(&t.admin, &registry);
-    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAdmin);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotGoverned);
 
     t.client.set_registry_contract(&governance, &registry);
 }
@@ -3407,14 +3412,14 @@ fn test_registry_contract_rejects_admin_once_governance_set() {
 #[test]
 fn test_update_supported_tokens_governance_gated() {
     let t = setup();
-    let governance = Address::generate(&t.env);
+    let governance = t.env.register(MockGovernance, ());
     t.client.set_governance_contract(&t.admin, &governance);
 
     let mut tokens = Vec::new(&t.env);
     tokens.push_back(t.token_id.clone());
 
     let result = t.client.try_update_supported_tokens(&t.admin, &tokens);
-    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAdmin);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotGoverned);
 
     t.client.update_supported_tokens(&governance, &tokens);
     assert_eq!(t.client.get_supported_tokens().len(), 1);
