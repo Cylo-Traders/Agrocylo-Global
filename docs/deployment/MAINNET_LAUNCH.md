@@ -145,7 +145,7 @@ Follow `docs/deployment/CONTRACTS.md` §"Deployment Steps" exactly.
 | 2.5 | `set_governance_contract` on escrow, registry, basket | CO | `get_governance_contract` x3 |
 | 2.6 | `set_guardian` on escrow, registry, basket = guardian multisig | CO | `get_guardian` x3 = multisig addr |
 | 2.7 | `set_attester` on escrow | CO | `get_attester` = attester addr |
-| 2.8 | Set Ramp Stage 1 campaign value cap (§8) via init param or governance param | CO | Read back cap = configured value |
+| 2.8 | Set Ramp Stage 1 campaign limits (§8: `set_token_campaign_cap` = `5_000_000_000` stroops [500 USDC], `set_max_active_campaigns` = `3`) | CO | `get_token_campaign_cap` = `5000000000` and `get_max_active_campaigns` = `3` |
 | 2.9 | Freeze `deployments/mainnet.json`, commit to repo, tag `mainnet-deploy-v1` | CO | Commit pushed |
 
 **Rollback P2:** **NONE.** Contracts exist forever. If wiring is wrong, the fix is

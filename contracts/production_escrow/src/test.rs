@@ -3560,3 +3560,144 @@ fn test_vote_to_resolve_non_arbitrator_rejected() {
         .unwrap();
     assert_eq!(err, EscrowError::ArbitratorNotFound);
 }
+
+
+// ---------------------------------------------------------------------------
+// Issue #1286: On-chain campaign value caps & active-campaign concurrency limits
+// ---------------------------------------------------------------------------
+
+#[contract]
+pub struct MockGovForLimits;
+
+#[contractimpl]
+impl MockGovForLimits {
+    pub fn get_admin(env: Env) -> Address {
+        env.current_contract_address()
+    }
+}
+
+#[test]
+fn test_token_campaign_cap_accepts_exact_and_rejects_excessive_target() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+
+    // Default cap is 0 (uncapped)
+    assert_eq!(t.client.get_token_campaign_cap(&t.token_id), 0);
+
+    // Configure Stage S1 Canary cap: 500 USDC (5_000_000_000 stroops)
+    let cap: i128 = 5_000_000_000;
+    t.client
+        .set_token_campaign_cap(&t.admin, &t.token_id, &cap);
+    assert_eq!(t.client.get_token_campaign_cap(&t.token_id), cap);
+
+    // Exact allowed target succeeds
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &cap, &deadline);
+    assert_eq!(id, 1);
+
+    // Target 1 unit above cap is rejected with CampaignOverfunded
+    let err = t
+        .client
+        .try_create_campaign(&t.farmer, &t.token_id, &(cap + 1), &deadline)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignOverfunded);
+}
+
+#[test]
+fn test_max_active_campaigns_enforces_concurrency_and_releases_on_terminal_transitions() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+
+    t.client.set_max_active_campaigns(&t.admin, &2);
+    assert_eq!(t.client.get_max_active_campaigns(), 2);
+    assert_eq!(t.client.get_active_campaign_count(), 0);
+
+    let c1 = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &1_000, &deadline);
+    let c2 = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &1_000, &deadline);
+    assert_eq!(t.client.get_active_campaign_count(), 2);
+
+    // 3rd concurrent campaign is rejected while c1 and c2 are active
+    let err = t
+        .client
+        .try_create_campaign(&t.farmer, &t.token_id, &1_000, &deadline)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignOverfunded);
+
+    // Opening a dispute does NOT release active capacity (disputes cannot bypass concurrency limit)
+    t.client.invest(&t.investor1, &c1, &1_000);
+    t.client.open_dispute(&t.farmer, &c1);
+    assert_eq!(t.client.get_active_campaign_count(), 2);
+    let err_disputed = t
+        .client
+        .try_create_campaign(&t.farmer, &t.token_id, &1_000, &deadline)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err_disputed, EscrowError::CampaignOverfunded);
+
+    // Resolving the dispute transitions c1 to terminal Settled and releases capacity exactly once
+    t.client
+        .resolve_dispute(&t.admin, &c1, &DisputeResolution::FullPayoutToInvestors);
+    assert_eq!(t.client.get_active_campaign_count(), 1);
+
+    // Now a new campaign c3 can be created
+    let c3 = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &1_000, &deadline);
+    assert_eq!(c3, 3);
+    assert_eq!(t.client.get_active_campaign_count(), 2);
+
+    // Failing c2 after deadline also releases capacity
+    advance_ledger(&t.env, 8 * 24 * 3600);
+    t.client.finalize_failed(&c2);
+    assert_eq!(t.client.get_active_campaign_count(), 1);
+}
+
+#[test]
+fn test_campaign_limits_governance_gating_and_lowering_preserves_existing_balances() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+
+    t.client
+        .set_token_campaign_cap(&t.admin, &t.token_id, &10_000);
+    let c1 = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &c1, &10_000);
+
+    // Wire governance contract: raw admin and strangers must now be rejected
+    let gov = t.env.register(MockGovForLimits, ());
+    t.client.set_governance_contract(&t.admin, &gov);
+
+    let err_admin_cap = t
+        .client
+        .try_set_token_campaign_cap(&t.admin, &t.token_id, &5_000)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err_admin_cap, EscrowError::NotGoverned);
+
+    let err_admin_conc = t
+        .client
+        .try_set_max_active_campaigns(&t.admin, &1)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err_admin_conc, EscrowError::NotGoverned);
+
+    // Governance lowers cap below c1's existing balance
+    t.client
+        .set_token_campaign_cap(&gov, &t.token_id, &2_000);
+    t.client.set_max_active_campaigns(&gov, &1);
+
+    // Existing campaign c1 (10_000) is unaffected and can complete its full lifecycle
+    t.client.start_production(&t.farmer, &c1);
+    t.client.mark_harvest(&t.farmer, &t.attester, &c1);
+    t.client.settle(&t.farmer, &c1);
+    let claimed = t.client.claim_returns(&t.investor1, &c1);
+    assert_eq!(claimed, 3_000);
+}
