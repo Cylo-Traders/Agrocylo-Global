@@ -138,9 +138,9 @@ Follow `docs/deployment/CONTRACTS.md` §"Deployment Steps" exactly.
 
 | Step | Action | Owner | Verify |
 |------|--------|-------|--------|
-| 2.1 | Deploy `governance` instance; record ID + deploy ledger | CO | `get_admin` returns admin |
-| 2.2 | Deploy `production_escrow`, `registry`, `investment_basket`; record IDs | CO | 3 IDs recorded |
-| 2.3 | `initialize` all 4 in dependency order (governance → escrow → registry → basket) | CO | `get_admin` on each; `production_escrow` supported_tokens = mainnet USDC |
+| 2.1 | Atomically deploy + initialize `governance` in a single transaction (`--init-fn initialize --init-args ...`); record ID + deploy ledger | CO | `get_admin` returns admin immediately after deploy tx |
+| 2.2 | Atomically deploy + initialize `escrow`, `production_escrow`, `registry`, and `investment_basket` in dependency order via `scripts/deploy-contracts.sh --network mainnet` (fresh mainnet instances must never be deployed uninitialized) | CO | All contract IDs recorded; `get_admin` returns admin on each; `production_escrow` supported_tokens = mainnet USDC |
+| 2.3 | Confirm idempotent post-deploy initialization check passes (tolerates `AlreadyInitialized` on verified existing instances) | CO | `get_admin` verified on all deployed contracts |
 | 2.4 | `set_registry_contract` on escrow | CO | `get_registry_contract` = registry ID |
 | 2.5 | `set_governance_contract` on escrow, registry, basket | CO | `get_governance_contract` x3 |
 | 2.6 | `set_guardian` on escrow, registry, basket = guardian multisig | CO | `get_guardian` x3 = multisig addr |

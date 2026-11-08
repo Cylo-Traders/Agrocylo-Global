@@ -120,14 +120,29 @@ case "$NETWORK" in
         NETWORK_PASSPHRASE="Public Global Stellar Network ; September 2015" ;;
 esac
 
-# Issue #843: initializing in the same transaction as deployment is *mandatory*
-# on mainnet — it removes the front-running window between `contract deploy`
-# and the maintainer's separate `initialize` call. Off-mainnet the classic
-# deploy-then-initialize flow is fine (no funds at stake), but can be opted in
-# with ATOMIC_INIT=true.
-ATOMIC_INIT=false
-[[ "$NETWORK" == "mainnet" || "${ATOMIC_INIT:-false}" == "true" ]] && ATOMIC_INIT=true
-[[ "${ATOMIC_INIT_DISABLE:-false}" == "true" ]] && ATOMIC_INIT=false
+# Issue #843 / Issue #1288: initializing in the same transaction as deployment is
+# *mandatory* on mainnet — it removes the front-running window between `contract deploy`
+# and the maintainer's separate `initialize` call. Attempting to disable atomic init
+# on mainnet fails immediately before any build, deploy, or manifest mutation.
+# Off-mainnet, callers can opt in via ATOMIC_INIT=true.
+CALLER_ATOMIC_INIT="${ATOMIC_INIT:-}"
+CALLER_ATOMIC_DISABLE="${ATOMIC_INIT_DISABLE:-false}"
+
+if [[ "$NETWORK" == "mainnet" ]]; then
+    if [[ "$CALLER_ATOMIC_INIT" == "false" || "$CALLER_ATOMIC_DISABLE" == "true" ]]; then
+        echo "Error: atomic initialization is mandatory on mainnet and cannot be disabled (ATOMIC_INIT=false / ATOMIC_INIT_DISABLE=true rejected)" >&2
+        exit 1
+    fi
+    ATOMIC_INIT=true
+else
+    if [[ "$CALLER_ATOMIC_DISABLE" == "true" ]]; then
+        ATOMIC_INIT=false
+    elif [[ "$CALLER_ATOMIC_INIT" == "true" ]]; then
+        ATOMIC_INIT=true
+    else
+        ATOMIC_INIT=false
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 # CLI detection
@@ -278,27 +293,47 @@ init_args_for() {
     esac
 }
 
+# Issue #1288: probe on-chain state (get_admin) rather than trusting the local
+# manifest's `initialized` boolean when distinguishing verified existing instances
+# from fresh or uninitialized instances.
+is_initialized_on_chain() {
+    local id="$1" onchain_admin=""
+    [[ -n "$id" ]] || return 1
+    onchain_admin="$(invoke_read "$id" get_admin || true)"
+    [[ -n "$onchain_admin" ]]
+}
+
 deploy_one() {
     local c="$1"
     local wasm="$WASM_DIR/${WASM[$c]}" existing salt hash id \
-          init_fn="" init_args="" deployed_init=false
+          init_fn="" init_args="" deployed_init=false onchain_initialized=false
     existing="$(cid "$c")"
+    if [[ -n "$existing" ]] && is_initialized_on_chain "$existing"; then
+        onchain_initialized=true
+    fi
+
     if [[ -n "$existing" && "$FORCE" == "false" ]]; then
-        echo "  $c: reusing $existing"
-        return
+        if [[ "$NETWORK" == "mainnet" && "$onchain_initialized" != "true" ]]; then
+            echo "  $c: manifest entry $existing is not initialized on-chain; redeploying atomically"
+        else
+            echo "  $c: reusing $existing"
+            return
+        fi
     fi
     [[ -f "$wasm" ]] || { echo "Error: missing WASM $wasm (build first, or drop --skip-build)" >&2; exit 1; }
     salt="$(printf 'agrocylo:%s:%s' "$NETWORK" "$c" | sha256sum | cut -c1-64)"
     hash="$($CLI contract install "${NET_ARGS[@]}" --source-account "$DEPLOYER" --wasm "$wasm")"
 
-    # Atomic init: only on a fresh instance (no manifest `initialized: true`).
-    # A --force redeploy onto an already-initialized instance must NOT re-run
-    # constructor-init — it would revert the whole deploy with AlreadyInitialized;
-    # that path keeps the separate idempotent initialize() step below.
-    if [[ "$ATOMIC_INIT" == "true" && "$(m_get ".contracts.\"$c\".initialized")" != "true" ]]; then
+    # Issue #1288: determine fresh vs already-initialized from on-chain state
+    # (`onchain_initialized`), never from an untrusted local manifest boolean.
+    if [[ "$ATOMIC_INIT" == "true" && "$onchain_initialized" != "true" ]]; then
         init_fn="initialize"
         init_args="$(init_args_for "$c")"
         deployed_init=true
+    fi
+    if [[ "$NETWORK" == "mainnet" && "$onchain_initialized" != "true" && -z "$init_fn" ]]; then
+        echo "Error: non-atomic fresh mainnet deployment is forbidden for '$c'" >&2
+        exit 1
     fi
 
     if [[ -n "$init_fn" ]]; then
