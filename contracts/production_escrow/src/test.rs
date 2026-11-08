@@ -3560,3 +3560,84 @@ fn test_vote_to_resolve_non_arbitrator_rejected() {
         .unwrap();
     assert_eq!(err, EscrowError::ArbitratorNotFound);
 }
+
+
+// ---------------------------------------------------------------------------
+// Issue #1272: Keep failed campaigns terminal and prevent payouts from already-refunded pools
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_failed_campaign_cannot_reopen_dispute_or_arbitration() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &5_000);
+
+    // Advance past deadline and mark failed
+    advance_ledger(&t.env, 8 * 24 * 3600);
+    t.client.finalize_failed(&id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+
+    let bal_before = balance(&t, &t.client.address);
+
+    // Farmer and investor cannot open a dispute on a Failed campaign
+    let err_farmer = t.client.try_open_dispute(&t.farmer, &id).unwrap_err().unwrap();
+    assert_eq!(err_farmer, EscrowError::CampaignAlreadyDisputed);
+
+    let err_inv = t.client.try_open_dispute(&t.investor1, &id).unwrap_err().unwrap();
+    assert_eq!(err_inv, EscrowError::CampaignAlreadyDisputed);
+
+    // Admin cannot resolve a dispute on a Failed campaign
+    let err_admin = t
+        .client
+        .try_resolve_dispute(&t.admin, &id, &DisputeResolution::FullPayoutToInvestors)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err_admin, EscrowError::CampaignNotDisputed);
+
+    // State and balances remain completely unchanged
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+    assert_eq!(balance(&t, &t.client.address), bal_before);
+}
+
+#[test]
+fn test_refunded_campaign_cannot_drain_second_campaign_in_shared_token_pool() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+
+    // Campaign 1 and Campaign 2 share the same token pool
+    let c1 = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    let c2 = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+
+    t.client.invest(&t.investor1, &c1, &10_000);
+    t.client.invest(&t.investor2, &c2, &10_000);
+
+    // Fail c1 and process investor1's full refund
+    t.client.mark_campaign_failed(&t.admin, &c1);
+    let refunded1 = t.client.refund(&t.investor1, &c1);
+    assert_eq!(refunded1, 10_000);
+
+    // c1 is now fully refunded. Attempting to reopen dispute or arbitrate c1 MUST fail
+    let err = t.client.try_open_dispute(&t.farmer, &c1).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::CampaignAlreadyDisputed);
+
+    let err_res = t
+        .client
+        .try_resolve_dispute(&t.admin, &c1, &DisputeResolution::Partial(5_000))
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err_res, EscrowError::CampaignNotDisputed);
+
+    // c2's funds are 100% intact and investor2 can refund or claim without obstruction
+    assert_eq!(balance(&t, &t.client.address), 10_000);
+    t.client.mark_campaign_failed(&t.admin, &c2);
+    let refunded2 = t.client.refund(&t.investor2, &c2);
+    assert_eq!(refunded2, 10_000);
+    assert_eq!(balance(&t, &t.client.address), 0);
+}
