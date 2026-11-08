@@ -112,27 +112,32 @@ soroban account info --account $ADMIN_PUBKEY
 # High threshold: 2
 ```
 
-## Pre-Deployment Verification
+## Pre-Deployment Verification (Issue #1283)
 
-Before deploying to mainnet, the `deploy-contracts.sh` script checks that the provided admin and guardian accounts are multisig-configured:
+Before any mainnet build, install, deploy, or manifest write occurs, `scripts/deploy-contracts.sh --network mainnet` performs a **read-only, fail-closed** check of the effective signing policy for `ADMIN`, `GUARDIAN`, and (if set) `ATTESTER`:
 
 ```bash
 ./scripts/deploy-contracts.sh --network mainnet
 ```
 
-The script:
-1. Reads `ADMIN_SECRET` and `GUARDIAN_SECRET` environment variables
-2. Derives the public key for each
-3. Calls `soroban account info` to inspect signer configuration
-4. **Rejects** if either account has only 1 signer
-5. **Accepts** if both have 2+ signers (and prints their threshold config)
+The script **never** requests or accepts `ADMIN_SECRET` or `GUARDIAN_SECRET`. Instead, it inspects public role addresses:
+1. Requires explicit `ADMIN` and `GUARDIAN` public addresses (never defaults `ADMIN` to `DEPLOYER` on mainnet, and rejects `ADMIN == DEPLOYER`).
+2. For classic Stellar accounts (`G...`), fetches the public Horizon account record (`$HORIZON_URL/accounts/<address>`) and verifies:
+   - At least **2 active signers** with `weight > 0` (`active_signers >= 2`).
+   - `med_threshold >= 2` and `high_threshold >= 2`.
+   - **No single signer can satisfy the threshold alone**: `max_signer_weight < med_threshold` and `max_signer_weight < high_threshold`.
+   - The account is not deadlocked: `total_signer_weight >= med_threshold` and `total_signer_weight >= high_threshold`.
+3. For Soroban contract-account authorities (`C...`), requires explicit `ALLOW_CONTRACT_ROLE_AUTH=true` and verifies on-chain via read-only `get_quorum` that the contract enforces `quorum >= 2`.
 
-**Environment Setup:**
+**Environment Setup (Public Addresses Only):**
 ```bash
-export ADMIN_SECRET="S..."       # Secret key for admin multisig account
-export GUARDIAN_SECRET="S..."    # Secret key for guardian multisig account (can be same as admin or different)
+export DEPLOYER="mainnet-deployer"
+export ADMIN="G..."              # Public address of 2-of-3 admin multisig account
+export GUARDIAN="G..."           # Public address of 2-of-3 guardian multisig account
+export FEE_COLLECTOR="G..."
+export SUPPORTED_TOKENS="C...,C..."
+export HORIZON_URL="https://horizon.stellar.org"
 export SOROBAN_RPC_URL="https://soroban.stellar.org"
-export SOROBAN_NETWORK_PASSPHRASE="Public Global Stellar Network ; September 2015"
 
 ./scripts/deploy-contracts.sh --network mainnet
 ```
