@@ -3560,3 +3560,14 @@ fn test_vote_to_resolve_non_arbitrator_rejected() {
         .unwrap();
     assert_eq!(err, EscrowError::ArbitratorNotFound);
 }
+
+
+#[test]
+fn test_production_escrow_get_attester_readback() {
+    let t = setup();
+    assert_eq!(t.client.get_attester(), Some(t.attester.clone()));
+
+    let new_att = Address::generate(&t.env);
+    t.client.set_attester(&t.admin, &new_att);
+    assert_eq!(t.client.get_attester(), Some(new_att));
+}

@@ -386,6 +386,40 @@ wire() {
 if [[ "$VERIFY_ONLY" == "false" ]]; then
     echo "[wire] cross-contract wiring (non-governance first)..."
 
+    # Configure guardian across all contracts if specified before governance locks direct admin calls
+    GUARDIAN="${GUARDIAN:-}"
+    if [[ -n "$GUARDIAN" ]]; then
+        echo "[wire] configuring guardian ($GUARDIAN)..."
+        wire "escrow.guardian" \
+            "$(invoke_read "$ESCROW" get_guardian || true)" "$GUARDIAN" \
+            invoke "$ESCROW" set_guardian --caller "$ADMIN" --guardian "$GUARDIAN"
+
+        wire "production_escrow.guardian" \
+            "$(invoke_read "$PROD_ESCROW" get_guardian || true)" "$GUARDIAN" \
+            invoke "$PROD_ESCROW" set_guardian --caller "$ADMIN" --guardian "$GUARDIAN"
+
+        wire "registry.guardian" \
+            "$(invoke_read "$REGISTRY" get_guardian || true)" "$GUARDIAN" \
+            invoke "$REGISTRY" set_guardian --caller "$ADMIN" --guardian "$GUARDIAN"
+
+        wire "investment_basket.guardian" \
+            "$(invoke_read "$BASKET" get_guardian || true)" "$GUARDIAN" \
+            invoke "$BASKET" set_guardian --caller "$ADMIN" --guardian "$GUARDIAN"
+    fi
+
+    # Configure attester on marketplace escrow and production escrow
+    ATTESTER="${ATTESTER:-}"
+    if [[ -n "$ATTESTER" ]]; then
+        echo "[wire] configuring independent attester ($ATTESTER)..."
+        wire "escrow.attester" \
+            "$(invoke_read "$ESCROW" get_attester || true)" "$ATTESTER" \
+            invoke "$ESCROW" set_attester --admin_caller "$ADMIN" --attester "$ATTESTER"
+
+        wire "production_escrow.attester" \
+            "$(invoke_read "$PROD_ESCROW" get_attester || true)" "$ATTESTER" \
+            invoke "$PROD_ESCROW" set_attester --admin_caller "$ADMIN" --attester "$ATTESTER"
+    fi
+
     wire "escrow.registry" \
         "$(invoke_read "$ESCROW" get_registry_contract || true)" "$REGISTRY" \
         invoke "$ESCROW" set_registry_contract --admin "$ADMIN" --registry "$REGISTRY"
@@ -468,12 +502,30 @@ check "investment_basket.get_admin"    "$(invoke_read "$BASKET" get_admin || tru
 
 GUARDIAN="${GUARDIAN:-}"
 if [[ -n "$GUARDIAN" ]]; then
-    check "escrow.get_guardian"        "$(invoke_read "$ESCROW" get_guardian || true)" "$GUARDIAN"
+    check "escrow.get_guardian"            "$(invoke_read "$ESCROW" get_guardian || true)" "$GUARDIAN"
     check "production_escrow.get_guardian" "$(invoke_read "$PROD_ESCROW" get_guardian || true)" "$GUARDIAN"
-    check "registry.get_guardian"      "$(invoke_read "$REGISTRY" get_guardian || true)" "$GUARDIAN"
+    check "registry.get_guardian"          "$(invoke_read "$REGISTRY" get_guardian || true)" "$GUARDIAN"
     check "investment_basket.get_guardian" "$(invoke_read "$BASKET" get_guardian || true)" "$GUARDIAN"
 else
-    echo "  ok   (GUARDIAN unset — skipping get_guardian readback)"
+    if [[ "$NETWORK" == "mainnet" ]]; then
+        echo "  FAIL mainnet readiness requires explicit GUARDIAN configuration (Issue #1284)" >&2
+        FAILURES=$((FAILURES + 1))
+    else
+        echo "  ok   (GUARDIAN unset — skipping get_guardian readback on testnet)"
+    fi
+fi
+
+ATTESTER="${ATTESTER:-}"
+if [[ -n "$ATTESTER" ]]; then
+    check "escrow.get_attester"            "$(invoke_read "$ESCROW" get_attester || true)" "$ATTESTER"
+    check "production_escrow.get_attester" "$(invoke_read "$PROD_ESCROW" get_attester || true)" "$ATTESTER"
+else
+    if [[ "$NETWORK" == "mainnet" ]]; then
+        echo "  FAIL mainnet readiness requires explicit ATTESTER configuration (Issue #1284)" >&2
+        FAILURES=$((FAILURES + 1))
+    else
+        echo "  ok   (ATTESTER unset — skipping get_attester readback on testnet)"
+    fi
 fi
 
 # registry.get_contract_refs returns {escrow, production, ...}; assert both links
