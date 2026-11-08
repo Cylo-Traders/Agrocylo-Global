@@ -7,8 +7,9 @@ use soroban_sdk::{
 };
 
 use crate::{
-    CampaignStatus, DisputeResolution, EscrowError, OrderStatus, ProductionEscrowContract,
-    ProductionEscrowContractClient, SplitOrderStatus, ORDER_EXPIRY_SECS,
+    CampaignStatus, DataKey, DisputeResolution, EscrowError, Order, OrderStatus,
+    ProductionEscrowContract, ProductionEscrowContractClient, SplitOrder, SplitOrderError,
+    SplitOrderResolution, SplitOrderStatus, ORDER_EXPIRY_SECS,
 };
 
 // ---------------------------------------------------------------------------
@@ -3559,4 +3560,250 @@ fn test_vote_to_resolve_non_arbitrator_rejected() {
         .unwrap_err()
         .unwrap();
     assert_eq!(err, EscrowError::ArbitratorNotFound);
+}
+
+// ---------------------------------------------------------------------------
+// Issue #1279: Bounded buyer-volume lookup, small-target floor, split orders,
+// and legacy v1 -> v2 backfill migration
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_advance_milestone_rejects_non_buyer_on_small_target_below_100() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    // Campaign target is 50 (< 100), where integer division 50 / 100 == 0.
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &50, &deadline);
+    t.client.invest(&t.investor1, &id, &50);
+    t.client.start_production(&t.farmer, &id);
+
+    let mut configs = Vec::new(&t.env);
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Planted,
+        release_bps: 1000,
+    });
+    t.client.set_milestone_configs(&t.admin, &id, &configs);
+
+    // An address with 0 confirmed volume must still be rejected with NotBuyerOrOracle.
+    let stranger = Address::generate(&t.env);
+    let err = t
+        .client
+        .try_advance_milestone(&stranger, &t.attester, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::NotBuyerOrOracle);
+
+    // Once a buyer confirms a 1-unit order, they meet the minimum floor and can advance.
+    let order_id = t.client.create_order(&t.buyer, &id, &1);
+    t.client.confirm_order(&t.buyer, &order_id);
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &t.buyer), 1);
+
+    t.client.advance_milestone(&t.buyer, &t.attester, &id);
+    assert_eq!(t.client.get_campaign(&id).current_milestone, 1);
+}
+
+#[test]
+fn test_advance_milestone_ignores_unconfirmed_and_refunded_orders() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+
+    let mut configs = Vec::new(&t.env);
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Planted,
+        release_bps: 1000,
+    });
+    t.client.set_milestone_configs(&t.admin, &id, &configs);
+
+    // 1. Pending (unconfirmed) order does not count toward buyer volume.
+    let pending_order = t.client.create_order(&t.buyer, &id, &500);
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &t.buyer), 0);
+    let err = t
+        .client
+        .try_advance_milestone(&t.buyer, &t.attester, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::NotBuyerOrOracle);
+
+    // 2. Cancelled/refunded order does not count toward buyer volume.
+    t.client.cancel_order(&t.buyer, &pending_order);
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &t.buyer), 0);
+
+    // 3. Confirmed order counts exactly once; repeated confirmation is rejected.
+    let confirmed_order = t.client.create_order(&t.buyer, &id, &200);
+    t.client.confirm_order(&t.buyer, &confirmed_order);
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &t.buyer), 200);
+
+    let repeat_err = t
+        .client
+        .try_confirm_order(&t.buyer, &confirmed_order)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(repeat_err, EscrowError::OrderNotPending);
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &t.buyer), 200);
+
+    t.client.advance_milestone(&t.buyer, &t.attester, &id);
+    assert_eq!(t.client.get_campaign(&id).current_milestone, 1);
+}
+
+#[test]
+fn test_split_order_confirmed_shares_credit_only_confirming_co_buyers() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+
+    let mut configs = Vec::new(&t.env);
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Planted,
+        release_bps: 1000,
+    });
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Growing,
+        release_bps: 1000,
+    });
+    t.client.set_milestone_configs(&t.admin, &id, &configs);
+
+    let cb1 = Address::generate(&t.env);
+    let cb2 = Address::generate(&t.env);
+    let cb3 = Address::generate(&t.env);
+    mint_to(&t, &cb1, 10_000);
+    mint_to(&t, &cb2, 10_000);
+    mint_to(&t, &cb3, 10_000);
+
+    let mut co_buyers = Vec::new(&t.env);
+    co_buyers.push_back(cb1.clone());
+    co_buyers.push_back(cb2.clone());
+    co_buyers.push_back(cb3.clone());
+
+    let mut shares = Vec::new(&t.env);
+    shares.push_back(400i128);
+    shares.push_back(300i128);
+    shares.push_back(300i128);
+
+    let split_id = t
+        .client
+        .create_split_order(&cb1, &id, &co_buyers, &shares);
+    t.client.fund_split_order(&cb1, &split_id);
+    t.client.fund_split_order(&cb2, &split_id);
+    t.client.fund_split_order(&cb3, &split_id);
+
+    // cb1 confirms 400/1000 (not yet majority): split order is still Active, so volume is 0.
+    t.client.confirm_split_receipt(&cb1, &split_id);
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &cb1), 0);
+
+    // cb2 confirms 300/1000 -> 700/1000 > 50% majority reached -> SplitOrderStatus::Confirmed.
+    // cb1 (400) and cb2 (300) confirmed their shares; cb3 (0) did not confirm.
+    t.client.confirm_split_receipt(&cb2, &split_id);
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &cb1), 400);
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &cb2), 300);
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &cb3), 0);
+
+    // cb1 and cb2 can advance milestones; cb3 (unconfirmed share) is rejected.
+    let err = t
+        .client
+        .try_advance_milestone(&cb3, &t.attester, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::NotBuyerOrOracle);
+
+    t.client.advance_milestone(&cb1, &t.attester, &id);
+    t.client.advance_milestone(&cb2, &t.attester, &id);
+    assert_eq!(t.client.get_campaign(&id).current_milestone, 2);
+}
+
+#[test]
+fn test_migrate_backfills_legacy_confirmed_orders_and_split_orders_idempotently() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+
+    let legacy_buyer = Address::generate(&t.env);
+    let legacy_cb1 = Address::generate(&t.env);
+    let legacy_cb2 = Address::generate(&t.env);
+
+    // Simulate pre-v2 legacy storage state where Order(1) and SplitOrder(1) were
+    // confirmed before DataKey::BuyerConfirmedVolume existed.
+    let contract_addr = t.client.address.clone();
+    t.env.as_contract(&contract_addr, || {
+        t.env
+            .storage()
+            .instance()
+            .set(&DataKey::SchemaVersion, &1u32);
+        t.env.storage().instance().set(&DataKey::OrderCount, &1u64);
+        t.env.storage().persistent().set(
+            &DataKey::Order(1),
+            &Order {
+                id: 1,
+                campaign_id: id,
+                buyer: legacy_buyer.clone(),
+                amount: 250,
+                fee: 0,
+                created_at: 1,
+                status: OrderStatus::Confirmed,
+            },
+        );
+
+        let mut co_buyers = Vec::new(&t.env);
+        co_buyers.push_back(legacy_cb1.clone());
+        co_buyers.push_back(legacy_cb2.clone());
+        let mut shares = soroban_sdk::Map::new(&t.env);
+        shares.set(legacy_cb1.clone(), 150i128);
+        shares.set(legacy_cb2.clone(), 150i128);
+        let mut funded = soroban_sdk::Map::new(&t.env);
+        funded.set(legacy_cb1.clone(), true);
+        funded.set(legacy_cb2.clone(), true);
+        let mut confirmed = soroban_sdk::Map::new(&t.env);
+        confirmed.set(legacy_cb1.clone(), true);
+
+        t.env
+            .storage()
+            .instance()
+            .set(&DataKey::SplitOrderCount, &1u64);
+        t.env.storage().persistent().set(
+            &DataKey::SplitOrder(1),
+            &SplitOrder {
+                campaign_id: id,
+                total_amount: 300,
+                fee: 0,
+                co_buyers,
+                shares,
+                funded,
+                confirmed,
+                funded_count: 2,
+                confirmed_count: 1,
+                confirmed_value: 150,
+                created_at: 1,
+                status: SplitOrderStatus::Confirmed,
+            },
+        );
+    });
+
+    assert_eq!(t.client.get_schema_version(), 1);
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &legacy_buyer), 0);
+
+    // Run migrate: backfills both legacy records and advances SchemaVersion to 2.
+    let v = t.client.migrate(&t.admin);
+    assert_eq!(v, 2);
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &legacy_buyer), 250);
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &legacy_cb1), 150);
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &legacy_cb2), 0);
+
+    // Re-running migrate is idempotent and never double-counts.
+    let v2 = t.client.migrate(&t.admin);
+    assert_eq!(v2, 2);
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &legacy_buyer), 250);
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &legacy_cb1), 150);
 }
