@@ -399,10 +399,20 @@ if [[ "$VERIFY_ONLY" == "false" ]]; then
             echo "  (set_path_payment_router rejected — likely already governance-gated)"
     fi
 
-    if (( FEE_RATE_BPS > 0 )); then
-        wire "escrow.fee_config" \
-            "$(invoke_read "$ESCROW" get_fee_rate_bps || true)" "$FEE_RATE_BPS" \
-            invoke "$ESCROW" set_fee_config --admin_caller "$ADMIN" --fee_collector "$FEE_COLLECTOR" --fee_rate_bps "$FEE_RATE_BPS"
+    # Issue #1289: always apply configured fee rate (including explicit 0)
+    # and compare both fee rate and collector to detect collector-only changes.
+    # A governed rerun that cannot apply the requested configuration fails clearly
+    # rather than reporting the new desired configuration as active.
+    CURRENT_FEE_RATE="$(invoke_read "$ESCROW" get_fee_rate_bps || true)"
+    CURRENT_FEE_COLLECTOR="$(invoke_read "$ESCROW" get_fee_collector || true)"
+    if [[ "${CURRENT_FEE_RATE}:${CURRENT_FEE_COLLECTOR}" == "${FEE_RATE_BPS}:${FEE_COLLECTOR}" ]]; then
+        echo "  = escrow.fee_config already rate=$FEE_RATE_BPS collector=$FEE_COLLECTOR"
+    else
+        echo "  + escrow.fee_config -> rate=$FEE_RATE_BPS collector=$FEE_COLLECTOR"
+        if ! invoke "$ESCROW" set_fee_config --admin_caller "$ADMIN" --fee_collector "$FEE_COLLECTOR" --fee_rate_bps "$FEE_RATE_BPS"; then
+            echo "Error: failed to apply escrow.fee_config (rate: $FEE_RATE_BPS bps, collector: $FEE_COLLECTOR). A governed contract cannot have fee configuration changed via raw admin; submit an authorized governance proposal." >&2
+            exit 1
+        fi
     fi
 
     # production_escrow has no get_registry_contract getter; guard on the
@@ -432,7 +442,7 @@ if [[ "$VERIFY_ONLY" == "false" ]]; then
         "$(invoke_read "$BASKET" get_governance_contract || true)" "$GOVERNANCE" \
         invoke "$BASKET" set_governance_contract --caller "$ADMIN" --governance "$GOVERNANCE"
 
-    m_set ".wiring = {\"escrow.registry\":\"$REGISTRY\",\"escrow.governance\":\"$GOVERNANCE\",\"production_escrow.registry\":\"$REGISTRY\",\"production_escrow.governance\":\"$GOVERNANCE\",\"registry.governance\":\"$GOVERNANCE\",\"investment_basket.governance\":\"$GOVERNANCE\"${PATH_PAYMENT_ROUTER:+,\"escrow.path_payment_router\":\"$PATH_PAYMENT_ROUTER\"}}"
+    m_set ".wiring = {\"escrow.registry\":\"$REGISTRY\",\"escrow.governance\":\"$GOVERNANCE\",\"production_escrow.registry\":\"$REGISTRY\",\"production_escrow.governance\":\"$GOVERNANCE\",\"registry.governance\":\"$GOVERNANCE\",\"investment_basket.governance\":\"$GOVERNANCE\",\"escrow.fee_rate_bps\":$FEE_RATE_BPS,\"escrow.fee_collector\":\"$FEE_COLLECTOR\"${PATH_PAYMENT_ROUTER:+,\"escrow.path_payment_router\":\"$PATH_PAYMENT_ROUTER\"}}"
     echo ""
 fi
 
@@ -449,6 +459,13 @@ check() {  # check <label> <actual> <expected>
         FAILURES=$((FAILURES + 1))
     fi
 }
+
+EXPECTED_FEE_RATE_BPS="${FEE_RATE_BPS:-$(m_get '.wiring."escrow.fee_rate_bps"')}"
+check "escrow.get_fee_rate_bps"        "$(invoke_read "$ESCROW" get_fee_rate_bps || true)"    "$EXPECTED_FEE_RATE_BPS"
+EXPECTED_FEE_COLLECTOR="${FEE_COLLECTOR:-$(m_get '.wiring."escrow.fee_collector"')}"
+if [[ -n "$EXPECTED_FEE_COLLECTOR" ]]; then
+    check "escrow.get_fee_collector"   "$(invoke_read "$ESCROW" get_fee_collector || true)"   "$EXPECTED_FEE_COLLECTOR"
+fi
 
 check "escrow.registry_contract"      "$(invoke_read "$ESCROW" get_registry_contract || true)"    "$REGISTRY"
 check "escrow.governance_contract"     "$(invoke_read "$ESCROW" get_governance_contract || true)"  "$GOVERNANCE"
