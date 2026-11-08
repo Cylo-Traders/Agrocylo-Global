@@ -1806,7 +1806,9 @@ impl ProductionEscrowContract {
                 return Err(EscrowError::NotInvestor);
             }
         }
-        if campaign.status == CampaignStatus::Disputed || campaign.status == CampaignStatus::Settled
+        if campaign.status == CampaignStatus::Disputed
+            || campaign.status == CampaignStatus::Settled
+            || campaign.status == CampaignStatus::Failed
         {
             return Err(EscrowError::CampaignAlreadyDisputed);
         }
