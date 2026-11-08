@@ -171,6 +171,14 @@ FEE_COLLECTOR="${FEE_COLLECTOR:-}"
 SUPPORTED_TOKENS="${SUPPORTED_TOKENS:-}"
 FEE_RATE_BPS="${FEE_RATE_BPS:-0}"
 PATH_PAYMENT_ROUTER="${PATH_PAYMENT_ROUTER:-}"
+if [[ "$NETWORK" == "mainnet" ]]; then
+    # Issue #1286: Mainnet Ramp Stage S1 Canary defaults (500 USDC = 5_000_000_000 stroops, 3 concurrent campaigns)
+    CAMPAIGN_VALUE_CAP="${CAMPAIGN_VALUE_CAP:-5000000000}"
+    MAX_ACTIVE_CAMPAIGNS="${MAX_ACTIVE_CAMPAIGNS:-3}"
+else
+    CAMPAIGN_VALUE_CAP="${CAMPAIGN_VALUE_CAP:-0}"
+    MAX_ACTIVE_CAMPAIGNS="${MAX_ACTIVE_CAMPAIGNS:-0}"
+fi
 GOV_VOTING_PERIOD_SECS="${GOV_VOTING_PERIOD_SECS:-259200}"
 GOV_TIMELOCK_SECS="${GOV_TIMELOCK_SECS:-172800}"
 GOV_UPGRADE_TIMELOCK_SECS="${GOV_UPGRADE_TIMELOCK_SECS:-604800}"
@@ -415,6 +423,22 @@ if [[ "$VERIFY_ONLY" == "false" ]]; then
         echo "  = production_escrow.registry already $REGISTRY (per manifest)"
     fi
 
+    # Issue #1286: configure per-token campaign value caps and active-campaign concurrency limit before governance locks setters.
+    if (( CAMPAIGN_VALUE_CAP > 0 )); then
+        IFS=',' read -ra _CAP_TOKS <<< "$SUPPORTED_TOKENS"
+        for _tok in "${_CAP_TOKS[@]}"; do
+            [[ -n "$_tok" ]] || continue
+            wire "production_escrow.token_campaign_cap($_tok)" \
+                "$(invoke_read "$PROD_ESCROW" get_token_campaign_cap --token "$_tok" || true)" "$CAMPAIGN_VALUE_CAP" \
+                invoke "$PROD_ESCROW" set_token_campaign_cap --caller "$ADMIN" --token "$_tok" --max_target_amount "$CAMPAIGN_VALUE_CAP"
+        done
+    fi
+    if (( MAX_ACTIVE_CAMPAIGNS > 0 )); then
+        wire "production_escrow.max_active_campaigns" \
+            "$(invoke_read "$PROD_ESCROW" get_max_active_campaigns || true)" "$MAX_ACTIVE_CAMPAIGNS" \
+            invoke "$PROD_ESCROW" set_max_active_campaigns --caller "$ADMIN" --max_active "$MAX_ACTIVE_CAMPAIGNS"
+    fi
+
     echo "[wire] governance wiring (last — locks the other setters)..."
     wire "escrow.governance" \
         "$(invoke_read "$ESCROW" get_governance_contract || true)" "$GOVERNANCE" \
@@ -484,6 +508,20 @@ check "registry.production_ref" "$(jq -r '.production_contract // .production //
 if [[ -n "$PATH_PAYMENT_ROUTER" ]]; then
     # no getter for the router; assert it's recorded in the manifest at least
     check "manifest.escrow.path_payment_router" "$(m_get '.wiring."escrow.path_payment_router"')" "$PATH_PAYMENT_ROUTER"
+fi
+
+# Issue #1286: verify configured on-chain campaign value caps and active-campaign concurrency limit
+if (( CAMPAIGN_VALUE_CAP > 0 )); then
+    IFS=',' read -ra _VERIFY_TOKS <<< "$SUPPORTED_TOKENS"
+    for _tok in "${_VERIFY_TOKS[@]}"; do
+        [[ -n "$_tok" ]] || continue
+        check "production_escrow.token_campaign_cap($_tok)" \
+            "$(invoke_read "$PROD_ESCROW" get_token_campaign_cap --token "$_tok" || true)" "$CAMPAIGN_VALUE_CAP"
+    done
+fi
+if (( MAX_ACTIVE_CAMPAIGNS > 0 )); then
+    check "production_escrow.max_active_campaigns" \
+        "$(invoke_read "$PROD_ESCROW" get_max_active_campaigns || true)" "$MAX_ACTIVE_CAMPAIGNS"
 fi
 
 echo ""

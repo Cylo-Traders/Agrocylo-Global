@@ -338,12 +338,20 @@ pub enum DataKey {
     Guardian,
     /// Whether the contract is currently paused (Issue #757).
     Paused,
+    /// Governance-controlled per-token maximum campaign target amount in token base units (Issue #1286).
+    TokenCampaignCap(Address),
+    /// Governance-controlled maximum number of active (non-terminal) campaigns (Issue #1286).
+    MaxActiveCampaigns,
+    /// Current number of active (non-terminal) campaigns (Issue #1286).
+    ActiveCampaignCount,
+    /// Per-campaign idempotency flag ensuring terminal transitions release active capacity at most once (Issue #1286).
+    CampaignCapacityReleased(u64),
 }
 
-/// Current on-chain storage layout version (Issue #757). Bump when a stored
+/// Current on-chain storage layout version (Issue #757 / #1286). Bump when a stored
 /// `#[contracttype]` gains/loses/reshapes a field, and extend `migrate` to
 /// translate existing entries — see `docs/CONTRACT_UPGRADES.md`.
-const CURRENT_SCHEMA_VERSION: u32 = 1;
+const CURRENT_SCHEMA_VERSION: u32 = 2;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -571,6 +579,37 @@ impl ProductionEscrowContract {
             .get(&DataKey::SchemaVersion)
             .unwrap_or(0);
         if stored < CURRENT_SCHEMA_VERSION {
+            // Issue #1286: backfill ActiveCampaignCount and CampaignCapacityReleased
+            // across existing campaigns when upgrading from schema v0/v1 -> v2.
+            let campaign_count: u64 = env
+                .storage()
+                .instance()
+                .get(&DataKey::CampaignCount)
+                .unwrap_or(0);
+            let mut active_count: u32 = 0;
+            for cid in 1..=campaign_count {
+                if let Some(c) = env
+                    .storage()
+                    .persistent()
+                    .get::<_, Campaign>(&DataKey::Campaign(cid))
+                {
+                    if matches!(c.status, CampaignStatus::Settled | CampaignStatus::Failed) {
+                        env.storage()
+                            .persistent()
+                            .set(&DataKey::CampaignCapacityReleased(cid), &true);
+                        env.storage().persistent().extend_ttl(
+                            &DataKey::CampaignCapacityReleased(cid),
+                            TTL_THRESHOLD,
+                            TTL_EXTEND,
+                        );
+                    } else {
+                        active_count = active_count.saturating_add(1);
+                    }
+                }
+            }
+            env.storage()
+                .instance()
+                .set(&DataKey::ActiveCampaignCount, &active_count);
             env.storage()
                 .instance()
                 .set(&DataKey::SchemaVersion, &CURRENT_SCHEMA_VERSION);
@@ -697,6 +736,95 @@ impl ProductionEscrowContract {
         Ok(())
     }
 
+    /// Issue #1286: Set (or clear with 0) the per-token maximum campaign target
+    /// amount in token base units (e.g., 7-decimal stroops for Stellar USDC).
+    /// Governance-gated once governance is configured; admin-only before.
+    /// Lowering this cap affects only future `create_campaign` calls and never
+    /// alters or confiscates existing campaign balances.
+    pub fn set_token_campaign_cap(
+        env: Env,
+        caller: Address,
+        token: Address,
+        max_target_amount: i128,
+    ) -> Result<(), EscrowError> {
+        caller.require_auth();
+        require_governed_caller(&env, &caller)?;
+        if max_target_amount < 0 {
+            return Err(EscrowError::InvalidAmount);
+        }
+        let supported: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::SupportedTokens)
+            .ok_or(EscrowError::ContractNotInitialized)?;
+        if !supported.contains(&token) {
+            return Err(EscrowError::UnsupportedToken);
+        }
+        bump_instance(&env);
+        if max_target_amount == 0 {
+            env.storage()
+                .instance()
+                .remove(&DataKey::TokenCampaignCap(token.clone()));
+        } else {
+            env.storage()
+                .instance()
+                .set(&DataKey::TokenCampaignCap(token.clone()), &max_target_amount);
+        }
+        env.events().publish(
+            (t_campaign(), symbol_short!("tok_cap")),
+            (token, max_target_amount),
+        );
+        Ok(())
+    }
+
+    /// Issue #1286: Set (or clear with 0) the maximum number of concurrent
+    /// active (non-terminal) campaigns. Governance-gated once governance is
+    /// configured; admin-only before.
+    pub fn set_max_active_campaigns(
+        env: Env,
+        caller: Address,
+        max_active: u32,
+    ) -> Result<(), EscrowError> {
+        caller.require_auth();
+        require_governed_caller(&env, &caller)?;
+        bump_instance(&env);
+        if max_active == 0 {
+            env.storage()
+                .instance()
+                .remove(&DataKey::MaxActiveCampaigns);
+        } else {
+            env.storage()
+                .instance()
+                .set(&DataKey::MaxActiveCampaigns, &max_active);
+        }
+        env.events().publish(
+            (t_campaign(), symbol_short!("max_act")),
+            (max_active,),
+        );
+        Ok(())
+    }
+
+    pub fn get_token_campaign_cap(env: Env, token: Address) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::TokenCampaignCap(token))
+            .unwrap_or(0)
+    }
+
+    pub fn get_max_active_campaigns(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::MaxActiveCampaigns)
+            .unwrap_or(0)
+    }
+
+    pub fn get_active_campaign_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::ActiveCampaignCount)
+            .unwrap_or(0)
+    }
+
     // -----------------------------------------------------------------------
     // Campaign creation
     // -----------------------------------------------------------------------
@@ -728,6 +856,37 @@ impl ProductionEscrowContract {
         if !supported.contains(&token) {
             return Err(EscrowError::UnsupportedToken);
         }
+
+        // Issue #1286: enforce per-token campaign target cap when configured (> 0).
+        let token_cap: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TokenCampaignCap(token.clone()))
+            .unwrap_or(0);
+        if token_cap > 0 && target_amount > token_cap {
+            return Err(EscrowError::CampaignOverfunded);
+        }
+
+        // Issue #1286: enforce active-campaign concurrency limit when configured (> 0).
+        let max_active: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MaxActiveCampaigns)
+            .unwrap_or(0);
+        let active_count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ActiveCampaignCount)
+            .unwrap_or(0);
+        if max_active > 0 && active_count >= max_active {
+            return Err(EscrowError::CampaignOverfunded);
+        }
+        let next_active = active_count
+            .checked_add(1)
+            .ok_or(EscrowError::InvalidAmount)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::ActiveCampaignCount, &next_active);
 
         let mut id: u64 = env
             .storage()
@@ -1543,6 +1702,7 @@ impl ProductionEscrowContract {
         }
         campaign.status = CampaignStatus::Settled;
         save_campaign(&env, &campaign);
+        release_campaign_capacity_once(&env, campaign_id);
 
         env.events().publish(
             (t_campaign(), symbol_short!("settled")),
@@ -1629,6 +1789,7 @@ impl ProductionEscrowContract {
         }
         campaign.status = CampaignStatus::Failed;
         save_campaign(&env, &campaign);
+        release_campaign_capacity_once(&env, campaign_id);
 
         env.events()
             .publish((t_campaign(), symbol_short!("failed")), (campaign_id,));
@@ -1671,6 +1832,7 @@ impl ProductionEscrowContract {
 
         campaign.status = CampaignStatus::Failed;
         save_campaign(&env, &campaign);
+        release_campaign_capacity_once(&env, campaign_id);
         env.events()
             .publish((t_campaign(), symbol_short!("failed")), (campaign_id,));
         Ok(())
@@ -1806,7 +1968,9 @@ impl ProductionEscrowContract {
                 return Err(EscrowError::NotInvestor);
             }
         }
-        if campaign.status == CampaignStatus::Disputed || campaign.status == CampaignStatus::Settled
+        if campaign.status == CampaignStatus::Disputed
+            || campaign.status == CampaignStatus::Settled
+            || campaign.status == CampaignStatus::Failed
         {
             return Err(EscrowError::CampaignAlreadyDisputed);
         }
@@ -2359,6 +2523,35 @@ fn save_campaign(env: &Env, c: &Campaign) {
         .extend_ttl(&DataKey::Campaign(c.id), TTL_THRESHOLD, TTL_EXTEND);
 }
 
+/// Issue #1286: Idempotently releases one slot from `ActiveCampaignCount`
+/// when a campaign reaches a terminal state (`Settled` or `Failed`).
+fn release_campaign_capacity_once(env: &Env, campaign_id: u64) {
+    let released_key = DataKey::CampaignCapacityReleased(campaign_id);
+    if env
+        .storage()
+        .persistent()
+        .get::<_, bool>(&released_key)
+        .unwrap_or(false)
+    {
+        return;
+    }
+    env.storage().persistent().set(&released_key, &true);
+    env.storage()
+        .persistent()
+        .extend_ttl(&released_key, TTL_THRESHOLD, TTL_EXTEND);
+
+    let active: u32 = env
+        .storage()
+        .instance()
+        .get(&DataKey::ActiveCampaignCount)
+        .unwrap_or(0);
+    if active > 0 {
+        env.storage()
+            .instance()
+            .set(&DataKey::ActiveCampaignCount, &(active - 1));
+    }
+}
+
 fn load_split_order(env: &Env, order_id: u64) -> Result<SplitOrder, SplitOrderError> {
     env.storage()
         .persistent()
@@ -2440,6 +2633,7 @@ fn resolve_dispute_internal(
         DisputeResolution::FullPayoutToInvestors => {
             campaign.status = CampaignStatus::Settled;
             save_campaign(env, &campaign);
+            release_campaign_capacity_once(env, campaign_id);
             env.events().publish(
                 (t_campaign(), symbol_short!("settled")),
                 (campaign_id, campaign.total_revenue),
@@ -2448,6 +2642,7 @@ fn resolve_dispute_internal(
         DisputeResolution::RefundInvestors => {
             campaign.status = CampaignStatus::Failed;
             save_campaign(env, &campaign);
+            release_campaign_capacity_once(env, campaign_id);
             env.events()
                 .publish((t_campaign(), symbol_short!("failed")), (campaign_id,));
         }
@@ -2473,6 +2668,7 @@ fn resolve_dispute_internal(
             }
             campaign.status = CampaignStatus::Settled;
             save_campaign(env, &campaign);
+            release_campaign_capacity_once(env, campaign_id);
             env.events().publish(
                 (t_campaign(), symbol_short!("settled")),
                 (campaign_id, campaign.total_revenue),
