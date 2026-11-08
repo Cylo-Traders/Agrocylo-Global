@@ -3560,3 +3560,136 @@ fn test_vote_to_resolve_non_arbitrator_rejected() {
         .unwrap();
     assert_eq!(err, EscrowError::ArbitratorNotFound);
 }
+
+
+// ---------------------------------------------------------------------------
+// Issue #1273: Refund exit for partially funded split orders
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_split_order_partial_funding_cancel_by_funded_participant() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let cid = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &cid, &10_000);
+    t.client.start_production(&t.farmer, &cid);
+    t.client.mark_harvest(&t.farmer, &t.attester, &cid);
+
+    let sac = soroban_sdk::token::StellarAssetClient::new(&t.env, &t.token_id);
+    let buyer_a = Address::generate(&t.env);
+    let buyer_b = Address::generate(&t.env);
+    sac.mint(&buyer_a, &1_000);
+    sac.mint(&buyer_b, &1_000);
+
+    let mut co_buyers = Vec::new(&t.env);
+    co_buyers.push_back(buyer_a.clone());
+    co_buyers.push_back(buyer_b.clone());
+    let mut shares = Vec::new(&t.env);
+    shares.push_back(500);
+    shares.push_back(500);
+
+    let oid = t
+        .client
+        .create_split_order(&buyer_a, &cid, &co_buyers, &shares);
+
+    // Only buyer_a funds 500; buyer_b never funds
+    t.client.fund_split_order(&buyer_a, &oid);
+    assert_eq!(TokenClient::new(&t.env, &t.token_id).balance(&buyer_a), 500);
+    assert_eq!(TokenClient::new(&t.env, &t.token_id).balance(&buyer_b), 1_000);
+
+    // Unfunded buyer_b cannot cancel
+    let err_unfunded = t
+        .client
+        .try_cancel_split_order(&buyer_b, &oid)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err_unfunded, SplitOrderError::NotCoBuyer);
+
+    // Funded buyer_a cancels without requiring buyer_b's auth and recovers 500
+    let refunded = t.client.cancel_split_order(&buyer_a, &oid);
+    assert_eq!(refunded, 500);
+    assert_eq!(TokenClient::new(&t.env, &t.token_id).balance(&buyer_a), 1_000);
+    assert_eq!(TokenClient::new(&t.env, &t.token_id).balance(&buyer_b), 1_000);
+    assert_eq!(
+        t.client.get_split_order(&oid).status,
+        SplitOrderStatus::Refunded
+    );
+
+    // Duplicate cancel or late funding by buyer_b is rejected
+    let err_dup = t
+        .client
+        .try_cancel_split_order(&buyer_a, &oid)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err_dup, SplitOrderError::SplitOrderAlreadyFunded);
+
+    let err_late_fund = t
+        .client
+        .try_fund_split_order(&buyer_b, &oid)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err_late_fund, SplitOrderError::SplitOrderAlreadyFunded);
+}
+
+#[test]
+fn test_split_order_partial_funding_expiry_and_pause_enforcement() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let cid = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &cid, &10_000);
+    t.client.start_production(&t.farmer, &cid);
+    t.client.mark_harvest(&t.farmer, &t.attester, &cid);
+
+    let sac = soroban_sdk::token::StellarAssetClient::new(&t.env, &t.token_id);
+    let buyer_a = Address::generate(&t.env);
+    let buyer_b = Address::generate(&t.env);
+    sac.mint(&buyer_a, &1_000);
+    sac.mint(&buyer_b, &1_000);
+
+    let mut co_buyers = Vec::new(&t.env);
+    co_buyers.push_back(buyer_a.clone());
+    co_buyers.push_back(buyer_b.clone());
+    let mut shares = Vec::new(&t.env);
+    shares.push_back(500);
+    shares.push_back(500);
+
+    let oid = t
+        .client
+        .create_split_order(&buyer_a, &cid, &co_buyers, &shares);
+    t.client.fund_split_order(&buyer_a, &oid);
+
+    // Before ORDER_EXPIRY_SECS and while campaign is active, refund_expired_split_order is rejected
+    let err_early = t
+        .client
+        .try_refund_expired_split_order(&oid)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err_early, SplitOrderError::SplitOrderFundingNotExpired);
+
+    // Advance past ORDER_EXPIRY_SECS
+    advance_ledger(&t.env, ORDER_EXPIRY_SECS + 1);
+
+    // Pause blocks both cancel_split_order and refund_expired_split_order
+    let guardian = Address::generate(&t.env);
+    t.client.set_guardian(&t.admin, &guardian);
+    t.client.pause(&guardian);
+    assert_eq!(
+        t.client.try_refund_expired_split_order(&oid).unwrap_err().unwrap(),
+        SplitOrderError::ContractPaused
+    );
+    t.client.unpause(&t.admin);
+
+    // After unpausing, refund_expired_split_order refunds only buyer_a (500) and transitions to Refunded
+    let refunded = t.client.refund_expired_split_order(&oid);
+    assert_eq!(refunded, 500);
+    assert_eq!(TokenClient::new(&t.env, &t.token_id).balance(&buyer_a), 1_000);
+    assert_eq!(TokenClient::new(&t.env, &t.token_id).balance(&buyer_b), 1_000);
+    assert_eq!(
+        t.client.get_split_order(&oid).status,
+        SplitOrderStatus::Refunded
+    );
+}
