@@ -1,9 +1,13 @@
 # Agro-production contracts
 
-The canonical production escrow contract is
-[`production_escrow`](../../contracts/production_escrow). It is the only production escrow
-crate in the workspace and is the contract targeted by
-`NEXT_PUBLIC_PRODUCTION_CONTRACT_ID` and `PRODUCTION_ESCROW_CONTRACT_ID`.
+> **Last verified against commit:** `25d942522b76e4252752249142326a757d3d78d6`
+
+The canonical crowdfunded campaign escrow contract is
+[`production_escrow`](../../contracts/production_escrow) (Cargo package `production-escrow-v2`,
+WASM output `production_escrow_v2.wasm`), targeted by
+`NEXT_PUBLIC_PRODUCTION_CONTRACT_ID` and `PRODUCTION_ESCROW_CONTRACT_ID`. Direct
+marketplace order escrow is implemented in [`contracts/escrow`](../../contracts/escrow)
+(targeted by `NEXT_PUBLIC_CONTRACT_ID` / `NEXT_PUBLIC_ESCROW_CONTRACT_ID`).
 
 It manages campaign funding, investor positions, production lifecycle events,
 orders, settlement, refunds, and disputes. The `registry` crate stores farmer

@@ -1,160 +1,93 @@
-# Persistent Storage TTL Extension Policy (Issue #456)
+# Persistent & Instance Storage TTL Extension Policy (Issue #456 / Issue #1300)
+
+> **Last verified against commit:** `25d942522b76e4252752249142326a757d3d78d6`
 
 ## Overview
 
-All data stored in Soroban persistent contract storage must have their Time-To-Live (TTL) explicitly managed to prevent loss. This document specifies when and how TTL is extended for each data key across the production escrow contract.
+All data stored in Soroban persistent and instance contract storage in `contracts/production_escrow/src/lib.rs` (`production-escrow-v2`) has its Time-To-Live (TTL) explicitly managed. This document specifies the exact storage keys and extension call sites implemented in `lib.rs`.
 
-## TTL Configuration Constants
-
-All TTL extension operations use the following named constants (defined in `lib.rs`):
+## TTL Configuration Constants (`contracts/production_escrow/src/lib.rs`)
 
 ```rust
-const TTL_THRESHOLD: u32 = 1_000;   // Extend when TTL falls below 1,000 ledgers
-const TTL_EXTEND: u32 = 100_000;    // Extend TTL by 100,000 ledgers on each operation
+const TTL_THRESHOLD: u32 = 1_000;          // Persistent storage threshold (ledgers)
+const TTL_EXTEND: u32 = 100_000;           // Persistent storage extension (ledgers)
+const INSTANCE_TTL_THRESHOLD: u32 = 1_000; // Instance storage threshold (ledgers)
+const INSTANCE_TTL_EXTEND: u32 = 100_000;  // Instance storage extension (ledgers)
 ```
 
-These constants ensure:
-- TTL does not expire during normal contract operations.
-- Extension overhead is minimized (each extension adds ~100,000 ledgers of validity).
-- Data survives infrequent access patterns (if unused for 1 million ledgers, data is still available).
-
-## Data Key TTL Policies
-
-### Campaign Records
-
-**Key**: `DataKey::Campaign(campaign_id)`
-**Storage Type**: Persistent
-**Owner**: Farmer (creates), Admin (reads/modifies)
-**Lifetime**: Campaign + 2 years (disputes may be resolved long after completion)
-
-| Trigger | TTL Extension Call | Reason |
-|---------|-------------------|--------|
-| Creation (`create_campaign`) | ✅ Extended immediately after set | Campaign must survive investor interest phase |
-| Status transition (funded, production, harvested, settled) | ✅ Extended via `save_campaign()` | Investors read status before claiming |
-| Dispute resolution | ✅ Extended in `resolve_dispute()` | Final state must persist for audit |
-
-**Implementation**: `save_campaign()` helper handles all Campaign writes with automatic TTL extension.
+Instance storage TTL is extended via `bump_instance(&env)` on state-mutating entry points and can also be extended permissionlessly during quiet periods via `bump_instance_ttl(env)`.
 
 ---
 
-### Campaign Contributions
+## Implemented Persistent Storage Key TTL Policies
 
-**Key**: `DataKey::Contributions(campaign_id)`
-**Storage Type**: Persistent
-**Owner**: Protocol (stores investor → amount map)
-**Lifetime**: Campaign + 3 months (for refund audits after settlement)
+### 1. Campaign Records
 
-| Trigger | TTL Extension Call | Reason |
-|---------|-------------------|--------|
-| Creation (first investment) | ✅ Extended on first `invest()` | Must survive entire funding phase |
-| Investment added | ✅ Extended in `invest()` | Each new investor access needs refresh |
-| Claim/Refund read | ⚠️ **Currently NOT extended** | **Issue**: Should extend on each claim/refund for access verification |
+- **Key**: `DataKey::Campaign(campaign_id)`
+- **Storage Type**: Persistent
+- **Helper**: `save_campaign(env, &campaign)` sets `DataKey::Campaign(c.id)` and immediately calls `extend_ttl(&DataKey::Campaign(c.id), TTL_THRESHOLD, TTL_EXTEND)`.
+- **Call Sites**: `create_campaign`, `invest`, `start_production`, `mark_harvest`, `advance_milestone`, `confirm_split_receipt`, `resolve_split_dispute`, `confirm_order`, `settle`, `finalize_failed`, `mark_campaign_failed`, `open_dispute`, `resolve_dispute_internal`.
 
-**Implementation**: Should extend in `claim_returns()` and `refund()` before reading contributions.
+### 2. Per-Investor Contributions (Indexed O(1) Keys)
 
----
+- **Key**: `DataKey::Contribution(campaign_id, investor)` *(replaces the legacy `DataKey::Contributions(campaign_id)` map)*
+- **Storage Type**: Persistent
+- **Implemented Extension Call Sites**:
+  - `invest()`: extended after writing updated investor contribution.
+  - `claim_returns()`: **extended on read** before computing payout (`lib.rs:1678`).
+  - `refund()`: **extended on read** before computing refund (`lib.rs:1702`).
+  - `batch_refund_investors()`: **extended on read** for each refunded investor (`lib.rs:1891`).
+  - `transfer_investment()`: extended on `from` (when non-zero remainder remains) and on `to` (`lib.rs:2044, 2055`).
 
-### Investor Claims (Proof of Payout)
+### 3. Investor Claim / Refund Flags
 
-**Key**: `DataKey::Claimed(campaign_id, investor)`
-**Storage Type**: Persistent
-**Owner**: Protocol (double-claim prevention flag)
-**Lifetime**: Campaign + 6 months (for dispute audits)
+- **Key**: `DataKey::Claimed(campaign_id, investor)`
+- **Storage Type**: Persistent
+- **Implemented Extension Call Sites**:
+  - `claim_returns()`: extended immediately after setting `Claimed` to `true`.
+  - `refund()`: extended immediately after setting `Claimed` to `true`.
+  - `batch_refund_investors()`: extended for each investor processed in the batch.
+  - `transfer_investment()`: when transferring to an address that previously claimed, removes the stale `Claimed` flag on `to`.
 
-| Trigger | TTL Extension Call | Reason |
-|---------|-------------------|--------|
-| First claim (`claim_returns`) | ✅ Extended on set | Prevents double-claims in disputes |
-| First refund (`refund`) | ✅ Extended on set | Prevents double-refunds in disputes |
-| Batch refund | ✅ Extended in `batch_refund_investors()` | Batch operations must protect all claims |
+### 4. Ordinary Order Records
 
-**Implementation**: `set(&claim_key, &true)` is followed by implicit TTL extension in all payout paths.
+- **Key**: `DataKey::Order(order_id)`
+- **Storage Type**: Persistent
+- **Implemented Extension Call Sites**:
+  - `create_order()`: extended immediately after storing new `OrderStatus::Pending` record.
+  - `cancel_order()`: extended after transitioning to `OrderStatus::Refunded`.
+  - `confirm_order()`: extended after transitioning to `OrderStatus::Confirmed`.
+  - `batch_refund_orders()`: extended for each expired order transitioned to `OrderStatus::Refunded`.
 
----
+### 5. Multi-Party Split Orders
 
-### Order Records
+- **Key**: `DataKey::SplitOrder(order_id)`
+- **Storage Type**: Persistent
+- **Helper**: `save_split_order(env, order_id, &order)` sets `DataKey::SplitOrder(order_id)` and calls `extend_ttl(&DataKey::SplitOrder(order_id), TTL_THRESHOLD, TTL_EXTEND)`.
+- **Call Sites**: `create_split_order`, `fund_split_order`, `confirm_split_receipt`, `open_split_dispute`, `resolve_split_dispute`.
 
-**Key**: `DataKey::Order(order_id)`
-**Storage Type**: Persistent
-**Owner**: Buyer/Farmer (buyer creates, farmer marks delivered, buyer confirms)
-**Lifetime**: Campaign + 3 months (for delivery disputes)
+### 6. Milestone Configurations & Arbitrator Votes
 
-| Trigger | TTL Extension Call | Reason |
-|---------|-------------------|--------|
-| Creation (`create_order`) | ✅ Extended in `create_order()` | Order must survive confirmation phase |
-| Confirmation (`confirm_order`) | ✅ Extended via `write_order()` helper | Confirmed state must persist |
-| Batch refund (`batch_refund_orders`) | ✅ Extended on set after status change | Refund state must persist |
-
-**Implementation**: `write_order()` helper in Contracts/Escrow (not in production_escrow yet, but should adopt if expanded).
-
----
-
-## Cross-Crate TTL Policies
-
-### `production_escrow/src/lib.rs`
-
-| Key | Storage Type | TTL Extension Points |
-|-----|--------------|----------------------|
-| `Campaign(id)` | Persistent | create, save (all mutations) |
-| `Contributions(id)` | Persistent | first invest, each invest |
-| `Claimed(campaign_id, investor)` | Persistent | claim_returns, refund, batch_refund_investors |
-| `Order(id)` | Persistent | create_order, confirm_order, batch_refund_orders |
+- **Key**: `DataKey::MilestoneConfigs(campaign_id)` — Persistent; extended in `set_milestone_configs()`.
+- **Key**: `DataKey::ArbitratorVote(campaign_id, arbitrator)` — Persistent; extended in `vote_to_resolve()`.
 
 ---
 
-### `registry/src/lib.rs`
+## Summary Table (`contracts/production_escrow/src/lib.rs`)
 
-| Key | Storage Type | TTL Extension Points |
-|-----|--------------|----------------------|
-| `Farmer(address)` | Persistent | register_farmer, on any farmer read |
-| `Campaign(id)` | Persistent | register_campaign |
-| `FarmerCampaigns(farmer)` | Persistent | on creation and farmer access |
-
----
-
-
----
-
-## Ledger Advance Testing
-
-To verify TTL policy is working:
-
-1. **Setup**: Create a campaign, invest funds, confirm orders.
-2. **Advance Ledger**: Jump forward ~95,000 ledgers (near TTL threshold).
-3. **Verify Operations**: Call `claim_returns()`, `refund()`, order confirmation—all should succeed.
-4. **Assert TTL Extended**: After each operation, verify the key was extended.
-
-**Test Example**:
-```rust
-#[test]
-fn test_ttl_extended_on_claim() {
-    let t = setup();
-    // ... create campaign, invest, settle ...
-    let ledger_before = t.env.ledger().sequence();
-    t.client.claim_returns(&t.investor1, &campaign_id);
-    // TTL should now reflect an extension
-}
-```
+| Key | Storage Type | Implemented TTL Extension Points |
+|-----|--------------|----------------------------------|
+| `Campaign(id)` | Persistent | `save_campaign()` on creation and every campaign mutation |
+| `Contribution(campaign_id, investor)` | Persistent | `invest`, `claim_returns`, `refund`, `batch_refund_investors`, `transfer_investment` |
+| `Claimed(campaign_id, investor)` | Persistent | `claim_returns`, `refund`, `batch_refund_investors` |
+| `Order(order_id)` | Persistent | `create_order`, `cancel_order`, `confirm_order`, `batch_refund_orders` |
+| `SplitOrder(order_id)` | Persistent | `save_split_order()` across all split-order lifecycle mutations |
+| `MilestoneConfigs(campaign_id)` | Persistent | `set_milestone_configs` |
+| `ArbitratorVote(campaign_id, arbitrator)` | Persistent | `vote_to_resolve` |
+| Instance keys (`Admin`, `Attester`, `GovernanceContract`, `SupportedTokens`, `FeeCollector`, `FeeRateBps`, `Paused`, etc.) | Instance | `bump_instance()` across mutators + permissionless `bump_instance_ttl()` |
 
 ---
 
-## Best Practices
+## Remaining Follow-Up Gaps
 
-1. **Always Use Helpers**: Use `save_campaign()` and `write_order()` helpers instead of direct `set()` calls.
-2. **Extend on Read**: Before returning data to users (claim, refund, get_contribution), extend TTL to signal the data is still in use.
-3. **Extend on Write**: Every mutation must extend TTL immediately after the write.
-4. **Document New Keys**: If new persistent keys are added, update this policy immediately.
-5. **Test TTL Scenarios**: Add tests for near-threshold ledger states to catch missed extensions.
-
----
-
-## Migration Path (Future)
-
-If TTL thresholds need adjustment:
-1. Update `TTL_THRESHOLD` and `TTL_EXTEND` constants.
-2. Deploy a new contract version.
-3. Migrate data by re-extending all keys in the migration function.
-4. Inform users to update contract references in registries.
-
----
-
-**Issue Reference**: #456 (persistent storage TTL policy)
+- Pure read-only view functions (`get_campaign`, `get_order`, `get_split_order`, `get_contribution`, `refundable_amount`) do not mutate or extend TTL so that off-chain RPC simulations remain free of storage-write footprints. Keepers should invoke `bump_instance_ttl` for instance keys during extended idle periods.
