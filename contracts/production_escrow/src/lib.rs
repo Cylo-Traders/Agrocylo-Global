@@ -1806,7 +1806,10 @@ impl ProductionEscrowContract {
                 return Err(EscrowError::NotInvestor);
             }
         }
-        if campaign.status == CampaignStatus::Disputed || campaign.status == CampaignStatus::Settled
+        // Terminal states (Settled, Failed) and already-disputed campaigns cannot open disputes (Issue #1272)
+        if campaign.status == CampaignStatus::Disputed
+            || campaign.status == CampaignStatus::Settled
+            || campaign.status == CampaignStatus::Failed
         {
             return Err(EscrowError::CampaignAlreadyDisputed);
         }
