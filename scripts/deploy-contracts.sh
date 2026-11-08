@@ -370,17 +370,34 @@ if [[ "$VERIFY_ONLY" == "false" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Cross-wiring — read current value, skip when already correct
+# 4. Cross-wiring — read current value from on-chain state, skip when already correct
 # ---------------------------------------------------------------------------
-# wire <label> <current-value> <desired-value> <invoke...>
+# Issue #1287: never trust the local manifest for wiring convergence or
+# verification, and never swallow setter failures. If a contract is already
+# governance-gated and its on-chain link disagrees with the desired target,
+# report the exact governance proposal required and fail nonzero.
 wire() {
     local label="$1" current="$2" desired="$3"; shift 3
     if [[ "$current" == "$desired" ]]; then
-        echo "  = $label already $desired"
-        return
+        echo "  = $label already $desired (verified on-chain)"
+        return 0
     fi
-    echo "  + $label -> $desired"
-    "$@"
+    echo "  + $label -> $desired (current on-chain: '${current:-<unset>}')"
+    local out rc
+    if out="$("$@" 2>&1)"; then
+        printf '%s\n' "$out"
+        return 0
+    fi
+    rc=$?
+    local target_contract="${2:-}" target_fn="${3:-}"
+    if grep -qiE "NotGoverned|NotAdmin|Error\(Contract, #54\)|Error\(Contract, #50\)" <<<"$out"; then
+        echo "  ERROR: setter '$target_fn' on contract '$target_contract' ($label) was rejected because governance is already active." >&2
+        echo "  REQUIRED ACTION: submit an authorized governance proposal targeting '$target_contract' :: '$target_fn' via governance.propose(...) to update $label -> $desired." >&2
+    else
+        echo "  ERROR: setter '$target_fn' for $label failed:" >&2
+        printf '%s\n' "$out" >&2
+    fi
+    return "$rc"
 }
 
 if [[ "$VERIFY_ONLY" == "false" ]]; then
@@ -390,13 +407,10 @@ if [[ "$VERIFY_ONLY" == "false" ]]; then
         "$(invoke_read "$ESCROW" get_registry_contract || true)" "$REGISTRY" \
         invoke "$ESCROW" set_registry_contract --admin "$ADMIN" --registry "$REGISTRY"
 
-    # escrow has no getter for the router; skip when the manifest already
-    # records it, otherwise set it (tolerating a governance-gated rejection
-    # on a re-run where governance is already wired).
-    if [[ -n "$PATH_PAYMENT_ROUTER" && "$(m_get '.wiring."escrow.path_payment_router"')" != "$PATH_PAYMENT_ROUTER" ]]; then
-        echo "  + escrow.path_payment_router -> $PATH_PAYMENT_ROUTER"
-        invoke "$ESCROW" set_path_payment_router --admin "$ADMIN" --router "$PATH_PAYMENT_ROUTER" || \
-            echo "  (set_path_payment_router rejected — likely already governance-gated)"
+    if [[ -n "$PATH_PAYMENT_ROUTER" ]]; then
+        wire "escrow.path_payment_router" \
+            "$(invoke_read "$ESCROW" get_path_payment_router || true)" "$PATH_PAYMENT_ROUTER" \
+            invoke "$ESCROW" set_path_payment_router --admin "$ADMIN" --router "$PATH_PAYMENT_ROUTER"
     fi
 
     if (( FEE_RATE_BPS > 0 )); then
@@ -405,15 +419,9 @@ if [[ "$VERIFY_ONLY" == "false" ]]; then
             invoke "$ESCROW" set_fee_config --admin_caller "$ADMIN" --fee_collector "$FEE_COLLECTOR" --fee_rate_bps "$FEE_RATE_BPS"
     fi
 
-    # production_escrow has no get_registry_contract getter; guard on the
-    # manifest so a converged re-run doesn't pay for a redundant write.
-    if [[ "$(m_get '.wiring."production_escrow.registry"')" != "$REGISTRY" ]]; then
-        echo "  + production_escrow.registry -> $REGISTRY"
-        invoke "$PROD_ESCROW" set_registry_contract --admin_caller "$ADMIN" --registry "$REGISTRY" || \
-            echo "  (set_registry_contract rejected — likely already governance-gated)"
-    else
-        echo "  = production_escrow.registry already $REGISTRY (per manifest)"
-    fi
+    wire "production_escrow.registry" \
+        "$(invoke_read "$PROD_ESCROW" get_registry_contract || true)" "$REGISTRY" \
+        invoke "$PROD_ESCROW" set_registry_contract --admin_caller "$ADMIN" --registry "$REGISTRY"
 
     echo "[wire] governance wiring (last — locks the other setters)..."
     wire "escrow.governance" \
@@ -432,17 +440,16 @@ if [[ "$VERIFY_ONLY" == "false" ]]; then
         "$(invoke_read "$BASKET" get_governance_contract || true)" "$GOVERNANCE" \
         invoke "$BASKET" set_governance_contract --caller "$ADMIN" --governance "$GOVERNANCE"
 
-    m_set ".wiring = {\"escrow.registry\":\"$REGISTRY\",\"escrow.governance\":\"$GOVERNANCE\",\"production_escrow.registry\":\"$REGISTRY\",\"production_escrow.governance\":\"$GOVERNANCE\",\"registry.governance\":\"$GOVERNANCE\",\"investment_basket.governance\":\"$GOVERNANCE\"${PATH_PAYMENT_ROUTER:+,\"escrow.path_payment_router\":\"$PATH_PAYMENT_ROUTER\"}}"
     echo ""
 fi
 
 # ---------------------------------------------------------------------------
-# 5. Verification pass — read back and assert
+# 5. Verification pass — read back on-chain state and assert before persisting
 # ---------------------------------------------------------------------------
 echo "[verify] reading back on-chain wiring..."
 FAILURES=0
 check() {  # check <label> <actual> <expected>
-    if [[ "$2" == "$3" ]]; then
+    if [[ -n "$2" && "$2" == "$3" ]]; then
         echo "  ok   $1 = $3"
     else
         echo "  FAIL $1: expected '$3', got '$2'" >&2
@@ -450,11 +457,25 @@ check() {  # check <label> <actual> <expected>
     fi
 }
 
-check "escrow.registry_contract"      "$(invoke_read "$ESCROW" get_registry_contract || true)"    "$REGISTRY"
-check "escrow.governance_contract"     "$(invoke_read "$ESCROW" get_governance_contract || true)"  "$GOVERNANCE"
-check "production_escrow.governance"   "$(invoke_read "$PROD_ESCROW" get_governance_contract || true)" "$GOVERNANCE"
-check "registry.governance_contract"   "$(invoke_read "$REGISTRY" get_governance_contract || true)" "$GOVERNANCE"
-check "investment_basket.governance"   "$(invoke_read "$BASKET" get_governance_contract || true)"  "$GOVERNANCE"
+OBS_ESCROW_REG="$(invoke_read "$ESCROW" get_registry_contract || true)"
+OBS_PROD_ESCROW_REG="$(invoke_read "$PROD_ESCROW" get_registry_contract || true)"
+OBS_ESCROW_GOV="$(invoke_read "$ESCROW" get_governance_contract || true)"
+OBS_PROD_ESCROW_GOV="$(invoke_read "$PROD_ESCROW" get_governance_contract || true)"
+OBS_REGISTRY_GOV="$(invoke_read "$REGISTRY" get_governance_contract || true)"
+OBS_BASKET_GOV="$(invoke_read "$BASKET" get_governance_contract || true)"
+OBS_BASKET_ESCROW="$(invoke_read "$BASKET" get_escrow_contract || true)"
+OBS_ESCROW_ROUTER=""
+if [[ -n "$PATH_PAYMENT_ROUTER" ]]; then
+    OBS_ESCROW_ROUTER="$(invoke_read "$ESCROW" get_path_payment_router || true)"
+fi
+
+check "escrow.registry_contract"          "$OBS_ESCROW_REG"      "$REGISTRY"
+check "production_escrow.registry"        "$OBS_PROD_ESCROW_REG" "$REGISTRY"
+check "escrow.governance_contract"        "$OBS_ESCROW_GOV"      "$GOVERNANCE"
+check "production_escrow.governance"      "$OBS_PROD_ESCROW_GOV" "$GOVERNANCE"
+check "registry.governance_contract"      "$OBS_REGISTRY_GOV"    "$GOVERNANCE"
+check "investment_basket.governance"      "$OBS_BASKET_GOV"      "$GOVERNANCE"
+check "investment_basket.escrow_contract" "$OBS_BASKET_ESCROW"   "$PROD_ESCROW"
 
 # ── Issue #843 admin/guardian readback — assert the expected admin owns every
 # newly-deployed contract before any funds move. Registry now exposes get_admin
@@ -478,12 +499,13 @@ fi
 
 # registry.get_contract_refs returns {escrow, production, ...}; assert both links
 REFS="$($CLI contract invoke "${NET_ARGS[@]}" --source-account "$DEPLOYER" --id "$REGISTRY" -- get_contract_refs 2>/dev/null || echo '{}')"
-check "registry.escrow_ref"     "$(jq -r '.escrow_contract // .escrow // empty' <<<"$REFS")"     "$ESCROW"
-check "registry.production_ref" "$(jq -r '.production_contract // .production // empty' <<<"$REFS")" "$PROD_ESCROW"
+OBS_REG_ESCROW_REF="$(jq -r '.escrow_contract // .escrow // empty' <<<"$REFS")"
+OBS_REG_PROD_REF="$(jq -r '.production_contract // .production // empty' <<<"$REFS")"
+check "registry.escrow_ref"     "$OBS_REG_ESCROW_REF" "$ESCROW"
+check "registry.production_ref" "$OBS_REG_PROD_REF"   "$PROD_ESCROW"
 
 if [[ -n "$PATH_PAYMENT_ROUTER" ]]; then
-    # no getter for the router; assert it's recorded in the manifest at least
-    check "manifest.escrow.path_payment_router" "$(m_get '.wiring."escrow.path_payment_router"')" "$PATH_PAYMENT_ROUTER"
+    check "escrow.path_payment_router" "$OBS_ESCROW_ROUTER" "$PATH_PAYMENT_ROUTER"
 fi
 
 echo ""
@@ -491,5 +513,11 @@ if (( FAILURES > 0 )); then
     echo "❌ $FAILURES wiring check(s) failed — deployment is half-configured. Fix and re-run." >&2
     exit 1
 fi
+
+# Issue #1287: persist ONLY verified on-chain observations to the manifest.
+if [[ "$VERIFY_ONLY" == "false" ]]; then
+    m_set ".wiring = {\"escrow.registry\":\"$OBS_ESCROW_REG\",\"escrow.governance\":\"$OBS_ESCROW_GOV\",\"production_escrow.registry\":\"$OBS_PROD_ESCROW_REG\",\"production_escrow.governance\":\"$OBS_PROD_ESCROW_GOV\",\"registry.governance\":\"$OBS_REGISTRY_GOV\",\"registry.escrow_ref\":\"$OBS_REG_ESCROW_REF\",\"registry.production_ref\":\"$OBS_REG_PROD_REF\",\"investment_basket.governance\":\"$OBS_BASKET_GOV\",\"investment_basket.escrow_contract\":\"$OBS_BASKET_ESCROW\"${PATH_PAYMENT_ROUTER:+,\"escrow.path_payment_router\":\"$OBS_ESCROW_ROUTER\"}}"
+fi
+
 echo "✅ All contracts deployed and wired. Manifest: $MANIFEST_FILE"
 jq . "$MANIFEST_FILE"

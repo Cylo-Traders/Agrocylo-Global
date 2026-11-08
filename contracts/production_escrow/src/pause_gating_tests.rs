@@ -131,6 +131,7 @@ const PAUSE_GATING_MATRIX: &[(&str, bool, &str)] = &[
     ("get_schema_version", false, "Read-only view"),
     ("get_guardian", false, "Read-only view"),
     ("set_registry_contract", false, "Governance-gated setter"),
+    ("get_registry_contract", false, "Read-only view"),
     ("set_fee_config", false, "Governance-gated setter"),
     ("set_governance_contract", false, "Governance-gated setter"),
     ("update_supported_tokens", false, "Governance-gated setter"),
