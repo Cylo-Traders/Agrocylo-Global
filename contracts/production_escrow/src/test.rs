@@ -1,6 +1,7 @@
 extern crate std;
 
 use soroban_sdk::{
+    contract, contractimpl,
     testutils::{Address as _, Ledger, LedgerInfo},
     token::{Client as TokenClient, StellarAssetClient},
     Address, Env, Vec,
@@ -3559,4 +3560,59 @@ fn test_vote_to_resolve_non_arbitrator_rejected() {
         .unwrap_err()
         .unwrap();
     assert_eq!(err, EscrowError::ArbitratorNotFound);
+}
+
+// ---------------------------------------------------------------------------
+// Issue #1297: Governance-gated set_attester
+// ---------------------------------------------------------------------------
+
+#[contract]
+struct MockGovernanceForAttester;
+
+#[contractimpl]
+impl MockGovernanceForAttester {
+    pub fn get_admin(env: Env) -> Address {
+        env.current_contract_address()
+    }
+}
+
+#[test]
+fn test_set_attester_admin_fallback_before_governance_set() {
+    let t = setup();
+    let new_attester = Address::generate(&t.env);
+
+    // No governance contract configured yet: admin can still rotate the attester.
+    t.client.set_attester(&t.admin, &new_attester);
+
+    let id = create_in_production_campaign(&t);
+    // Old attester is rejected; new attester succeeds on mark_harvest.
+    let err = t
+        .client
+        .try_mark_harvest(&t.farmer, &t.attester, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::NotAdmin);
+
+    t.client.mark_harvest(&t.farmer, &new_attester, &id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Harvested);
+}
+
+#[test]
+fn test_set_attester_rejects_admin_once_governance_set() {
+    let t = setup();
+    let governance = t.env.register(MockGovernanceForAttester, ());
+    let new_attester = Address::generate(&t.env);
+
+    t.client.set_governance_contract(&t.admin, &governance);
+
+    // Raw admin can no longer rotate the attester once governance is configured.
+    let result = t.client.try_set_attester(&t.admin, &new_attester);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotGoverned);
+
+    // The governance contract address is now the sole authorized caller.
+    t.client.set_attester(&governance, &new_attester);
+
+    let id = create_in_production_campaign(&t);
+    t.client.mark_harvest(&t.farmer, &new_attester, &id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Harvested);
 }

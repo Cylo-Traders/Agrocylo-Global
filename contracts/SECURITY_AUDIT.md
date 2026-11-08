@@ -445,7 +445,7 @@ All contracts define comprehensive error enums with descriptive variant names. E
 `contracts/escrow::mark_delivered` required only `farmer.require_auth()`. Once called, `delivery_timestamp` is set to a non-zero value, which permanently disables the buyer's automatic `refund_expired_order` escape hatch (`refund_expired_order`/`refund_expired_orders` both reject once `delivery_timestamp != 0`) — regardless of whether the farmer actually delivered anything. This is the same self-rug pattern `240c652` fixed in `production_escrow::mark_harvest`/`advance_milestone` via an independent attester co-signature, and it had not been ported.
 
 **Fix applied** (this PR): ported the identical pattern —
-- `DataKey::Attester` + `set_attester(admin, attester)` (admin-only setter)
+- `DataKey::Attester` + `set_attester(admin_caller, attester)` (governance-gated setter via `require_governed_caller`, falling back to admin-only while governance is unset in both `contracts/escrow` and `contracts/production_escrow`)
 - `mark_delivered(farmer, attester_caller, order_id)` now also requires `attester_caller.require_auth()`, checked against the configured attester
 - While no attester is configured, falls back to requiring the admin's co-signature (mirrors this file's existing governance-fallback convention for `set_fee_config`/`set_supported_tokens`, so a deployment that never calls `set_attester` isn't bricked, but a farmer alone can no longer self-attest either way)
 
@@ -486,7 +486,7 @@ Neither should be deprecated — they are both in active use by distinct, curren
 Because `contracts/escrow` and `production_escrow` intentionally duplicate several security-critical patterns (independent attester, governance-gated params, admin/arbitrator dispute resolution, fee collection) without sharing code, any fix to one of the patterns below **must** be checked against the other contract before merging:
 
 - [ ] **Self-attestation / independent-attester requirement** on any action that gates fund release on the interested party's own claim (`mark_delivered` / `mark_harvest` / `advance_milestone`)
-- [ ] **Governance-gating fallback** on admin-controlled parameter setters (`set_fee_config`, `set_supported_tokens`/`update_supported_tokens`, `set_governance_contract` itself)
+- [ ] **Governance-gating fallback** on admin-controlled parameter setters (`set_fee_config`, `set_supported_tokens`/`update_supported_tokens`, `set_attester`, `set_registry_contract`, `set_governance_contract` itself)
 - [ ] **Dispute resolution → reputation reporting** — every code path that resolves a dispute (admin-direct or arbitrator-quorum) reports the outcome to the registry, matching the "clean confirmation" path
 - [ ] **Arbitrator pool / quorum voting** — `set_arbitrators`, `get_arbitrators`, `get_quorum`, `vote_to_resolve` present and type-complete (this class of bug — a feature referencing types/variants that were never defined — caused §14.2's compile breaks; a `cargo check --workspace` in CI would catch this immediately and is the single highest-leverage fix here)
 - [ ] **Cancellation / cooling-off window** (`cancel_order`) — window duration, fee-refund semantics, and the guard against cancelling after delivery/confirmation
