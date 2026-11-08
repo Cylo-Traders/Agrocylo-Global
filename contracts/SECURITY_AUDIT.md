@@ -486,7 +486,7 @@ Neither should be deprecated — they are both in active use by distinct, curren
 Because `contracts/escrow` and `production_escrow` intentionally duplicate several security-critical patterns (independent attester, governance-gated params, admin/arbitrator dispute resolution, fee collection) without sharing code, any fix to one of the patterns below **must** be checked against the other contract before merging:
 
 - [ ] **Self-attestation / independent-attester requirement** on any action that gates fund release on the interested party's own claim (`mark_delivered` / `mark_harvest` / `advance_milestone`)
-- [ ] **Governance-gating fallback** on admin-controlled parameter setters (`set_fee_config`, `set_supported_tokens`/`update_supported_tokens`, `set_governance_contract` itself)
+- [ ] **Governance-gating fallback** on admin-controlled parameter setters (`set_fee_config`, `set_supported_tokens`/`update_supported_tokens`, `set_attester`, `set_milestone_configs`, `set_governance_contract` itself)
 - [ ] **Dispute resolution → reputation reporting** — every code path that resolves a dispute (admin-direct or arbitrator-quorum) reports the outcome to the registry, matching the "clean confirmation" path
 - [ ] **Arbitrator pool / quorum voting** — `set_arbitrators`, `get_arbitrators`, `get_quorum`, `vote_to_resolve` present and type-complete (this class of bug — a feature referencing types/variants that were never defined — caused §14.2's compile breaks; a `cargo check --workspace` in CI would catch this immediately and is the single highest-leverage fix here)
 - [ ] **Cancellation / cooling-off window** (`cancel_order`) — window duration, fee-refund semantics, and the guard against cancelling after delivery/confirmation

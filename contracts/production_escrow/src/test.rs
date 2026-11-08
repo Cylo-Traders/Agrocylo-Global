@@ -3560,3 +3560,73 @@ fn test_vote_to_resolve_non_arbitrator_rejected() {
         .unwrap();
     assert_eq!(err, EscrowError::ArbitratorNotFound);
 }
+
+
+// ---------------------------------------------------------------------------
+// Issue #1298: Governance-gated set_milestone_configs
+// ---------------------------------------------------------------------------
+
+#[contract]
+struct MockGovernanceForMilestones;
+
+#[contractimpl]
+impl MockGovernanceForMilestones {
+    pub fn get_admin(env: Env) -> Address {
+        env.current_contract_address()
+    }
+}
+
+#[test]
+fn test_set_milestone_configs_admin_fallback_before_governance_set() {
+    use crate::{Milestone, MilestoneConfig};
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+
+    let mut configs = Vec::new(&t.env);
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Planted,
+        release_bps: 2_000,
+    });
+
+    // Before governance is configured, raw admin can set milestone configs.
+    t.client.set_milestone_configs(&t.admin, &id, &configs);
+    let retrieved = t.client.get_milestone_configs(&id);
+    assert_eq!(retrieved.len(), 1);
+    assert_eq!(retrieved.get(0).unwrap().release_bps, 2_000);
+}
+
+#[test]
+fn test_set_milestone_configs_rejects_admin_once_governance_set() {
+    use crate::{Milestone, MilestoneConfig};
+    let t = setup();
+    let governance = t.env.register(MockGovernanceForMilestones, ());
+    t.client.set_governance_contract(&t.admin, &governance);
+
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+
+    let mut configs = Vec::new(&t.env);
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Planted,
+        release_bps: 2_000,
+    });
+
+    // Raw admin must now be rejected with NotGoverned once governance is configured.
+    let err = t
+        .client
+        .try_set_milestone_configs(&t.admin, &id, &configs)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::NotGoverned);
+
+    // Calling via the governance contract address succeeds.
+    t.client.set_milestone_configs(&governance, &id, &configs);
+    let retrieved = t.client.get_milestone_configs(&id);
+    assert_eq!(retrieved.len(), 1);
+    assert_eq!(retrieved.get(0).unwrap().release_bps, 2_000);
+}
