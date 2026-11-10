@@ -1,6 +1,6 @@
 import request from 'supertest';
 import express from 'express';
-import jwt from 'jsonwebtoken';
+import jwt, { type SignOptions } from 'jsonwebtoken';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const JWT_SECRET = 'test-secret-at-least-32-chars-long!!';
@@ -85,7 +85,11 @@ app.use(notificationRoutes);
 app.use(productErrorHandler);
 app.use(notificationErrorHandler);
 
-function makeToken(payload: Record<string, unknown>, secret = JWT_SECRET, expiresIn = '1h') {
+function makeToken(
+  payload: Record<string, unknown>,
+  secret = JWT_SECRET,
+  expiresIn: SignOptions['expiresIn'] = '1h'
+) {
   return jwt.sign(payload, secret, { expiresIn });
 }
 

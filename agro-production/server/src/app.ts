@@ -41,9 +41,7 @@ const corsOptions: cors.CorsOptions = {
       callback(null, true);
       return;
     }
-    const allowedOrigins = config.corsOrigins
-      ? config.corsOrigins.split(',').map((o) => o.trim())
-      : [];
+    const allowedOrigins = config.corsOrigins;
     if (allowedOrigins.length === 0 && config.nodeEnv !== 'production') {
       callback(null, true);
       return;

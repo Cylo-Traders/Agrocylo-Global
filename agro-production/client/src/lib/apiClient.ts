@@ -5,7 +5,7 @@
    - Retries use exponential backoff and only apply to network errors and 5xx responses on safe methods
 */
 
-import { getAccessToken } from "./authToken";
+import { getAccessToken, setAccessToken } from "./authToken";
 import { apiBaseUrl } from "./apiConfig";
 
 /** Thrown when no response is received (DNS failure, timeout, offline, etc.) */
