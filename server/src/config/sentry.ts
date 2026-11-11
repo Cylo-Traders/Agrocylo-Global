@@ -1,6 +1,6 @@
-import * as Sentry from "@sentry/node";
-import { config } from "./index.js";
-import logger from "./logger.js";
+import * as Sentry from '@sentry/node';
+import { config } from './index.js';
+import logger from './logger.js';
 
 // Regex patterns for PII scrubbing — wallet addresses (Stellar format) and private keys.
 const WALLET_ADDRESS_PATTERN = /[G][A-Z0-9]{55}/g;
@@ -10,10 +10,7 @@ const PRIVATE_KEY_PATTERN = /S[A-Z0-9]{55}/g;
  * Sensitive field patterns that should be scrubbed before transmission.
  * Matches wallet addresses (Stellar format) and private keys.
  */
-export const SENSITIVE_PATTERNS = [
-  WALLET_ADDRESS_PATTERN,
-  PRIVATE_KEY_PATTERN,
-];
+export const SENSITIVE_PATTERNS = [WALLET_ADDRESS_PATTERN, PRIVATE_KEY_PATTERN];
 
 let initialized = false;
 
@@ -22,24 +19,24 @@ let initialized = false;
  * tokens) from error payloads before transmission.
  */
 export function scrubSensitiveData(data: unknown): unknown {
-  if (typeof data === "string") {
+  if (typeof data === 'string') {
     let scrubbed = data;
-    scrubbed = scrubbed.replace(WALLET_ADDRESS_PATTERN, "[WALLET_ADDRESS_REDACTED]");
-    scrubbed = scrubbed.replace(PRIVATE_KEY_PATTERN, "[PRIVATE_KEY_REDACTED]");
+    scrubbed = scrubbed.replace(WALLET_ADDRESS_PATTERN, '[WALLET_ADDRESS_REDACTED]');
+    scrubbed = scrubbed.replace(PRIVATE_KEY_PATTERN, '[PRIVATE_KEY_REDACTED]');
     return scrubbed;
   }
 
-  if (typeof data === "object" && data !== null) {
+  if (typeof data === 'object' && data !== null) {
     const result = Array.isArray(data) ? [] : {};
     for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
       if (
-        key.toLowerCase().includes("wallet") ||
-        key.toLowerCase().includes("address") ||
-        key.toLowerCase().includes("key") ||
-        key.toLowerCase().includes("secret") ||
-        key.toLowerCase().includes("token")
+        key.toLowerCase().includes('wallet') ||
+        key.toLowerCase().includes('address') ||
+        key.toLowerCase().includes('key') ||
+        key.toLowerCase().includes('secret') ||
+        key.toLowerCase().includes('token')
       ) {
-        (result as Record<string, unknown>)[key] = "[REDACTED]";
+        (result as Record<string, unknown>)[key] = '[REDACTED]';
       } else {
         (result as Record<string, unknown>)[key] = scrubSensitiveData(value);
       }
@@ -63,7 +60,7 @@ export function scrubSensitiveData(data: unknown): unknown {
  * Must be called before any other module that might throw during
  * import/setup, so call it first thing in the process entrypoint.
  */
-export function initSentry(processType?: "api" | "worker" | "watcher"): void {
+export function initSentry(processType?: 'api' | 'worker' | 'watcher'): void {
   if (initialized) return;
   initialized = true;
 
@@ -72,7 +69,7 @@ export function initSentry(processType?: "api" | "worker" | "watcher"): void {
   const dsn = config.sentryDsn || process.env.SENTRY_DSN;
   if (!dsn) {
     logger.warn(
-      "[sentry]: SENTRY_DSN not set — error tracking disabled. Errors will only be visible in logs.",
+      '[sentry]: SENTRY_DSN not set — error tracking disabled. Errors will only be visible in logs.'
     );
     return;
   }
@@ -81,10 +78,8 @@ export function initSentry(processType?: "api" | "worker" | "watcher"): void {
     Sentry.init({
       dsn,
       environment: config.nodeEnv,
-      release: process.env.npm_package_version || "unknown",
-      integrations: [
-        Sentry.expressIntegration(),
-      ],
+      release: process.env.npm_package_version || 'unknown',
+      integrations: [Sentry.expressIntegration()],
       // Scrub sensitive data before transmission
       beforeSend: (event) => {
         if (event.request) {
@@ -105,16 +100,16 @@ export function initSentry(processType?: "api" | "worker" | "watcher"): void {
 
     // Add custom tags for process type
     if (processType) {
-      Sentry.setTag("process_type", processType);
+      Sentry.setTag('process_type', processType);
     }
-    Sentry.setTag("node_env", config.nodeEnv);
+    Sentry.setTag('node_env', config.nodeEnv);
 
-    logger.info("[sentry]: Error tracking initialized", {
+    logger.info('[sentry]: Error tracking initialized', {
       environment: config.nodeEnv,
       release: process.env.npm_package_version,
     });
   } catch (error) {
-    logger.error("Failed to initialize Sentry", { error });
+    logger.error('Failed to initialize Sentry', { error });
     // Fail open: application continues without error tracking
   }
 }
@@ -129,12 +124,12 @@ export function initSentry(processType?: "api" | "worker" | "watcher"): void {
 export function captureAlert(
   alertType: string,
   message: string,
-  extra?: Record<string, unknown>,
+  extra?: Record<string, unknown>
 ): void {
   logger.error(`[alert:${alertType}] ${message}`, extra);
   if (!config.sentryDsn) return;
   Sentry.captureMessage(message, {
-    level: "error",
+    level: 'error',
     tags: { alert_type: alertType },
     extra,
   });

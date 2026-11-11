@@ -31,10 +31,17 @@ app.use(jobRoutes);
 const token = (role: string) => `Bearer ${jwt.sign({ walletAddress: 'GADMIN', role }, JWT_SECRET)}`;
 const validJob = {
   name: 'aggregate-metrics',
-  data: { metricName: 'order_count', granularity: 'daily', startDate: '2026-01-01', endDate: '2026-01-02' },
+  data: {
+    metricName: 'order_count',
+    granularity: 'daily',
+    startDate: '2026-01-01',
+    endDate: '2026-01-02',
+  },
 };
 const post = (body: unknown, auth?: string, queue = 'analytics') => {
-  const r = request(app).post(`/jobs/${queue}`).send(body as object);
+  const r = request(app)
+    .post(`/jobs/${queue}`)
+    .send(body as object);
   return auth ? r.set('Authorization', auth) : r;
 };
 
@@ -59,8 +66,16 @@ describe('POST /jobs/:queue (#953)', () => {
   it.each([
     ['unsupported job name', { name: 'default', data: {} }, 'analytics'],
     ['job name from another queue', { name: 'send-email', data: {} }, 'analytics'],
-    ['invalid payload', { name: 'aggregate-metrics', data: { granularity: 'yearly' } }, 'analytics'],
-    ['bad email address', { name: 'send-email', data: { to: 'nope', subject: 's', body: 'b' } }, 'notifications'],
+    [
+      'invalid payload',
+      { name: 'aggregate-metrics', data: { granularity: 'yearly' } },
+      'analytics',
+    ],
+    [
+      'bad email address',
+      { name: 'send-email', data: { to: 'nope', subject: 's', body: 'b' } },
+      'notifications',
+    ],
   ])('rejects %s with 400 before enqueueing', async (_label, body, queue) => {
     const res = await post(body, token('ADMIN'), queue);
     expect(res.status).toBe(400);

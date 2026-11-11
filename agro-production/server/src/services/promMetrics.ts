@@ -33,7 +33,12 @@ export const reconciliationDrift = new client.Gauge({
   registers: [registry],
 });
 
-export function recordHttpRequest(method: string, route: string, status: number, durationMs: number): void {
+export function recordHttpRequest(
+  method: string,
+  route: string,
+  status: number,
+  durationMs: number,
+): void {
   const labels = { method, route, status: String(status) };
   httpRequestsByRouteTotal.inc(labels);
   httpRequestDuration.observe(labels, durationMs / 1000);

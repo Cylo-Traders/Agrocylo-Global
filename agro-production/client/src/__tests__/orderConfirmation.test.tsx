@@ -5,6 +5,7 @@ vi.mock("@/services/orderService", () => ({
 }));
 
 import { confirmOrderReceipt } from "@/services/orderService";
+import type { Order } from "@/types";
 
 const mockConfirmOrderReceipt = vi.mocked(confirmOrderReceipt);
 
@@ -18,7 +19,7 @@ describe("Order confirmation", () => {
       id: "order-123",
       buyerAddress: "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU",
       status: "PENDING",
-    } as any;
+    };
 
     const currentUserAddress = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
@@ -34,7 +35,7 @@ describe("Order confirmation", () => {
       id: "order-123",
       buyerAddress: "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU",
       status: "CONFIRMED",
-    } as any;
+    };
 
     const buyerAddress = "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU";
 
@@ -49,7 +50,7 @@ describe("Order confirmation", () => {
       id: "order-456",
       buyerAddress: "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU",
       status: "PENDING",
-    } as any;
+    };
 
     const buyerAddress = "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU";
 
@@ -66,7 +67,7 @@ describe("Order confirmation", () => {
     mockConfirmOrderReceipt.mockResolvedValue({
       id: orderId,
       status: "CONFIRMED",
-    } as any);
+    } as unknown as Order);
 
     const result = await mockConfirmOrderReceipt(orderId, buyerAddress);
 
@@ -96,13 +97,13 @@ describe("Order confirmation", () => {
     // Simulate a slow network response
     mockConfirmOrderReceipt.mockImplementation(
       () =>
-        new Promise((resolve) =>
+        new Promise<Order>((resolve) =>
           setTimeout(
             () =>
               resolve({
                 id: orderId,
                 status: "CONFIRMED",
-              } as any),
+              } as unknown as Order),
             100
           )
         )

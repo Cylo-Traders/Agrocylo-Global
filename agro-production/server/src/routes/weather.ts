@@ -54,7 +54,7 @@ const AdvisoryListResponseSchema = z.array(WeatherAdvisorySchema);
 router.get(
   '/weather/advisories',
   validateQuery(AdvisoryQuerySchema),
-  async (req: Request, res: Response) => {
+  (req: Request, res: Response) => {
     try {
       const { farmerId, lat, lng } = req.query as unknown as {
         farmerId?: string;

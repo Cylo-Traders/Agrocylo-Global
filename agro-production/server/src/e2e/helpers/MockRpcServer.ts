@@ -9,19 +9,22 @@
  *   - simulateTransaction
  *   - sendTransaction
  */
-import http from "http";
-import * as StellarSdk from "@stellar/stellar-sdk";
-import { buildAccountLedgerEntry, buildSorobanTransactionData } from "./xdrBuilder.js";
+import http from 'http';
+import * as StellarSdk from '@stellar/stellar-sdk';
+import {
+  buildAccountLedgerEntry,
+  buildSorobanTransactionData,
+} from './xdrBuilder.js';
 
 interface JsonRpcRequest {
-  jsonrpc: "2.0";
+  jsonrpc: '2.0';
   id: number | string;
   method: string;
   params?: Record<string, unknown>;
 }
 
 interface JsonRpcResponse {
-  jsonrpc: "2.0";
+  jsonrpc: '2.0';
   id: number | string;
   result?: unknown;
   error?: { code: number; message: string };
@@ -36,9 +39,11 @@ export class MockRpcServer {
   constructor(contractId: string) {
     this.contractId = contractId;
     this.server = http.createServer((req, res) => {
-      let body = "";
-      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-      req.on("end", () => {
+      let body = '';
+      req.on('data', (chunk: Buffer) => {
+        body += chunk.toString();
+      });
+      req.on('end', () => {
         this.handleRequest(body, res);
       });
     });
@@ -56,9 +61,9 @@ export class MockRpcServer {
 
   start(): Promise<number> {
     return new Promise((resolve) => {
-      this.server.listen(0, "127.0.0.1", () => {
+      this.server.listen(0, '127.0.0.1', () => {
         const addr = this.server.address();
-        const port = typeof addr === "object" && addr ? addr.port : 0;
+        const port = typeof addr === 'object' && addr ? addr.port : 0;
         resolve(port);
       });
     });
@@ -72,7 +77,8 @@ export class MockRpcServer {
 
   get url(): string {
     const addr = this.server.address();
-    if (typeof addr !== "object" || !addr) throw new Error("Server not started");
+    if (typeof addr !== 'object' || !addr)
+      throw new Error('Server not started');
     return `http://127.0.0.1:${addr.port}`;
   }
 
@@ -82,27 +88,27 @@ export class MockRpcServer {
       req = JSON.parse(body) as JsonRpcRequest;
     } catch {
       res.writeHead(400);
-      res.end(JSON.stringify({ error: "bad json" }));
+      res.end(JSON.stringify({ error: 'bad json' }));
       return;
     }
 
     const result = this.dispatch(req);
-    const response: JsonRpcResponse = { jsonrpc: "2.0", id: req.id, result };
-    res.writeHead(200, { "Content-Type": "application/json" });
+    const response: JsonRpcResponse = { jsonrpc: '2.0', id: req.id, result };
+    res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(response));
   }
 
   private dispatch(req: JsonRpcRequest): unknown {
     switch (req.method) {
-      case "getLatestLedger":
+      case 'getLatestLedger':
         return this.getLatestLedger();
-      case "getEvents":
-        return this.getEvents(req.params as { startLedger?: number } | undefined);
-      case "getLedgerEntries":
-        return this.getLedgerEntries(req.params as { keys?: string[] } | undefined);
-      case "simulateTransaction":
+      case 'getEvents':
+        return this.getEvents();
+      case 'getLedgerEntries':
+        return this.getLedgerEntries(req.params);
+      case 'simulateTransaction':
         return this.simulateTransaction();
-      case "sendTransaction":
+      case 'sendTransaction':
         return this.sendTransaction();
       default:
         return null;
@@ -111,13 +117,13 @@ export class MockRpcServer {
 
   private getLatestLedger() {
     return {
-      id: "mockhash",
-      protocolVersion: "21",
+      id: 'mockhash',
+      protocolVersion: '21',
       sequence: this.currentLedger,
     };
   }
 
-  private getEvents(params?: { startLedger?: number }) {
+  private getEvents() {
     // Drain the pending queue and return whatever events are present.
     // The watcher filters by contractId; we pre-fill events with the right id.
     const events = this.pendingEvents.splice(0);
@@ -129,22 +135,34 @@ export class MockRpcServer {
     // Decode the requested key to find which public key is being looked up.
     // Return a minimal valid AccountEntry so the SDK can build a transaction.
     const keys = params?.keys ?? [];
-    const entries = keys.map((keyBase64) => {
-      try {
-        const ledgerKey = StellarSdk.xdr.LedgerKey.fromXDR(keyBase64, "base64");
-        if (ledgerKey.type !== "account") {
+    const entries = keys
+      .map((keyBase64) => {
+        try {
+          const ledgerKey = StellarSdk.xdr.LedgerKey.fromXDR(
+            keyBase64,
+            'base64',
+          );
+          if (ledgerKey.type !== 'account') {
+            return null;
+          }
+          const accountId = ledgerKey.account.accountId;
+          const publicKey = StellarSdk.StrKey.encodeEd25519PublicKey(
+            accountId.ed25519.toBytes(),
+          );
+          const { keyBase64: k, entryBase64 } = buildAccountLedgerEntry(
+            publicKey,
+            100,
+          );
+          return {
+            key: k,
+            xdr: entryBase64,
+            lastModifiedLedgerSeq: this.currentLedger,
+          };
+        } catch {
           return null;
         }
-        const accountId = ledgerKey.account.accountId;
-        const publicKey = StellarSdk.StrKey.encodeEd25519PublicKey(
-          accountId.ed25519.toBytes(),
-        );
-        const { keyBase64: k, entryBase64 } = buildAccountLedgerEntry(publicKey, 100);
-        return { key: k, xdr: entryBase64, lastModifiedLedgerSeq: this.currentLedger };
-      } catch {
-        return null;
-      }
-    }).filter(Boolean);
+      })
+      .filter(Boolean);
 
     return { entries, ledger: this.currentLedger };
   }
@@ -155,28 +173,28 @@ export class MockRpcServer {
       transactionData = buildSorobanTransactionData();
     } catch {
       // Fallback: return enough for the SDK to not crash
-      transactionData = "";
+      transactionData = '';
     }
 
-    const returnVal = StellarSdk.xdr.ScVal.scvVoid().toXDR("base64");
+    const returnVal = StellarSdk.xdr.ScVal.scvVoid().toXDR('base64');
 
     return {
       results: [{ auth: [], xdr: returnVal }],
       transactionData,
-      minResourceFee: "1000",
+      minResourceFee: '1000',
       latestLedger: this.currentLedger,
-      cost: { cpuInsns: "1000", memBytes: "1000" },
+      cost: { cpuInsns: '1000', memBytes: '1000' },
       stateChanges: [],
-      id: "mock-sim",
+      id: 'mock-sim',
       events: [],
     };
   }
 
   private sendTransaction() {
-    const hash = "c".repeat(64);
+    const hash = 'c'.repeat(64);
     return {
       hash,
-      status: "PENDING",
+      status: 'PENDING',
       latestLedger: this.currentLedger,
       latestLedgerCloseTime: Math.floor(Date.now() / 1000).toString(),
     };

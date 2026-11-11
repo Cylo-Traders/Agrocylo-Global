@@ -35,7 +35,7 @@ export function assertCurrency(value: unknown, { allowLegacy = false } = {}): Cu
       400,
       'Bad Request',
       `Unsupported currency. Supported: ${ACTIVE_CURRENCIES.join(', ')}`,
-      'https://cylos.io/errors/validation',
+      'https://cylos.io/errors/validation'
     );
   }
   return code;
@@ -54,7 +54,7 @@ export function toBaseUnits(amount: string, currency: CurrencyCode): bigint {
       400,
       'Bad Request',
       `${currency} supports at most ${decimals} decimal places`,
-      'https://cylos.io/errors/validation',
+      'https://cylos.io/errors/validation'
     );
   }
   return BigInt(whole! + frac.padEnd(decimals, '0'));

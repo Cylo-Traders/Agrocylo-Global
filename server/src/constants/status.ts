@@ -14,12 +14,12 @@
 // ---------------------------------------------------------------------------
 
 export const OrderStatus = {
-  PENDING: "PENDING",
-  DELIVERED: "DELIVERED", // event-only, not distinct on-chain; DB intermediate
-  COMPLETED: "COMPLETED",
-  REFUNDED: "REFUNDED",
-  DISPUTED: "DISPUTED",
-  CANCELLED: "CANCELLED",
+  PENDING: 'PENDING',
+  DELIVERED: 'DELIVERED', // event-only, not distinct on-chain; DB intermediate
+  COMPLETED: 'COMPLETED',
+  REFUNDED: 'REFUNDED',
+  DISPUTED: 'DISPUTED',
+  CANCELLED: 'CANCELLED',
 } as const;
 
 export type OrderStatusType = (typeof OrderStatus)[keyof typeof OrderStatus];
@@ -43,10 +43,10 @@ export const ORDER_STATUS_MAP_PRODUCTION: Record<number, OrderStatusType> = {
 
 export function fromContractOrderStatus(
   value: number | string,
-  contractSet: "escrow" | "production_escrow" = "escrow",
+  contractSet: 'escrow' | 'production_escrow' = 'escrow'
 ): string {
   const num = Number(value);
-  if (contractSet === "production_escrow") {
+  if (contractSet === 'production_escrow') {
     return ORDER_STATUS_MAP_PRODUCTION[num] ?? String(value);
   }
   return ORDER_STATUS_MAP_ESCROW[num] ?? String(value);
@@ -57,14 +57,14 @@ export function fromContractOrderStatus(
 // ---------------------------------------------------------------------------
 
 export const CampaignStatus = {
-  ACTIVE: "ACTIVE",
-  SETTLED: "SETTLED",
-  FUNDING: "FUNDING",
-  FUNDED: "FUNDED",
-  IN_PRODUCTION: "IN_PRODUCTION",
-  HARVESTED: "HARVESTED",
-  FAILED: "FAILED",
-  DISPUTED: "DISPUTED",
+  ACTIVE: 'ACTIVE',
+  SETTLED: 'SETTLED',
+  FUNDING: 'FUNDING',
+  FUNDED: 'FUNDED',
+  IN_PRODUCTION: 'IN_PRODUCTION',
+  HARVESTED: 'HARVESTED',
+  FAILED: 'FAILED',
+  DISPUTED: 'DISPUTED',
 } as const;
 
 export type CampaignStatusType = (typeof CampaignStatus)[keyof typeof CampaignStatus];
@@ -86,10 +86,10 @@ export const CAMPAIGN_STATUS_MAP_PRODUCTION: Record<number, CampaignStatusType> 
 
 export function fromContractCampaignStatus(
   value: number | string,
-  contractSet: "escrow" | "production_escrow" = "escrow",
+  contractSet: 'escrow' | 'production_escrow' = 'escrow'
 ): string {
   const num = Number(value);
-  if (contractSet === "production_escrow") {
+  if (contractSet === 'production_escrow') {
     return CAMPAIGN_STATUS_MAP_PRODUCTION[num] ?? String(value);
   }
   return CAMPAIGN_STATUS_MAP_ESCROW[num] ?? String(value);
@@ -100,13 +100,13 @@ export function fromContractCampaignStatus(
 // ---------------------------------------------------------------------------
 
 export const DisputeStatus = {
-  OPEN: "OPEN",
-  IN_REVIEW: "IN_REVIEW",
-  EVIDENCE_SUBMITTED: "EVIDENCE_SUBMITTED",
-  RESOLVED: "RESOLVED",
-  RESOLVED_BUYER: "RESOLVED_BUYER",
-  RESOLVED_SELLER: "RESOLVED_SELLER",
-  DISMISSED: "DISMISSED",
+  OPEN: 'OPEN',
+  IN_REVIEW: 'IN_REVIEW',
+  EVIDENCE_SUBMITTED: 'EVIDENCE_SUBMITTED',
+  RESOLVED: 'RESOLVED',
+  RESOLVED_BUYER: 'RESOLVED_BUYER',
+  RESOLVED_SELLER: 'RESOLVED_SELLER',
+  DISMISSED: 'DISMISSED',
 } as const;
 
 export type DisputeStatusType = (typeof DisputeStatus)[keyof typeof DisputeStatus];
@@ -135,8 +135,8 @@ export function normalizeOrderStatus(dbStatus: string): string {
   // Historical rows may be title-case or mixed; normalize to upper (canonical).
   // "Delivered" is event-only on DB but maps to Pending on-chain.
   const upper = dbStatus.toUpperCase();
-  if (upper === "DELIVERED") return OrderStatus.PENDING;
-  if (upper === "CONFIRMED") return OrderStatus.COMPLETED;
+  if (upper === 'DELIVERED') return OrderStatus.PENDING;
+  if (upper === 'CONFIRMED') return OrderStatus.COMPLETED;
   return upper;
 }
 

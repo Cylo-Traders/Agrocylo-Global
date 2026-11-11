@@ -194,8 +194,16 @@ describe("useWebSocket", () => {
   it("wss:// URL is derived correctly when page is served over https", () => {
     // Mock window.location.protocol as https
     const originalLocation = window.location;
-    delete (window as any).location;
-    window.location = { ...originalLocation, protocol: "https:", hostname: "myapp.example.com" } as any;
+    Reflect.deleteProperty(window, "location");
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      writable: true,
+      value: {
+        ...originalLocation,
+        protocol: "https:",
+        hostname: "myapp.example.com",
+      } as unknown as Location,
+    });
 
     const onMessage = vi.fn();
     renderHook(() => useWebSocket(onMessage));
@@ -205,13 +213,25 @@ describe("useWebSocket", () => {
     expect(ws.url).toBe("wss://myapp.example.com/ws");
 
     // Restore location
-    window.location = originalLocation as string & Location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      writable: true,
+      value: originalLocation,
+    });
   });
 
   it("ws://localhost:5001/ws is used when running locally on http", () => {
     const originalLocation = window.location;
-    delete (window as any).location;
-    window.location = { ...originalLocation, protocol: "http:", hostname: "localhost" } as any;
+    Reflect.deleteProperty(window, "location");
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      writable: true,
+      value: {
+        ...originalLocation,
+        protocol: "http:",
+        hostname: "localhost",
+      } as unknown as Location,
+    });
 
     const onMessage = vi.fn();
     renderHook(() => useWebSocket(onMessage));
@@ -219,7 +239,11 @@ describe("useWebSocket", () => {
     const ws = webSocketInstances[0];
     expect(ws.url).toBe("ws://localhost:5001/ws");
 
-    window.location = originalLocation as string & Location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      writable: true,
+      value: originalLocation,
+    });
   });
 
   it("uses an explicit NEXT_PUBLIC_WS_URL override when set", () => {

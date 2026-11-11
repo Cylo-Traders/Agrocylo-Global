@@ -23,10 +23,7 @@ vi.mock('../middleware/walletAuth.js', () => ({
       'G1111111111111111111111111111111111111111111111111111111';
     next();
   },
-  requireRole:
-    (_role: string) =>
-    (req: any, _res: any, next: any) =>
-      next(),
+  requireRole: (_role: string) => (req: any, _res: any, next: any) => next(),
   requireAnyRole:
     (..._roles: string[]) =>
     (req: any, _res: any, next: any) =>

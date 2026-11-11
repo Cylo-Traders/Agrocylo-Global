@@ -6,8 +6,14 @@ import type { AdminRequest } from '../middleware/adminAuth.js';
 
 const GetDisputesQuerySchema = z.object({
   status: z.enum(['OPEN', 'RESOLVED', 'REJECTED']).optional(),
-  page: z.string().optional().transform((v) => (v ? parseInt(v, 10) : 1)),
-  limit: z.string().optional().transform((v) => (v ? Math.min(parseInt(v, 10), 100) : 20)),
+  page: z
+    .string()
+    .optional()
+    .transform((v) => (v ? parseInt(v, 10) : 1)),
+  limit: z
+    .string()
+    .optional()
+    .transform((v) => (v ? Math.min(parseInt(v, 10), 100) : 20)),
 });
 
 const ResolveDisputeSchema = z.object({
@@ -21,7 +27,11 @@ export class AdminDisputeController {
     const parsed = GetDisputesQuerySchema.safeParse(req.query);
     if (!parsed.success) {
       const detail = parsed.error.issues.map((e) => e.message).join('; ');
-      return sendProblem(res, req as Request, new ApiError(400, 'Invalid query parameters', detail));
+      return sendProblem(
+        res,
+        req as Request,
+        new ApiError(400, 'Invalid query parameters', detail)
+      );
     }
     const { status, page, limit } = parsed.data;
     const skip = (page - 1) * limit;
@@ -62,26 +72,47 @@ export class AdminDisputeController {
     const { disputeId, decision, resolution } = parsed.data;
     const existing = await prisma.dispute.findUnique({ where: { id: disputeId } });
     if (!existing) {
-      return sendProblem(res, req as Request, new ApiError(404, 'Dispute not found', 'No dispute with id ' + disputeId));
+      return sendProblem(
+        res,
+        req as Request,
+        new ApiError(404, 'Dispute not found', 'No dispute with id ' + disputeId)
+      );
     }
     if (existing.status !== 'OPEN') {
-      return sendProblem(res, req as Request, new ApiError(409, 'Dispute already settled', 'Dispute is already ' + existing.status.toLowerCase()));
+      return sendProblem(
+        res,
+        req as Request,
+        new ApiError(
+          409,
+          'Dispute already settled',
+          'Dispute is already ' + existing.status.toLowerCase()
+        )
+      );
     }
     const updated = await prisma.dispute.update({
       where: { id: disputeId },
       data: { status: decision, outcome: resolution, resolvedAt: new Date() },
       include: {
-        order: { select: { id: true, orderIdOnChain: true, buyerAddress: true, sellerAddress: true } },
+        order: {
+          select: { id: true, orderIdOnChain: true, buyerAddress: true, sellerAddress: true },
+        },
       },
     });
     await prisma.notification.create({
       data: {
         walletAddress: updated.raisedBy,
-        message: 'Your dispute for order ' + updated.order.orderIdOnChain + ' has been ' + decision.toLowerCase() + '.',
+        message:
+          'Your dispute for order ' +
+          updated.order.orderIdOnChain +
+          ' has been ' +
+          decision.toLowerCase() +
+          '.',
         orderId: updated.orderIdOnChain,
         type: 'DISPUTE_RESOLVED',
       },
     });
-    res.status(200).json({ message: 'Dispute successfully ' + decision.toLowerCase() + '.', dispute: updated });
+    res
+      .status(200)
+      .json({ message: 'Dispute successfully ' + decision.toLowerCase() + '.', dispute: updated });
   }
 }

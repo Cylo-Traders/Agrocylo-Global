@@ -8,7 +8,7 @@ export class ApiError extends Error {
     detail: string,
     public readonly type = 'about:blank',
     public readonly code?: string,
-    public readonly details?: Record<string, unknown> | Array<unknown>,
+    public readonly details?: Record<string, unknown> | Array<unknown>
   ) {
     super(detail);
     this.name = 'ApiError';
@@ -25,7 +25,14 @@ export class NotFoundError extends ApiError {
 
 export class ValidationError extends ApiError {
   constructor(message: string, details?: Record<string, unknown>) {
-    super(400, 'Bad Request', message, 'https://cylos.io/errors/validation', 'VALIDATION_ERROR', details);
+    super(
+      400,
+      'Bad Request',
+      message,
+      'https://cylos.io/errors/validation',
+      'VALIDATION_ERROR',
+      details
+    );
     this.name = 'ValidationError';
   }
 }
@@ -58,7 +65,7 @@ export class ServiceUnavailableError extends ApiError {
       'Service Unavailable',
       message,
       'https://cylos.io/errors/service-unavailable',
-      'SERVICE_UNAVAILABLE',
+      'SERVICE_UNAVAILABLE'
     );
     this.name = 'ServiceUnavailableError';
   }
@@ -111,15 +118,16 @@ export function sendProblem(res: Response, req: Request, error: ApiError): void 
     problemResponse.details = error.details;
   }
 
-  res
-    .status(error.status)
-    .type('application/problem+json')
-    .json(problemResponse);
+  res.status(error.status).type('application/problem+json').json(problemResponse);
 }
 
 export function handleServiceError(err: unknown, req: Request, res: Response): void {
   if (err instanceof ApiError) {
-    logger.warn(`[${err.name}] ${err.message}`, { path: req.path, method: req.method, status: err.status });
+    logger.warn(`[${err.name}] ${err.message}`, {
+      path: req.path,
+      method: req.method,
+      status: err.status,
+    });
     sendProblem(res, req, err);
     return;
   }
@@ -141,7 +149,7 @@ export function handleServiceError(err: unknown, req: Request, res: Response): v
       'Internal Server Error',
       'An unexpected error occurred. Please try again later.',
       'about:blank',
-      'INTERNAL_SERVER_ERROR',
-    ),
+      'INTERNAL_SERVER_ERROR'
+    )
   );
 }

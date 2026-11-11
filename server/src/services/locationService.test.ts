@@ -15,7 +15,10 @@ beforeEach(() => {
 });
 
 describe('location validation (#1136)', () => {
-  it.each([{ lat: 0, lng: 0 }, { latitude: 0, longitude: 0 }])('setLocation rejects (0,0): %j', async (b) => {
+  it.each([
+    { lat: 0, lng: 0 },
+    { latitude: 0, longitude: 0 },
+  ])('setLocation rejects (0,0): %j', async (b) => {
     await expect(setLocation('w', b)).rejects.toThrow(bad);
     expect(prisma.location.upsert).not.toHaveBeenCalled();
   });
@@ -40,7 +43,7 @@ describe('location validation (#1136)', () => {
     'proximity query rejects partial origin/radius: %j',
     async (q) => {
       await expect(getFarmerLocations(q)).rejects.toThrow(bad);
-    },
+    }
   );
 
   it('proximity query accepts all three or none', async () => {

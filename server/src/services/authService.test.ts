@@ -22,7 +22,13 @@ vi.mock('@stellar/stellar-sdk', () => ({
   },
 }));
 
-import { buildSignInMessage, generateNonce, verifySignature, refreshAccessToken, logout } from './authService.js';
+import {
+  buildSignInMessage,
+  generateNonce,
+  verifySignature,
+  refreshAccessToken,
+  logout,
+} from './authService.js';
 import { prisma } from '../config/database.js';
 import { Keypair } from '@stellar/stellar-sdk';
 import jwt from 'jsonwebtoken';
@@ -44,7 +50,12 @@ const PAST_DATE_OBJ = new Date(Date.now() - 60_000);
 const ISSUED_AT = new Date();
 
 function challenge(overrides: Record<string, unknown> = {}) {
-  return { nonce: 'some-nonce', createdAt: ISSUED_AT, expiresAt: FUTURE_DATE_OBJ, ...overrides } as any;
+  return {
+    nonce: 'some-nonce',
+    createdAt: ISSUED_AT,
+    expiresAt: FUTURE_DATE_OBJ,
+    ...overrides,
+  } as any;
 }
 
 function message(row = challenge()) {
@@ -113,13 +124,17 @@ describe('verifySignature', () => {
       throw new Error('Invalid');
     });
 
-    await expect(verifySignature('INVALID', 'sig', 'message')).rejects.toMatchObject({ status: 400 });
+    await expect(verifySignature('INVALID', 'sig', 'message')).rejects.toMatchObject({
+      status: 400,
+    });
   });
 
   it('throws 401 when no nonce exists for the wallet', async () => {
     mockNonceFindUnique.mockResolvedValueOnce(null);
 
-    await expect(verifySignature(VALID_WALLET, 'sig', 'message')).rejects.toMatchObject({ status: 401 });
+    await expect(verifySignature(VALID_WALLET, 'sig', 'message')).rejects.toMatchObject({
+      status: 401,
+    });
   });
 
   it('throws 401 when the nonce has expired', async () => {
@@ -129,7 +144,9 @@ describe('verifySignature', () => {
       expiresAt: PAST_DATE_OBJ,
     } as any);
 
-    await expect(verifySignature(VALID_WALLET, 'sig', 'message')).rejects.toMatchObject({ status: 401 });
+    await expect(verifySignature(VALID_WALLET, 'sig', 'message')).rejects.toMatchObject({
+      status: 401,
+    });
   });
 
   it('throws 401 when the signature is invalid', async () => {
@@ -139,21 +156,29 @@ describe('verifySignature', () => {
       .mockReturnValueOnce({ verify: vi.fn().mockReturnValue(true) } as any)
       .mockReturnValueOnce({ verify: vi.fn().mockReturnValue(false) } as any);
 
-    await expect(verifySignature(VALID_WALLET, 'dGVzdA==', message(row))).rejects.toMatchObject({ status: 401 });
+    await expect(verifySignature(VALID_WALLET, 'dGVzdA==', message(row))).rejects.toMatchObject({
+      status: 401,
+    });
   });
 
   it('rejects a message with a tampered structured field', async () => {
     const row = challenge();
     mockNonceFindUnique.mockResolvedValueOnce(row);
     await expect(
-      verifySignature(VALID_WALLET, 'dGVzdA==', message(row).replace('agrocylo.global', 'evil.example')),
+      verifySignature(
+        VALID_WALLET,
+        'dGVzdA==',
+        message(row).replace('agrocylo.global', 'evil.example')
+      )
     ).rejects.toMatchObject({ status: 401 });
   });
 
   it('rejects a challenge with an expired issued-at time', async () => {
     const row = challenge({ createdAt: new Date(Date.now() - 6 * 60 * 1000) });
     mockNonceFindUnique.mockResolvedValueOnce(row);
-    await expect(verifySignature(VALID_WALLET, 'dGVzdA==', message(row))).rejects.toMatchObject({ status: 401 });
+    await expect(verifySignature(VALID_WALLET, 'dGVzdA==', message(row))).rejects.toMatchObject({
+      status: 401,
+    });
   });
 });
 

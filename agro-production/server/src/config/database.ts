@@ -1,4 +1,9 @@
-import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from 'pg';
+import {
+  Pool,
+  type PoolClient,
+  type QueryResult,
+  type QueryResultRow,
+} from 'pg';
 import logger from './logger.js';
 import { config } from './index.js';
 

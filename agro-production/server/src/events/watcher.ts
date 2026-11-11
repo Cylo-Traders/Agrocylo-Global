@@ -4,7 +4,7 @@ import { config } from '../config/index.js';
 import logger from '../config/logger.js';
 import { prisma } from '../db/client.js';
 import { ProductionEventParser } from './parser.js';
-import { EventPersister, DependencyMissingError } from './persister.js';
+import { EventPersister } from './persister.js';
 import { recordPersistError } from './metrics.js';
 import type { RawSorobanEvent } from './types.js';
 import { captureAlert } from '../config/sentry.js';
@@ -21,7 +21,6 @@ const MAX_BACKFILL_BATCH = 100;
 // base64 encoding of "campaign" and "order" short symbols
 const CAMPAIGN_TOPIC = 'AAAADwAAAAhjYW1wYWlnbg==';
 const ORDER_TOPIC = 'AAAADwAAAAVvcmRlcg==';
-const DISPUTE_TOPIC = 'AAAADwAAAAdkaXNwdXRl';
 // base64 encoding of the "basket" short symbol
 const BASKET_TOPIC = 'AAAADwAAAAZiYXNrZXQAAA==';
 
@@ -161,7 +160,7 @@ async function recordDeadLetter(
       id: rawEvent.id,
     });
     captureAlert(
-      "contract_watcher_ingestion_failure",
+      'contract_watcher_ingestion_failure',
       `Event ${rawEvent.id} at ledger ${rawEvent.ledger} moved to dead-letter queue`,
       { ledger: rawEvent.ledger, eventId: rawEvent.id },
     );
@@ -189,9 +188,10 @@ export interface DeadLetterReplayResult {
  * Called automatically after a `campaign.created` event is indexed, and
  * exported for operators to replay exhausted events manually.
  */
-export async function replayDeadLetterEvents(
-  opts?: { campaignOnChainId?: string; limit?: number },
-): Promise<DeadLetterReplayResult> {
+export async function replayDeadLetterEvents(opts?: {
+  campaignOnChainId?: string;
+  limit?: number;
+}): Promise<DeadLetterReplayResult> {
   const limit = Math.max(1, Math.min(opts?.limit ?? 50, 500));
   const deadLetters = await prisma.transaction.findMany({
     where: { eventType: 'dead_letter', status: 'failed' },
@@ -250,8 +250,14 @@ export async function replayDeadLetterEvents(
 }
 
 /** SDK 17 dropped `getLedger(seq)`; fetch one ledger via `getLedgers` instead. */
-async function getLedgerHash(server: rpc.Server, sequence: number): Promise<string> {
-  const { ledgers } = await server.getLedgers({ startLedger: sequence, pagination: { limit: 1 } });
+async function getLedgerHash(
+  server: rpc.Server,
+  sequence: number,
+): Promise<string> {
+  const { ledgers } = await server.getLedgers({
+    startLedger: sequence,
+    pagination: { limit: 1 },
+  });
   const ledger = ledgers[0];
   if (!ledger || ledger.sequence !== sequence) {
     throw new Error(`Ledger ${sequence} not available from RPC`);
@@ -354,11 +360,6 @@ async function pollEvents(
   const now = await server.getLatestLedger();
   const latestLedger = now.sequence;
 
-  // Bounded backfill: never try to fetch more than MAX_BACKFILL_BATCH ledgers
-  // at once. If the gap is larger, the operator is alerted and must
-  // explicitly decide how to recover (manual cursor reset).
-  const endLedger = Math.min(startLedger + MAX_BACKFILL_BATCH, latestLedger);
-
   const filters: Parameters<typeof server.getEvents>[0]['filters'] = [
     {
       type: 'contract',
@@ -410,7 +411,7 @@ export async function startProductionWatcher(): Promise<
   // Resume reorg detection from the hash persisted alongside the cursor.
   let trackedLedgerHash: string | null = cursor.ledgerHash;
 
-  const interval = setInterval(async () => {
+  const poll = (async () => {
     try {
       const { events, latestLedger } = await pollEvents(server, currentLedger);
       const confirmedTipLedger = Math.max(0, latestLedger - CONFIRMATION_DEPTH);
@@ -531,7 +532,11 @@ export async function startProductionWatcher(): Promise<
 
         currentLedger = maxEventLedger;
         currentEventIndex = maxEventIndex;
-        await advanceCursor(currentLedger, currentEventIndex, trackedLedgerHash ?? undefined);
+        await advanceCursor(
+          currentLedger,
+          currentEventIndex,
+          trackedLedgerHash ?? undefined,
+        );
         logger.debug('Production watcher: cursor advanced', {
           ledger: currentLedger,
           eventIndex: currentEventIndex,
@@ -549,56 +554,8 @@ export async function startProductionWatcher(): Promise<
         { error: err instanceof Error ? err.message : String(err) },
       );
     }
-  }, POLL_INTERVAL_MS);
+  }) as () => void;
+  const interval = setInterval(poll, POLL_INTERVAL_MS);
 
   return interval;
-}
-
-function buildContractFilters() {
-  const filters: any[] = [];
-
-  if (config.escrowContractId) {
-    filters.push({
-      type: 'contract' as const,
-      contractIds: [config.escrowContractId],
-      topics: [[ORDER_TOPIC, '*']],
-    });
-  }
-
-  if (config.productionEscrowContractId) {
-    filters.push(
-      {
-        type: 'contract' as const,
-        contractIds: [config.productionEscrowContractId],
-        topics: [[CAMPAIGN_TOPIC, '*']],
-      },
-      {
-        type: 'contract' as const,
-        contractIds: [config.productionEscrowContractId],
-        topics: [[ORDER_TOPIC, '*']],
-      },
-      {
-        type: 'contract' as const,
-        contractIds: [config.productionEscrowContractId],
-        topics: [[DISPUTE_TOPIC, '*']],
-      },
-    );
-  }
-
-  if (config.contractId && config.contractId !== 'C...') {
-    filters.push(
-      {
-        type: 'contract' as const,
-        contractIds: [config.contractId],
-        topics: [[CAMPAIGN_TOPIC, '*']],
-      },
-      {
-        type: 'contract' as const,
-        contractIds: [config.contractId],
-        topics: [[ORDER_TOPIC, '*']],
-      },
-    );
-  }
-
-  return filters;
 }

@@ -40,7 +40,11 @@ describe("ProductFormModal", () => {
   it("renders in add mode with empty fields", () => {
     renderModal();
     expect(screen.getByText("Add Product")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("")).toHaveLength(4);
+    expect(screen.getByLabelText("Product Name")).toHaveValue("");
+    expect(screen.getByLabelText("Price")).toHaveValue(null);
+    expect(screen.getByLabelText("Stock quantity")).toHaveValue(null);
+    expect(screen.getByLabelText("Farm Location (Region)")).toHaveValue("");
+    expect(screen.getByLabelText("Delivery Window")).toHaveValue("");
   });
 
   it("renders in edit mode with initial product data", () => {
@@ -74,7 +78,7 @@ describe("ProductFormModal", () => {
     await user.click(submitButton);
 
     await waitFor(() => {
-      expect(screen.getByText("Name is required")).toBeInTheDocument();
+      expect(screen.getByText("Product name is required")).toBeInTheDocument();
     });
   });
 
@@ -82,10 +86,7 @@ describe("ProductFormModal", () => {
     const user = userEvent.setup();
     renderModal();
 
-    const priceInput = screen.getByDisplayValue("") as HTMLInputElement;
-    if (priceInput.type !== "number") {
-      return;
-    }
+    const priceInput = screen.getByLabelText("Price") as HTMLInputElement;
 
     await user.type(priceInput, "-1");
     const submitButton = screen.getByRole("button", { name: /List Product/i });
@@ -114,11 +115,10 @@ describe("ProductFormModal", () => {
 
     // Fill in required fields
     await user.type(screen.getByLabelText("Product Name"), "Tomato");
-    const categorySelect = screen.getByDisplayValue("Select category");
-    await user.click(categorySelect);
-    await user.click(screen.getByRole("option", { name: "Vegetables" }));
+    const categorySelect = screen.getAllByRole("combobox")[0];
+    await user.selectOptions(categorySelect, "Vegetables");
     await user.type(screen.getByLabelText("Price"), "5");
-    await user.type(screen.getByLabelText("Farm Location"), "Accra");
+    await user.type(screen.getByLabelText("Farm Location (Region)"), "Accra");
     await user.type(screen.getByLabelText("Delivery Window"), "2-3 days");
 
     await user.click(screen.getByRole("button", { name: /List Product/i }));
@@ -148,11 +148,10 @@ describe("ProductFormModal", () => {
     renderModal();
 
     await user.type(screen.getByLabelText("Product Name"), "Tomato");
-    const categorySelect = screen.getByDisplayValue("Select category");
-    await user.click(categorySelect);
-    await user.click(screen.getByRole("option", { name: "Vegetables" }));
+    const categorySelect = screen.getAllByRole("combobox")[0];
+    await user.selectOptions(categorySelect, "Vegetables");
     await user.type(screen.getByLabelText("Price"), "5");
-    await user.type(screen.getByLabelText("Farm Location"), "Accra");
+    await user.type(screen.getByLabelText("Farm Location (Region)"), "Accra");
     await user.type(screen.getByLabelText("Delivery Window"), "2-3 days");
 
     await user.click(screen.getByRole("button", { name: /List Product/i }));
@@ -183,11 +182,14 @@ describe("ProductFormModal", () => {
     renderModal();
 
     const file = new File(["test"], "test.jpg", { type: "image/jpeg" });
-    const input = screen.getByRole("img")?.closest("label")?.querySelector("input") as HTMLInputElement;
+    const input = document.getElementById("prod-image-upload") as HTMLInputElement;
+    expect(input).not.toBeNull();
 
-    if (input) {
-      await user.upload(input, file);
-    }
+    await user.upload(input, file);
+
+    await waitFor(() => {
+      expect(screen.getByText("test.jpg")).toBeInTheDocument();
+    });
   });
 
   it("closes modal when Cancel button is clicked", async () => {

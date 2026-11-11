@@ -29,10 +29,21 @@ describe('POST /api/analytics (#1139)', () => {
   });
 
   it('stores a granted batch and strips PII', async () => {
-    const res = await request(app).post('/api/analytics').send({
-      consent: 'granted',
-      events: [event({ name: 'search_query', properties: { query: 'maize', email: 'user@example.com', wallet: '0x1111111111111111111111111111111111111111' } })],
-    });
+    const res = await request(app)
+      .post('/api/analytics')
+      .send({
+        consent: 'granted',
+        events: [
+          event({
+            name: 'search_query',
+            properties: {
+              query: 'maize',
+              email: 'user@example.com',
+              wallet: '0x1111111111111111111111111111111111111111',
+            },
+          }),
+        ],
+      });
     expect(res.status).toBe(200);
     expect(res.body.stored).toBe(1);
     const stored = getAnalyticsStore();
@@ -42,7 +53,9 @@ describe('POST /api/analytics (#1139)', () => {
   });
 
   it('does not store when consent is denied', async () => {
-    const res = await request(app).post('/api/analytics').send({ consent: 'denied', events: [event()] });
+    const res = await request(app)
+      .post('/api/analytics')
+      .send({ consent: 'denied', events: [event()] });
     expect(res.status).toBe(202);
     expect(res.body.stored).toBe(0);
     expect(getAnalyticsStore()).toHaveLength(0);

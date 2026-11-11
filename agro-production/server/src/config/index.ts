@@ -28,7 +28,9 @@ function validateJwtSecret(value: string | undefined): string {
     throw new Error('JWT_SECRET is required in production');
   }
   if (value === DEV_JWT_SECRET) {
-    throw new Error('JWT_SECRET must not use the development default in production');
+    throw new Error(
+      'JWT_SECRET must not use the development default in production',
+    );
   }
   if (value.length < 32) {
     throw new Error('JWT_SECRET must be at least 32 characters in production');
@@ -44,7 +46,9 @@ function validateMetricsApiKey(value: string | undefined): string {
 }
 
 const envSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  NODE_ENV: z
+    .enum(['development', 'test', 'production'])
+    .default('development'),
   PORT: z.coerce.number().default(3000),
   LOG_LEVEL: z.string().default('debug'),
   DATABASE_URL: z.string().default(''),
@@ -112,7 +116,9 @@ export const config = {
   metricsApiKey,
   sentryDsn: parsed.SENTRY_DSN,
   sentryTracesSampleRate: parsed.SENTRY_TRACES_SAMPLE_RATE,
-  corsOrigins: parsed.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean),
+  corsOrigins: parsed.CORS_ORIGINS.split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
   redisUrl: parsed.REDIS_URL,
   rateLimitWindowMs: parsed.RATE_LIMIT_WINDOW_MS,
   rateLimitMaxRequests: parsed.RATE_LIMIT_MAX_REQUESTS,

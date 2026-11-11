@@ -1,6 +1,6 @@
-import rateLimit from "express-rate-limit";
-import { config } from "../config/index.js";
-import { incrementRateLimitHit } from "./rateLimitMetrics.js";
+import rateLimit from 'express-rate-limit';
+import { config } from '../config/index.js';
+import { incrementRateLimitHit } from './rateLimitMetrics.js';
 
 /** Default limiter applied to all routes. */
 export const defaultLimiter = rateLimit({
@@ -9,11 +9,11 @@ export const defaultLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res, _next, options) => {
-    incrementRateLimitHit("default");
+    incrementRateLimitHit('default');
     res.status(options.statusCode).send(options.message);
   },
   message: {
-    error: "Too many requests",
+    error: 'Too many requests',
     retryAfter: `${config.rateLimitWindowMs / 1000}s`,
   },
 });
@@ -25,11 +25,11 @@ export const writeLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res, _next, options) => {
-    incrementRateLimitHit("write");
+    incrementRateLimitHit('write');
     res.status(options.statusCode).send(options.message);
   },
   message: {
-    error: "Too many write requests",
+    error: 'Too many write requests',
     retryAfter: `${config.rateLimitWindowMs / 1000}s`,
   },
 });
@@ -42,11 +42,11 @@ export const authLimiter = rateLimit({
   legacyHeaders: false,
   skipSuccessfulRequests: true,
   handler: (req, res, _next, options) => {
-    incrementRateLimitHit("auth");
+    incrementRateLimitHit('auth');
     res.status(options.statusCode).send(options.message);
   },
   message: {
-    error: "Too many authentication attempts",
+    error: 'Too many authentication attempts',
     retryAfter: `${config.rateLimitWindowMs / 1000}s`,
   },
 });

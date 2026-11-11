@@ -24,11 +24,18 @@ const {
     upload: vi.fn().mockResolvedValue({ error: null }),
     list: vi.fn().mockResolvedValue({ data: [], error: null }),
     remove: vi.fn().mockResolvedValue({ error: null }),
-    getPublicUrl: vi.fn(() => ({ data: { publicUrl: 'https://supabase.co/storage/v1/object/public/campaign-images/farmer/campaign/thumbnail_800x800.webp' } })),
+    getPublicUrl: vi.fn(() => ({
+      data: {
+        publicUrl:
+          'https://supabase.co/storage/v1/object/public/campaign-images/farmer/campaign/thumbnail_800x800.webp',
+      },
+    })),
   },
   mockCampaignFindUnique: vi.fn(),
   mockCampaignUpdate: vi.fn(),
-  mockVerifySession: vi.fn().mockResolvedValue({ walletAddress: '', sessionToken: 'test-token' }),
+  mockVerifySession: vi
+    .fn()
+    .mockResolvedValue({ walletAddress: '', sessionToken: 'test-token' }),
 }));
 
 vi.mock('../services/walletAuthService.js', () => ({
@@ -55,7 +62,8 @@ import app from '../app.js';
 import { getSupabaseAdmin } from '../config/supabase.js';
 
 const VALID_UUID = '00000000-0000-0000-0000-000000000001';
-const WALLET_ADDRESS = 'GBP7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7X';
+const WALLET_ADDRESS =
+  'GBP7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7X';
 
 function fakeImageBuffer(): Buffer {
   return Buffer.from('fake-image-data');
@@ -69,8 +77,15 @@ describe('Campaign Image Upload', () => {
     mockStorageFrom.upload.mockResolvedValue({ error: null });
     mockStorageFrom.list.mockResolvedValue({ data: [], error: null });
     mockStorageFrom.remove.mockResolvedValue({ error: null });
-    mockStorageFrom.getPublicUrl.mockReturnValue({ data: { publicUrl: 'https://supabase.co/storage/v1/object/public/campaign-images/farmer/campaign/thumbnail_800x800.webp' } });
-    (getSupabaseAdmin().storage.from as ReturnType<typeof vi.fn>).mockReturnValue(mockStorageFrom);
+    mockStorageFrom.getPublicUrl.mockReturnValue({
+      data: {
+        publicUrl:
+          'https://supabase.co/storage/v1/object/public/campaign-images/farmer/campaign/thumbnail_800x800.webp',
+      },
+    });
+    (
+      getSupabaseAdmin().storage.from as ReturnType<typeof vi.fn>
+    ).mockReturnValue(mockStorageFrom);
   });
 
   describe('POST /campaigns/:campaign_id/image', () => {
@@ -184,7 +199,9 @@ describe('Campaign Image Upload', () => {
         upload: vi.fn().mockResolvedValue({ error: null }),
         list: vi.fn().mockResolvedValue({ data: [], error: null }),
         remove: storageRemove,
-        getPublicUrl: vi.fn(() => ({ data: { publicUrl: 'https://supabase.co/image.webp' } })),
+        getPublicUrl: vi.fn(() => ({
+          data: { publicUrl: 'https://supabase.co/image.webp' },
+        })),
       });
 
       const res = await request(app)
@@ -221,8 +238,7 @@ describe('Campaign Image Upload', () => {
     });
 
     it('should return 401 if no auth header', async () => {
-      const res = await request(app)
-        .delete(`/campaigns/${VALID_UUID}/image`);
+      const res = await request(app).delete(`/campaigns/${VALID_UUID}/image`);
 
       expect(res.status).toBe(401);
     });

@@ -5,9 +5,9 @@
  * - GET /api-docs — Swagger UI for interactive API exploration
  */
 
-import { Router } from "express";
-import type { Request, Response } from "express";
-import { registry } from "../openapi/registry.js";
+import { Router } from 'express';
+import type { Request, Response } from 'express';
+import { registry } from '../openapi/registry.js';
 
 const router = Router();
 
@@ -20,9 +20,9 @@ const router = Router();
  * - Integration testing frameworks
  * - API gateway configurations
  */
-router.get("/openapi.json", (_req: Request, res: Response) => {
+router.get('/openapi.json', (_req: Request, res: Response) => {
   const spec = registry.toOpenAPI();
-  res.setHeader("Content-Type", "application/json");
+  res.setHeader('Content-Type', 'application/json');
   res.json(spec);
 });
 
@@ -32,7 +32,7 @@ router.get("/openapi.json", (_req: Request, res: Response) => {
  * Browse all endpoints, their schemas, and test requests directly.
  * Hosted at /api-docs with Swagger UI embedded.
  */
-router.get("/api-docs", (_req: Request, res: Response) => {
+router.get('/api-docs', (_req: Request, res: Response) => {
   const html = `
     <!DOCTYPE html>
     <html>
@@ -65,7 +65,7 @@ router.get("/api-docs", (_req: Request, res: Response) => {
       </body>
     </html>
   `;
-  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(html);
 });
 
@@ -73,7 +73,7 @@ router.get("/api-docs", (_req: Request, res: Response) => {
  * Redoc alternative — another interactive API documentation option.
  * Lighter weight than Swagger UI, good for static hosting.
  */
-router.get("/api-docs-redoc", (_req: Request, res: Response) => {
+router.get('/api-docs-redoc', (_req: Request, res: Response) => {
   const html = `
     <!DOCTYPE html>
     <html>
@@ -95,7 +95,7 @@ router.get("/api-docs-redoc", (_req: Request, res: Response) => {
       </body>
     </html>
   `;
-  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(html);
 });
 

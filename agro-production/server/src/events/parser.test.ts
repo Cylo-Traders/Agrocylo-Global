@@ -117,7 +117,13 @@ describe('ProductionEventParser', () => {
 
   describe('basket.created', () => {
     it('parses correctly', () => {
-      const raw = makeRaw('basket', 'created', [1, 1n, 3, 1_700_001_000n, 1000n]);
+      const raw = makeRaw('basket', 'created', [
+        1,
+        1n,
+        3,
+        1_700_001_000n,
+        1000n,
+      ]);
       const event = ProductionEventParser.parse(raw);
       expect(event.action).toBe('basket.created');
       if (event.action === 'basket.created') {
@@ -413,7 +419,9 @@ describe('ProductionEventParser', () => {
       // "order.cancelled" isn't a registered EventAction, so this now fails
       // canonical schema validation rather than reaching the switch's default
       // case — either way the parser must reject it.
-      expect(() => ProductionEventParser.parse(raw)).toThrow(/unknown (action|event type)/i);
+      expect(() => ProductionEventParser.parse(raw)).toThrow(
+        /unknown (action|event type)/i,
+      );
     });
 
     it('tryParse returns null instead of throwing for order unknown verb', () => {

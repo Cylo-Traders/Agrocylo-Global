@@ -25,11 +25,28 @@ vi.mock('../lifecycle.js', () => ({
 
 vi.mock('../../db/client.js', () => ({
   prisma: {
-    campaign: { findMany: vi.fn(), count: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), upsert: vi.fn() },
+    campaign: {
+      findMany: vi.fn(),
+      count: vi.fn(),
+      findUnique: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      upsert: vi.fn(),
+    },
     investment: { findMany: vi.fn(), create: vi.fn() },
-    order: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
+    order: {
+      findMany: vi.fn(),
+      findUnique: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+    },
     user: { upsert: vi.fn(), findUnique: vi.fn() },
-    transaction: { findFirst: vi.fn(), findUnique: vi.fn(), findMany: vi.fn(), create: vi.fn() },
+    transaction: {
+      findFirst: vi.fn(),
+      findUnique: vi.fn(),
+      findMany: vi.fn(),
+      create: vi.fn(),
+    },
     dispute: { findMany: vi.fn(), count: vi.fn(), findUnique: vi.fn() },
     eventCursor: { findUnique: vi.fn(), upsert: vi.fn() },
     $queryRaw: vi.fn(),
@@ -58,7 +75,9 @@ vi.mock('../../config/database.js', () => ({
 }));
 
 vi.mock('express-rate-limit', () => ({
-  default: vi.fn(() => (_req: unknown, _res: unknown, next: () => void) => next()),
+  default: vi.fn(
+    () => (_req: unknown, _res: unknown, next: () => void) => next(),
+  ),
 }));
 
 vi.mock('../walletAuthService.js', () => ({
@@ -89,8 +108,12 @@ describe('Graceful lifecycle & readiness', () => {
     it('returns ready when all checks pass', async () => {
       const { prisma } = await import('../../db/client.js');
       const { server: rpcServer } = await import('../sorobanRpc.js');
-      (prisma.$queryRaw as ReturnType<typeof vi.fn>).mockResolvedValue([{ 1: 1 }]);
-      (rpcServer.getLatestLedger as ReturnType<typeof vi.fn>).mockResolvedValue({ sequence: 99999 });
+      (prisma.$queryRaw as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { 1: 1 },
+      ]);
+      (rpcServer.getLatestLedger as ReturnType<typeof vi.fn>).mockResolvedValue(
+        { sequence: 99999 },
+      );
 
       const res = await request(app).get('/readyz');
       expect(res.status).toBe(200);
@@ -106,7 +129,9 @@ describe('Graceful lifecycle & readiness', () => {
       (prisma.$queryRaw as ReturnType<typeof vi.fn>).mockRejectedValue(
         new Error('connect ECONNREFUSED 127.0.0.1:5432'),
       );
-      (rpcServer.getLatestLedger as ReturnType<typeof vi.fn>).mockResolvedValue({ sequence: 12345 });
+      (rpcServer.getLatestLedger as ReturnType<typeof vi.fn>).mockResolvedValue(
+        { sequence: 12345 },
+      );
 
       const res = await request(app).get('/readyz');
       expect(res.status).toBe(503);
@@ -117,7 +142,9 @@ describe('Graceful lifecycle & readiness', () => {
     it('returns not_ready when RPC is unreachable', async () => {
       const { prisma } = await import('../../db/client.js');
       const { server: rpcServer } = await import('../sorobanRpc.js');
-      (prisma.$queryRaw as ReturnType<typeof vi.fn>).mockResolvedValue([{ 1: 1 }]);
+      (prisma.$queryRaw as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { 1: 1 },
+      ]);
       (rpcServer.getLatestLedger as ReturnType<typeof vi.fn>).mockRejectedValue(
         new Error('ENOTFOUND rpc.example.com'),
       );
@@ -132,10 +159,14 @@ describe('Graceful lifecycle & readiness', () => {
       const { prisma } = await import('../../db/client.js');
       const { server: rpcServer } = await import('../sorobanRpc.js');
       (prisma.$queryRaw as ReturnType<typeof vi.fn>).mockRejectedValue(
-        new Error('password authentication failed for user "admin" at postgres://admin:secret@db.example.com:5432/db'),
+        new Error(
+          'password authentication failed for user "admin" at postgres://admin:secret@db.example.com:5432/db',
+        ),
       );
       (rpcServer.getLatestLedger as ReturnType<typeof vi.fn>).mockRejectedValue(
-        new Error('connect failed to https://rpc:secret-token@internal.stellar.org'),
+        new Error(
+          'connect failed to https://rpc:secret-token@internal.stellar.org',
+        ),
       );
 
       const res = await request(app).get('/readyz');
@@ -187,7 +218,9 @@ describe('Graceful lifecycle & readiness', () => {
     it('rejects DELETE requests during shutdown with 503', async () => {
       mockIsShuttingDown.mockReturnValue(true);
 
-      const res = await request(app).delete('/campaigns/aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa/image');
+      const res = await request(app).delete(
+        '/campaigns/aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa/image',
+      );
       expect(res.status).toBe(503);
     });
 

@@ -1,9 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock("../../config/logger.js", () => ({
+vi.mock('../../config/logger.js', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
-vi.mock("../../config/database.js", () => ({
+vi.mock('../../config/database.js', () => ({
   prisma: {
     order: {
       count: vi.fn(),
@@ -24,13 +24,13 @@ vi.mock("../../config/database.js", () => ({
   },
 }));
 
-import { processAnalytics } from "./analytics.js";
-import { prisma } from "../../config/database.js";
-import logger from "../../config/logger.js";
+import { processAnalytics } from './analytics.js';
+import { prisma } from '../../config/database.js';
+import logger from '../../config/logger.js';
 
 function makeJob(name: string, data: unknown, overrides: Partial<Record<string, unknown>> = {}) {
   return {
-    id: overrides.id as string | undefined ?? "job-1",
+    id: (overrides.id as string | undefined) ?? 'job-1',
     name,
     data,
     attemptsMade: (overrides.attemptsMade as number) ?? 0,
@@ -41,20 +41,20 @@ function makeJob(name: string, data: unknown, overrides: Partial<Record<string, 
   } as any;
 }
 
-describe("processAnalytics", () => {
+describe('processAnalytics', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  describe("aggregate-metrics", () => {
-    it("should aggregate order_count metric", async () => {
+  describe('aggregate-metrics', () => {
+    it('should aggregate order_count metric', async () => {
       (prisma.order.count as any).mockResolvedValue(42);
 
-      const job = makeJob("aggregate-metrics", {
-        metricName: "order_count",
-        granularity: "daily",
-        startDate: "2025-01-01T00:00:00Z",
-        endDate: "2025-01-31T23:59:59Z",
+      const job = makeJob('aggregate-metrics', {
+        metricName: 'order_count',
+        granularity: 'daily',
+        startDate: '2025-01-01T00:00:00Z',
+        endDate: '2025-01-31T23:59:59Z',
       });
 
       await processAnalytics(job);
@@ -69,58 +69,58 @@ describe("processAnalytics", () => {
       });
     });
 
-    it("should aggregate total_volume metric", async () => {
+    it('should aggregate total_volume metric', async () => {
       (prisma.order.findMany as any).mockResolvedValue([
-        { amount: "100.5" },
-        { amount: "200.3" },
-        { amount: "invalid" },
+        { amount: '100.5' },
+        { amount: '200.3' },
+        { amount: 'invalid' },
       ]);
 
-      const job = makeJob("aggregate-metrics", {
-        metricName: "total_volume",
-        granularity: "daily",
-        startDate: "2025-01-01T00:00:00Z",
-        endDate: "2025-01-31T23:59:59Z",
+      const job = makeJob('aggregate-metrics', {
+        metricName: 'total_volume',
+        granularity: 'daily',
+        startDate: '2025-01-01T00:00:00Z',
+        endDate: '2025-01-31T23:59:59Z',
       });
 
       await processAnalytics(job);
 
       expect(prisma.order.findMany).toHaveBeenCalled();
       expect(logger.info).toHaveBeenCalledWith(
-        "Metrics aggregated",
-        expect.objectContaining({ metricName: "total_volume", value: 300.8 }),
+        'Metrics aggregated',
+        expect.objectContaining({ metricName: 'total_volume', value: 300.8 })
       );
     });
 
-    it("should aggregate active_users metric", async () => {
+    it('should aggregate active_users metric', async () => {
       (prisma.order.groupBy as any)
-        .mockResolvedValueOnce([{ buyerAddress: "0xa" }, { buyerAddress: "0xb" }])
-        .mockResolvedValueOnce([{ sellerAddress: "0xa" }, { sellerAddress: "0xc" }]);
+        .mockResolvedValueOnce([{ buyerAddress: '0xa' }, { buyerAddress: '0xb' }])
+        .mockResolvedValueOnce([{ sellerAddress: '0xa' }, { sellerAddress: '0xc' }]);
 
-      const job = makeJob("aggregate-metrics", {
-        metricName: "active_users",
-        granularity: "daily",
-        startDate: "2025-01-01T00:00:00Z",
-        endDate: "2025-01-31T23:59:59Z",
+      const job = makeJob('aggregate-metrics', {
+        metricName: 'active_users',
+        granularity: 'daily',
+        startDate: '2025-01-01T00:00:00Z',
+        endDate: '2025-01-31T23:59:59Z',
       });
 
       await processAnalytics(job);
 
       expect(prisma.order.groupBy).toHaveBeenCalledTimes(2);
       expect(logger.info).toHaveBeenCalledWith(
-        "Metrics aggregated",
-        expect.objectContaining({ metricName: "active_users", value: 3 }),
+        'Metrics aggregated',
+        expect.objectContaining({ metricName: 'active_users', value: 3 })
       );
     });
 
-    it("should aggregate product_count metric", async () => {
+    it('should aggregate product_count metric', async () => {
       (prisma.product.count as any).mockResolvedValue(15);
 
-      const job = makeJob("aggregate-metrics", {
-        metricName: "product_count",
-        granularity: "daily",
-        startDate: "2025-01-01T00:00:00Z",
-        endDate: "2025-01-31T23:59:59Z",
+      const job = makeJob('aggregate-metrics', {
+        metricName: 'product_count',
+        granularity: 'daily',
+        startDate: '2025-01-01T00:00:00Z',
+        endDate: '2025-01-31T23:59:59Z',
       });
 
       await processAnalytics(job);
@@ -129,53 +129,53 @@ describe("processAnalytics", () => {
         where: { isAvailable: true },
       });
       expect(logger.info).toHaveBeenCalledWith(
-        "Metrics aggregated",
-        expect.objectContaining({ metricName: "product_count", value: 15 }),
+        'Metrics aggregated',
+        expect.objectContaining({ metricName: 'product_count', value: 15 })
       );
     });
 
-    it("should warn for unknown metric names", async () => {
-      const job = makeJob("aggregate-metrics", {
-        metricName: "unknown_metric",
-        granularity: "daily",
-        startDate: "2025-01-01T00:00:00Z",
-        endDate: "2025-01-31T23:59:59Z",
+    it('should warn for unknown metric names', async () => {
+      const job = makeJob('aggregate-metrics', {
+        metricName: 'unknown_metric',
+        granularity: 'daily',
+        startDate: '2025-01-01T00:00:00Z',
+        endDate: '2025-01-31T23:59:59Z',
       });
 
       await processAnalytics(job);
 
       expect(logger.warn).toHaveBeenCalledWith(
-        "Unknown metric requested for aggregation",
-        expect.any(Object),
+        'Unknown metric requested for aggregation',
+        expect.any(Object)
       );
     });
 
-    it("should handle database errors gracefully", async () => {
-      (prisma.order.count as any).mockRejectedValue(new Error("DB timeout"));
+    it('should handle database errors gracefully', async () => {
+      (prisma.order.count as any).mockRejectedValue(new Error('DB timeout'));
 
-      const job = makeJob("aggregate-metrics", {
-        metricName: "order_count",
-        granularity: "daily",
-        startDate: "2025-01-01T00:00:00Z",
-        endDate: "2025-01-31T23:59:59Z",
+      const job = makeJob('aggregate-metrics', {
+        metricName: 'order_count',
+        granularity: 'daily',
+        startDate: '2025-01-01T00:00:00Z',
+        endDate: '2025-01-31T23:59:59Z',
       });
 
-      await expect(processAnalytics(job)).rejects.toThrow("DB timeout");
+      await expect(processAnalytics(job)).rejects.toThrow('DB timeout');
       expect(logger.error).toHaveBeenCalledWith(
-        "Failed to aggregate metrics",
+        'Failed to aggregate metrics',
         expect.any(Error),
-        expect.any(Object),
+        expect.any(Object)
       );
     });
 
-    it("should default date range when not provided", async () => {
+    it('should default date range when not provided', async () => {
       (prisma.order.count as any).mockResolvedValue(10);
 
-      const job = makeJob("aggregate-metrics", {
-        metricName: "order_count",
-        granularity: "daily",
-        startDate: "",
-        endDate: "",
+      const job = makeJob('aggregate-metrics', {
+        metricName: 'order_count',
+        granularity: 'daily',
+        startDate: '',
+        endDate: '',
       });
 
       await processAnalytics(job);
@@ -186,17 +186,14 @@ describe("processAnalytics", () => {
     });
   });
 
-  describe("generate-report", () => {
-    it("should generate a sales report", async () => {
+  describe('generate-report', () => {
+    it('should generate a sales report', async () => {
       (prisma.order.count as any).mockResolvedValue(100);
-      (prisma.order.findMany as any).mockResolvedValue([
-        { amount: "50" },
-        { amount: "75.5" },
-      ]);
+      (prisma.order.findMany as any).mockResolvedValue([{ amount: '50' }, { amount: '75.5' }]);
 
-      const job = makeJob("generate-report", {
-        reportType: "sales",
-        parameters: { status: "COMPLETED" },
+      const job = makeJob('generate-report', {
+        reportType: 'sales',
+        parameters: { status: 'COMPLETED' },
       });
 
       await processAnalytics(job);
@@ -206,24 +203,22 @@ describe("processAnalytics", () => {
         select: { amount: true },
       });
       expect(logger.info).toHaveBeenCalledWith(
-        "Report generated",
+        'Report generated',
         expect.objectContaining({
-          reportType: "sales",
+          reportType: 'sales',
           summary: expect.objectContaining({
             totalOrders: 100,
             totalVolume: 125.5,
           }),
-        }),
+        })
       );
     });
 
-    it("should generate an inventory report", async () => {
-      (prisma.product.count as any)
-        .mockResolvedValueOnce(8)
-        .mockResolvedValueOnce(10);
+    it('should generate an inventory report', async () => {
+      (prisma.product.count as any).mockResolvedValueOnce(8).mockResolvedValueOnce(10);
 
-      const job = makeJob("generate-report", {
-        reportType: "inventory",
+      const job = makeJob('generate-report', {
+        reportType: 'inventory',
         parameters: {},
       });
 
@@ -231,102 +226,99 @@ describe("processAnalytics", () => {
 
       expect(prisma.product.count).toHaveBeenCalledTimes(2);
       expect(logger.info).toHaveBeenCalledWith(
-        "Report generated",
+        'Report generated',
         expect.objectContaining({
-          reportType: "inventory",
+          reportType: 'inventory',
           summary: expect.objectContaining({
             availableProducts: 8,
             totalProducts: 10,
             outOfStock: 2,
           }),
-        }),
+        })
       );
     });
 
-    it("should generate a demand report", async () => {
+    it('should generate a demand report', async () => {
       (prisma.buyerDemand.count as any).mockResolvedValue(5);
       (prisma.buyerDemand.groupBy as any).mockResolvedValue([
-        { cropName: "Wheat", _count: { id: 3 }, _sum: { quantityWanted: 100 } },
-        { cropName: "Rice", _count: { id: 2 }, _sum: { quantityWanted: 50 } },
+        { cropName: 'Wheat', _count: { id: 3 }, _sum: { quantityWanted: 100 } },
+        { cropName: 'Rice', _count: { id: 2 }, _sum: { quantityWanted: 50 } },
       ]);
 
-      const job = makeJob("generate-report", {
-        reportType: "demand",
+      const job = makeJob('generate-report', {
+        reportType: 'demand',
         parameters: {},
       });
 
       await processAnalytics(job);
 
       expect(logger.info).toHaveBeenCalledWith(
-        "Report generated",
+        'Report generated',
         expect.objectContaining({
-          reportType: "demand",
+          reportType: 'demand',
           summary: expect.objectContaining({
             activeDemands: 5,
             demandsByCrop: expect.any(Array),
           }),
-        }),
+        })
       );
     });
 
-    it("should generate a supply report", async () => {
+    it('should generate a supply report', async () => {
       (prisma.farmerSupply.count as any).mockResolvedValue(7);
       (prisma.farmerSupply.groupBy as any).mockResolvedValue([
-        { cropName: "Corn", _count: { id: 4 }, _sum: { quantityAvailable: 200 } },
+        { cropName: 'Corn', _count: { id: 4 }, _sum: { quantityAvailable: 200 } },
       ]);
 
-      const job = makeJob("generate-report", {
-        reportType: "supply",
+      const job = makeJob('generate-report', {
+        reportType: 'supply',
         parameters: {},
       });
 
       await processAnalytics(job);
 
       expect(logger.info).toHaveBeenCalledWith(
-        "Report generated",
+        'Report generated',
         expect.objectContaining({
-          reportType: "supply",
+          reportType: 'supply',
           summary: expect.objectContaining({ activeSupplies: 7 }),
-        }),
+        })
       );
     });
 
-    it("should warn for unknown report types", async () => {
-      const job = makeJob("generate-report", {
-        reportType: "unknown-type" as any,
+    it('should warn for unknown report types', async () => {
+      const job = makeJob('generate-report', {
+        reportType: 'unknown-type' as any,
         parameters: {},
       });
 
       await processAnalytics(job);
 
-      expect(logger.warn).toHaveBeenCalledWith(
-        "Unknown report type requested",
-        expect.any(Object),
-      );
+      expect(logger.warn).toHaveBeenCalledWith('Unknown report type requested', expect.any(Object));
     });
 
-    it("should handle database errors in report generation", async () => {
-      (prisma.order.count as any).mockRejectedValue(new Error("Query failed"));
+    it('should handle database errors in report generation', async () => {
+      (prisma.order.count as any).mockRejectedValue(new Error('Query failed'));
 
-      const job = makeJob("generate-report", {
-        reportType: "sales",
+      const job = makeJob('generate-report', {
+        reportType: 'sales',
         parameters: {},
       });
 
-      await expect(processAnalytics(job)).rejects.toThrow("Query failed");
+      await expect(processAnalytics(job)).rejects.toThrow('Query failed');
       expect(logger.error).toHaveBeenCalledWith(
-        "Failed to generate report",
+        'Failed to generate report',
         expect.any(Error),
-        expect.any(Object),
+        expect.any(Object)
       );
     });
   });
 
-  describe("unknown job name", () => {
-    it("should reject unrecognized job names", async () => {
-      const job = makeJob("unknown-job", { some: "data" });
+  describe('unknown job name', () => {
+    it('should reject unrecognized job names', async () => {
+      const job = makeJob('unknown-job', { some: 'data' });
 
-      await expect(processAnalytics(job)).rejects.toThrow("Unknown analytics job name");
+      await expect(processAnalytics(job)).rejects.toThrow('Unknown analytics job name');
     });
   });
 });

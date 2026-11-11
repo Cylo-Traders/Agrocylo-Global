@@ -1,8 +1,8 @@
-import { prisma } from "../config/database.js";
-import { EvidenceStorageService } from "./evidenceStorageService.js";
-import { ApiError, NotFoundError } from "../http/errors.js";
-import logger from "../config/logger.js";
-import { DisputeStatus } from "../constants/status.js";
+import { prisma } from '../config/database.js';
+import { EvidenceStorageService } from './evidenceStorageService.js';
+import { ApiError, NotFoundError } from '../http/errors.js';
+import logger from '../config/logger.js';
+import { DisputeStatus } from '../constants/status.js';
 
 export class DisputeService {
   /**
@@ -20,11 +20,11 @@ export class DisputeService {
             },
           },
         },
-        orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: 'desc' },
       });
     } catch (error) {
-      logger.error("Failed to fetch disputes", { error });
-      throw new ApiError(500, "Internal Server Error", "Failed to fetch disputes");
+      logger.error('Failed to fetch disputes', { error });
+      throw new ApiError(500, 'Internal Server Error', 'Failed to fetch disputes');
     }
   }
 
@@ -49,11 +49,11 @@ export class DisputeService {
             },
           },
         },
-        orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: 'desc' },
       });
     } catch (error) {
-      logger.error("Failed to fetch disputes for wallet", { error, walletAddress });
-      throw new ApiError(500, "Internal Server Error", "Failed to fetch disputes");
+      logger.error('Failed to fetch disputes for wallet', { error, walletAddress });
+      throw new ApiError(500, 'Internal Server Error', 'Failed to fetch disputes');
     }
   }
 
@@ -75,13 +75,13 @@ export class DisputeService {
         },
       });
       if (!dispute) {
-        throw new NotFoundError("Dispute", orderIdOnChain);
+        throw new NotFoundError('Dispute', orderIdOnChain);
       }
       return dispute;
     } catch (error) {
       if (error instanceof ApiError) throw error;
-      logger.error("Failed to fetch dispute by order ID", { error, orderIdOnChain });
-      throw new ApiError(500, "Internal Server Error", "Failed to fetch dispute");
+      logger.error('Failed to fetch dispute by order ID', { error, orderIdOnChain });
+      throw new ApiError(500, 'Internal Server Error', 'Failed to fetch dispute');
     }
   }
 
@@ -95,26 +95,34 @@ export class DisputeService {
         data: { evidenceHash },
       });
     } catch (error) {
-      logger.error("Failed to attach evidence to dispute", { error, orderIdOnChain });
-      throw new ApiError(500, "Internal Server Error", "Failed to attach evidence");
+      logger.error('Failed to attach evidence to dispute', { error, orderIdOnChain });
+      throw new ApiError(500, 'Internal Server Error', 'Failed to attach evidence');
     }
   }
 
   /**
    * Orchestrate evidence upload and attachment with validation
    */
-  static async provideEvidence(orderIdOnChain: string, file: Express.Multer.File, walletAddress: string) {
+  static async provideEvidence(
+    orderIdOnChain: string,
+    file: Express.Multer.File,
+    walletAddress: string
+  ) {
     const dispute = await this.getDisputeByOrderId(orderIdOnChain);
 
     const isParticipant =
       dispute.order.buyerAddress === walletAddress || dispute.order.sellerAddress === walletAddress;
 
     if (!isParticipant) {
-      throw new ApiError(403, "Forbidden", "Only dispute participants can submit evidence");
+      throw new ApiError(403, 'Forbidden', 'Only dispute participants can submit evidence');
     }
 
     if (dispute.status === DisputeStatus.RESOLVED || dispute.status === DisputeStatus.DISMISSED) {
-      throw new ApiError(409, "Conflict", `Cannot submit evidence to a ${dispute.status.toLowerCase()} dispute`);
+      throw new ApiError(
+        409,
+        'Conflict',
+        `Cannot submit evidence to a ${dispute.status.toLowerCase()} dispute`
+      );
     }
 
     const evidenceHash = await EvidenceStorageService.uploadEvidence(file, orderIdOnChain);

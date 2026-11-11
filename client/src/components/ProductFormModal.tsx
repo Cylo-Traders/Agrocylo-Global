@@ -235,7 +235,11 @@ export default function ProductFormModal({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={onSubmit} className="min-h-0 flex-1 space-y-6 overflow-y-auto pr-1">
+        <form
+          noValidate
+          onSubmit={onSubmit}
+          className="min-h-0 flex-1 space-y-6 overflow-y-auto pr-1"
+        >
           <div className="grid gap-4 sm:grid-cols-2">
             <Input
               label="Product Name"

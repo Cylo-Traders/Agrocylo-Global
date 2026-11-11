@@ -44,7 +44,10 @@ export async function getDemandData() {
     getTrend(30),
   ]);
   const total = rows.reduce((sum, r) => sum + qty(r), 0);
-  const breakdown = Object.fromEntries(CATEGORIES.map((c) => [c, '0'])) as Record<(typeof CATEGORIES)[number], string>;
+  const breakdown = Object.fromEntries(CATEGORIES.map((c) => [c, '0'])) as Record<
+    (typeof CATEGORIES)[number],
+    string
+  >;
   // Demand rows carry no category, so all volume is reported under "Other".
   breakdown.Other = String(total);
   return {
@@ -76,7 +79,9 @@ export async function getBuyerIntents(limit = 50) {
     },
     created_at: r.createdAt.toISOString(),
     ...(r.neededBy ? { timeline: `By ${r.neededBy.toISOString().slice(0, 10)}` } : {}),
-    ...(r.maxPricePerUnit ? { budget_range: `Up to ${r.maxPricePerUnit} ${r.currency ?? ''}`.trim() } : {}),
+    ...(r.maxPricePerUnit
+      ? { budget_range: `Up to ${r.maxPricePerUnit} ${r.currency ?? ''}`.trim() }
+      : {}),
   }));
 }
 

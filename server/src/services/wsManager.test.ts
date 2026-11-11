@@ -1,21 +1,21 @@
-import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
-import http from "http";
-import WebSocket from "ws";
-import jwt from "jsonwebtoken";
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import http from 'http';
+import WebSocket from 'ws';
+import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = vi.hoisted(() => "test-secret-at-least-32-chars-long!!");
+const JWT_SECRET = vi.hoisted(() => 'test-secret-at-least-32-chars-long!!');
 
-vi.mock("../config/logger.js", () => ({
+vi.mock('../config/logger.js', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-vi.mock("../config/index.js", () => ({
-  config: { wsPath: "/ws", jwtSecret: JWT_SECRET },
+vi.mock('../config/index.js', () => ({
+  config: { wsPath: '/ws', jwtSecret: JWT_SECRET },
 }));
 
-import { WsManager } from "./wsManager.js";
+import { WsManager } from './wsManager.js';
 
-describe("WsManager", () => {
+describe('WsManager', () => {
   let manager: WsManager;
   let server: http.Server;
   let port: number;
@@ -24,7 +24,7 @@ describe("WsManager", () => {
     manager = new WsManager();
     server = http.createServer();
     manager.init(server);
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     port = (server.address() as { port: number }).port;
   });
 
@@ -35,57 +35,57 @@ describe("WsManager", () => {
   function openWs(): Promise<WebSocket> {
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
-      ws.on("open", () => resolve(ws));
-      ws.on("error", reject);
+      ws.on('open', () => resolve(ws));
+      ws.on('error', reject);
     });
   }
 
   function closeWs(ws: WebSocket): Promise<void> {
     return new Promise((resolve) => {
       if (ws.readyState === WebSocket.CLOSED) return resolve();
-      ws.once("close", () => resolve());
+      ws.once('close', () => resolve());
       ws.close();
     });
   }
 
-  describe("auth", () => {
-    it("keeps connection open after successful authentication", async () => {
-      const token = jwt.sign({ walletAddress: "GTEST_VALID" }, JWT_SECRET);
+  describe('auth', () => {
+    it('keeps connection open after successful authentication', async () => {
+      const token = jwt.sign({ walletAddress: 'GTEST_VALID' }, JWT_SECRET);
       const ws = await openWs();
 
-      ws.send(JSON.stringify({ type: "auth", token }));
+      ws.send(JSON.stringify({ type: 'auth', token }));
       await new Promise((r) => setTimeout(r, 60));
 
       expect(ws.readyState).toBe(WebSocket.OPEN);
       await closeWs(ws);
     });
 
-    it("closes with code 4001 on invalid JWT token", async () => {
+    it('closes with code 4001 on invalid JWT token', async () => {
       const ws = await openWs();
 
       const code = await new Promise<number>((resolve) => {
-        ws.on("close", (c) => resolve(c));
-        ws.send(JSON.stringify({ type: "auth", token: "not-a-valid-token" }));
+        ws.on('close', (c) => resolve(c));
+        ws.send(JSON.stringify({ type: 'auth', token: 'not-a-valid-token' }));
       });
 
       expect(code).toBe(4001);
     });
 
-    it("closes with code 4001 on non-JSON message", async () => {
+    it('closes with code 4001 on non-JSON message', async () => {
       const ws = await openWs();
 
       const code = await new Promise<number>((resolve) => {
-        ws.on("close", (c) => resolve(c));
-        ws.send("not-json-at-all");
+        ws.on('close', (c) => resolve(c));
+        ws.send('not-json-at-all');
       });
 
       expect(code).toBe(4001);
     });
 
-    it("ignores non-auth JSON messages without closing the connection", async () => {
+    it('ignores non-auth JSON messages without closing the connection', async () => {
       const ws = await openWs();
 
-      ws.send(JSON.stringify({ type: "ping", data: "heartbeat" }));
+      ws.send(JSON.stringify({ type: 'ping', data: 'heartbeat' }));
       await new Promise((r) => setTimeout(r, 60));
 
       expect(ws.readyState).toBe(WebSocket.OPEN);
@@ -93,34 +93,34 @@ describe("WsManager", () => {
     });
   });
 
-  describe("broadcastTo wallet matching", () => {
-    it("delivers to the matching wallet regardless of case", async () => {
-      const token = jwt.sign({ walletAddress: "GWALLETABC" }, JWT_SECRET);
+  describe('broadcastTo wallet matching', () => {
+    it('delivers to the matching wallet regardless of case', async () => {
+      const token = jwt.sign({ walletAddress: 'GWALLETABC' }, JWT_SECRET);
       const ws = await openWs();
-      ws.send(JSON.stringify({ type: "auth", token }));
+      ws.send(JSON.stringify({ type: 'auth', token }));
       await new Promise((r) => setTimeout(r, 60));
 
       const received: string[] = [];
-      ws.on("message", (data) => received.push(data.toString()));
+      ws.on('message', (data) => received.push(data.toString()));
 
-      manager.broadcastTo("gwalletabc", "test:event", { value: 1 });
+      manager.broadcastTo('gwalletabc', 'test:event', { value: 1 });
       await new Promise((r) => setTimeout(r, 60));
 
       expect(received).toHaveLength(1);
-      expect(JSON.parse(received[0]!)).toMatchObject({ event: "test:event" });
+      expect(JSON.parse(received[0]!)).toMatchObject({ event: 'test:event' });
       await closeWs(ws);
     });
 
-    it("does not deliver to a non-matching wallet", async () => {
-      const token = jwt.sign({ walletAddress: "GWALLET_X" }, JWT_SECRET);
+    it('does not deliver to a non-matching wallet', async () => {
+      const token = jwt.sign({ walletAddress: 'GWALLET_X' }, JWT_SECRET);
       const ws = await openWs();
-      ws.send(JSON.stringify({ type: "auth", token }));
+      ws.send(JSON.stringify({ type: 'auth', token }));
       await new Promise((r) => setTimeout(r, 60));
 
       const received: string[] = [];
-      ws.on("message", (data) => received.push(data.toString()));
+      ws.on('message', (data) => received.push(data.toString()));
 
-      manager.broadcastTo("GWALLET_DIFFERENT", "test:event", {});
+      manager.broadcastTo('GWALLET_DIFFERENT', 'test:event', {});
       await new Promise((r) => setTimeout(r, 60));
 
       expect(received).toHaveLength(0);
@@ -128,17 +128,17 @@ describe("WsManager", () => {
     });
   });
 
-  describe("broadcast", () => {
-    it("sends to all connected clients", async () => {
+  describe('broadcast', () => {
+    it('sends to all connected clients', async () => {
       const ws1 = await openWs();
       const ws2 = await openWs();
 
       const received1: string[] = [];
       const received2: string[] = [];
-      ws1.on("message", (d) => received1.push(d.toString()));
-      ws2.on("message", (d) => received2.push(d.toString()));
+      ws1.on('message', (d) => received1.push(d.toString()));
+      ws2.on('message', (d) => received2.push(d.toString()));
 
-      manager.broadcast("global:event", { msg: "hello" });
+      manager.broadcast('global:event', { msg: 'hello' });
       await new Promise((r) => setTimeout(r, 60));
 
       expect(received1).toHaveLength(1);
@@ -148,8 +148,8 @@ describe("WsManager", () => {
     });
   });
 
-  describe("telemetry", () => {
-    it("tracks connected client count accurately", async () => {
+  describe('telemetry', () => {
+    it('tracks connected client count accurately', async () => {
       const before = manager.clientCount;
       const ws = await openWs();
       await new Promise((r) => setTimeout(r, 30));
@@ -159,43 +159,43 @@ describe("WsManager", () => {
       expect(manager.clientCount).toBe(before);
     });
 
-    it("exposes telemetry with connectedClients and droppedMessages fields", () => {
+    it('exposes telemetry with connectedClients and droppedMessages fields', () => {
       const t = manager.telemetry;
-      expect(typeof t.connectedClients).toBe("number");
-      expect(typeof t.droppedMessages).toBe("number");
+      expect(typeof t.connectedClients).toBe('number');
+      expect(typeof t.droppedMessages).toBe('number');
       expect(t.droppedMessages).toBeGreaterThanOrEqual(0);
     });
   });
 
-  describe("broadcastAuthenticated", () => {
-    it("delivers to an authenticated client", async () => {
-      const token = jwt.sign({ walletAddress: "GWALLET_AUTH" }, JWT_SECRET);
+  describe('broadcastAuthenticated', () => {
+    it('delivers to an authenticated client', async () => {
+      const token = jwt.sign({ walletAddress: 'GWALLET_AUTH' }, JWT_SECRET);
       const ws = await openWs();
-      ws.send(JSON.stringify({ type: "auth", token }));
+      ws.send(JSON.stringify({ type: 'auth', token }));
       await new Promise((r) => setTimeout(r, 60));
 
       const received: string[] = [];
-      ws.on("message", (data) => received.push(data.toString()));
+      ws.on('message', (data) => received.push(data.toString()));
 
-      manager.broadcastAuthenticated("order:created", { orderId: "1" });
+      manager.broadcastAuthenticated('order:created', { orderId: '1' });
       await new Promise((r) => setTimeout(r, 60));
 
       expect(received).toHaveLength(1);
       await closeWs(ws);
     });
 
-    it("does NOT deliver to an unauthenticated client", async () => {
+    it('does NOT deliver to an unauthenticated client', async () => {
       const ws = await openWs();
       // Never send auth message — wallet remains null
 
       const received: string[] = [];
-      ws.on("message", (data) => received.push(data.toString()));
+      ws.on('message', (data) => received.push(data.toString()));
 
-      manager.broadcastAuthenticated("order:created", {
-        orderId: "1",
-        buyer: "GALICE123",
-        seller: "GBOB456",
-        amount: "100",
+      manager.broadcastAuthenticated('order:created', {
+        orderId: '1',
+        buyer: 'GALICE123',
+        seller: 'GBOB456',
+        amount: '100',
       });
       await new Promise((r) => setTimeout(r, 60));
 
@@ -203,45 +203,45 @@ describe("WsManager", () => {
       await closeWs(ws);
     });
 
-    it("does NOT deliver to clients that failed authentication", async () => {
+    it('does NOT deliver to clients that failed authentication', async () => {
       const ws = await openWs();
 
       // Send an invalid JWT — connection should close
       const closeCode = await new Promise<number>((resolve) => {
-        ws.on("close", (c) => resolve(c));
-        ws.send(JSON.stringify({ type: "auth", token: "invalid-token" }));
+        ws.on('close', (c) => resolve(c));
+        ws.send(JSON.stringify({ type: 'auth', token: 'invalid-token' }));
       });
 
       expect(closeCode).toBe(4001);
     });
 
-    it("does not leak order data to unauthenticated connections", async () => {
+    it('does not leak order data to unauthenticated connections', async () => {
       // Connect one authenticated and one unauthenticated client
-      const token = jwt.sign({ walletAddress: "GALICE" }, JWT_SECRET);
+      const token = jwt.sign({ walletAddress: 'GALICE' }, JWT_SECRET);
       const authedWs = await openWs();
-      authedWs.send(JSON.stringify({ type: "auth", token }));
+      authedWs.send(JSON.stringify({ type: 'auth', token }));
       await new Promise((r) => setTimeout(r, 60));
 
       const unauthedWs = await openWs();
 
       const authedReceived: string[] = [];
       const unauthedReceived: string[] = [];
-      authedWs.on("message", (d) => authedReceived.push(d.toString()));
-      unauthedWs.on("message", (d) => unauthedReceived.push(d.toString()));
+      authedWs.on('message', (d) => authedReceived.push(d.toString()));
+      unauthedWs.on('message', (d) => unauthedReceived.push(d.toString()));
 
-      manager.broadcastAuthenticated("order:created", {
-        orderId: "99",
-        buyer: "GALICE",
-        farmer: "GBOB",
-        amount: "50000000",
+      manager.broadcastAuthenticated('order:created', {
+        orderId: '99',
+        buyer: 'GALICE',
+        farmer: 'GBOB',
+        amount: '50000000',
       });
       await new Promise((r) => setTimeout(r, 60));
 
       // Authenticated client received the order event
       expect(authedReceived).toHaveLength(1);
       const parsed = JSON.parse(authedReceived[0]!);
-      expect(parsed.event).toBe("order:created");
-      expect(parsed.payload.buyer).toBe("GALICE");
+      expect(parsed.event).toBe('order:created');
+      expect(parsed.payload.buyer).toBe('GALICE');
 
       // Unauthenticated client did NOT receive the order event
       expect(unauthedReceived).toHaveLength(0);
@@ -250,13 +250,13 @@ describe("WsManager", () => {
       await closeWs(unauthedWs);
     });
 
-    it("regular broadcast still delivers to unauthenticated clients", async () => {
+    it('regular broadcast still delivers to unauthenticated clients', async () => {
       const ws = await openWs();
 
       const received: string[] = [];
-      ws.on("message", (data) => received.push(data.toString()));
+      ws.on('message', (data) => received.push(data.toString()));
 
-      manager.broadcast("system:status", { status: "online" });
+      manager.broadcast('system:status', { status: 'online' });
       await new Promise((r) => setTimeout(r, 60));
 
       expect(received).toHaveLength(1);

@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { startReconciliationSweep, stopReconciliationSweep, shutdown, listen } = vi.hoisted(() => ({
-  startReconciliationSweep: vi.fn(),
-  stopReconciliationSweep: vi.fn(),
-  shutdown: vi.fn().mockResolvedValue(undefined),
-  listen: vi.fn(),
-}));
+const { startReconciliationSweep, stopReconciliationSweep, shutdown, listen } =
+  vi.hoisted(() => ({
+    startReconciliationSweep: vi.fn(),
+    stopReconciliationSweep: vi.fn(),
+    shutdown: vi.fn().mockResolvedValue(undefined),
+    listen: vi.fn(),
+  }));
 
 vi.mock('../services/reconciliationSweep.js', () => ({
   startReconciliationSweep,
@@ -16,16 +17,26 @@ vi.mock('../config/sentry.js', () => ({
   Sentry: { captureException: vi.fn(), close: vi.fn().mockResolvedValue(true) },
 }));
 vi.mock('../app.js', () => ({ default: vi.fn() }));
-vi.mock('../db/client.js', () => ({ connectDB: vi.fn().mockResolvedValue(undefined) }));
-vi.mock('../events/watcher.js', () => ({ startProductionWatcher: vi.fn().mockResolvedValue(null) }));
-vi.mock('../services/reconciliationService.js', () => ({ runProductionReconciliation: vi.fn() }));
+vi.mock('../db/client.js', () => ({
+  connectDB: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('../events/watcher.js', () => ({
+  startProductionWatcher: vi.fn().mockResolvedValue(null),
+}));
+vi.mock('../services/reconciliationService.js', () => ({
+  runProductionReconciliation: vi.fn(),
+}));
 vi.mock('../services/wsServer.js', () => ({ attachWebSocketServer: vi.fn() }));
 vi.mock('../services/lifecycle.js', () => ({
   registerHttpServer: vi.fn(),
-  registerWatcher: vi.fn((handle: ReturnType<typeof setInterval>) => clearInterval(handle)),
+  registerWatcher: vi.fn((handle: ReturnType<typeof setInterval>) =>
+    clearInterval(handle),
+  ),
   shutdown,
 }));
-vi.mock('http', () => ({ default: { createServer: vi.fn(() => ({ listen })) } }));
+vi.mock('http', () => ({
+  default: { createServer: vi.fn(() => ({ listen })) },
+}));
 
 describe('bootstrap (Issue #1205)', () => {
   beforeEach(() => {
@@ -40,8 +51,14 @@ describe('bootstrap (Issue #1205)', () => {
     await import('../index.js');
     await vi.waitFor(() => expect(listen).toHaveBeenCalled());
     // Drop the signal handlers index.ts registered so they do not leak.
-    for (const sig of ['SIGTERM', 'SIGINT', 'unhandledRejection', 'uncaughtException'] as const) {
-      for (const l of process.listeners(sig as NodeJS.Signals)) if (!before.has(l as never)) process.removeListener(sig, l);
+    for (const sig of [
+      'SIGTERM',
+      'SIGINT',
+      'unhandledRejection',
+      'uncaughtException',
+    ] as const) {
+      for (const l of process.listeners(sig as NodeJS.Signals))
+        if (!before.has(l)) process.removeListener(sig, l);
     }
   }
 

@@ -3,12 +3,12 @@
  * Expose indexing progress and health for UI and monitoring.
  */
 
-import { Router, type Request, type Response } from "express";
-import { config } from "../config/index.js";
-import { getIndexerReadiness } from "../services/indexerReadinessService.js";
-import { jsonValidated } from "../middleware/validate.js";
-import { z } from "zod";
-import { asyncHandler } from "../middleware/asyncHandler.js";
+import { Router, type Request, type Response } from 'express';
+import { config } from '../config/index.js';
+import { getIndexerReadiness } from '../services/indexerReadinessService.js';
+import { jsonValidated } from '../middleware/validate.js';
+import { z } from 'zod';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 
 const router = Router();
 
@@ -28,12 +28,15 @@ const IndexerReadinessSchema = z.object({
 });
 
 // GET /indexer/readiness — check indexer health and backfill progress
-router.get("/readiness", asyncHandler(async (req: Request, res: Response) => {
-  const readiness = await getIndexerReadiness(config.contractId, 300);
-  jsonValidated(res, IndexerReadinessSchema, 200, {
-    ...readiness,
-    lastProcessedTime: readiness.lastProcessedTime?.toISOString() ?? null,
-  });
-}));
+router.get(
+  '/readiness',
+  asyncHandler(async (req: Request, res: Response) => {
+    const readiness = await getIndexerReadiness(config.contractId, 300);
+    jsonValidated(res, IndexerReadinessSchema, 200, {
+      ...readiness,
+      lastProcessedTime: readiness.lastProcessedTime?.toISOString() ?? null,
+    });
+  }),
+);
 
 export default router;

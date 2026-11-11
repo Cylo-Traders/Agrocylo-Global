@@ -3,8 +3,8 @@
  * Supports health checks and UI display of indexing progress.
  */
 
-import { prisma } from "../db/client.js";
-import logger from "../config/logger.js";
+import { prisma } from '../db/client.js';
+import logger from '../config/logger.js';
 
 export interface IndexerReadiness {
   /** Whether the indexer is currently operational. */
@@ -53,7 +53,7 @@ export async function getIndexerReadiness(
 
     const lastTx = await prisma.transaction.findFirst({
       where: { ledger: { gte: cursor.ledger - 10 } },
-      orderBy: { processedAt: "desc" },
+      orderBy: { processedAt: 'desc' },
       take: 1,
     });
 
@@ -74,7 +74,7 @@ export async function getIndexerReadiness(
       cursor: { ledger: cursor.ledger, eventIndex: cursor.eventIndex },
     };
   } catch (err) {
-    logger.error("getIndexerReadiness failed", {
+    logger.error('getIndexerReadiness failed', {
       error: err instanceof Error ? err.message : String(err),
       contractId,
     });

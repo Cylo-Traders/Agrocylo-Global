@@ -8,18 +8,34 @@ const router = express.Router();
 
 router.post('/', requireWallet, writeLimiter, async (req: WalletRequest, res, next) => {
   try {
-    if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet', 'https://cylos.io/errors/unauthorized');
+    if (!req.walletAddress)
+      throw new ApiError(
+        401,
+        'Unauthorized',
+        'Missing wallet',
+        'https://cylos.io/errors/unauthorized'
+      );
     const data = await createOrderMetadata(req.body ?? {}, req.walletAddress);
     res.status(201).json(data);
-  } catch (error) { next(error); }
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.get('/:on_chain_order_id', requireWallet, async (req: WalletRequest, res, next) => {
   try {
-    if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet', 'https://cylos.io/errors/unauthorized');
+    if (!req.walletAddress)
+      throw new ApiError(
+        401,
+        'Unauthorized',
+        'Missing wallet',
+        'https://cylos.io/errors/unauthorized'
+      );
     const data = await getOrderMetadata(req.params['on_chain_order_id']!, req.walletAddress);
     res.status(200).json(data);
-  } catch (error) { next(error); }
+  } catch (error) {
+    next(error);
+  }
 });
 
 export default router;

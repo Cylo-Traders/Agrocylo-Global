@@ -83,18 +83,25 @@ function buildModules(): ModuleInterface[] {
   return walletConnect ? [...modules, walletConnect] : modules;
 }
 
-export const WALLET_KIT_MODULES = buildModules();
+let cachedModules: ModuleInterface[] | undefined;
+
+function getWalletKitModules(): ModuleInterface[] {
+  if (typeof window === "undefined") return [];
+  return (cachedModules ??= buildModules());
+}
 
 let initialized = false;
 
 export function initializeWalletKit(selectedWalletId?: string): void {
+  const modules = getWalletKitModules();
+  if (modules.length === 0) return;
   if (!initialized) {
     StellarWalletsKit.init({
-      modules: WALLET_KIT_MODULES,
+      modules,
       network: configuredNetwork(),
       selectedWalletId:
         selectedWalletId &&
-        WALLET_KIT_MODULES.some((module) => module.productId === selectedWalletId)
+        modules.some((module) => module.productId === selectedWalletId)
           ? selectedWalletId
           : undefined,
       authModal: {
@@ -108,7 +115,7 @@ export function initializeWalletKit(selectedWalletId?: string): void {
 
   if (
     selectedWalletId &&
-    WALLET_KIT_MODULES.some((module) => module.productId === selectedWalletId)
+    getWalletKitModules().some((module) => module.productId === selectedWalletId)
   ) {
     StellarWalletsKit.setWallet(selectedWalletId);
   }
@@ -195,8 +202,24 @@ export function createKitWalletAdapter(
   };
 }
 
-export const KIT_WALLET_ADAPTERS = WALLET_KIT_MODULES.map((module) =>
-  createKitWalletAdapter(module),
+let cachedAdapters: WalletAdapter[] | undefined;
+
+function getKitWalletAdapters(): WalletAdapter[] {
+  if (typeof window === "undefined") return [];
+  return (cachedAdapters ??= getWalletKitModules().map((module) =>
+    createKitWalletAdapter(module),
+  ));
+}
+
+export const KIT_WALLET_ADAPTERS: WalletAdapter[] = new Proxy(
+  [] as WalletAdapter[],
+  {
+    get(_target, property) {
+      const adapters = getKitWalletAdapters();
+      const value = Reflect.get(adapters, property, adapters);
+      return typeof value === "function" ? value.bind(adapters) : value;
+    },
+  },
 );
 
 export async function connectWithWalletModal(): Promise<{

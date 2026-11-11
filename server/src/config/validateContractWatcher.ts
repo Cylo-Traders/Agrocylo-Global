@@ -6,12 +6,12 @@
 export function validateContractWatcherConfig(
   runWatcher: boolean,
   contractId: string,
-  governanceContractId = "",
+  governanceContractId = ''
 ): void {
   if (runWatcher && !contractId && !governanceContractId) {
     throw new Error(
-      "CONTRACT_ID is required when RUN_CONTRACT_WATCHER is enabled. " +
-      "Set CONTRACT_ID or GOVERNANCE_CONTRACT_ID in your .env, or set RUN_CONTRACT_WATCHER=false for REST-only mode.",
+      'CONTRACT_ID is required when RUN_CONTRACT_WATCHER is enabled. ' +
+        'Set CONTRACT_ID or GOVERNANCE_CONTRACT_ID in your .env, or set RUN_CONTRACT_WATCHER=false for REST-only mode.'
     );
   }
 }

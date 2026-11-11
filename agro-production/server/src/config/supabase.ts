@@ -10,8 +10,12 @@ export function getSupabaseAdmin(): ReturnType<typeof createClient> {
       'Missing Supabase configuration. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.',
     );
   }
-  cachedClient = createClient(config.supabaseUrl, config.supabaseServiceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  cachedClient = createClient(
+    config.supabaseUrl,
+    config.supabaseServiceRoleKey,
+    {
+      auth: { persistSession: false, autoRefreshToken: false },
+    },
+  );
   return cachedClient;
 }

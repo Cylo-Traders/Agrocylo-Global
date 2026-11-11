@@ -5,7 +5,10 @@ import { config } from './config/index.js';
 import { defaultLimiter } from './middleware/rateLimit.js';
 import { jsonValidated } from './middleware/validate.js';
 import { requireMetricsAuth } from './middleware/metricsAuth.js';
-import { isGracefullyShuttingDown, getShutdownPhase, getShutdownSignal } from './services/lifecycle.js';
+import {
+  isGracefullyShuttingDown,
+  getShutdownPhase,
+} from './services/lifecycle.js';
 import authRoutes from './routes/auth.js';
 import campaignImageRoutes from './routes/campaignImageRoutes.js';
 import campaignRoutes from './routes/campaigns.js';
@@ -22,7 +25,11 @@ import indexerRoutes from './routes/indexer.js';
 import weatherRoutes from './routes/weather.js';
 import analyticsRoutes from './routes/analytics.js';
 import { globalErrorHandler } from './middleware/errors.js';
-import { HealthResponseSchema, LivezResponseSchema, ReadyzResponseSchema } from './schemas/health.js';
+import {
+  HealthResponseSchema,
+  LivezResponseSchema,
+  ReadyzResponseSchema,
+} from './schemas/health.js';
 import { serveOpenApiDocument } from './openapi/document.js';
 import { getRateLimitMetrics } from './middleware/rateLimitMetrics.js';
 import { getEventMetrics } from './events/metrics.js';
@@ -70,7 +77,10 @@ const corsOptions: cors.CorsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 app.use(defaultLimiter);
-app.use((_req: Request, _res: Response, next: express.NextFunction) => { _requestTotal++; next(); });
+app.use((_req: Request, _res: Response, next: express.NextFunction) => {
+  _requestTotal++;
+  next();
+});
 
 app.use((req: Request, _res: Response, next: express.NextFunction) => {
   if (isGracefullyShuttingDown()) {
@@ -115,7 +125,7 @@ app.get('/health', (_req: Request, res: Response) => {
   });
 });
 
-app.get('/livez', async (_req: Request, res: Response) => {
+app.get('/livez', (_req: Request, res: Response) => {
   jsonValidated(res, LivezResponseSchema, 200, {
     status: 'alive',
     uptime: process.uptime(),
@@ -123,60 +133,77 @@ app.get('/livez', async (_req: Request, res: Response) => {
   });
 });
 
-app.get('/readyz', async (_req: Request, res: Response) => {
-  if (isGracefullyShuttingDown()) {
-    jsonValidated(res, ReadyzResponseSchema, 503, {
-      status: 'not_ready',
-      checks: { shutdown: { status: 'DOWN', message: `Server shutting down: ${getShutdownPhase()}` } },
-      lastLedger: 0,
+app.get('/readyz', (_req: Request, res: Response) => {
+  void (async () => {
+    if (isGracefullyShuttingDown()) {
+      jsonValidated(res, ReadyzResponseSchema, 503, {
+        status: 'not_ready',
+        checks: {
+          shutdown: {
+            status: 'DOWN',
+            message: `Server shutting down: ${getShutdownPhase()}`,
+          },
+        },
+        lastLedger: 0,
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
+    const checks: Record<string, { status: string; message?: string }> = {};
+    let lastLedger = 0;
+
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      checks.database = { status: 'UP' };
+    } catch (err) {
+      checks.database = {
+        status: 'DOWN',
+        message:
+          err instanceof Error
+            ? 'database unreachable'
+            : 'database unreachable',
+      };
+    }
+
+    try {
+      const latest = await sorobanRpcServer.getLatestLedger();
+      lastLedger = latest.sequence;
+      checks.rpc = { status: 'UP' };
+    } catch (err) {
+      checks.rpc = {
+        status: 'DOWN',
+        message:
+          err instanceof Error
+            ? 'RPC endpoint unreachable'
+            : 'RPC endpoint unreachable',
+      };
+    }
+
+    if (config.registryContractId) {
+      checks.registry = { status: 'UP' };
+    } else {
+      logger.warn(
+        '[HealthCheck] WARNING: production_escrow has no REGISTRY_CONTRACT_ID configured',
+      );
+      checks.registry = {
+        status: 'WARN',
+        message: 'REGISTRY_CONTRACT_ID not set',
+      };
+    }
+
+    const ready = Object.values(checks).every(
+      (c) => c.status === 'UP' || c.status === 'WARN',
+    );
+    const statusCode = ready ? 200 : 503;
+
+    jsonValidated(res, ReadyzResponseSchema, statusCode, {
+      status: ready ? 'ready' : 'not_ready',
+      checks,
+      lastLedger,
       timestamp: new Date().toISOString(),
     });
-    return;
-  }
-
-  const checks: Record<string, { status: string; message?: string }> = {};
-  let lastLedger = 0;
-
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    checks.database = { status: 'UP' };
-  } catch (err) {
-    checks.database = {
-      status: 'DOWN',
-      message: err instanceof Error ? 'database unreachable' : 'database unreachable',
-    };
-  }
-
-  try {
-    const latest = await sorobanRpcServer.getLatestLedger();
-    lastLedger = latest.sequence;
-    checks.rpc = { status: 'UP' };
-  } catch (err) {
-    checks.rpc = {
-      status: 'DOWN',
-      message: err instanceof Error ? 'RPC endpoint unreachable' : 'RPC endpoint unreachable',
-    };
-  }
-
-  if (config.registryContractId) {
-    checks.registry = { status: 'UP' };
-  } else {
-    logger.warn('[HealthCheck] WARNING: production_escrow has no REGISTRY_CONTRACT_ID configured');
-    checks.registry = {
-      status: 'WARN',
-      message: 'REGISTRY_CONTRACT_ID not set',
-    };
-  }
-
-  const ready = Object.values(checks).every((c) => c.status === 'UP' || c.status === 'WARN');
-  const statusCode = ready ? 200 : 503;
-
-  jsonValidated(res, ReadyzResponseSchema, statusCode, {
-    status: ready ? 'ready' : 'not_ready',
-    checks,
-    lastLedger,
-    timestamp: new Date().toISOString(),
-  });
+  })();
 });
 
 app.get('/api/docs/openapi.json', serveOpenApiDocument);
@@ -197,16 +224,26 @@ app.get('/metrics', requireMetricsAuth, (_req: Request, res: Response) => {
     '# TYPE api_requests_total counter',
     `api_requests_total ${_requestTotal}`,
   ];
-  res.set('Content-Type', 'text/plain; version=0.0.4').send(lines.join('\n') + '\n');
+  res
+    .set('Content-Type', 'text/plain; version=0.0.4')
+    .send(lines.join('\n') + '\n');
 });
 
-app.get('/metrics/rate-limits', requireMetricsAuth, (_req: Request, res: Response) => {
-  res.status(200).json(getRateLimitMetrics());
-});
+app.get(
+  '/metrics/rate-limits',
+  requireMetricsAuth,
+  (_req: Request, res: Response) => {
+    res.status(200).json(getRateLimitMetrics());
+  },
+);
 
-app.get('/metrics/events', requireMetricsAuth, (_req: Request, res: Response) => {
-  res.status(200).json(getEventMetrics());
-});
+app.get(
+  '/metrics/events',
+  requireMetricsAuth,
+  (_req: Request, res: Response) => {
+    res.status(200).json(getEventMetrics());
+  },
+);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({ error: 'Not found' });

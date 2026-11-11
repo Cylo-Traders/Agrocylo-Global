@@ -1,4 +1,4 @@
-import { randomUUID, timingSafeEqual, randomBytes } from 'node:crypto';
+import { createHash, randomUUID, randomBytes } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { Keypair } from '@stellar/stellar-sdk';
 import { config } from '../config/index.js';
@@ -41,7 +41,9 @@ export interface VerifiedSession {
   sessionToken: string;
 }
 
-export async function createChallenge(walletAddress: string): Promise<ChallengeResult> {
+export async function createChallenge(
+  walletAddress: string,
+): Promise<ChallengeResult> {
   const nonce = randomUUID();
   const expiresAt = new Date(Date.now() + NONCE_EXPIRY_SECS * 1000);
 
@@ -58,15 +60,6 @@ export async function createChallenge(walletAddress: string): Promise<ChallengeR
     nonce,
     expiresAt: expiresAt.toISOString(),
   };
-}
-
-function constantTimeEqual(a: Buffer, b: Buffer): boolean {
-  if (a.length !== b.length) return false;
-  try {
-    return timingSafeEqual(a, b);
-  } catch {
-    return false;
-  }
 }
 
 export async function verifySignatureAndCreateSession(
@@ -166,7 +159,10 @@ export async function verifyHandoffAndCreateSession(
     const decoded = jwt.verify(handoffToken, config.jwtSecret, {
       audience: HANDOFF_AUDIENCE,
     }) as jwt.JwtPayload;
-    if (typeof decoded.walletAddress !== 'string' || typeof decoded.jti !== 'string') {
+    if (
+      typeof decoded.walletAddress !== 'string' ||
+      typeof decoded.jti !== 'string'
+    ) {
       throw new Error('Malformed handoff token payload.');
     }
     walletAddress = decoded.walletAddress;
@@ -276,7 +272,7 @@ export async function revokeSession(sessionToken: string): Promise<void> {
 }
 
 function hashRefreshToken(token: string): string {
-  return randomBytes(32).toString('hex');
+  return createHash('sha256').update(token).digest('hex');
 }
 
 function canonicalWalletAddress(addr: string): string {

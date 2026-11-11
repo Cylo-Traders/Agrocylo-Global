@@ -91,7 +91,9 @@ function runE2ESuite() {
   // Setup / teardown
   // ---------------------------------------------------------------------------
   beforeAll(async () => {
-    prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: E2E_DB_URL }) });
+    prisma = new PrismaClient({
+      adapter: new PrismaPg({ connectionString: E2E_DB_URL }),
+    });
     await prisma.$connect();
 
     // Wipe slate for this test run.
@@ -316,8 +318,10 @@ function runE2ESuite() {
       // own dependencies) in this package's compilation/rootDir checks.
       // Vitest transforms .ts on the fly at runtime, so this imports the
       // real source directly instead of a committed build artifact.
-      const contractServiceModulePath: string =
-        '../../../client/src/lib/contractService.ts';
+      const contractServiceModulePath = new URL(
+        '../../../client/src/lib/contractService.ts',
+        import.meta.url,
+      ).href;
       const { buildInvest } = await import(contractServiceModulePath);
 
       const result = await buildInvest(INVESTOR, '1', BigInt(100_000));

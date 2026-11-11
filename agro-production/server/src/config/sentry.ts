@@ -13,7 +13,9 @@ export function initSentry(): void {
   initialized = true;
 
   if (!config.sentryDsn) {
-    logger.warn('[sentry]: SENTRY_DSN not set — error tracking disabled. Errors will only be visible in logs.');
+    logger.warn(
+      '[sentry]: SENTRY_DSN not set — error tracking disabled. Errors will only be visible in logs.',
+    );
     return;
   }
 
@@ -31,7 +33,11 @@ export function initSentry(): void {
  * so alert rules can route on `alert_type` without parsing message text.
  * Falls back to a plain log line if Sentry isn't configured.
  */
-export function captureAlert(alertType: string, message: string, extra?: Record<string, unknown>): void {
+export function captureAlert(
+  alertType: string,
+  message: string,
+  extra?: Record<string, unknown>,
+): void {
   logger.error(`[alert:${alertType}] ${message}`, extra);
   if (!config.sentryDsn) return;
   Sentry.captureMessage(message, {
