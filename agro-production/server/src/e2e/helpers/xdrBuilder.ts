@@ -2,18 +2,20 @@
  * Utilities for building base64-encoded XDR ScVals that the parser and watcher
  * expect from the Soroban JSON-RPC event feed.
  */
-import * as StellarSdk from "@stellar/stellar-sdk";
+import * as StellarSdk from '@stellar/stellar-sdk';
 
 const { xdr, StrKey } = StellarSdk;
 
 /** Encode a symbol ScVal to base64 XDR (matches CAMPAIGN_TOPIC / ORDER_TOPIC constants). */
 export function scvSymbolB64(s: string): string {
-  return xdr.ScVal.scvSymbol(s).toXDR("base64");
+  return xdr.ScVal.scvSymbol(s).toXDR('base64');
 }
 
 /** Encode a Vec of string ScVals to base64 XDR. */
 export function scvVecOfStringsB64(items: string[]): string {
-  return xdr.ScVal.scvVec(items.map((i) => xdr.ScVal.scvString(Buffer.from(i)))).toXDR("base64");
+  return xdr.ScVal.scvVec(
+    items.map((i) => xdr.ScVal.scvString(Buffer.from(i))),
+  ).toXDR('base64');
 }
 
 export interface CampaignCreatedPayload {
@@ -39,19 +41,25 @@ export function makeCampaignCreatedRawEvent(
   p: CampaignCreatedPayload,
   ledger = 100,
   eventIdx = 0,
-  contractId = "CTEST0000000000000000000000000000000000000000000000000000",
+  contractId = 'CTEST0000000000000000000000000000000000000000000000000000',
 ): object {
   return {
     id: `${ledger}-${eventIdx}`,
-    type: "contract",
+    type: 'contract',
     ledger,
     ledgerClosedAt: new Date().toISOString(),
     contractId,
-    topic: [scvSymbolB64("campaign"), scvSymbolB64("created")],
-    value: scvVecOfStringsB64([p.campaignId, p.farmer, p.token, p.targetAmount, p.deadline]),
+    topic: [scvSymbolB64('campaign'), scvSymbolB64('created')],
+    value: scvVecOfStringsB64([
+      p.campaignId,
+      p.farmer,
+      p.token,
+      p.targetAmount,
+      p.deadline,
+    ]),
     inSuccessfulContractCall: true,
     paging_token: `${ledger}-${eventIdx}`,
-    txHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    txHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   };
 }
 
@@ -60,19 +68,24 @@ export function makeCampaignInvestedRawEvent(
   p: CampaignInvestedPayload,
   ledger = 101,
   eventIdx = 0,
-  contractId = "CTEST0000000000000000000000000000000000000000000000000000",
+  contractId = 'CTEST0000000000000000000000000000000000000000000000000000',
 ): object {
   return {
     id: `${ledger}-${eventIdx}`,
-    type: "contract",
+    type: 'contract',
     ledger,
     ledgerClosedAt: new Date().toISOString(),
     contractId,
-    topic: [scvSymbolB64("campaign"), scvSymbolB64("invested")],
-    value: scvVecOfStringsB64([p.campaignId, p.investor, p.amount, p.totalRaised]),
+    topic: [scvSymbolB64('campaign'), scvSymbolB64('invested')],
+    value: scvVecOfStringsB64([
+      p.campaignId,
+      p.investor,
+      p.amount,
+      p.totalRaised,
+    ]),
     inSuccessfulContractCall: true,
     paging_token: `${ledger}-${eventIdx}`,
-    txHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    txHash: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
   };
 }
 
@@ -95,12 +108,12 @@ export function buildAccountLedgerEntry(
 
   const accountEntry = new xdr.AccountEntry({
     accountId,
-    balance: xdr.Int64.fromString("1000000000000"),
+    balance: xdr.Int64.fromString('1000000000000'),
     seqNum,
     numSubEntries: 0,
     inflationDest: null,
     flags: 0,
-    homeDomain: "",
+    homeDomain: '',
     thresholds,
     signers: [],
     ext: xdr.AccountEntryExt.v0(),
@@ -117,8 +130,8 @@ export function buildAccountLedgerEntry(
   );
 
   return {
-    keyBase64: ledgerKey.toXDR("base64"),
-    entryBase64: ledgerEntry.toXDR("base64"),
+    keyBase64: ledgerKey.toXDR('base64'),
+    entryBase64: ledgerEntry.toXDR('base64'),
   };
 }
 
@@ -127,5 +140,5 @@ export function buildAccountLedgerEntry(
  * Uses SorobanDataBuilder to handle version-specific XDR differences automatically.
  */
 export function buildSorobanTransactionData(): string {
-  return new StellarSdk.SorobanDataBuilder().build().toXDR("base64");
+  return new StellarSdk.SorobanDataBuilder().build().toXDR('base64');
 }

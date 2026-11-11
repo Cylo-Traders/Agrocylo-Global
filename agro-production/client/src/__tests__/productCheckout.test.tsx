@@ -30,6 +30,7 @@ import { buildCreateOrder } from "@/lib/contractService";
 import { createOrder } from "@/services/orderService";
 import { signAndSubmitTransaction } from "@/lib/signTransaction";
 import { logErrorWithContext } from "@/lib/errorHandling";
+import type { Order } from "@/types";
 
 const mockBuildCreateOrder = vi.mocked(buildCreateOrder);
 const mockCreateOrder = vi.mocked(createOrder);
@@ -42,7 +43,7 @@ describe("Product checkout error handling", () => {
   });
 
   it("builder failure surfaces in error UI", async () => {
-    mockCreateOrder.mockResolvedValue({ id: "order-123" } satisfies unknown);
+    mockCreateOrder.mockResolvedValue({ id: "order-123" } as Order);
     mockBuildCreateOrder.mockResolvedValue({
       success: false,
       error: "Contract not initialized",
@@ -81,7 +82,7 @@ describe("Product checkout error handling", () => {
   });
 
   it("wallet rejection surfaces in error UI", async () => {
-    mockCreateOrder.mockResolvedValue({ id: "order-456" } satisfies unknown);
+    mockCreateOrder.mockResolvedValue({ id: "order-456" } as Order);
     mockBuildCreateOrder.mockResolvedValue({
       success: true,
       data: "prepared-xdr",
@@ -124,7 +125,7 @@ describe("Product checkout error handling", () => {
 
   it("successful transaction creates off-chain order record", async () => {
     const createdOrderId = "order-789";
-    mockCreateOrder.mockResolvedValue({ id: createdOrderId } satisfies unknown);
+    mockCreateOrder.mockResolvedValue({ id: createdOrderId } as Order);
     mockBuildCreateOrder.mockResolvedValue({
       success: true,
       data: "prepared-xdr",
@@ -171,7 +172,7 @@ describe("Product checkout error handling", () => {
   });
 
   it("logs error context when builder fails", async () => {
-    mockCreateOrder.mockResolvedValue({ id: "order-err" } satisfies unknown);
+    mockCreateOrder.mockResolvedValue({ id: "order-err" } as Order);
     mockBuildCreateOrder.mockResolvedValue({
       success: false,
       error: "RPC error",

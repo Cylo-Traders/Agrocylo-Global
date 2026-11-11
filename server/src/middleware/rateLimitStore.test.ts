@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createRateLimitStore } from './rateLimitStore.js';
 
 // Simple in-memory Redis mock that supports the subset of commands used by
@@ -60,13 +60,18 @@ class MockRedis {
     return Math.ceil(p / 1000);
   }
 
-  async eval(script: string, numKeys: number, key: string, windowMsStr?: string): Promise<[number, number]> {
+  async eval(
+    script: string,
+    numKeys: number,
+    key: string,
+    windowMsStr?: string
+  ): Promise<[number, number]> {
     // Detect which Lua script is being executed by content
     const windowMs = windowMsStr ? parseInt(windowMsStr, 10) : 60000;
 
     if (script.includes('INCR')) {
       // incrWithExpireScript path
-      let e = this.getEntry(key);
+      const e = this.getEntry(key);
       let current: number;
       if (!e) {
         current = 1;

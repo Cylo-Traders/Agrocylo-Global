@@ -1,11 +1,11 @@
-import { z } from "zod";
+import { z } from 'zod';
 import {
   basketStatusEnum,
   campaignStatusEnum,
   orderStatusEnum,
   stellarAddress,
   uuidParam,
-} from "./common.js";
+} from './common.js';
 
 const dateField = z.union([
   z.string().datetime(),
@@ -213,7 +213,7 @@ export const InvestorBasketSummarySchema = z.object({
 
 export const ValidationErrorSchema = z.object({
   type: z.string().url(),
-  title: z.literal("Validation Failed"),
+  title: z.literal('Validation Failed'),
   status: z.literal(400),
   instance: z.string(),
   errors: z.array(

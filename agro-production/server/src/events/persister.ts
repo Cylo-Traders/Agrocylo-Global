@@ -1,9 +1,9 @@
-import type { CampaignStatus, OrderStatus, Prisma, UserRole } from "@prisma/client";
-import { prisma } from "../db/client.js";
-import logger from "../config/logger.js";
-import { broadcast, type WsEventType } from "../services/wsServer.js";
-import { recordEventProcessed, recordEventDuplicate } from "./metrics.js";
-import { isValidTransition } from "../services/campaignStatusService.js";
+import type { CampaignStatus, Prisma, UserRole } from '@prisma/client';
+import { prisma } from '../db/client.js';
+import logger from '../config/logger.js';
+import { broadcast } from '../services/wsServer.js';
+import { recordEventProcessed, recordEventDuplicate } from './metrics.js';
+import { isValidTransition } from '../services/campaignStatusService.js';
 import type {
   CampaignCreatedEvent,
   CampaignInvestedEvent,
@@ -21,7 +21,7 @@ import type {
   BasketFundedEvent,
   BasketWithdrawnEvent,
   BasketClaimedEvent,
-} from "./types.js";
+} from './types.js';
 
 /**
  * Raised when an event references a parent entity (e.g. a campaign) that has
@@ -47,67 +47,71 @@ export class DependencyMissingError extends Error {
  */
 export class EventPersister {
   static async persist(event: ParsedEvent): Promise<void> {
-    const alreadyProcessed = await hasPersistedEvent(prisma, event.ledger, event.eventIndex);
+    const alreadyProcessed = await hasPersistedEvent(
+      prisma,
+      event.ledger,
+      event.eventIndex,
+    );
     if (alreadyProcessed) {
       recordEventDuplicate();
-      logDuplicateSkip(event, "persist.preflight");
+      logDuplicateSkip(event, 'persist.preflight');
       return;
     }
 
     switch (event.action) {
-      case "campaign.created":
+      case 'campaign.created':
         await handleCampaignCreated(event);
         break;
-      case "campaign.invested":
+      case 'campaign.invested':
         await handleCampaignInvested(event);
         break;
-      case "campaign.settled":
+      case 'campaign.settled':
         await handleCampaignSettled(event);
         break;
-      case "order.created":
+      case 'order.created':
         await handleOrderCreated(event);
         break;
-      case "order.confirmed":
+      case 'order.confirmed':
         await handleOrderConfirmed(event);
         break;
-      case "campaign.produce":
-        await updateCampaignStatus(event, "IN_PRODUCTION");
+      case 'campaign.produce':
+        await updateCampaignStatus(event, 'IN_PRODUCTION');
         break;
-      case "campaign.harvest":
-        await updateCampaignStatus(event, "HARVESTED");
+      case 'campaign.harvest':
+        await updateCampaignStatus(event, 'HARVESTED');
         break;
-      case "campaign.failed":
-        await updateCampaignStatus(event, "FAILED");
+      case 'campaign.failed':
+        await updateCampaignStatus(event, 'FAILED');
         break;
-      case "campaign.disputed":
-        await updateCampaignStatus(event, "DISPUTED");
+      case 'campaign.disputed':
+        await updateCampaignStatus(event, 'DISPUTED');
         break;
-      case "dispute.opened":
-        await handleDisputeOpened(event as DisputeOpenedEvent);
+      case 'dispute.opened':
+        await handleDisputeOpened(event);
         break;
-      case "dispute.evidence_submitted":
-        await handleDisputeEvidenceSubmitted(event as DisputeEvidenceSubmittedEvent);
+      case 'dispute.evidence_submitted':
+        await handleDisputeEvidenceSubmitted(event);
         break;
-      case "dispute.resolved":
-        await handleDisputeResolved(event as DisputeResolvedEvent);
+      case 'dispute.resolved':
+        await handleDisputeResolved(event);
         break;
-      case "dispute.dismissed":
-        await handleDisputeDismissed(event as DisputeDismissedEvent);
+      case 'dispute.dismissed':
+        await handleDisputeDismissed(event);
         break;
-      case "basket.created":
-        await handleBasketCreated(event as BasketCreatedEvent);
+      case 'basket.created':
+        await handleBasketCreated(event);
         break;
-      case "basket.deposit":
-        await handleBasketDeposit(event as BasketDepositEvent);
+      case 'basket.deposit':
+        await handleBasketDeposit(event);
         break;
-      case "basket.funded":
-        await handleBasketFunded(event as BasketFundedEvent);
+      case 'basket.funded':
+        await handleBasketFunded(event);
         break;
-      case "basket.withdrawn":
-        await handleBasketWithdrawn(event as BasketWithdrawnEvent);
+      case 'basket.withdrawn':
+        await handleBasketWithdrawn(event);
         break;
-      case "basket.claimed":
-        await handleBasketClaimed(event as BasketClaimedEvent);
+      case 'basket.claimed':
+        await handleBasketClaimed(event);
         break;
       default:
         // Record the raw transaction but don't update domain models.
@@ -116,7 +120,10 @@ export class EventPersister {
     }
 
     recordEventProcessed(event.action, event.ledger);
-    logger.info("EventPersister: persisted", { action: event.action, ledger: event.ledger });
+    logger.info('EventPersister: persisted', {
+      action: event.action,
+      ledger: event.ledger,
+    });
   }
 }
 
@@ -133,7 +140,7 @@ async function handleCampaignCreated(event: CampaignCreatedEvent) {
 
   await prisma.$transaction(async (tx) => {
     if (await skipDuplicateInTransaction(tx, event)) return;
-    await upsertUser(tx, event.farmer, "FARMER");
+    await upsertUser(tx, event.farmer, 'FARMER');
 
     const campaign = await tx.campaign.upsert({
       where: { onChainId: event.campaignId },
@@ -143,7 +150,7 @@ async function handleCampaignCreated(event: CampaignCreatedEvent) {
         tokenAddress: event.token,
         targetAmount: event.targetAmount,
         deadline,
-        status: "FUNDING",
+        status: 'FUNDING',
       },
       update: {},
     });
@@ -161,10 +168,13 @@ async function handleCampaignCreated(event: CampaignCreatedEvent) {
   });
 }
 
-type TransactionClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+type TransactionClient = Parameters<
+  Parameters<typeof prisma.$transaction>[0]
+>[0];
 
 async function hasPersistedEvent(
-  client: Pick<typeof prisma, "transaction"> | Pick<TransactionClient, "transaction">,
+  client:
+    Pick<typeof prisma, 'transaction'> | Pick<TransactionClient, 'transaction'>,
   ledger: number,
   eventIndex: number,
 ) {
@@ -174,17 +184,24 @@ async function hasPersistedEvent(
   return Boolean(existing);
 }
 
-async function skipDuplicateInTransaction(tx: TransactionClient, event: ParsedEvent) {
-  const alreadyProcessed = await hasPersistedEvent(tx, event.ledger, event.eventIndex);
+async function skipDuplicateInTransaction(
+  tx: TransactionClient,
+  event: ParsedEvent,
+) {
+  const alreadyProcessed = await hasPersistedEvent(
+    tx,
+    event.ledger,
+    event.eventIndex,
+  );
   if (alreadyProcessed) {
-    logDuplicateSkip(event, "persist.tx");
+    logDuplicateSkip(event, 'persist.tx');
     return true;
   }
   return false;
 }
 
 function logDuplicateSkip(event: ParsedEvent, stage: string) {
-  logger.debug("EventPersister: skipping duplicate", {
+  logger.debug('EventPersister: skipping duplicate', {
     action: event.action,
     ledger: event.ledger,
     eventIndex: event.eventIndex,
@@ -219,7 +236,7 @@ async function handleCampaignInvested(event: CampaignInvestedEvent) {
 
   await prisma.$transaction(async (tx) => {
     if (await skipDuplicateInTransaction(tx, event)) return;
-    await upsertUser(tx, event.investor, "INVESTOR");
+    await upsertUser(tx, event.investor, 'INVESTOR');
 
     const campaign = await tx.campaign.findUnique({
       where: { onChainId: event.campaignId },
@@ -242,7 +259,7 @@ async function handleCampaignInvested(event: CampaignInvestedEvent) {
         // equality check would strand overshoot campaigns in FUNDING forever.
         status:
           BigInt(event.totalRaised) >= BigInt(campaign.targetAmount)
-            ? "FUNDED"
+            ? 'FUNDED'
             : undefined,
       },
     });
@@ -291,14 +308,22 @@ async function handleCampaignInvested(event: CampaignInvestedEvent) {
         amount: inv.amount,
         ledger: inv.ledger,
         txHash: inv.txHash ?? undefined,
-        createdAt: inv.createdAt ? inv.createdAt.toISOString() : new Date().toISOString(),
+        createdAt: inv.createdAt
+          ? inv.createdAt.toISOString()
+          : new Date().toISOString(),
       },
     };
   });
 
   if (post) {
-    broadcast("campaign.invested", (post as PostCommitPayloads).campaignInvested);
-    broadcast("investment.indexed", (post as PostCommitPayloads).investmentIndexed);
+    broadcast(
+      'campaign.invested',
+      (post as PostCommitPayloads).campaignInvested,
+    );
+    broadcast(
+      'investment.indexed',
+      (post as PostCommitPayloads).investmentIndexed,
+    );
   }
 }
 
@@ -328,7 +353,7 @@ async function handleCampaignSettled(event: CampaignSettledEvent) {
       where: { onChainId: event.campaignId },
       data: {
         totalRevenue: event.totalRevenue,
-        status: "SETTLED",
+        status: 'SETTLED',
       },
     });
 
@@ -351,7 +376,7 @@ async function handleCampaignSettled(event: CampaignSettledEvent) {
   });
 
   if (post) {
-    broadcast("campaign.settled", post as PostCommitPayload);
+    broadcast('campaign.settled', post);
   }
 }
 
@@ -371,7 +396,7 @@ async function handleOrderCreated(event: OrderCreatedEvent) {
 
   await prisma.$transaction(async (tx) => {
     if (await skipDuplicateInTransaction(tx, event)) return;
-    await upsertUser(tx, event.buyer, "BUYER");
+    await upsertUser(tx, event.buyer, 'BUYER');
 
     const campaign = await tx.campaign.findUnique({
       where: { onChainId: event.campaignId },
@@ -388,7 +413,7 @@ async function handleOrderCreated(event: OrderCreatedEvent) {
         campaignId: campaign.id,
         buyerAddress: event.buyer,
         amount: event.amount,
-        status: "PENDING",
+        status: 'PENDING',
         ledger: event.ledger,
         txHash: event.txHash,
       },
@@ -401,7 +426,7 @@ async function handleOrderCreated(event: OrderCreatedEvent) {
       buyerAddress: event.buyer,
       farmerAddress: campaign.farmerAddress,
       amount: event.amount,
-      status: "PENDING",
+      status: 'PENDING',
       txHash: event.txHash,
     };
 
@@ -418,7 +443,7 @@ async function handleOrderCreated(event: OrderCreatedEvent) {
   });
 
   if (post) {
-    broadcast("order.created", post as PostCommitPayload);
+    broadcast('order.created', post);
   }
 }
 
@@ -440,7 +465,7 @@ async function handleOrderConfirmed(event: OrderConfirmedEvent) {
       where: { onChainId: event.orderId },
     });
     if (!order) {
-      logger.warn("EventPersister: confirm for unknown order", {
+      logger.warn('EventPersister: confirm for unknown order', {
         orderId: event.orderId,
       });
       return;
@@ -448,12 +473,14 @@ async function handleOrderConfirmed(event: OrderConfirmedEvent) {
 
     await tx.order.update({
       where: { onChainId: event.orderId },
-      data: { status: "CONFIRMED" },
+      data: { status: 'CONFIRMED' },
     });
 
     // Prisma cannot add string-backed i128 values; calculate with BigInt and
     // write the exact decimal string once the authoritative event is indexed.
-    const campaign = await tx.campaign.findUnique({ where: { id: order.campaignId } });
+    const campaign = await tx.campaign.findUnique({
+      where: { id: order.campaignId },
+    });
     if (campaign) {
       const prev = BigInt(campaign.totalRevenue);
       const added = BigInt(order.amount);
@@ -467,7 +494,7 @@ async function handleOrderConfirmed(event: OrderConfirmedEvent) {
       orderId: event.orderId,
       campaignId: order.campaignId,
       buyerAddress: event.buyer,
-      status: "CONFIRMED",
+      status: 'CONFIRMED',
       txHash: event.txHash,
     };
 
@@ -484,7 +511,7 @@ async function handleOrderConfirmed(event: OrderConfirmedEvent) {
   });
 
   if (post) {
-    broadcast("order.confirmed", post as PostCommitPayload);
+    broadcast('order.confirmed', post);
   }
 }
 
@@ -501,8 +528,8 @@ async function updateCampaignStatus(
     });
     if (!campaign) return;
 
-    if (!isValidTransition(campaign.status as CampaignStatus, status)) {
-      logger.warn("EventPersister: invalid status transition rejected", {
+    if (!isValidTransition(campaign.status, status)) {
+      logger.warn('EventPersister: invalid status transition rejected', {
         campaignId: event.campaignId,
         from: campaign.status,
         to: status,
@@ -512,10 +539,10 @@ async function updateCampaignStatus(
     }
 
     let trancheReleased = campaign.trancheReleased;
-    if (status === "IN_PRODUCTION") {
-      const total = BigInt(campaign.totalRaised || "0");
-      trancheReleased = (total * 50n / 100n).toString();
-    } else if (status === "HARVESTED" || status === "SETTLED") {
+    if (status === 'IN_PRODUCTION') {
+      const total = BigInt(campaign.totalRaised || '0');
+      trancheReleased = ((total * 50n) / 100n).toString();
+    } else if (status === 'HARVESTED' || status === 'SETTLED') {
       trancheReleased = campaign.totalRaised;
     }
 
@@ -537,7 +564,10 @@ async function updateCampaignStatus(
   });
 }
 
-async function recordTransaction(event: ParsedEvent, campaignId: string | null) {
+async function recordTransaction(
+  event: ParsedEvent,
+  campaignId: string | null,
+) {
   await prisma.transaction.create({
     data: {
       campaignId,
@@ -583,7 +613,7 @@ async function handleDisputeOpened(event: DisputeOpenedEvent) {
       where: { onChainId: event.campaignId },
     });
     if (!campaign) {
-      logger.warn("EventPersister: dispute for unknown campaign", {
+      logger.warn('EventPersister: dispute for unknown campaign', {
         campaignId: event.campaignId,
       });
       return;
@@ -598,7 +628,7 @@ async function handleDisputeOpened(event: DisputeOpenedEvent) {
         respondentAddress: event.respondentAddress,
         transactionHash: event.txHash!,
         ledgerSequence: event.ledger,
-        status: "Open",
+        status: 'Open',
       },
       update: {},
     });
@@ -607,7 +637,7 @@ async function handleDisputeOpened(event: DisputeOpenedEvent) {
     await tx.disputeAuditEntry.create({
       data: {
         disputeId: dispute.id,
-        action: "opened",
+        action: 'opened',
         actorAddress: event.initiatorAddress,
         details: { initiatorAddress: event.initiatorAddress },
       },
@@ -619,7 +649,7 @@ async function handleDisputeOpened(event: DisputeOpenedEvent) {
       orderId: event.orderId,
       initiatorAddress: event.initiatorAddress,
       respondentAddress: event.respondentAddress,
-      status: "Open",
+      status: 'Open',
       txHash: event.txHash,
     };
 
@@ -636,11 +666,13 @@ async function handleDisputeOpened(event: DisputeOpenedEvent) {
   });
 
   if (post) {
-    broadcast("dispute.opened", post as PostCommitPayload);
+    broadcast('dispute.opened', post);
   }
 }
 
-async function handleDisputeEvidenceSubmitted(event: DisputeEvidenceSubmittedEvent) {
+async function handleDisputeEvidenceSubmitted(
+  event: DisputeEvidenceSubmittedEvent,
+) {
   // Idempotency: evidence upsert by transactionHash + evidence_submitted action.
   // Issue #1066: broadcast deferred until after the transaction commits.
   type PostCommitPayload = {
@@ -656,12 +688,12 @@ async function handleDisputeEvidenceSubmitted(event: DisputeEvidenceSubmittedEve
 
     const dispute = await tx.dispute.findMany({
       where: {},
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
       take: 1,
     });
 
     if (!dispute.length) {
-      logger.warn("EventPersister: evidence submitted for unknown dispute", {
+      logger.warn('EventPersister: evidence submitted for unknown dispute', {
         disputeId: event.disputeId,
       });
       return;
@@ -680,10 +712,10 @@ async function handleDisputeEvidenceSubmitted(event: DisputeEvidenceSubmittedEve
     });
 
     // Update dispute status to EvidenceSubmitted if it's Open
-    if (currentDispute.status === "Open") {
+    if (currentDispute.status === 'Open') {
       await tx.dispute.update({
         where: { id: currentDispute.id },
-        data: { status: "EvidenceSubmitted" },
+        data: { status: 'EvidenceSubmitted' },
       });
     }
 
@@ -691,7 +723,7 @@ async function handleDisputeEvidenceSubmitted(event: DisputeEvidenceSubmittedEve
     await tx.disputeAuditEntry.create({
       data: {
         disputeId: currentDispute.id,
-        action: "evidence_submitted",
+        action: 'evidence_submitted',
         actorAddress: event.submitterAddress,
         details: { evidenceHash: event.evidenceHash },
       },
@@ -700,7 +732,7 @@ async function handleDisputeEvidenceSubmitted(event: DisputeEvidenceSubmittedEve
     post = {
       disputeId: currentDispute.id,
       submitterAddress: event.submitterAddress,
-      status: "EvidenceSubmitted",
+      status: 'EvidenceSubmitted',
       txHash: event.txHash,
     };
 
@@ -717,7 +749,7 @@ async function handleDisputeEvidenceSubmitted(event: DisputeEvidenceSubmittedEve
   });
 
   if (post) {
-    broadcast("dispute.evidence_submitted", post as PostCommitPayload);
+    broadcast('dispute.evidence_submitted', post);
   }
 }
 
@@ -737,12 +769,12 @@ async function handleDisputeResolved(event: DisputeResolvedEvent) {
 
     const dispute = await tx.dispute.findMany({
       where: {},
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
       take: 1,
     });
 
     if (!dispute.length) {
-      logger.warn("EventPersister: resolve event for unknown dispute", {
+      logger.warn('EventPersister: resolve event for unknown dispute', {
         disputeId: event.disputeId,
       });
       return;
@@ -753,7 +785,7 @@ async function handleDisputeResolved(event: DisputeResolvedEvent) {
     await tx.dispute.update({
       where: { id: currentDispute.id },
       data: {
-        status: "Resolved",
+        status: 'Resolved',
         resolutionOutcome: event.resolutionOutcome,
         resolutionNotes: event.resolutionNotes,
       },
@@ -763,15 +795,15 @@ async function handleDisputeResolved(event: DisputeResolvedEvent) {
     await tx.disputeAuditEntry.create({
       data: {
         disputeId: currentDispute.id,
-        action: "resolved",
-        actorAddress: event.txHash || "system",
+        action: 'resolved',
+        actorAddress: event.txHash || 'system',
         details: { outcome: event.resolutionOutcome },
       },
     });
 
     post = {
       disputeId: currentDispute.id,
-      status: "Resolved",
+      status: 'Resolved',
       resolutionOutcome: event.resolutionOutcome,
       txHash: event.txHash,
     };
@@ -789,7 +821,7 @@ async function handleDisputeResolved(event: DisputeResolvedEvent) {
   });
 
   if (post) {
-    broadcast("dispute.resolved", post as PostCommitPayload);
+    broadcast('dispute.resolved', post);
   }
 }
 
@@ -808,12 +840,12 @@ async function handleDisputeDismissed(event: DisputeDismissedEvent) {
 
     const dispute = await tx.dispute.findMany({
       where: {},
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
       take: 1,
     });
 
     if (!dispute.length) {
-      logger.warn("EventPersister: dismiss event for unknown dispute", {
+      logger.warn('EventPersister: dismiss event for unknown dispute', {
         disputeId: event.disputeId,
       });
       return;
@@ -823,22 +855,22 @@ async function handleDisputeDismissed(event: DisputeDismissedEvent) {
 
     await tx.dispute.update({
       where: { id: currentDispute.id },
-      data: { status: "Dismissed" },
+      data: { status: 'Dismissed' },
     });
 
     // Create audit entry
     await tx.disputeAuditEntry.create({
       data: {
         disputeId: currentDispute.id,
-        action: "dismissed",
-        actorAddress: event.txHash || "system",
+        action: 'dismissed',
+        actorAddress: event.txHash || 'system',
         details: { reason: event.dismissalReason },
       },
     });
 
     post = {
       disputeId: currentDispute.id,
-      status: "Dismissed",
+      status: 'Dismissed',
       txHash: event.txHash,
     };
 
@@ -855,7 +887,7 @@ async function handleDisputeDismissed(event: DisputeDismissedEvent) {
   });
 
   if (post) {
-    broadcast("dispute.dismissed", post as PostCommitPayload);
+    broadcast('dispute.dismissed', post);
   }
 }
 
@@ -869,7 +901,7 @@ async function handleBasketCreated(event: BasketCreatedEvent) {
       create: {
         onChainId: event.basketId,
         constituentsCount: event.constituentsCount,
-        status: "OPEN",
+        status: 'OPEN',
       },
       update: {},
     });
@@ -901,24 +933,36 @@ async function handleBasketDeposit(event: BasketDepositEvent) {
 
   await prisma.$transaction(async (tx) => {
     if (await skipDuplicateInTransaction(tx, event)) return;
-    await upsertUser(tx, event.depositor, "INVESTOR");
+    await upsertUser(tx, event.depositor, 'INVESTOR');
 
-    const basket = await tx.basket.findUnique({ where: { onChainId: event.basketId } });
+    const basket = await tx.basket.findUnique({
+      where: { onChainId: event.basketId },
+    });
     if (!basket) {
-      logger.warn("EventPersister: deposit for unknown basket", { basketId: event.basketId });
+      logger.warn('EventPersister: deposit for unknown basket', {
+        basketId: event.basketId,
+      });
       return;
     }
 
     const position = await tx.basketDeposit.findUnique({
       where: {
-        basketId_depositorAddress: { basketId: basket.id, depositorAddress: event.depositor },
+        basketId_depositorAddress: {
+          basketId: basket.id,
+          depositorAddress: event.depositor,
+        },
       },
     });
-    const updatedAmount = (BigInt(position?.amount ?? "0") + BigInt(event.amount)).toString();
+    const updatedAmount = (
+      BigInt(position?.amount ?? '0') + BigInt(event.amount)
+    ).toString();
 
     await tx.basketDeposit.upsert({
       where: {
-        basketId_depositorAddress: { basketId: basket.id, depositorAddress: event.depositor },
+        basketId_depositorAddress: {
+          basketId: basket.id,
+          depositorAddress: event.depositor,
+        },
       },
       create: {
         basketId: basket.id,
@@ -934,7 +978,9 @@ async function handleBasketDeposit(event: BasketDepositEvent) {
       },
     });
 
-    const updatedTotal = (BigInt(basket.totalDeposited) + BigInt(event.amount)).toString();
+    const updatedTotal = (
+      BigInt(basket.totalDeposited) + BigInt(event.amount)
+    ).toString();
     await tx.basket.update({
       where: { onChainId: event.basketId },
       data: { totalDeposited: updatedTotal },
@@ -960,7 +1006,7 @@ async function handleBasketDeposit(event: BasketDepositEvent) {
   });
 
   if (post) {
-    broadcast("basket.deposit", post as PostCommitPayload);
+    broadcast('basket.deposit', post);
   }
 }
 
@@ -976,15 +1022,19 @@ async function handleBasketFunded(event: BasketFundedEvent) {
   await prisma.$transaction(async (tx) => {
     if (await skipDuplicateInTransaction(tx, event)) return;
 
-    const basket = await tx.basket.findUnique({ where: { onChainId: event.basketId } });
+    const basket = await tx.basket.findUnique({
+      where: { onChainId: event.basketId },
+    });
     if (!basket) {
-      logger.warn("EventPersister: funded event for unknown basket", { basketId: event.basketId });
+      logger.warn('EventPersister: funded event for unknown basket', {
+        basketId: event.basketId,
+      });
       return;
     }
 
     await tx.basket.update({
       where: { onChainId: event.basketId },
-      data: { totalDeposited: event.totalDeposit, status: "FUNDED" },
+      data: { totalDeposited: event.totalDeposit, status: 'FUNDED' },
     });
 
     post = {
@@ -1004,7 +1054,7 @@ async function handleBasketFunded(event: BasketFundedEvent) {
   });
 
   if (post) {
-    broadcast("basket.funded", post as PostCommitPayload);
+    broadcast('basket.funded', post);
   }
 }
 
@@ -1022,19 +1072,26 @@ async function handleBasketWithdrawn(event: BasketWithdrawnEvent) {
   await prisma.$transaction(async (tx) => {
     if (await skipDuplicateInTransaction(tx, event)) return;
 
-    const basket = await tx.basket.findUnique({ where: { onChainId: event.basketId } });
+    const basket = await tx.basket.findUnique({
+      where: { onChainId: event.basketId },
+    });
     if (!basket) {
-      logger.warn("EventPersister: withdrawal for unknown basket", { basketId: event.basketId });
+      logger.warn('EventPersister: withdrawal for unknown basket', {
+        basketId: event.basketId,
+      });
       return;
     }
 
     const position = await tx.basketDeposit.findUnique({
       where: {
-        basketId_depositorAddress: { basketId: basket.id, depositorAddress: event.depositor },
+        basketId_depositorAddress: {
+          basketId: basket.id,
+          depositorAddress: event.depositor,
+        },
       },
     });
     if (!position) {
-      logger.warn("EventPersister: withdrawal for unknown basket position", {
+      logger.warn('EventPersister: withdrawal for unknown basket position', {
         basketId: event.basketId,
         depositor: event.depositor,
       });
@@ -1043,10 +1100,17 @@ async function handleBasketWithdrawn(event: BasketWithdrawnEvent) {
 
     await tx.basketDeposit.update({
       where: { id: position.id },
-      data: { amount: "0", withdrawn: true, ledger: event.ledger, txHash: event.txHash },
+      data: {
+        amount: '0',
+        withdrawn: true,
+        ledger: event.ledger,
+        txHash: event.txHash,
+      },
     });
 
-    const updatedTotal = (BigInt(basket.totalDeposited) - BigInt(event.depositAmount)).toString();
+    const updatedTotal = (
+      BigInt(basket.totalDeposited) - BigInt(event.depositAmount)
+    ).toString();
     await tx.basket.update({
       where: { onChainId: event.basketId },
       data: { totalDeposited: updatedTotal },
@@ -1071,7 +1135,7 @@ async function handleBasketWithdrawn(event: BasketWithdrawnEvent) {
   });
 
   if (post) {
-    broadcast("basket.withdrawn", post as PostCommitPayload);
+    broadcast('basket.withdrawn', post);
   }
 }
 
@@ -1089,19 +1153,26 @@ async function handleBasketClaimed(event: BasketClaimedEvent) {
   await prisma.$transaction(async (tx) => {
     if (await skipDuplicateInTransaction(tx, event)) return;
 
-    const basket = await tx.basket.findUnique({ where: { onChainId: event.basketId } });
+    const basket = await tx.basket.findUnique({
+      where: { onChainId: event.basketId },
+    });
     if (!basket) {
-      logger.warn("EventPersister: claim for unknown basket", { basketId: event.basketId });
+      logger.warn('EventPersister: claim for unknown basket', {
+        basketId: event.basketId,
+      });
       return;
     }
 
     const position = await tx.basketDeposit.findUnique({
       where: {
-        basketId_depositorAddress: { basketId: basket.id, depositorAddress: event.depositor },
+        basketId_depositorAddress: {
+          basketId: basket.id,
+          depositorAddress: event.depositor,
+        },
       },
     });
     if (!position) {
-      logger.warn("EventPersister: claim for unknown basket position", {
+      logger.warn('EventPersister: claim for unknown basket position', {
         basketId: event.basketId,
         depositor: event.depositor,
       });
@@ -1137,7 +1208,7 @@ async function handleBasketClaimed(event: BasketClaimedEvent) {
   });
 
   if (post) {
-    broadcast("basket.claimed", post as PostCommitPayload);
+    broadcast('basket.claimed', post);
   }
 }
 

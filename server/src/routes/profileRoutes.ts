@@ -14,34 +14,66 @@ router.get('/profiles/:wallet_address', async (req, res, next) => {
   try {
     const data = await getProfile(req.params['wallet_address']!);
     res.status(200).json(data);
-  } catch (error) { next(error); }
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post('/profiles', requireWallet, async (req: WalletRequest, res, next) => {
   try {
-    if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet', 'https://cylos.io/errors/unauthorized');
+    if (!req.walletAddress)
+      throw new ApiError(
+        401,
+        'Unauthorized',
+        'Missing wallet',
+        'https://cylos.io/errors/unauthorized'
+      );
     const data = await createProfile(req.walletAddress, req.body ?? {});
     res.status(201).json(data);
-  } catch (error) { next(error); }
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.patch('/profiles/:wallet_address', requireWallet, async (req: WalletRequest, res, next) => {
   try {
-    if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet', 'https://cylos.io/errors/unauthorized');
-    const data = await updateProfile(req.params['wallet_address']!, req.walletAddress, req.body ?? {});
+    if (!req.walletAddress)
+      throw new ApiError(
+        401,
+        'Unauthorized',
+        'Missing wallet',
+        'https://cylos.io/errors/unauthorized'
+      );
+    const data = await updateProfile(
+      req.params['wallet_address']!,
+      req.walletAddress,
+      req.body ?? {}
+    );
     res.status(200).json(data);
-  } catch (error) { next(error); }
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.get('/profiles/:wallet_address/reputation', async (req, res, next) => {
   try {
     const data = await getProfileReputation(req.params['wallet_address']!);
     res.status(200).json(data);
-  } catch (error) { next(error); }
+  } catch (error) {
+    next(error);
+  }
 });
 
-export function profileErrorHandler(error: unknown, req: express.Request, res: express.Response, next: express.NextFunction): void {
-  if (error instanceof ApiError) { sendProblem(res, req, error); return; }
+export function profileErrorHandler(
+  error: unknown,
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+): void {
+  if (error instanceof ApiError) {
+    sendProblem(res, req, error);
+    return;
+  }
   next(error);
 }
 

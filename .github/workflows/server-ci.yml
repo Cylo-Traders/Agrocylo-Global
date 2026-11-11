@@ -139,6 +139,5 @@ jobs:
       - name: Run TruffleHog secret scanning
         uses: trufflesecurity/trufflehog@048de9ff07098d943136cd5231a0e93fbb3ea443 # pinned reviewed revision
         with:
-          path: ./agro-production/server
           base: ${{ github.event.repository.default_branch }}
           head: HEAD

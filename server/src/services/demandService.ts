@@ -1,8 +1,8 @@
 import { Prisma } from '@prisma/client';
-import { prisma } from "../config/database.js";
-import { ApiError } from "../http/errors.js";
-import { assertCurrency } from "../constants/currencies.js";
-import { z } from "zod";
+import { prisma } from '../config/database.js';
+import { ApiError } from '../http/errors.js';
+import { assertCurrency } from '../constants/currencies.js';
+import { z } from 'zod';
 
 const demandBodySchema = z.object({
   crop_name: z.string().min(1),
@@ -24,17 +24,17 @@ async function assertBuyerProfile(wallet: string): Promise<void> {
   if (!profile) {
     throw new ApiError(
       404,
-      "Not Found",
-      "Create a buyer profile before posting demand.",
-      "https://cylos.io/errors/not-found",
+      'Not Found',
+      'Create a buyer profile before posting demand.',
+      'https://cylos.io/errors/not-found'
     );
   }
-  if (profile.role !== "BUYER") {
+  if (profile.role !== 'BUYER') {
     throw new ApiError(
       403,
-      "Forbidden",
-      "Only buyers can post demand.",
-      "https://cylos.io/errors/forbidden",
+      'Forbidden',
+      'Only buyers can post demand.',
+      'https://cylos.io/errors/forbidden'
     );
   }
 }
@@ -45,13 +45,6 @@ function parsePage(value: string | undefined, fallback: number): number {
   return Number.isNaN(parsed) || parsed <= 0 ? fallback : parsed;
 }
 
-function decimalFilter(value: string | undefined): Prisma.Decimal | undefined {
-  if (value === undefined) return undefined;
-  const parsed = Number.parseFloat(value);
-  if (Number.isNaN(parsed)) return undefined;
-  return new Prisma.Decimal(value);
-}
-
 export async function listBuyerDemands(params: {
   buyerWallet?: string;
   cropName?: string;
@@ -60,7 +53,13 @@ export async function listBuyerDemands(params: {
   maxPrice?: string;
   page?: string;
   pageSize?: string;
-}): Promise<{ page: number; page_size: number; total: number; totalPages: number; items: unknown[] }> {
+}): Promise<{
+  page: number;
+  page_size: number;
+  total: number;
+  totalPages: number;
+  items: unknown[];
+}> {
   const page = parsePage(params.page, 1);
   const pageSize = Math.min(parsePage(params.pageSize, 20), 100);
   const where: Prisma.BuyerDemandWhereInput = {};
@@ -91,10 +90,23 @@ export async function listBuyerDemands(params: {
 export async function createBuyerDemand(buyerWallet: string, body: unknown) {
   const parsed = demandBodySchema.safeParse(body);
   if (!parsed.success) {
-    throw new ApiError(400, "Bad Request", parsed.error.message, "https://cylos.io/errors/validation");
+    throw new ApiError(
+      400,
+      'Bad Request',
+      parsed.error.message,
+      'https://cylos.io/errors/validation'
+    );
   }
-  if (parsed.data.buyer_wallet !== undefined && parsed.data.buyer_wallet.toLowerCase() !== buyerWallet) {
-    throw new ApiError(403, "Forbidden", "buyer_wallet must match x-wallet-address", "https://cylos.io/errors/forbidden");
+  if (
+    parsed.data.buyer_wallet !== undefined &&
+    parsed.data.buyer_wallet.toLowerCase() !== buyerWallet
+  ) {
+    throw new ApiError(
+      403,
+      'Forbidden',
+      'buyer_wallet must match x-wallet-address',
+      'https://cylos.io/errors/forbidden'
+    );
   }
 
   await assertBuyerProfile(buyerWallet);
@@ -106,7 +118,8 @@ export async function createBuyerDemand(buyerWallet: string, body: unknown) {
       quantityWanted: parsed.data.quantity_wanted,
       unit: parsed.data.unit,
       maxPricePerUnit: parsed.data.max_price_per_unit,
-      currency: parsed.data.currency === undefined ? undefined : assertCurrency(parsed.data.currency),
+      currency:
+        parsed.data.currency === undefined ? undefined : assertCurrency(parsed.data.currency),
       region: parsed.data.region,
       notes: parsed.data.notes,
       neededBy: parsed.data.needed_by,

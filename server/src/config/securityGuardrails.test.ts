@@ -1,9 +1,9 @@
-import { readdir, readFile } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { readdir, readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
 
-const srcRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const srcRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 async function productionSourceFiles(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true });
@@ -11,10 +11,10 @@ async function productionSourceFiles(dir: string): Promise<string[]> {
     entries.map(async (entry) => {
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) return productionSourceFiles(fullPath);
-      if (!entry.name.endsWith(".ts")) return [];
-      if (entry.name.endsWith(".test.ts")) return [];
+      if (!entry.name.endsWith('.ts')) return [];
+      if (entry.name.endsWith('.test.ts')) return [];
       return [fullPath];
-    }),
+    })
   );
   return files.flat();
 }
@@ -22,19 +22,19 @@ async function productionSourceFiles(dir: string): Promise<string[]> {
 // Files explicitly allowlisted for raw SQL access. Each entry must carry a
 // documented `@allow-raw-sql` pragma in the source explaining why the ORM API
 // cannot express the operation. Keep this list minimal and reviewed.
-const RAW_SQL_ALLOWLIST = new Set<string>(["services/groupOrderService.ts"]);
+const RAW_SQL_ALLOWLIST = new Set<string>(['services/groupOrderService.ts']);
 
 function hasAllowRawSqlPragma(source: string): boolean {
   return /@allow-raw-sql\b/.test(source);
 }
 
-describe("security guardrails", () => {
-  it("does not use console logging in production source", async () => {
+describe('security guardrails', () => {
+  it('does not use console logging in production source', async () => {
     const files = await productionSourceFiles(srcRoot);
     const offenders: string[] = [];
 
     for (const file of files) {
-      const source = await readFile(file, "utf8");
+      const source = await readFile(file, 'utf8');
       if (/console\.(log|error|warn|info|debug)\s*\(/.test(source)) {
         offenders.push(path.relative(srcRoot, file));
       }
@@ -43,17 +43,23 @@ describe("security guardrails", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("keeps service and controller database access on Prisma ORM APIs", async () => {
-    const roots = [path.join(srcRoot, "services"), path.join(srcRoot, "controllers")];
+  it('keeps service and controller database access on Prisma ORM APIs', async () => {
+    const roots = [path.join(srcRoot, 'services'), path.join(srcRoot, 'controllers')];
     const files = (await Promise.all(roots.map(productionSourceFiles))).flat();
-    const rawSqlPatterns = [/\$queryRaw/, /\$executeRaw/, /\bdb\.query\s*\(/, /\bclient\.query\s*\(/, /\bquery\s*\(/];
+    const rawSqlPatterns = [
+      /\$queryRaw/,
+      /\$executeRaw/,
+      /\bdb\.query\s*\(/,
+      /\bclient\.query\s*\(/,
+      /\bquery\s*\(/,
+    ];
     const offenders: string[] = [];
 
     for (const file of files) {
-      const source = await readFile(file, "utf8");
+      const source = await readFile(file, 'utf8');
       if (!rawSqlPatterns.some((pattern) => pattern.test(source))) continue;
 
-      const relativePath = path.relative(srcRoot, file).split(path.sep).join("/");
+      const relativePath = path.relative(srcRoot, file).split(path.sep).join('/');
       const allowlisted = RAW_SQL_ALLOWLIST.has(relativePath) && hasAllowRawSqlPragma(source);
       if (!allowlisted) {
         offenders.push(relativePath);

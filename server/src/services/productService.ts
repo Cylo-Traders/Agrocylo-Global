@@ -102,7 +102,7 @@ export async function listProducts(params: {
   page_size?: string;
   includeUnavailable?: boolean;
   include_unavailable?: boolean;
-  sort?: SortOption;
+  sort?: string;
   lat?: string;
   lng?: string;
 }): Promise<{

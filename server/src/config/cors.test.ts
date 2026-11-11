@@ -46,7 +46,10 @@ describe('CORS policy (#954)', () => {
       .options('/cart/checkout')
       .set('Origin', ORIGIN)
       .set('Access-Control-Request-Method', 'POST')
-      .set('Access-Control-Request-Headers', 'authorization,idempotency-key,x-api-key,x-request-id');
+      .set(
+        'Access-Control-Request-Headers',
+        'authorization,idempotency-key,x-api-key,x-request-id'
+      );
     expect(res.status).toBe(204);
     const allowed = String(res.headers['access-control-allow-headers']).toLowerCase();
     for (const h of ['authorization', 'idempotency-key', 'x-api-key', 'x-request-id']) {

@@ -24,7 +24,9 @@ describe('currencies (#1135)', () => {
   });
 
   it('rejects too many decimals and malformed amounts', () => {
-    expect(() => toBaseUnits('0.00000001', 'XLM')).toThrow(expect.objectContaining({ status: 400 }));
+    expect(() => toBaseUnits('0.00000001', 'XLM')).toThrow(
+      expect.objectContaining({ status: 400 })
+    );
     expect(() => toBaseUnits('-1', 'USDC')).toThrow(expect.objectContaining({ status: 400 }));
   });
 });

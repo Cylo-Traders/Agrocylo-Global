@@ -20,7 +20,10 @@ export function recordResponseStatus(status: number): void {
   timestamps.push(now);
   timestamps = timestamps.filter((t) => now - t <= WINDOW_MS);
 
-  if (timestamps.length >= THRESHOLD_COUNT && now - lastAlertAt >= COOLDOWN_MS) {
+  if (
+    timestamps.length >= THRESHOLD_COUNT &&
+    now - lastAlertAt >= COOLDOWN_MS
+  ) {
     lastAlertAt = now;
     captureAlert(
       'elevated_5xx_rate',

@@ -1,4 +1,4 @@
-import type { ParsedEscrowEvent, MappedEscrowEvent } from "../../types/escrowEvent.js";
+import type { ParsedEscrowEvent, MappedEscrowEvent } from '../../types/escrowEvent.js';
 
 /**
  * EscrowEventMapper: Bridges pure parsed data with database-ready format.
@@ -8,9 +8,9 @@ export class EscrowEventMapper {
     return {
       orderId: parsed.orderId,
       buyer: parsed.buyer,
-      seller: parsed.seller || "N/A", // Map farmer to seller
+      seller: parsed.seller || 'N/A', // Map farmer to seller
       amount: parsed.amount,
-      token: parsed.token || "unknown",
+      token: parsed.token || 'unknown',
       action: parsed.action, // "CREATED", "CONFIRMED", "REFUNDED"
       ledger: parsed.ledger,
       eventIndex: parsed.eventIndex,

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { prisma } from '../config/database.js';
 import { ApiError } from '../http/errors.js';
-import { requireWallet, requireAnyRole } from '../middleware/walletAuth.js';
+import { requireWallet, requireAnyRole, type WalletRequest } from '../middleware/walletAuth.js';
 
 const router = Router();
 
@@ -11,7 +11,7 @@ router.post(
   '/equipment/listings',
   requireWallet,
   requireAnyRole('FARMER'),
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: WalletRequest, res: Response, next: NextFunction) => {
     try {
       const {
         ownerWallet,
@@ -41,11 +41,7 @@ router.post(
       }
 
       if (ownerWallet !== req.walletAddress) {
-        throw new ApiError(
-          403,
-          'Forbidden',
-          'ownerWallet does not match the authenticated wallet'
-        );
+        throw new ApiError(403, 'Forbidden', 'ownerWallet does not match the authenticated wallet');
       }
 
       if (!['SEED', 'TOOL', 'EQUIPMENT_RENTAL'].includes(listingType)) {

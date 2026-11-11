@@ -1653,20 +1653,21 @@ impl ProductionEscrowContract {
         let admin = admin(&env)?;
 
         // Determine who can call based on campaign state
-        let can_fail = match campaign.status {
+        match campaign.status {
+            CampaignStatus::Funding => return Err(EscrowError::CampaignNotFundedOrBeyond),
             CampaignStatus::Funded => {
                 // Farmer can unilaterally fail before production starts
-                caller == campaign.farmer || caller == admin
+                if caller != campaign.farmer && caller != admin {
+                    return Err(EscrowError::NotAdmin);
+                }
             }
             CampaignStatus::InProduction | CampaignStatus::Harvested => {
                 // Farmer cannot unilaterally fail after production starts; requires admin
-                caller == admin
+                if caller != admin {
+                    return Err(EscrowError::NotAdmin);
+                }
             }
-            _ => false,
-        };
-
-        if !can_fail {
-            return Err(EscrowError::NotAdmin);
+            _ => return Err(EscrowError::NotAdmin),
         }
 
         campaign.status = CampaignStatus::Failed;
@@ -1806,8 +1807,12 @@ impl ProductionEscrowContract {
                 return Err(EscrowError::NotInvestor);
             }
         }
-        if campaign.status == CampaignStatus::Disputed || campaign.status == CampaignStatus::Settled
-        {
+        if matches!(
+            campaign.status,
+            CampaignStatus::Failed
+                | CampaignStatus::Disputed
+                | CampaignStatus::Settled
+        ) {
             return Err(EscrowError::CampaignAlreadyDisputed);
         }
         campaign.status = CampaignStatus::Disputed;

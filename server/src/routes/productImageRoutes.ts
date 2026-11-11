@@ -3,7 +3,11 @@ import multer from 'multer';
 import { imageUpload, isUnsupportedMimeType, UploadError } from '../middleware/upload.js';
 import { requireWallet, type WalletRequest } from '../middleware/walletAuth.js';
 import { uploadRateLimiter } from '../middleware/rateLimiter.js';
-import { HttpError, deleteProductImage, uploadProductImage } from '../services/productImageService.js';
+import {
+  HttpError,
+  deleteProductImage,
+  uploadProductImage,
+} from '../services/productImageService.js';
 import { ApiError, sendProblem } from '../http/errors.js';
 import logger from '../config/logger.js';
 
@@ -41,14 +45,14 @@ router.post(
         throw new HttpError(
           400,
           "Missing image field. Please attach an image file under the 'image' multipart form field.",
-          'MISSING_IMAGE_FIELD',
+          'MISSING_IMAGE_FIELD'
         );
       }
       if (isUnsupportedMimeType(image)) {
         throw new HttpError(
           415,
           `Unsupported Media Type '${image.mimetype}'. Allowed formats: image/jpeg, image/png, image/webp.`,
-          'UNSUPPORTED_MIME_TYPE',
+          'UNSUPPORTED_MIME_TYPE'
         );
       }
 
@@ -63,32 +67,36 @@ router.post(
     } catch (error) {
       next(error);
     }
-  },
+  }
 );
 
-router.delete('/products/:product_id/image', requireWallet, async (req: WalletRequest, res, next) => {
-  try {
-    const productId = req.params['product_id'];
-    const walletAddress = req.walletAddress;
-    if (!productId) {
-      throw new HttpError(400, 'Missing product_id path parameter.', 'MISSING_PRODUCT_ID');
-    }
-    if (!walletAddress) {
-      throw new HttpError(401, 'Unauthorized: Wallet session required.', 'UNAUTHORIZED');
-    }
+router.delete(
+  '/products/:product_id/image',
+  requireWallet,
+  async (req: WalletRequest, res, next) => {
+    try {
+      const productId = req.params['product_id'];
+      const walletAddress = req.walletAddress;
+      if (!productId) {
+        throw new HttpError(400, 'Missing product_id path parameter.', 'MISSING_PRODUCT_ID');
+      }
+      if (!walletAddress) {
+        throw new HttpError(401, 'Unauthorized: Wallet session required.', 'UNAUTHORIZED');
+      }
 
-    await deleteProductImage({ productId, walletAddress });
-    res.status(204).send();
-  } catch (error) {
-    next(error);
+      await deleteProductImage({ productId, walletAddress });
+      res.status(204).send();
+    } catch (error) {
+      next(error);
+    }
   }
-});
+);
 
 export function productImageErrorHandler(
   err: unknown,
   req: express.Request,
   res: express.Response,
-  next: express.NextFunction,
+  next: express.NextFunction
 ): void {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
@@ -100,8 +108,8 @@ export function productImageErrorHandler(
           'Payload Too Large',
           'Payload Too Large. Maximum image size is 5MB.',
           'https://cylos.io/errors/payload-too-large',
-          'LIMIT_FILE_SIZE',
-        ),
+          'LIMIT_FILE_SIZE'
+        )
       );
       return;
     }
@@ -115,8 +123,8 @@ export function productImageErrorHandler(
           'Bad Request',
           `Upload error (${err.code}): Only a single image may be uploaded under field 'image'.`,
           'https://cylos.io/errors/bad-request',
-          err.code,
-        ),
+          err.code
+        )
       );
       return;
     }
@@ -129,8 +137,8 @@ export function productImageErrorHandler(
         'Bad Request',
         `File upload error: ${err.message}`,
         'https://cylos.io/errors/bad-request',
-        err.code,
-      ),
+        err.code
+      )
     );
     return;
   }
@@ -144,8 +152,8 @@ export function productImageErrorHandler(
         err.status === 415 ? 'Unsupported Media Type' : 'Bad Request',
         err.message,
         `https://cylos.io/errors/${err.code.toLowerCase().replace(/_/g, '-')}`,
-        err.code,
-      ),
+        err.code
+      )
     );
     return;
   }

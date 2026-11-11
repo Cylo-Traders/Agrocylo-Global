@@ -2,17 +2,13 @@ import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { prisma } from '../config/database.js';
 import { ApiError } from '../http/errors.js';
-import { requireWallet, requireAnyRole } from '../middleware/walletAuth.js';
+import { requireWallet, requireAnyRole, type WalletRequest } from '../middleware/walletAuth.js';
 
 const router = Router();
 
-function assertBodyWalletMatchesSession(req: Request, bodyWallet: unknown): void {
+function assertBodyWalletMatchesSession(req: WalletRequest, bodyWallet: unknown): void {
   if (bodyWallet && String(bodyWallet) !== req.walletAddress) {
-    throw new ApiError(
-      403,
-      'Forbidden',
-      'Body wallet does not match the authenticated wallet'
-    );
+    throw new ApiError(403, 'Forbidden', 'Body wallet does not match the authenticated wallet');
   }
 }
 
@@ -21,7 +17,7 @@ router.post(
   '/crop-plans',
   requireWallet,
   requireAnyRole('FARMER'),
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: WalletRequest, res: Response, next: NextFunction) => {
     try {
       const {
         farmerWallet,
@@ -40,12 +36,7 @@ router.post(
 
       const sessionWallet = req.walletAddress as string;
 
-      if (
-        !cropName ||
-        !plantedDate ||
-        !expectedHarvestStart ||
-        !expectedHarvestEnd
-      ) {
+      if (!cropName || !plantedDate || !expectedHarvestStart || !expectedHarvestEnd) {
         throw new ApiError(
           400,
           'Validation Error',

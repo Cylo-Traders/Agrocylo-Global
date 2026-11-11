@@ -1,5 +1,5 @@
-import { prisma } from "../config/database.js";
-import type { Prisma } from "@prisma/client";
+import { prisma } from '../config/database.js';
+import type { Prisma } from '@prisma/client';
 
 /**
  * Canonical identity helper — single code path for User/Profile creation.
@@ -20,10 +20,10 @@ export class IdentityService {
   /** Ensure a User row exists for walletAddress; idempotent upsert. */
   static async ensureUser(
     walletAddress: string,
-    tx?: Prisma.TransactionClient | typeof prisma,
+    tx?: Prisma.TransactionClient | typeof prisma
   ): Promise<void> {
-    if (!walletAddress || walletAddress.trim() === "") {
-      throw new Error("Cannot ensure identity for empty wallet address");
+    if (!walletAddress || walletAddress.trim() === '') {
+      throw new Error('Cannot ensure identity for empty wallet address');
     }
     const canonical = canonicalWallet(walletAddress);
     const client = (tx as any) ?? prisma;
@@ -38,9 +38,9 @@ export class IdentityService {
   static async ensureUserAndProfile(
     walletAddress: string,
     role?: string,
-    tx?: Prisma.TransactionClient | typeof prisma,
+    tx?: Prisma.TransactionClient | typeof prisma
   ): Promise<void> {
-    if (!walletAddress || walletAddress.trim() === "") return;
+    if (!walletAddress || walletAddress.trim() === '') return;
     const canonical = canonicalWallet(walletAddress);
     const client = (tx as any) ?? prisma;
     await client.user.upsert({
@@ -52,7 +52,7 @@ export class IdentityService {
     await client.profile.upsert({
       where: { walletAddress: canonical },
       update: {},
-      create: { walletAddress: canonical, role: role ?? "BUYER" },
+      create: { walletAddress: canonical, role: role ?? 'BUYER' },
     });
   }
 
@@ -63,10 +63,11 @@ export class IdentityService {
   static async ensureUsersForEvent(
     tx: Prisma.TransactionClient | typeof prisma,
     actorAddress?: string,
-    secondaryAddress?: string,
+    secondaryAddress?: string
   ): Promise<void> {
-    const addresses = [actorAddress, secondaryAddress]
-      .filter((a): a is string => Boolean(a && a.trim() !== ""));
+    const addresses = [actorAddress, secondaryAddress].filter((a): a is string =>
+      Boolean(a && a.trim() !== '')
+    );
     for (const addr of addresses) {
       const canonical = canonicalWallet(addr);
       await (tx as any).user.upsert({

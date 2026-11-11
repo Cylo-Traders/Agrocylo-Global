@@ -342,7 +342,7 @@ describe('getSuggestedPrice', () => {
 // produces, so a renamed or dropped parameter fails here instead of silently
 // returning an unfiltered list.
 describe('listProducts query contract (#1145)', () => {
-  const whereOf = () => mockFindMany.mock.calls[0]![0]!.where;
+  const whereOf = () => mockFindMany.mock.calls[0]![0]!.where as any;
   const queryOf = () => mockFindMany.mock.calls[0]![0]!;
 
   beforeEach(() => {

@@ -32,7 +32,7 @@ export class HttpError extends ApiError {
       title,
       message,
       `https://cylos.io/errors/${code ? code.toLowerCase().replace(/_/g, '-') : status}`,
-      code,
+      code
     );
     this.name = 'HttpError';
   }
@@ -54,30 +54,36 @@ function mimeTypeToExt(mimeType: string): 'jpg' | 'png' | 'webp' {
   if (mimeType === 'image/jpeg') return 'jpg';
   if (mimeType === 'image/png') return 'png';
   if (mimeType === 'image/webp') return 'webp';
-  throw new HttpError(415, 'Unsupported Media Type. Allowed formats: image/jpeg, image/png, image/webp.', 'UNSUPPORTED_MIME_TYPE');
+  throw new HttpError(
+    415,
+    'Unsupported Media Type. Allowed formats: image/jpeg, image/png, image/webp.',
+    'UNSUPPORTED_MIME_TYPE'
+  );
 }
 
 /** Check if Supabase storage is configured with valid credentials */
 export function isSupabaseStorageConfigured(): boolean {
   return Boolean(
     config.supabaseUrl &&
-      config.supabaseServiceRoleKey &&
-      config.supabaseServiceRoleKey.trim().length > 0 &&
-      !config.supabaseServiceRoleKey.includes('YOUR_SUPABASE')
+    config.supabaseServiceRoleKey &&
+    config.supabaseServiceRoleKey.trim().length > 0 &&
+    !config.supabaseServiceRoleKey.includes('YOUR_SUPABASE')
   );
 }
 
 function publicUrlForPath(storagePath: string): string {
   try {
     const supabaseAdmin = getSupabaseAdmin();
-    const { data } = supabaseAdmin.storage.from(config.productImagesBucket).getPublicUrl(storagePath);
+    const { data } = supabaseAdmin.storage
+      .from(config.productImagesBucket)
+      .getPublicUrl(storagePath);
     return data.publicUrl;
   } catch (err) {
     logger.error('Failed to get public URL from Supabase storage', err);
     throw new HttpError(
       503,
       'Image storage service is currently unreachable. Please check storage configuration.',
-      'STORAGE_UNAVAILABLE',
+      'STORAGE_UNAVAILABLE'
     );
   }
 }
@@ -116,7 +122,11 @@ async function assertProductOwnership(
     throw new HttpError(404, `Product not found: ${productId}`, 'PRODUCT_NOT_FOUND');
   }
   if (product.farmer_wallet.toLowerCase() !== walletAddress.toLowerCase()) {
-    throw new HttpError(403, 'Forbidden: you do not have permission to manage this product image.', 'FORBIDDEN');
+    throw new HttpError(
+      403,
+      'Forbidden: you do not have permission to manage this product image.',
+      'FORBIDDEN'
+    );
   }
   return product;
 }
@@ -133,7 +143,7 @@ async function renderThumbnail(buffer: Buffer, size: 400 | 800): Promise<Buffer>
     throw new HttpError(
       400,
       'Failed to process image buffer. Ensure the file is a valid, uncorrupted image.',
-      'IMAGE_PROCESSING_FAILED',
+      'IMAGE_PROCESSING_FAILED'
     );
   }
 }
@@ -148,7 +158,11 @@ async function saveToLocalDisk(storagePath: string, body: Buffer): Promise<strin
   return `/uploads/product-images/${storagePath.replace(/\\/g, '/')}`;
 }
 
-async function uploadVariant(storagePath: string, body: Buffer, contentType: string): Promise<string> {
+async function uploadVariant(
+  storagePath: string,
+  body: Buffer,
+  contentType: string
+): Promise<string> {
   if (isSupabaseStorageConfigured()) {
     try {
       const supabaseAdmin = getSupabaseAdmin();
@@ -164,7 +178,7 @@ async function uploadVariant(storagePath: string, body: Buffer, contentType: str
         throw new HttpError(
           503,
           `Image storage upload failed: ${error.message}. Please check bucket '${config.productImagesBucket}'.`,
-          'STORAGE_UNAVAILABLE',
+          'STORAGE_UNAVAILABLE'
         );
       }
       return publicUrlForPath(storagePath);
@@ -174,7 +188,7 @@ async function uploadVariant(storagePath: string, body: Buffer, contentType: str
       throw new HttpError(
         503,
         `Image storage service unavailable: ${err instanceof Error ? err.message : 'connection failure'}.`,
-        'STORAGE_UNAVAILABLE',
+        'STORAGE_UNAVAILABLE'
       );
     }
   }
@@ -188,7 +202,7 @@ async function uploadVariant(storagePath: string, body: Buffer, contentType: str
   throw new HttpError(
     503,
     'Image storage service is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.',
-    'STORAGE_NOT_CONFIGURED',
+    'STORAGE_NOT_CONFIGURED'
   );
 }
 
@@ -196,7 +210,9 @@ async function removeIfExists(storagePath: string): Promise<void> {
   if (isSupabaseStorageConfigured()) {
     try {
       const supabaseAdmin = getSupabaseAdmin();
-      const { error } = await supabaseAdmin.storage.from(config.productImagesBucket).remove([storagePath]);
+      const { error } = await supabaseAdmin.storage
+        .from(config.productImagesBucket)
+        .remove([storagePath]);
       if (error) {
         logger.warn('Storage delete warning', { message: error.message });
       }
@@ -231,7 +247,7 @@ export async function uploadProductImage(params: {
     throw new HttpError(
       415,
       'Invalid or corrupted image file format. Allowed formats: JPEG, PNG, WebP.',
-      'INVALID_IMAGE_BINARY',
+      'INVALID_IMAGE_BINARY'
     );
   }
 

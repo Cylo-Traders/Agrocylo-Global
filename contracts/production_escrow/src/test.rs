@@ -2854,8 +2854,7 @@ fn test_refundable_amount_proportional_after_production() {
         .client
         .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
     t.client.invest(&t.investor1, &id, &10_000);
-    t.client.start_production(&t.farmer, &id);
-    t.client.mark_harvest(&t.farmer, &t.attester, &id);
+    t.client.start_production(&t.farmer, &id); // 3_000 released
 
     let order_id = t.client.create_order(&t.buyer, &id, &2_000);
 
@@ -2871,7 +2870,6 @@ fn test_refundable_amount_proportional_after_production() {
 
     let order = t.client.get_order(&order_id);
     assert_eq!(order.status, OrderStatus::Refunded);
-    t.client.start_production(&t.farmer, &id); // 3_000 released
     t.client.mark_campaign_failed(&t.admin, &id);
 
     // Pool = 10_000 - 3_000 = 7_000
@@ -3150,12 +3148,8 @@ fn test_advance_milestone_planted_ok() {
     let configs = milestone_configs_50pct(&t);
     t.client.set_milestone_configs(&t.admin, &id, &configs);
 
-    // Buyer must have a confirmed order — create and confirm one first.
-    let order_id = t.client.create_order(&t.buyer, &id, &1_000);
-    t.client.confirm_order(&t.buyer, &order_id);
-
     let farmer_before = balance(&t, &t.farmer);
-    t.client.advance_milestone(&t.buyer, &t.attester, &id);
+    t.client.advance_milestone(&t.admin, &t.attester, &id);
     // 10% of 10_000 = 1_000
     assert_eq!(balance(&t, &t.farmer), farmer_before + 1_000);
 
@@ -3175,12 +3169,9 @@ fn test_advance_milestone_growing_ok() {
     let configs = milestone_configs_50pct(&t);
     t.client.set_milestone_configs(&t.admin, &id, &configs);
 
-    let order_id = t.client.create_order(&t.buyer, &id, &1_000);
-    t.client.confirm_order(&t.buyer, &order_id);
-
-    t.client.advance_milestone(&t.buyer, &t.attester, &id); // Planted: 1_000
+    t.client.advance_milestone(&t.admin, &t.attester, &id); // Planted: 1_000
     let farmer_before = balance(&t, &t.farmer);
-    t.client.advance_milestone(&t.buyer, &t.attester, &id); // Growing: 1_000
+    t.client.advance_milestone(&t.admin, &t.attester, &id); // Growing: 1_000
     assert_eq!(balance(&t, &t.farmer), farmer_before + 1_000);
 
     let c = t.client.get_campaign(&id);
@@ -3199,12 +3190,9 @@ fn test_advance_milestone_all_five_ok() {
     let configs = milestone_configs_50pct(&t);
     t.client.set_milestone_configs(&t.admin, &id, &configs);
 
-    let order_id = t.client.create_order(&t.buyer, &id, &1_000);
-    t.client.confirm_order(&t.buyer, &order_id);
-
     let farmer_before = balance(&t, &t.farmer);
     for _ in 0..5 {
-        t.client.advance_milestone(&t.buyer, &t.attester, &id);
+        t.client.advance_milestone(&t.admin, &t.attester, &id);
     }
     // 5 x 1_000 = 5_000 (50% of 10_000)
     assert_eq!(balance(&t, &t.farmer), farmer_before + 5_000);
@@ -3259,12 +3247,9 @@ fn test_advance_milestone_rejects_no_config() {
         .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
     t.client.invest(&t.investor1, &id, &10_000);
 
-    let order_id = t.client.create_order(&t.buyer, &id, &1_000);
-    t.client.confirm_order(&t.buyer, &order_id);
-
     let err = t
         .client
-        .try_advance_milestone(&t.buyer, &t.attester, &id)
+        .try_advance_milestone(&t.admin, &t.attester, &id)
         .unwrap_err()
         .unwrap();
     assert_eq!(err, EscrowError::MilestoneNotConfigured);
@@ -3281,16 +3266,13 @@ fn test_advance_milestone_rejects_past_end() {
     let configs = milestone_configs_50pct(&t);
     t.client.set_milestone_configs(&t.admin, &id, &configs);
 
-    let order_id = t.client.create_order(&t.buyer, &id, &1_000);
-    t.client.confirm_order(&t.buyer, &order_id);
-
     for _ in 0..5 {
-        t.client.advance_milestone(&t.buyer, &t.attester, &id);
+        t.client.advance_milestone(&t.admin, &t.attester, &id);
     }
     // 6th advance should fail — no more milestones.
     let err = t
         .client
-        .try_advance_milestone(&t.buyer, &t.attester, &id)
+        .try_advance_milestone(&t.admin, &t.attester, &id)
         .unwrap_err()
         .unwrap();
     assert_eq!(err, EscrowError::InvalidMilestone);
@@ -3322,14 +3304,11 @@ fn test_advance_milestone_over_release_prevented() {
     }
     t.client.set_milestone_configs(&t.admin, &id, &configs);
 
-    let order_id = t.client.create_order(&t.buyer, &id, &1_000);
-    t.client.confirm_order(&t.buyer, &order_id);
-
-    t.client.advance_milestone(&t.buyer, &t.attester, &id); // 30% = 3_000
-    t.client.advance_milestone(&t.buyer, &t.attester, &id); // 30% = 3_000 (total 6_000)
+    t.client.advance_milestone(&t.admin, &t.attester, &id); // 30% = 3_000
+    t.client.advance_milestone(&t.admin, &t.attester, &id); // 30% = 3_000 (total 6_000)
     let err = t
         .client
-        .try_advance_milestone(&t.buyer, &t.attester, &id)
+        .try_advance_milestone(&t.admin, &t.attester, &id)
         .unwrap_err()
         .unwrap();
     // 3rd milestone would push to 9_000 > 7_000 max.
@@ -3349,12 +3328,9 @@ fn test_advance_milestone_refund_after_partial_release() {
     let configs = milestone_configs_50pct(&t);
     t.client.set_milestone_configs(&t.admin, &id, &configs);
 
-    let order_id = t.client.create_order(&t.buyer, &id, &1_000);
-    t.client.confirm_order(&t.buyer, &order_id);
-
     // Advance 2 milestones: 2_000 released (20%).
-    t.client.advance_milestone(&t.buyer, &t.attester, &id);
-    t.client.advance_milestone(&t.buyer, &t.attester, &id);
+    t.client.advance_milestone(&t.admin, &t.attester, &id);
+    t.client.advance_milestone(&t.admin, &t.attester, &id);
 
     // Campaign fails. Remaining pool = 10_000 - 2_000 = 8_000.
     t.client.mark_campaign_failed(&t.farmer, &id);
@@ -3367,6 +3343,16 @@ fn test_advance_milestone_refund_after_partial_release() {
 // Governance gating (Issue #660)
 // ---------------------------------------------------------------------------
 
+#[soroban_sdk::contract]
+struct MockGovernance;
+
+#[soroban_sdk::contractimpl]
+impl MockGovernance {
+    pub fn get_admin(env: Env) -> Address {
+        env.current_contract_address()
+    }
+}
+
 #[test]
 fn test_fee_config_admin_fallback_before_governance_set() {
     let t = setup();
@@ -3378,13 +3364,13 @@ fn test_fee_config_admin_fallback_before_governance_set() {
 #[test]
 fn test_fee_config_rejects_admin_once_governance_set() {
     let t = setup();
-    let governance = Address::generate(&t.env);
+    let governance = t.env.register(MockGovernance, ());
     let fee_collector = Address::generate(&t.env);
 
     t.client.set_governance_contract(&t.admin, &governance);
 
     let result = t.client.try_set_fee_config(&t.admin, &fee_collector, &500);
-    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAdmin);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotGoverned);
 
     // The governance contract address is now the sole authorized caller.
     t.client.set_fee_config(&governance, &fee_collector, &500);
@@ -3393,13 +3379,13 @@ fn test_fee_config_rejects_admin_once_governance_set() {
 #[test]
 fn test_registry_contract_rejects_admin_once_governance_set() {
     let t = setup();
-    let governance = Address::generate(&t.env);
+    let governance = t.env.register(MockGovernance, ());
     let registry = Address::generate(&t.env);
 
     t.client.set_governance_contract(&t.admin, &governance);
 
     let result = t.client.try_set_registry_contract(&t.admin, &registry);
-    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAdmin);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotGoverned);
 
     t.client.set_registry_contract(&governance, &registry);
 }
@@ -3407,14 +3393,14 @@ fn test_registry_contract_rejects_admin_once_governance_set() {
 #[test]
 fn test_update_supported_tokens_governance_gated() {
     let t = setup();
-    let governance = Address::generate(&t.env);
+    let governance = t.env.register(MockGovernance, ());
     t.client.set_governance_contract(&t.admin, &governance);
 
     let mut tokens = Vec::new(&t.env);
     tokens.push_back(t.token_id.clone());
 
     let result = t.client.try_update_supported_tokens(&t.admin, &tokens);
-    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotAdmin);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::NotGoverned);
 
     t.client.update_supported_tokens(&governance, &tokens);
     assert_eq!(t.client.get_supported_tokens().len(), 1);

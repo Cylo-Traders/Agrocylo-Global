@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../db/client.js';
 import {
@@ -305,7 +306,7 @@ router.get(
       return;
     }
 
-    const where = {
+    const where: Prisma.MessageWhereInput = {
       conversationId: id,
       deletedAt: null,
     };
@@ -319,7 +320,7 @@ router.get(
       });
       if (cursorMessage) {
         skip = 1;
-        (where as any).createdAt = {
+        where.createdAt = {
           lt: cursorMessage.createdAt,
         };
       }

@@ -11,8 +11,11 @@ import { createIdempotencyMiddleware, idempotencyRedisKey } from './idempotency.
 
 const WALLET_A = 'GWALLETA';
 const WALLET_B = 'GWALLETB';
-const bearer = (walletAddress: string, extra: Record<string, unknown> = {}, opts: jwt.SignOptions = {}) =>
-  `Bearer ${jwt.sign({ walletAddress, ...extra }, JWT_SECRET, opts)}`;
+const bearer = (
+  walletAddress: string,
+  extra: Record<string, unknown> = {},
+  opts: jwt.SignOptions = {}
+) => `Bearer ${jwt.sign({ walletAddress, ...extra }, JWT_SECRET, opts)}`;
 const AUTH = bearer(WALLET_A);
 const scoped = (key: string) => idempotencyRedisKey(WALLET_A, undefined, key);
 
@@ -64,7 +67,7 @@ class InMemoryRedis {
   }
 
   async del(key: string): Promise<number> {
-    const existed = this.store.has(key) && !this.isExpired(this.store.get(key)!);
+    const _existed = this.store.has(key) && !this.isExpired(this.store.get(key)!);
     // Also need to delete expired keys
     const e = this.store.get(key);
     if (e && this.isExpired(e)) {
@@ -117,17 +120,21 @@ describe('Idempotency Middleware', () => {
     try {
       await redisClient.flushall?.();
       await redisClient.flushdb?.();
-    } catch {}
+    } catch {
+      /* ignore */
+    }
     try {
       redisClient.disconnect?.();
-    } catch {}
+    } catch {
+      /* ignore */
+    }
   });
 
   describe('Basic idempotency', () => {
     it('should cache response on first request', async () => {
       const middleware = createIdempotencyMiddleware(redisClient);
       const idempotencyKey = 'test-idem-key-1';
-      let handlerCalled = 0;
+      let _handlerCalled = 0;
 
       const req = {
         headers: { authorization: AUTH, 'idempotency-key': idempotencyKey },
@@ -141,7 +148,7 @@ describe('Idempotency Middleware', () => {
       } as unknown as Response;
 
       const next = vi.fn((err?: Error) => {
-        if (!err) handlerCalled++;
+        if (!err) _handlerCalled++;
       }) as unknown as NextFunction;
 
       await middleware(req, res, next);
@@ -158,7 +165,7 @@ describe('Idempotency Middleware', () => {
         scoped(idempotencyKey),
         JSON.stringify({ status: 201, body: cachedResponse }),
         'EX',
-        86400,
+        86400
       );
 
       const req = {
@@ -184,16 +191,18 @@ describe('Idempotency Middleware', () => {
       const middleware = createIdempotencyMiddleware(redisClient);
       const idempotencyKey = 'test-idem-concurrent';
 
-      const createRequest = () => ({
-        headers: { authorization: AUTH, 'idempotency-key': idempotencyKey },
-        method: 'POST',
-      }) as unknown as Request;
+      const createRequest = () =>
+        ({
+          headers: { authorization: AUTH, 'idempotency-key': idempotencyKey },
+          method: 'POST',
+        }) as unknown as Request;
 
-      const createResponse = () => ({
-        status: vi.fn().mockReturnThis(),
-        json: vi.fn().mockReturnThis(),
-        locals: {},
-      }) as unknown as Response;
+      const createResponse = () =>
+        ({
+          status: vi.fn().mockReturnThis(),
+          json: vi.fn().mockReturnThis(),
+          locals: {},
+        }) as unknown as Response;
 
       // Simulate two concurrent requests with same key
       const req1 = createRequest();
@@ -243,7 +252,6 @@ describe('Idempotency Middleware', () => {
     });
 
     it('should allow reuse of key after expiry', async () => {
-      const middleware = createIdempotencyMiddleware(redisClient);
       const idempotencyKey = 'test-idem-reuse';
       const shortTtlMs = 500;
 
@@ -252,11 +260,11 @@ describe('Idempotency Middleware', () => {
         scoped(idempotencyKey),
         JSON.stringify({ status: 201, body: { id: '1' } }),
         'PX',
-        shortTtlMs,
+        shortTtlMs
       );
 
       // Wait for expiry
-      await new Promise(resolve => setTimeout(resolve, shortTtlMs + 100));
+      await new Promise((resolve) => setTimeout(resolve, shortTtlMs + 100));
 
       // Key should be gone, allowing new request
       const exists = await redisClient.exists(scoped(idempotencyKey));
@@ -266,7 +274,6 @@ describe('Idempotency Middleware', () => {
 
   describe('Metrics tracking', () => {
     it('should track cache hits', async () => {
-      const middleware = createIdempotencyMiddleware(redisClient);
       const idempotencyKey = 'test-idem-metrics-hit';
 
       // Pre-store a response
@@ -274,7 +281,7 @@ describe('Idempotency Middleware', () => {
         scoped(idempotencyKey),
         JSON.stringify({ status: 200, body: { data: 'cached' } }),
         'EX',
-        86400,
+        86400
       );
 
       // Metrics should be accessible from the middleware context
@@ -305,9 +312,6 @@ describe('Idempotency Middleware', () => {
     });
 
     it('should track concurrent conflicts', async () => {
-      const middleware = createIdempotencyMiddleware(redisClient);
-      const idempotencyKey = 'test-idem-metrics-conflict';
-
       // Simulate concurrent request detection
       // Implementation details depend on how conflicts are detected
     });
@@ -393,7 +397,7 @@ describe('Idempotency Middleware', () => {
 
       expect(statusMock).toHaveBeenCalledWith(422);
       expect(jsonMock).toHaveBeenCalledWith(
-        expect.objectContaining({ status: 422, detail: expect.stringContaining('fingerprint') }),
+        expect.objectContaining({ status: 422, detail: expect.stringContaining('fingerprint') })
       );
       expect(nextB).not.toHaveBeenCalled();
     });
@@ -420,7 +424,7 @@ describe('Idempotency Middleware', () => {
       };
       // Need to capture json wrapper to trigger caching
       let jsonWrapper: any;
-      const originalJson = res1.json;
+      const _originalJson = res1.json;
       const next1 = vi.fn(() => {
         // Simulate handler using the wrapped json (which caches)
         jsonWrapper = (res1 as any).json;
@@ -460,7 +464,11 @@ describe('Idempotency Middleware', () => {
         body: { cartId: 'c1' },
       }) as unknown as Request;
     /** Runs a request; the "handler" responds 201 with `body` if reached. `sent` spies on what reached the client. */
-    async function run(middleware: ReturnType<typeof createIdempotencyMiddleware>, req: Request, body: unknown) {
+    async function run(
+      middleware: ReturnType<typeof createIdempotencyMiddleware>,
+      req: Request,
+      body: unknown
+    ) {
       const sent = vi.fn().mockReturnThis();
       const res: any = { status: vi.fn().mockReturnThis(), json: sent, statusCode: 200 };
       const next = vi.fn(() => {
@@ -496,7 +504,7 @@ describe('Idempotency Middleware', () => {
       }
     });
 
-    it('wallet B cannot read or block wallet A\'s entry with the same key/body', async () => {
+    it("wallet B cannot read or block wallet A's entry with the same key/body", async () => {
       const middleware = createIdempotencyMiddleware(redisClient);
       await run(middleware, makeReq(AUTH), { owner: 'A' });
       const b = await run(middleware, makeReq(bearer(WALLET_B)), { owner: 'B' });
@@ -505,17 +513,22 @@ describe('Idempotency Middleware', () => {
       expect(JSON.parse((await redisClient.get(scoped(KEY)))!).body).toEqual({ owner: 'A' });
     });
 
-    it('a role change (e.g. demoted admin) does not replay the old role\'s response', async () => {
+    it("a role change (e.g. demoted admin) does not replay the old role's response", async () => {
       const middleware = createIdempotencyMiddleware(redisClient);
       await run(middleware, makeReq(bearer(WALLET_A, { role: 'ADMIN' })), { admin: true });
-      const demoted = await run(middleware, makeReq(bearer(WALLET_A, { role: 'BUYER' })), { admin: false });
+      const demoted = await run(middleware, makeReq(bearer(WALLET_A, { role: 'BUYER' })), {
+        admin: false,
+      });
       expect(demoted.handlerRan).toBe(true);
       expect(demoted.res.json).not.toHaveBeenCalledWith({ admin: true });
     });
 
     it('legacy unscoped idem:<key> entries are ignored', async () => {
       const middleware = createIdempotencyMiddleware(redisClient);
-      await redisClient.set(`idem:${KEY}`, JSON.stringify({ status: 201, body: { owner: 'legacy' } }));
+      await redisClient.set(
+        `idem:${KEY}`,
+        JSON.stringify({ status: 201, body: { owner: 'legacy' } })
+      );
       const { res, handlerRan } = await run(middleware, makeReq(AUTH), { owner: 'A' });
       expect(handlerRan).toBe(true);
       expect(res.json).not.toHaveBeenCalledWith({ owner: 'legacy' });
@@ -692,8 +705,8 @@ describe('Idempotency Middleware', () => {
         headersSent: false,
       };
       // Simulate handler crashing before responding — call next(err) without ever calling res.json
-      const next1 = vi.fn((err?: any) => {
-        // The middleware's wrappedNext will clear the lock on err
+      const next1 = vi.fn((_err?: any) => {
+        // The middleware's wrappedNext will clear the lock on _err
       }) as unknown as NextFunction;
 
       await middleware(req1, res1, next1);
@@ -711,9 +724,9 @@ describe('Idempotency Middleware', () => {
       const key = 'test-status-type';
 
       // Manually set an IN_PROGRESS entry like the old buggy code would have (status string)
-      const fingerprint = 'dummy-fingerprint-for-test';
+      const _fingerprint = 'dummy-fingerprint-for-test';
       // Use the same fingerprint generation as middleware would for this request
-      const reqForFingerprint = {
+      const _reqForFingerprint = {
         headers: { authorization: AUTH, 'idempotency-key': key },
         method: 'POST',
         path: '/orders',
@@ -728,7 +741,7 @@ describe('Idempotency Middleware', () => {
         scoped(key),
         JSON.stringify({ status: 'IN_PROGRESS', body: null }),
         'EX',
-        60,
+        60
       );
 
       const req = {

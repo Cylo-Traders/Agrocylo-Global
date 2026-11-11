@@ -12,7 +12,9 @@ vi.mock('../db/client.js', () => ({
 const { captureAlert } = vi.hoisted(() => ({ captureAlert: vi.fn() }));
 vi.mock('../config/sentry.js', () => ({ captureAlert }));
 
-const { reconcileTransaction } = vi.hoisted(() => ({ reconcileTransaction: vi.fn() }));
+const { reconcileTransaction } = vi.hoisted(() => ({
+  reconcileTransaction: vi.fn(),
+}));
 vi.mock('./transactionReconciler.js', () => ({ reconcileTransaction }));
 
 const { gaugeSet } = vi.hoisted(() => ({ gaugeSet: vi.fn() }));
@@ -32,13 +34,15 @@ describe('reconciliationSweep', () => {
       { id: 'tx1', txHash: 'hash1', status: 'confirmed' },
       { id: 'tx2', txHash: 'hash2', status: 'submitted' },
     ]);
-    reconcileTransaction.mockImplementation(async (_hash: string, status: string) => ({
-      dbStatus: status,
-      reconciledStatus: status,
-      confirmedInLedger: true,
-      indexedByWatcher: false,
-      latestIndexedLedger: 100,
-    }));
+    reconcileTransaction.mockImplementation(
+      async (_hash: string, status: string) => ({
+        dbStatus: status,
+        reconciledStatus: status,
+        confirmedInLedger: true,
+        indexedByWatcher: false,
+        latestIndexedLedger: 100,
+      }),
+    );
 
     const result = await runReconciliationSweep();
 
@@ -52,25 +56,27 @@ describe('reconciliationSweep', () => {
       { id: 'tx1', txHash: 'hash1', status: 'submitted' },
       { id: 'tx2', txHash: 'hash2', status: 'confirmed' },
     ]);
-    reconcileTransaction.mockImplementation(async (_hash: string, status: string) => {
-      if (status === 'submitted') {
-        // Watcher already indexed this one — DB is stale.
+    reconcileTransaction.mockImplementation(
+      async (_hash: string, status: string) => {
+        if (status === 'submitted') {
+          // Watcher already indexed this one — DB is stale.
+          return {
+            dbStatus: 'submitted',
+            reconciledStatus: 'indexed',
+            confirmedInLedger: true,
+            indexedByWatcher: true,
+            latestIndexedLedger: 100,
+          };
+        }
         return {
-          dbStatus: 'submitted',
-          reconciledStatus: 'indexed',
+          dbStatus: status,
+          reconciledStatus: status,
           confirmedInLedger: true,
-          indexedByWatcher: true,
+          indexedByWatcher: false,
           latestIndexedLedger: 100,
         };
-      }
-      return {
-        dbStatus: status,
-        reconciledStatus: status,
-        confirmedInLedger: true,
-        indexedByWatcher: false,
-        latestIndexedLedger: 100,
-      };
-    });
+      },
+    );
 
     const result = await runReconciliationSweep();
 
@@ -84,7 +90,9 @@ describe('reconciliationSweep', () => {
   });
 
   it('skips transactions with no txHash yet rather than failing the sweep', async () => {
-    findMany.mockResolvedValue([{ id: 'tx1', txHash: null, status: 'awaiting_signature' }]);
+    findMany.mockResolvedValue([
+      { id: 'tx1', txHash: null, status: 'awaiting_signature' },
+    ]);
 
     const result = await runReconciliationSweep();
 
@@ -95,9 +103,11 @@ describe('reconciliationSweep', () => {
 
 describe('reconciliationSweep scheduler', () => {
   it('registers a timer on start and clears it on stop', async () => {
-    const { startReconciliationSweep, stopReconciliationSweep, isReconciliationSweepRunning } = await import(
-      './reconciliationSweep.js'
-    );
+    const {
+      startReconciliationSweep,
+      stopReconciliationSweep,
+      isReconciliationSweepRunning,
+    } = await import('./reconciliationSweep.js');
     expect(isReconciliationSweepRunning()).toBe(false);
     startReconciliationSweep(60_000);
     expect(isReconciliationSweepRunning()).toBe(true);

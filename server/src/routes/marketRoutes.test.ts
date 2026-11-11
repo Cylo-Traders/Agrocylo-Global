@@ -17,19 +17,32 @@ app.use(marketRoutes);
 
 const now = new Date();
 const row = (o: object) => ({
-  id: 'd1', buyerWallet: 'gb1', cropName: 'Maize', quantityWanted: '100', unit: 'kg',
-  maxPricePerUnit: '2', currency: 'XLM', region: 'Lagos', neededBy: null, createdAt: now, ...o,
+  id: 'd1',
+  buyerWallet: 'gb1',
+  cropName: 'Maize',
+  quantityWanted: '100',
+  unit: 'kg',
+  maxPricePerUnit: '2',
+  currency: 'XLM',
+  region: 'Lagos',
+  neededBy: null,
+  createdAt: now,
+  ...o,
 });
 
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(prisma.buyerDemand.findMany).mockResolvedValue([
-    row({}), row({ id: 'd2', buyerWallet: 'gb2', region: 'Abuja', quantityWanted: '50' }),
+    row({}),
+    row({ id: 'd2', buyerWallet: 'gb2', region: 'Abuja', quantityWanted: '50' }),
   ] as any);
   vi.mocked(prisma.location.findMany).mockResolvedValue([
-    { walletAddress: 'gb1', lat: 6.5, lng: 3.4 }, { walletAddress: 'gb2', lat: 9, lng: 7.4 },
+    { walletAddress: 'gb1', lat: 6.5, lng: 3.4 },
+    { walletAddress: 'gb2', lat: 9, lng: 7.4 },
   ] as any);
-  vi.mocked(prisma.profile.findMany).mockResolvedValue([{ walletAddress: 'gb1', name: 'Ada' }] as any);
+  vi.mocked(prisma.profile.findMany).mockResolvedValue([
+    { walletAddress: 'gb1', name: 'Ada' },
+  ] as any);
 });
 
 describe('/market/* (#1134)', () => {
@@ -46,7 +59,11 @@ describe('/market/* (#1134)', () => {
     const res = await request(app).get('/market/buyer-intents');
     expect(res.status).toBe(200);
     expect(res.body[0]).toMatchObject({
-      id: 'd1', buyer_name: 'Ada', product_name: 'Maize', quantity: '100', unit: 'kg',
+      id: 'd1',
+      buyer_name: 'Ada',
+      product_name: 'Maize',
+      quantity: '100',
+      unit: 'kg',
       location: { region: 'Lagos', coordinates: [6.5, 3.4] },
     });
     expect(res.body[1].buyer_name).toBe('Buyer');

@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const JWT_SECRET = 'test-secret-at-least-32-chars-long!!';
 const USER_WALLET = 'GUSER111111111111111111111111111111111111111111111111111';
-const OTHER_WALLET = 'GOTHER2222222222222222222222222222222222222222222222222222';
 
 vi.mock('ioredis', () => ({
   default: class {
@@ -51,8 +50,10 @@ vi.mock('../services/orderService.js', () => ({
 
 import { OrderService } from '../services/orderService.js';
 const { default: orderRoutes, orderErrorHandler } = await import('./orderRoutes.js');
-const { default: notificationRoutes, notificationErrorHandler } = await import('./notificationRoutes.js');
-const { default: productImageRoutes, productImageErrorHandler } = await import('./productImageRoutes.js');
+const { default: notificationRoutes, notificationErrorHandler } =
+  await import('./notificationRoutes.js');
+const { default: productImageRoutes, productImageErrorHandler } =
+  await import('./productImageRoutes.js');
 const { requestContext } = await import('../middleware/requestContext.js');
 
 const app = express();
@@ -76,10 +77,7 @@ describe('Structured API Error Responses (Issue #1188)', () => {
 
   describe('Order API Error Responses', () => {
     it('returns structured 401 when Authorization header is missing', async () => {
-      const res = await request(app)
-        .get('/orders')
-        .set('x-request-id', 'test-req-123')
-        .expect(401);
+      const res = await request(app).get('/orders').set('x-request-id', 'test-req-123').expect(401);
 
       expect(res.body).toHaveProperty('status', 401);
       expect(res.body).toHaveProperty('code', 'UNAUTHORIZED');
@@ -124,7 +122,7 @@ describe('Structured API Error Responses (Issue #1188)', () => {
     it('returns structured 500 without leaking internal database stack trace on service failure', async () => {
       const token = makeToken({ walletAddress: USER_WALLET });
       vi.mocked(OrderService.getAllForWallet).mockRejectedValue(
-        new Error('PrismaClientKnownRequestError: relation "orders" does not exist at pg.execute'),
+        new Error('PrismaClientKnownRequestError: relation "orders" does not exist at pg.execute')
       );
 
       const res = await request(app)

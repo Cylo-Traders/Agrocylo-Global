@@ -35,11 +35,21 @@ beforeEach(() => {
 
 describe('POST /locations auth + idempotency (#1138)', () => {
   it('succeeds with a valid session and retries are safe (upsert)', async () => {
-    vi.mocked(prisma.location.upsert).mockResolvedValue({ walletAddress: WALLET, lat: 6.5, lng: 3.3 } as never);
+    vi.mocked(prisma.location.upsert).mockResolvedValue({
+      walletAddress: WALLET,
+      lat: 6.5,
+      lng: 3.3,
+    } as never);
     const payload = { lat: 6.5, lng: 3.3 };
-    const first = await request(app).post('/locations').set('Authorization', bearer()).send(payload);
+    const first = await request(app)
+      .post('/locations')
+      .set('Authorization', bearer())
+      .send(payload);
     expect(first.status).toBe(201);
-    const second = await request(app).post('/locations').set('Authorization', bearer()).send(payload);
+    const second = await request(app)
+      .post('/locations')
+      .set('Authorization', bearer())
+      .send(payload);
     expect(second.status).toBe(201);
     expect(vi.mocked(prisma.location.upsert)).toHaveBeenCalledTimes(2);
   });
@@ -51,10 +61,11 @@ describe('POST /locations auth + idempotency (#1138)', () => {
   });
 
   it('rejects body wallet mismatch with 403', async () => {
-    const res = await request(app)
-      .post('/locations')
-      .set('Authorization', bearer())
-      .send({ lat: 6.5, lng: 3.3, wallet_address: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' });
+    const res = await request(app).post('/locations').set('Authorization', bearer()).send({
+      lat: 6.5,
+      lng: 3.3,
+      wallet_address: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    });
     expect(res.status).toBe(403);
     expect(res.headers['content-type']).toContain('application/problem+json');
   });
@@ -62,7 +73,11 @@ describe('POST /locations auth + idempotency (#1138)', () => {
 
 describe('GET /locations/me (#1137)', () => {
   it('returns the caller saved location', async () => {
-    vi.mocked(prisma.location.findUnique).mockResolvedValue({ walletAddress: WALLET, lat: 6.5, lng: 3.3 } as never);
+    vi.mocked(prisma.location.findUnique).mockResolvedValue({
+      walletAddress: WALLET,
+      lat: 6.5,
+      lng: 3.3,
+    } as never);
     const res = await request(app).get('/locations/me').set('Authorization', bearer());
     expect(res.status).toBe(200);
     expect(res.body.lat).toBe(6.5);

@@ -451,7 +451,10 @@ jobs:
           key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run fast cargo check
-        run: cargo check --workspace --all-targets --target wasm32v1-none
+        # `--all-targets` pulls in dev-dependencies/testutils, whose `std`
+        # feature unification cannot compile for the no_std wasm32v1-none
+        # target. Tests are built separately on the host below.
+        run: cargo check --workspace --target wasm32v1-none
 
       - name: Build tests (no-run)
         run: cargo test --workspace --no-run

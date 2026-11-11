@@ -13,14 +13,18 @@ import {
 describe('upload middleware', () => {
   describe('isValidImageBuffer', () => {
     it('detects valid JPEG magic bytes', () => {
-      const jpegBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01]);
+      const jpegBuffer = Buffer.from([
+        0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
+      ]);
       const result = isValidImageBuffer(jpegBuffer);
       expect(result.valid).toBe(true);
       expect(result.detectedType).toBe('jpg');
     });
 
     it('detects valid PNG magic bytes', () => {
-      const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]);
+      const pngBuffer = Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+      ]);
       const result = isValidImageBuffer(pngBuffer);
       expect(result.valid).toBe(true);
       expect(result.detectedType).toBe('png');
@@ -58,7 +62,9 @@ describe('upload middleware', () => {
 
     it('flags unsupported mime types', () => {
       expect(isUnsupportedMimeType({ mimetype: 'image/gif' } as Express.Multer.File)).toBe(true);
-      expect(isUnsupportedMimeType({ mimetype: 'application/pdf' } as Express.Multer.File)).toBe(true);
+      expect(isUnsupportedMimeType({ mimetype: 'application/pdf' } as Express.Multer.File)).toBe(
+        true
+      );
       expect(isUnsupportedMimeType({ mimetype: 'text/html' } as Express.Multer.File)).toBe(true);
     });
   });
@@ -68,7 +74,12 @@ describe('upload middleware', () => {
       const app = express();
       app.post('/evidence', evidenceUpload.single('file'), (_req, res) => res.sendStatus(204));
       app.use(
-        (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+        (
+          err: unknown,
+          _req: express.Request,
+          res: express.Response,
+          _next: express.NextFunction
+        ) => {
           const code = typeof err === 'object' && err && 'code' in err ? err.code : undefined;
           res.sendStatus(code === 'LIMIT_FILE_SIZE' ? 413 : 500);
         }
@@ -88,7 +99,12 @@ describe('upload middleware', () => {
         res.status(200).json({ filename: req.file?.originalname, size: req.file?.size });
       });
       app.use(
-        (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+        (
+          err: unknown,
+          _req: express.Request,
+          res: express.Response,
+          _next: express.NextFunction
+        ) => {
           if (err instanceof UploadError) {
             res.status(err.status).json({ error: err.message, code: err.code });
             return;
@@ -110,7 +126,9 @@ describe('upload middleware', () => {
 
     it('accepts valid JPEG file within size limit', async () => {
       const app = createTestApp();
-      const validJpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01]);
+      const validJpeg = Buffer.from([
+        0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
+      ]);
       const res = await request(app)
         .post('/upload')
         .attach('image', validJpeg, { filename: 'test.jpg', contentType: 'image/jpeg' });
@@ -141,7 +159,9 @@ describe('upload middleware', () => {
 
     it('rejects unexpected field names with 400', async () => {
       const app = createTestApp();
-      const validPng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]);
+      const validPng = Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+      ]);
       const res = await request(app)
         .post('/upload')
         .attach('wrong_field', validPng, { filename: 'test.png', contentType: 'image/png' });

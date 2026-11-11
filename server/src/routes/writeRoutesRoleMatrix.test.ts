@@ -69,7 +69,10 @@ describe('location writes (#1145)', () => {
     });
 
     it('rejects BUYER with 403 (#1133)', async () => {
-      const res = await request(app).post('/locations').set('Authorization', bearer('BUYER')).send(body);
+      const res = await request(app)
+        .post('/locations')
+        .set('Authorization', bearer('BUYER'))
+        .send(body);
       expect(res.status).toBe(403);
       expect(res.type).toBe('application/problem+json');
       expect(prisma.location.upsert).not.toHaveBeenCalled();
@@ -120,7 +123,6 @@ describe('location writes (#1145)', () => {
       expect(res.status).toBe(400);
       expect(prisma.location.upsert).not.toHaveBeenCalled();
     });
-
   });
 
   describe.each([
@@ -151,10 +153,13 @@ describe('location writes (#1145)', () => {
       expect(write()).toHaveBeenCalledTimes(1);
     });
 
-    it.each(['FARMER', 'ADMIN'] as const)("rejects %s on another wallet's row with 403", async (role) => {
-      expect((await call('gsomeoneelse', bearer(role))).status).toBe(403);
-      expect(write()).not.toHaveBeenCalled();
-    });
+    it.each(['FARMER', 'ADMIN'] as const)(
+      "rejects %s on another wallet's row with 403",
+      async (role) => {
+        expect((await call('gsomeoneelse', bearer(role))).status).toBe(403);
+        expect(write()).not.toHaveBeenCalled();
+      }
+    );
   });
 });
 

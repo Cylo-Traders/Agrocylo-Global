@@ -1,7 +1,7 @@
-import type { Request, Response, NextFunction } from "express";
-import multer from "multer";
-import logger from "../config/logger.js";
-import { Sentry } from "../config/sentry.js";
+import type { Request, Response, NextFunction } from 'express';
+import multer from 'multer';
+import logger from '../config/logger.js';
+import { Sentry } from '../config/sentry.js';
 
 export class HttpError extends Error {
   constructor(
@@ -53,11 +53,11 @@ export function problemDetail(
     ...(detail ? { detail } : {}),
     ...extra,
   };
-  res.status(status).type("application/problem+json").json(body);
+  res.status(status).type('application/problem+json').json(body);
 }
 
 function slugify(s: string): string {
-  return s.toLowerCase().replace(/\s+/g, "-");
+  return s.toLowerCase().replace(/\s+/g, '-');
 }
 
 // Global error handler: consolidates all error types (must have 4 params for Express).
@@ -67,9 +67,10 @@ export function globalErrorHandler(
   res: Response,
   _next: NextFunction,
 ): void {
+  void _next;
   // Multer file upload errors
-  if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
-    problemDetail(res, req, 413, "Payload Too Large", "Max image size is 5MB");
+  if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+    problemDetail(res, req, 413, 'Payload Too Large', 'Max image size is 5MB');
     return;
   }
 
@@ -82,7 +83,7 @@ export function globalErrorHandler(
     if (err.status >= 500) {
       Sentry.captureException(err);
     }
-    problemDetail(res, req, err.status, "Storage Error", err.message);
+    problemDetail(res, req, err.status, 'Storage Error', err.message);
     return;
   }
 
@@ -91,12 +92,12 @@ export function globalErrorHandler(
     if (err.status >= 500) {
       Sentry.captureException(err);
     }
-    problemDetail(res, req, err.status, "Request Error", err.message);
+    problemDetail(res, req, err.status, 'Request Error', err.message);
     return;
   }
 
   // Unhandled errors
-  logger.error("Unhandled request error", { error: err, path: req.path });
+  logger.error('Unhandled request error', { error: err, path: req.path });
   Sentry.captureException(err);
-  problemDetail(res, req, 500, "Internal Server Error");
+  problemDetail(res, req, 500, 'Internal Server Error');
 }

@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import app from './app.js';
 
 vi.mock('./config/database.js', () => ({
@@ -72,9 +72,7 @@ describe('Security Headers', () => {
   });
 
   it('client IP should be correctly derived behind proxy', async () => {
-    const res = await request(app)
-      .get('/health')
-      .set('X-Forwarded-For', '192.168.1.100, 10.0.0.1');
+    const res = await request(app).get('/health').set('X-Forwarded-For', '192.168.1.100, 10.0.0.1');
 
     expect(res.status).toBe(200);
   });

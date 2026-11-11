@@ -7,7 +7,7 @@ export class UploadError extends Error {
   constructor(
     public readonly status: number,
     public readonly code: string,
-    message: string,
+    message: string
   ) {
     super(message);
     this.name = 'UploadError';
@@ -18,7 +18,10 @@ export class UploadError extends Error {
  * Validates binary magic numbers to ensure the uploaded buffer matches allowed image formats
  * (JPEG, PNG, WebP) and is not a disguised or executable file.
  */
-export function isValidImageBuffer(buffer: Buffer): { valid: boolean; detectedType?: 'jpg' | 'png' | 'webp' } {
+export function isValidImageBuffer(buffer: Buffer): {
+  valid: boolean;
+  detectedType?: 'jpg' | 'png' | 'webp';
+} {
   if (!buffer || buffer.length < 12) {
     return { valid: false };
   }
@@ -43,10 +46,7 @@ export function isValidImageBuffer(buffer: Buffer): { valid: boolean; detectedTy
   }
 
   // WebP magic bytes: RIFF .... WEBP
-  if (
-    buffer.toString('ascii', 0, 4) === 'RIFF' &&
-    buffer.toString('ascii', 8, 12) === 'WEBP'
-  ) {
+  if (buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') {
     return { valid: true, detectedType: 'webp' };
   }
 
@@ -68,8 +68,8 @@ export const imageUpload = multer({
         new UploadError(
           415,
           'UNSUPPORTED_MIME_TYPE',
-          `Unsupported Media Type '${file.mimetype}'. Allowed types: image/jpeg, image/png, image/webp.`,
-        ),
+          `Unsupported Media Type '${file.mimetype}'. Allowed types: image/jpeg, image/png, image/webp.`
+        )
       );
     }
     cb(null, true);
@@ -91,8 +91,8 @@ export const evidenceUpload = multer({
         new UploadError(
           415,
           'UNSUPPORTED_MIME_TYPE',
-          `Unsupported Media Type '${file.mimetype}'. Allowed types: image/jpeg, image/png, image/webp.`,
-        ),
+          `Unsupported Media Type '${file.mimetype}'. Allowed types: image/jpeg, image/png, image/webp.`
+        )
       );
     }
     cb(null, true);

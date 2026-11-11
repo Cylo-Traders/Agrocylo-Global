@@ -1,5 +1,5 @@
-import { z } from "zod";
-import { uuidParam } from "./common.js";
+import { z } from 'zod';
+import { uuidParam } from './common.js';
 
 export const CampaignImageParamSchema = z.object({
   campaign_id: uuidParam,

@@ -74,19 +74,21 @@ const createLocationSchema = optionalLocationFields
     };
   });
 
-const proximitySchema = z.object({
-  lat: z.coerce.number().min(-90).max(90).optional(),
-  lng: z.coerce.number().min(-180).max(180).optional(),
-  radius: z.coerce.number().positive().optional(),
-  role: z.string().trim().optional(),
-  page: z.coerce.number().int().positive().default(1),
-  limit: z.coerce.number().int().positive().max(100).default(20),
-}).superRefine((v, ctx) => {
-  const given = [v.lat, v.lng, v.radius].filter((x) => x !== undefined).length;
-  if (given !== 0 && given !== 3) {
-    ctx.addIssue({ code: 'custom', message: 'lat, lng and radius must be provided together' });
-  }
-});
+const proximitySchema = z
+  .object({
+    lat: z.coerce.number().min(-90).max(90).optional(),
+    lng: z.coerce.number().min(-180).max(180).optional(),
+    radius: z.coerce.number().positive().optional(),
+    role: z.string().trim().optional(),
+    page: z.coerce.number().int().positive().default(1),
+    limit: z.coerce.number().int().positive().max(100).default(20),
+  })
+  .superRefine((v, ctx) => {
+    const given = [v.lat, v.lng, v.radius].filter((x) => x !== undefined).length;
+    if (given !== 0 && given !== 3) {
+      ctx.addIssue({ code: 'custom', message: 'lat, lng and radius must be provided together' });
+    }
+  });
 
 function haversine(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
@@ -122,7 +124,7 @@ export async function getFarmerLocations(query: unknown) {
     // 1 degree latitude ≈ 111 km; longitude varies by latitude
     const latDelta = radius / 111;
     const lngDelta = radius / (111 * Math.cos((lat * Math.PI) / 180));
-    
+
     whereClause.lat = { gte: lat - latDelta, lte: lat + latDelta };
     whereClause.lng = { gte: lng - lngDelta, lte: lng + lngDelta };
   }
@@ -139,9 +141,10 @@ export async function getFarmerLocations(query: unknown) {
 
   const total = locations.length;
   const farmers = locations.slice(skip, skip + limit).map((location) => {
-    const distance_km = (lat !== undefined && lng !== undefined)
-      ? Math.round(haversine(lat, lng, location.lat, location.lng) * 10) / 10
-      : null;
+    const distance_km =
+      lat !== undefined && lng !== undefined
+        ? Math.round(haversine(lat, lng, location.lat, location.lng) * 10) / 10
+        : null;
 
     return {
       wallet_address: (location as any).walletAddress ?? (location as any).wallet_address,

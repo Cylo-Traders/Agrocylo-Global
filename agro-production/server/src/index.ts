@@ -7,8 +7,15 @@ import { connectDB } from './db/client.js';
 import { startProductionWatcher } from './events/watcher.js';
 import { runProductionReconciliation } from './services/reconciliationService.js';
 import { attachWebSocketServer } from './services/wsServer.js';
-import { registerHttpServer, registerWatcher, shutdown } from './services/lifecycle.js';
-import { startReconciliationSweep, stopReconciliationSweep } from './services/reconciliationSweep.js';
+import {
+  registerHttpServer,
+  registerWatcher,
+  shutdown,
+} from './services/lifecycle.js';
+import {
+  startReconciliationSweep,
+  stopReconciliationSweep,
+} from './services/reconciliationSweep.js';
 
 async function bootstrap() {
   try {
@@ -25,7 +32,9 @@ async function bootstrap() {
     const RECONCILIATION_INTERVAL_MS = 15 * 60 * 1000;
     const reconciliationInterval = setInterval(() => {
       runProductionReconciliation().catch((err) => {
-        logger.error('[Reconciliation] Scheduled run failed', { error: err instanceof Error ? err.message : String(err) });
+        logger.error('[Reconciliation] Scheduled run failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
       });
     }, RECONCILIATION_INTERVAL_MS);
     registerWatcher(reconciliationInterval);
@@ -65,12 +74,18 @@ process.on('SIGINT', () => {
 });
 
 process.on('unhandledRejection', (reason: unknown) => {
-  logger.error('Unhandled promise rejection', { reason: reason instanceof Error ? reason.message : String(reason), stack: reason instanceof Error ? reason.stack : undefined });
+  logger.error('Unhandled promise rejection', {
+    reason: reason instanceof Error ? reason.message : String(reason),
+    stack: reason instanceof Error ? reason.stack : undefined,
+  });
   Sentry.captureException(reason);
 });
 
 process.on('uncaughtException', (error: Error) => {
-  logger.error('Uncaught exception — shutting down', { error: error.message, stack: error.stack });
+  logger.error('Uncaught exception — shutting down', {
+    error: error.message,
+    stack: error.stack,
+  });
   Sentry.captureException(error);
   Sentry.close(2000).finally(() => process.exit(1));
 });

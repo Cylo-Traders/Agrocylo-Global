@@ -1,14 +1,13 @@
-import type { Request, Response } from "express";
-import { OrderService } from "../services/orderService.js";
-import type { WalletRequest } from "../middleware/walletAuth.js";
+import type { Request, Response } from 'express';
+import { OrderService } from '../services/orderService.js';
+import type { WalletRequest } from '../middleware/walletAuth.js';
 import {
   AuthError,
-  ForbiddenError,
   NotFoundError,
   ValidationError,
   handleServiceError,
   sendProblem,
-} from "../http/errors.js";
+} from '../http/errors.js';
 
 // Stellar addresses are checksummed mixed-case while identity/order rows are
 // persisted canonical-lowercase. Canonicalize once at the boundary so every
@@ -21,7 +20,7 @@ export class OrderController {
       const walletReq = req as WalletRequest;
       const walletAddress = walletReq.walletAddress;
       if (!walletAddress) {
-        sendProblem(res, req, new AuthError("Authentication required to view orders"));
+        sendProblem(res, req, new AuthError('Authentication required to view orders'));
         return;
       }
       const orders = await OrderService.getAllForWallet(canonicalizeWallet(walletAddress));
@@ -34,7 +33,7 @@ export class OrderController {
   static async getOrderById(req: Request, res: Response) {
     const { id } = req.params;
     if (!id) {
-      sendProblem(res, req, new ValidationError("Order id path parameter is required"));
+      sendProblem(res, req, new ValidationError('Order id path parameter is required'));
       return;
     }
 
@@ -42,13 +41,13 @@ export class OrderController {
       const walletReq = req as WalletRequest;
       const walletAddress = walletReq.walletAddress;
       if (!walletAddress) {
-        sendProblem(res, req, new AuthError("Authentication required to view order"));
+        sendProblem(res, req, new AuthError('Authentication required to view order'));
         return;
       }
 
       const order = await OrderService.getByOrderId(id);
       if (!order) {
-        sendProblem(res, req, new NotFoundError("Order", id));
+        sendProblem(res, req, new NotFoundError('Order', id));
         return;
       }
       // Identity rows are stored lower-cased while callers send checksummed
@@ -58,7 +57,7 @@ export class OrderController {
         order.buyerAddress?.toLowerCase() !== principal &&
         order.sellerAddress?.toLowerCase() !== principal
       ) {
-        return res.status(403).json({ error: "Forbidden: you do not have access to this order" });
+        return res.status(403).json({ error: 'Forbidden: you do not have access to this order' });
       }
 
       res.status(200).json(order);
@@ -70,7 +69,7 @@ export class OrderController {
   static async getOrdersByBuyer(req: Request, res: Response) {
     const { address } = req.params;
     if (!address) {
-      sendProblem(res, req, new ValidationError("Buyer address path parameter is required"));
+      sendProblem(res, req, new ValidationError('Buyer address path parameter is required'));
       return;
     }
 
@@ -78,12 +77,12 @@ export class OrderController {
       const walletReq = req as WalletRequest;
       const walletAddress = walletReq.walletAddress;
       if (!walletAddress) {
-        sendProblem(res, req, new AuthError("Authentication required to view buyer orders"));
+        sendProblem(res, req, new AuthError('Authentication required to view buyer orders'));
         return;
       }
       const buyerAddress = canonicalizeWallet(address);
       if (canonicalizeWallet(walletAddress) !== buyerAddress) {
-        return res.status(403).json({ error: "Forbidden: you can only view your own orders" });
+        return res.status(403).json({ error: 'Forbidden: you can only view your own orders' });
       }
 
       const orders = await OrderService.getByBuyerAddress(buyerAddress);
@@ -96,7 +95,7 @@ export class OrderController {
   static async getOrdersBySeller(req: Request, res: Response) {
     const { address } = req.params;
     if (!address) {
-      sendProblem(res, req, new ValidationError("Seller address path parameter is required"));
+      sendProblem(res, req, new ValidationError('Seller address path parameter is required'));
       return;
     }
 
@@ -104,12 +103,12 @@ export class OrderController {
       const walletReq = req as WalletRequest;
       const walletAddress = walletReq.walletAddress;
       if (!walletAddress) {
-        sendProblem(res, req, new AuthError("Authentication required to view seller orders"));
+        sendProblem(res, req, new AuthError('Authentication required to view seller orders'));
         return;
       }
       const sellerAddress = canonicalizeWallet(address);
       if (canonicalizeWallet(walletAddress) !== sellerAddress) {
-        return res.status(403).json({ error: "Forbidden: you can only view your own orders" });
+        return res.status(403).json({ error: 'Forbidden: you can only view your own orders' });
       }
 
       const orders = await OrderService.getByFarmerAddress(sellerAddress);
@@ -122,7 +121,7 @@ export class OrderController {
   static async getSellerStats(req: Request, res: Response) {
     const { sellerAddress } = req.params;
     if (!sellerAddress) {
-      sendProblem(res, req, new ValidationError("Seller address path parameter is required"));
+      sendProblem(res, req, new ValidationError('Seller address path parameter is required'));
       return;
     }
 
@@ -130,12 +129,12 @@ export class OrderController {
       const walletReq = req as WalletRequest;
       const walletAddress = walletReq.walletAddress;
       if (!walletAddress) {
-        sendProblem(res, req, new AuthError("Authentication required to view seller stats"));
+        sendProblem(res, req, new AuthError('Authentication required to view seller stats'));
         return;
       }
       const canonicalSeller = canonicalizeWallet(sellerAddress);
       if (canonicalizeWallet(walletAddress) !== canonicalSeller) {
-        return res.status(403).json({ error: "Forbidden: you can only view your own stats" });
+        return res.status(403).json({ error: 'Forbidden: you can only view your own stats' });
       }
 
       const stats = await OrderService.getSellerStats(canonicalSeller);

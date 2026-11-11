@@ -2,7 +2,14 @@ import express from 'express';
 import { requireWallet, type WalletRequest } from '../middleware/walletAuth.js';
 import { writeLimiter } from '../middleware/rateLimiter.js';
 import { ApiError } from '../http/errors.js';
-import { addItem, checkout, clearCart, getActiveCart, removeItem, updateItemQuantity } from '../services/cartService.js';
+import {
+  addItem,
+  checkout,
+  clearCart,
+  getActiveCart,
+  removeItem,
+  updateItemQuantity,
+} from '../services/cartService.js';
 
 const router = express.Router();
 
@@ -58,14 +65,19 @@ router.delete('/cart', requireWallet, async (req: WalletRequest, res, next) => {
   }
 });
 
-router.post('/cart/checkout', requireWallet, writeLimiter, async (req: WalletRequest, res, next) => {
-  try {
-    if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet');
-    const result = await checkout(req.walletAddress);
-    res.status(200).json(result);
-  } catch (error) {
-    next(error);
+router.post(
+  '/cart/checkout',
+  requireWallet,
+  writeLimiter,
+  async (req: WalletRequest, res, next) => {
+    try {
+      if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet');
+      const result = await checkout(req.walletAddress);
+      res.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
   }
-});
+);
 
 export default router;

@@ -10,7 +10,7 @@ describe("campaignService", () => {
 
   it("fetchCampaigns returns parsed list", async () => {
     globalThis.fetch = vi.fn(() =>
-      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(mockCampaigns), headers: new Map([['content-type','application/json']]) } as any),
+      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(mockCampaigns), headers: new Map([['content-type','application/json']]) } as unknown as Response),
     );
 
     const res = await fetchCampaigns();

@@ -1,4 +1,4 @@
-import type { EventAction } from "./types.js";
+import type { EventAction } from './types.js';
 
 interface EventMetrics {
   processed: number;

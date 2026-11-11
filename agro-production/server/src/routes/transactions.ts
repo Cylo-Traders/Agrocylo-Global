@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from 'express';
+import { Router, type Response } from 'express';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../db/client.js';
 import {
@@ -16,7 +16,11 @@ import {
   TransactionStatusUpdateSchema,
   TransactionReconciliationResponseSchema,
 } from '../schemas/transaction.js';
-import type { TransactionStatus } from '../schemas/transaction.js';
+import type {
+  TransactionIntentCreate,
+  TransactionStatus,
+  TransactionStatusUpdate,
+} from '../schemas/transaction.js';
 import { broadcastTo } from '../services/wsServer.js';
 import { reconcileTransaction } from '../services/transactionReconciler.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
@@ -67,7 +71,7 @@ router.post(
   validateBody(TransactionIntentCreateSchema),
   asyncHandler(async (req: WalletRequest, res: Response) => {
     const { requestId, txHash, walletAddress, eventType, campaignId } =
-      req.body;
+      req.body as TransactionIntentCreate;
 
     if (req.walletAddress !== walletAddress) {
       problemDetail(res, req, 403, 'Forbidden', 'Wallet address mismatch');
@@ -166,7 +170,7 @@ router.patch(
   validateParams(TransactionRequestIdParamSchema),
   validateBody(TransactionStatusUpdateSchema),
   asyncHandler(async (req: WalletRequest, res: Response) => {
-    const { status: newStatus, message } = req.body;
+    const { status: newStatus, message } = req.body as TransactionStatusUpdate;
 
     const tx = await prisma.transaction.findUnique({
       where: { id: req.params.requestId },

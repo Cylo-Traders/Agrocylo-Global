@@ -48,7 +48,8 @@ async function assertCampaignOwnership(
 const TRANSIENT_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
 
 function isTransientError(error: unknown): boolean {
-  if (error instanceof StorageError && TRANSIENT_STATUS_CODES.has(error.status)) return true;
+  if (error instanceof StorageError && TRANSIENT_STATUS_CODES.has(error.status))
+    return true;
   return false;
 }
 
@@ -71,49 +72,96 @@ function classifyStorageError(
   error: { statusCode?: number | string; message?: string } | null,
 ): StorageError {
   if (!error) {
-    return new StorageError(500, `Storage ${operation} failed with unknown error.`);
+    return new StorageError(
+      500,
+      `Storage ${operation} failed with unknown error.`,
+    );
   }
-  const statusCode = typeof error.statusCode === 'string' ? parseInt(error.statusCode, 10) : error.statusCode;
+  const statusCode =
+    typeof error.statusCode === 'string'
+      ? parseInt(error.statusCode, 10)
+      : error.statusCode;
   switch (statusCode) {
     case 401:
-      return new StorageError(500, `Storage ${operation} failed: authentication error.`, error as Record<string, unknown>);
+      return new StorageError(
+        500,
+        `Storage ${operation} failed: authentication error.`,
+        error,
+      );
     case 403:
-      return new StorageError(500, `Storage ${operation} failed: permission denied.`, error as Record<string, unknown>);
+      return new StorageError(
+        500,
+        `Storage ${operation} failed: permission denied.`,
+        error,
+      );
     case 404:
-      return new StorageError(500, `Storage ${operation} failed: path not found.`, error as Record<string, unknown>);
+      return new StorageError(
+        500,
+        `Storage ${operation} failed: path not found.`,
+        error,
+      );
     case 413:
-      return new StorageError(413, `Storage ${operation} failed: file exceeds storage size limit.`, error as Record<string, unknown>);
+      return new StorageError(
+        413,
+        `Storage ${operation} failed: file exceeds storage size limit.`,
+        error,
+      );
     case 408:
     case 429:
     case 502:
     case 503:
     case 504:
-      return new StorageError(statusCode, `Storage ${operation} temporarily unavailable.`, error as Record<string, unknown>);
+      return new StorageError(
+        statusCode,
+        `Storage ${operation} temporarily unavailable.`,
+        error,
+      );
     default:
-      return new StorageError(500, `Storage ${operation} failed: ${error.message ?? 'Unknown error'}`, error as Record<string, unknown>);
+      return new StorageError(
+        500,
+        `Storage ${operation} failed: ${error.message ?? 'Unknown error'}`,
+        error,
+      );
   }
 }
 
-export async function validateImageContent(buffer: Buffer): Promise<{ width: number; height: number }> {
+export async function validateImageContent(
+  buffer: Buffer,
+): Promise<{ width: number; height: number }> {
   try {
     const metadata = await sharp(buffer).metadata();
     if (!metadata.width || !metadata.height) {
-      throw new HttpError(422, 'Could not determine image dimensions. The file may be corrupted.');
+      throw new HttpError(
+        422,
+        'Could not determine image dimensions. The file may be corrupted.',
+      );
     }
     if (metadata.width < 200 || metadata.height < 200) {
-      throw new HttpError(422, 'Image dimensions too small. Minimum 200x200 pixels required.');
+      throw new HttpError(
+        422,
+        'Image dimensions too small. Minimum 200x200 pixels required.',
+      );
     }
     if (metadata.width > 4096 || metadata.height > 4096) {
-      throw new HttpError(422, 'Image dimensions too large. Maximum 4096x4096 pixels allowed.');
+      throw new HttpError(
+        422,
+        'Image dimensions too large. Maximum 4096x4096 pixels allowed.',
+      );
     }
     return { width: metadata.width, height: metadata.height };
   } catch (error) {
     if (error instanceof HttpError) throw error;
-    throw new HttpError(422, 'Invalid image file. The uploaded file could not be processed as an image.');
+    throw new HttpError(
+      422,
+      'Invalid image file. The uploaded file could not be processed as an image.',
+    );
   }
 }
 
-async function renderThumbnail(buffer: Buffer, size: 400 | 800): Promise<Buffer> {
+async function renderThumbnail(
+  buffer: Buffer,
+  size: 400 | 800,
+): Promise<Buffer> {
   return sharp(buffer)
     .rotate()
     .resize(size, size, { fit: 'cover' })
@@ -130,7 +178,11 @@ async function uploadVariant(
   await withRetry(async () => {
     const { error } = await supabaseAdmin.storage
       .from(config.campaignImagesBucket)
-      .upload(storagePath, body, { contentType, upsert: true, cacheControl: '3600' });
+      .upload(storagePath, body, {
+        contentType,
+        upsert: true,
+        cacheControl: '3600',
+      });
     if (error) throw classifyStorageError('upload', error);
   });
 }
@@ -188,7 +240,7 @@ export async function uploadCampaignImage(params: {
       where: { id: campaign.id },
       data: { imageUrl },
     });
-  } catch (error) {
+  } catch {
     const supabaseAdmin = getSupabaseAdmin();
     const rollbackPaths = [originalPath, thumb400Path, thumb800Path];
     const { error: removeError } = await supabaseAdmin.storage
@@ -199,7 +251,10 @@ export async function uploadCampaignImage(params: {
         `Rollback failed to clean up storage files for campaign ${campaignId}: ${removeError.message}`,
       );
     }
-    throw new HttpError(500, 'Failed to save image metadata. Upload rolled back.');
+    throw new HttpError(
+      500,
+      'Failed to save image metadata. Upload rolled back.',
+    );
   }
 
   return { imageUrl };

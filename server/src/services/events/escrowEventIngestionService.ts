@@ -1,10 +1,10 @@
-import { EscrowEventParser } from "./escrowEventParser.js";
-import { EscrowEventMapper } from "./escrowEventMapper.js";
-import { EscrowEventRepository } from "./escrowEventRepository.js";
-import { EscrowEventProjectionService } from "./escrowEventProjectionService.js";
-import { NotificationService } from "../notificationService.js";
-import logger from "../../config/logger.js";
-import type { RawRpcEvent } from "../../types/rawRpcEvent.js";
+import { EscrowEventParser } from './escrowEventParser.js';
+import { EscrowEventMapper } from './escrowEventMapper.js';
+import { EscrowEventRepository } from './escrowEventRepository.js';
+import { EscrowEventProjectionService } from './escrowEventProjectionService.js';
+import { NotificationService } from '../notificationService.js';
+import logger from '../../config/logger.js';
+import type { RawRpcEvent } from '../../types/rawRpcEvent.js';
 
 /**
  * EscrowEventIngestionService: The public entrypoint for processing each event.
@@ -30,10 +30,10 @@ export class EscrowEventIngestionService {
     await EscrowEventProjectionService.projectEvent(mapped);
 
     // 5. Notification System for Disputes
-    if (mapped.action === "dispute" || mapped.action === "resolved") {
+    if (mapped.action === 'dispute' || mapped.action === 'resolved') {
       await NotificationService.notifyOrderEvent(
-        mapped.action === "dispute" ? "dispute_opened" : "dispute_resolved",
-        mapped,
+        mapped.action === 'dispute' ? 'dispute_opened' : 'dispute_resolved',
+        mapped
       );
     }
 

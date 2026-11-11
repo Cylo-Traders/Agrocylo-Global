@@ -13,7 +13,11 @@ import type { TransactionStatus } from '../schemas/transaction.js';
  * state) but does not write the corrected status back; auto-correction
  * policy belongs to whatever Issue 8 lands, not to an observability PR.
  */
-const NON_TERMINAL_STATUSES: TransactionStatus[] = ['awaiting_signature', 'submitted', 'confirmed'];
+const NON_TERMINAL_STATUSES: TransactionStatus[] = [
+  'awaiting_signature',
+  'submitted',
+  'confirmed',
+];
 
 /** Bounds per-run cost; a backlog larger than this is itself worth knowing about (see `checked` in the result). */
 const SWEEP_BATCH_LIMIT = 200;
@@ -39,7 +43,10 @@ export async function runReconciliationSweep(): Promise<ReconciliationSweepResul
         drifted += 1;
       }
     } catch (error) {
-      logger.error('[reconciliationSweep] Failed to reconcile transaction', { id: tx.id, error });
+      logger.error('[reconciliationSweep] Failed to reconcile transaction', {
+        id: tx.id,
+        error,
+      });
     }
   }
 
@@ -64,9 +71,13 @@ export function startReconciliationSweep(intervalMs: number): void {
   sweepTimer = setInterval(() => {
     runReconciliationSweep().catch((error) => {
       logger.error('[reconciliationSweep] Sweep cycle failed', error);
-      captureAlert('scheduled_job_failed', 'Reconciliation sweep cycle failed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      captureAlert(
+        'scheduled_job_failed',
+        'Reconciliation sweep cycle failed',
+        {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
     });
   }, intervalMs);
 }
