@@ -1,7 +1,6 @@
-import logger from "../../config/logger.js";
-import { BlockchainEventParser } from "./blockchainEventParser.js";
-import { BlockchainEventPersistenceService } from "./blockchainEventPersistenceService.js";
-import type { RawRpcEvent } from "../../types/rawRpcEvent.js";
+import { BlockchainEventParser } from './blockchainEventParser.js';
+import { BlockchainEventPersistenceService } from './blockchainEventPersistenceService.js';
+import type { RawRpcEvent } from '../../types/rawRpcEvent.js';
 
 export class BlockchainEventIngestionService {
   static async ingestEvent(rawEvent: RawRpcEvent): Promise<void> {

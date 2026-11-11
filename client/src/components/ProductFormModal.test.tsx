@@ -107,7 +107,7 @@ describe("ProductFormModal", () => {
       status: "idle",
       mutate: vi.fn(),
       reset: vi.fn(),
-    } as any);
+    } as unknown as ReturnType<typeof useProductsHook.useCreateProduct>);
 
     const user = userEvent.setup();
     renderModal();
@@ -142,7 +142,7 @@ describe("ProductFormModal", () => {
       status: "idle",
       mutate: vi.fn(),
       reset: vi.fn(),
-    } as any);
+    } as unknown as ReturnType<typeof useProductsHook.useCreateProduct>);
 
     const user = userEvent.setup();
     renderModal();
@@ -177,7 +177,7 @@ describe("ProductFormModal", () => {
       status: "idle",
       mutate: vi.fn(),
       reset: vi.fn(),
-    } as any);
+    } as unknown as ReturnType<typeof useProductsHook.useCreateProduct>);
 
     const user = userEvent.setup();
     renderModal();
