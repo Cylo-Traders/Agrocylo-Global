@@ -117,8 +117,10 @@ case "$NETWORK" in
         NETWORK_PASSPHRASE="Test SDF Network ; September 2015" ;;
     mainnet)
         RPC_URL="${SOROBAN_RPC_URL:-https://soroban.stellar.org}"
+        HORIZON_URL="${HORIZON_URL:-https://horizon.stellar.org}"
         NETWORK_PASSPHRASE="Public Global Stellar Network ; September 2015" ;;
 esac
+HORIZON_URL="${HORIZON_URL:-https://horizon-testnet.stellar.org}"
 
 # Issue #843: initializing in the same transaction as deployment is *mandatory*
 # on mainnet — it removes the front-running window between `contract deploy`
@@ -163,10 +165,27 @@ declare -A WASM=(
 )
 
 # ---------------------------------------------------------------------------
-# Params
+# Params & Mainnet Custody Pre-Check (Issue #1283)
 # ---------------------------------------------------------------------------
 DEPLOYER="${DEPLOYER:?Set DEPLOYER to a configured 'stellar keys' identity}"
-ADMIN="${ADMIN:-$($CLI keys address "$DEPLOYER")}"
+DEPLOYER_ADDR="$($CLI keys address "$DEPLOYER")"
+if [[ "$NETWORK" == "mainnet" ]]; then
+    # Issue #1283: never default ADMIN to DEPLOYER on mainnet, and never request secret keys.
+    if [[ -n "${ADMIN_SECRET:-}" || -n "${GUARDIAN_SECRET:-}" ]]; then
+        echo "Error: do not pass ADMIN_SECRET or GUARDIAN_SECRET; provide public ADMIN and GUARDIAN addresses for read-only custody verification" >&2
+        exit 1
+    fi
+    [[ -n "${ADMIN:-}" ]] || { echo "Error: explicit ADMIN public address is required on mainnet (must not default to DEPLOYER)" >&2; exit 1; }
+    [[ -n "${GUARDIAN:-}" ]] || { echo "Error: explicit GUARDIAN public address is required on mainnet" >&2; exit 1; }
+    if [[ "$ADMIN" == "$DEPLOYER_ADDR" ]]; then
+        echo "Error: ADMIN ($ADMIN) must not be the single-key DEPLOYER account on mainnet" >&2
+        exit 1
+    fi
+else
+    ADMIN="${ADMIN:-$DEPLOYER_ADDR}"
+fi
+GUARDIAN="${GUARDIAN:-}"
+ATTESTER="${ATTESTER:-}"
 FEE_COLLECTOR="${FEE_COLLECTOR:-}"
 SUPPORTED_TOKENS="${SUPPORTED_TOKENS:-}"
 FEE_RATE_BPS="${FEE_RATE_BPS:-0}"
@@ -175,6 +194,105 @@ GOV_VOTING_PERIOD_SECS="${GOV_VOTING_PERIOD_SECS:-259200}"
 GOV_TIMELOCK_SECS="${GOV_TIMELOCK_SECS:-172800}"
 GOV_UPGRADE_TIMELOCK_SECS="${GOV_UPGRADE_TIMELOCK_SECS:-604800}"
 GOV_QUORUM_WEIGHT="${GOV_QUORUM_WEIGHT:-1}"
+ALLOW_CONTRACT_ROLE_AUTH="${ALLOW_CONTRACT_ROLE_AUTH:-false}"
+
+# Fetch public Horizon account JSON (or fixture file when ACCOUNT_FIXTURE_DIR is set for tests).
+fetch_account_json() {
+    local addr="$1"
+    if [[ -n "${ACCOUNT_FIXTURE_DIR:-}" ]]; then
+        local f="${ACCOUNT_FIXTURE_DIR}/${addr}.json"
+        [[ -f "$f" ]] || return 1
+        cat "$f"
+        return 0
+    fi
+    command -v curl &>/dev/null || { echo "Error: curl is required to inspect Horizon account thresholds" >&2; return 1; }
+    curl -fsSL "${HORIZON_URL%/}/accounts/${addr}" 2>/dev/null
+}
+
+# Issue #1283: Read-only, fail-closed verification of effective signing policy
+# for privileged roles (ADMIN, GUARDIAN, and optional ATTESTER) before any mainnet write.
+verify_role_multisig_policy() {
+    local role="$1" addr="$2"
+    [[ -n "$addr" ]] || { echo "Error: [$role] address is empty" >&2; return 1; }
+
+    # Case A: Soroban contract address (C...)
+    if [[ "$addr" =~ ^C[A-Z2-7]{55}$ ]]; then
+        if [[ "$ALLOW_CONTRACT_ROLE_AUTH" != "true" ]]; then
+            echo "Error: [$role] contract-account authorization ($addr) requires ALLOW_CONTRACT_ROLE_AUTH=true" >&2
+            return 1
+        fi
+        local quorum_raw
+        quorum_raw="$($CLI contract invoke "${NET_ARGS[@]}" --source-account "$DEPLOYER" --id "$addr" -- get_quorum 2>/dev/null | tr -d '"' || true)"
+        if [[ ! "$quorum_raw" =~ ^[0-9]+$ ]] || (( quorum_raw < 2 )); then
+            echo "Error: [$role] contract account $addr failed on-chain get_quorum >= 2 verification (got '${quorum_raw:-<unavailable>}')" >&2
+            return 1
+        fi
+        echo "  ok   [$role] $addr verified as contract-account authority (on-chain quorum=$quorum_raw)"
+        return 0
+    fi
+
+    # Case B: Classic Stellar account address (G...)
+    if [[ ! "$addr" =~ ^G[A-Z2-7]{55}$ ]]; then
+        echo "Error: [$role] '$addr' is neither a valid Stellar public key (G...) nor a contract address (C...)" >&2
+        return 1
+    fi
+
+    local acct_json
+    if ! acct_json="$(fetch_account_json "$addr")" || [[ -z "$acct_json" ]]; then
+        echo "Error: [$role] failed to fetch public account configuration for $addr" >&2
+        return 1
+    fi
+
+    local check_out
+    if ! check_out="$(jq -r '
+        if (type != "object")
+           or (.thresholds | type != "object")
+           or (.thresholds.med_threshold | type != "number")
+           or (.thresholds.high_threshold | type != "number")
+           or (.signers | type != "array")
+        then
+            "MALFORMED: missing thresholds or signers array"
+        else
+            (.thresholds.med_threshold) as $med |
+            (.thresholds.high_threshold) as $high |
+            ([.signers[] | select((.weight | type == "number") and (.weight > 0))]) as $active |
+            ($active | length) as $count |
+            (if $count > 0 then ($active | map(.weight) | max) else 0 end) as $max_w |
+            (if $count > 0 then ($active | map(.weight) | add) else 0 end) as $total_w |
+            if $count < 2 then
+                "REJECT: only ($count) active signer(s) with weight > 0 (minimum 2 required)"
+            elif $med < 2 or $high < 2 then
+                "REJECT: thresholds too low (med=($med), high=($high); both must be >= 2)"
+            elif $max_w >= $med or $max_w >= $high then
+                "REJECT: single signer with weight ($max_w) can unilaterally satisfy threshold (med=($med), high=($high))"
+            elif $total_w < $med or $total_w < $high then
+                "REJECT: total signer weight (($total_w)) cannot reach threshold (med=($med), high=($high))"
+            else
+                "OK: signers=($count) max_weight=($max_w) total_weight=($total_w) med=($med) high=($high)"
+            end
+        end
+    ' <<<"$acct_json" 2>/dev/null)"; then
+        echo "Error: [$role] malformed account JSON for $addr" >&2
+        return 1
+    fi
+
+    if [[ "$check_out" != OK:* ]]; then
+        echo "Error: [$role] $addr failed multisig custody verification — $check_out" >&2
+        return 1
+    fi
+    echo "  ok   [$role] $addr ($check_out)"
+    return 0
+}
+
+if [[ "$NETWORK" == "mainnet" ]]; then
+    echo "[custody] verifying effective multisig signing policy for privileged roles..."
+    verify_role_multisig_policy "admin" "$ADMIN"
+    verify_role_multisig_policy "guardian" "$GUARDIAN"
+    if [[ -n "$ATTESTER" ]]; then
+        verify_role_multisig_policy "attester" "$ATTESTER"
+    fi
+    echo ""
+fi
 
 if [[ "$VERIFY_ONLY" == "false" ]]; then
     [[ -n "$FEE_COLLECTOR" ]] || { echo "Error: FEE_COLLECTOR is required" >&2; exit 1; }
