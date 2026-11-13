@@ -142,6 +142,7 @@ const PAUSE_GATING_MATRIX: &[(&str, bool, &str)] = &[
     ("get_admin", false, "Read-only view"),
     ("get_campaign", false, "Read-only view"),
     ("get_split_order", false, "Read-only view"),
+    ("get_buyer_confirmed_volume", false, "Read-only view"),
     ("refundable_amount", false, "Read-only calculation"),
     (
         "transfer_investment",

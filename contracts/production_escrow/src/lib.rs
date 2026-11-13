@@ -338,12 +338,26 @@ pub enum DataKey {
     Guardian,
     /// Whether the contract is currently paused (Issue #757).
     Paused,
+    /// Bounded cumulative confirmed order volume per (campaign_id, buyer) (Issue #1279).
+    /// Eliminates O(OrderCount) global order scans during `advance_milestone`.
+    BuyerConfirmedVolume(u64, Address),
+    /// Exactly-once credit guard for ordinary order volume accounting (Issue #1279).
+    OrderVolumeCreditRecorded(u64),
+    /// Exactly-once credit guard for split order volume accounting (Issue #1279).
+    SplitOrderVolumeCreditRecorded(u64),
+    /// Cursor tracking highest ordinary order_id inspected during v1->v2 backfill (Issue #1279).
+    OrderMigrationCursor,
+    /// Cursor tracking highest split_order_id inspected during v1->v2 backfill (Issue #1279).
+    SplitOrderMigrationCursor,
 }
 
-/// Current on-chain storage layout version (Issue #757). Bump when a stored
-/// `#[contracttype]` gains/loses/reshapes a field, and extend `migrate` to
-/// translate existing entries — see `docs/CONTRACT_UPGRADES.md`.
-const CURRENT_SCHEMA_VERSION: u32 = 1;
+/// Current on-chain storage layout version (Issue #757, bumped to v2 in Issue #1279
+/// for bounded `BuyerConfirmedVolume` backfill).
+const CURRENT_SCHEMA_VERSION: u32 = 2;
+
+/// Maximum number of historical orders/split-orders inspected per `migrate` call
+/// during the v1 -> v2 buyer-volume backfill (Issue #1279).
+const MIGRATION_BATCH_SIZE: u64 = 50;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -554,13 +568,16 @@ impl ProductionEscrowContract {
         bump_instance(&env);
     }
 
-    /// Storage migration hook. This contract's schema hasn't changed since
-    /// `CURRENT_SCHEMA_VERSION` was introduced — nothing to translate yet.
-    /// A future layout-changing upgrade extends this with an old-shape read
-    /// + new-shape write per affected `DataKey`, following the worked
-    /// example in `investment_basket::migrate_baskets`. Governance-gated,
-    /// and expected to run while `is_paused()` — see
-    /// `docs/CONTRACT_UPGRADES.md`.
+    /// Storage migration hook (Issue #757, extended in Issue #1279).
+    /// Backfills `DataKey::BuyerConfirmedVolume(campaign_id, buyer)` from legacy
+    /// confirmed `Order` and `SplitOrder` records in bounded batches of
+    /// `MIGRATION_BATCH_SIZE` (50) using `OrderMigrationCursor` and
+    /// `SplitOrderMigrationCursor`. Per-order credit guards
+    /// (`OrderVolumeCreditRecorded` / `SplitOrderVolumeCreditRecorded`) ensure
+    /// orders confirmed after the upgrade or visited across repeated migration
+    /// calls are never double-counted. `SchemaVersion` flips to
+    /// `CURRENT_SCHEMA_VERSION` (2) only once both cursors reach `OrderCount`
+    /// and `SplitOrderCount`.
     pub fn migrate(env: Env, caller: Address) -> Result<u32, EscrowError> {
         caller.require_auth();
         require_governed_caller(&env, &caller)?;
@@ -570,12 +587,87 @@ impl ProductionEscrowContract {
             .instance()
             .get(&DataKey::SchemaVersion)
             .unwrap_or(0);
-        if stored < CURRENT_SCHEMA_VERSION {
-            env.storage()
-                .instance()
-                .set(&DataKey::SchemaVersion, &CURRENT_SCHEMA_VERSION);
+
+        let order_count: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::OrderCount)
+            .unwrap_or(0);
+        let split_order_count: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::SplitOrderCount)
+            .unwrap_or(0);
+
+        let mut order_cursor: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::OrderMigrationCursor)
+            .unwrap_or(0);
+        let mut split_cursor: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::SplitOrderMigrationCursor)
+            .unwrap_or(0);
+
+        let mut remaining_budget = MIGRATION_BATCH_SIZE;
+
+        while order_cursor < order_count && remaining_budget > 0 {
+            order_cursor += 1;
+            remaining_budget -= 1;
+            if let Some(order) = env
+                .storage()
+                .persistent()
+                .get::<_, Order>(&DataKey::Order(order_cursor))
+            {
+                if order.status == OrderStatus::Confirmed {
+                    record_confirmed_order_volume(
+                        &env,
+                        order_cursor,
+                        order.campaign_id,
+                        &order.buyer,
+                        order.amount,
+                    );
+                }
+            }
         }
-        Ok(CURRENT_SCHEMA_VERSION)
+        env.storage()
+            .instance()
+            .set(&DataKey::OrderMigrationCursor, &order_cursor);
+
+        while split_cursor < split_order_count && remaining_budget > 0 {
+            split_cursor += 1;
+            remaining_budget -= 1;
+            if let Some(split_order) = env
+                .storage()
+                .persistent()
+                .get::<_, SplitOrder>(&DataKey::SplitOrder(split_cursor))
+            {
+                if split_order.status == SplitOrderStatus::Confirmed {
+                    record_confirmed_split_order_volume(&env, split_cursor, &split_order);
+                }
+            }
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::SplitOrderMigrationCursor, &split_cursor);
+
+        if order_cursor >= order_count && split_cursor >= split_order_count {
+            if stored < CURRENT_SCHEMA_VERSION {
+                env.storage()
+                    .instance()
+                    .set(&DataKey::SchemaVersion, &CURRENT_SCHEMA_VERSION);
+            }
+            Ok(CURRENT_SCHEMA_VERSION)
+        } else {
+            Ok(stored)
+        }
+    }
+
+    /// Read-only view returning the bounded confirmed purchase volume for `buyer`
+    /// on `campaign_id` (Issue #1279).
+    pub fn get_buyer_confirmed_volume(env: Env, campaign_id: u64, buyer: Address) -> i128 {
+        get_buyer_order_volume(&env, campaign_id, &buyer)
     }
 
     pub fn get_schema_version(env: Env) -> u32 {
@@ -1005,9 +1097,11 @@ impl ProductionEscrowContract {
         let is_oracle = caller == admin_addr;
         if !is_oracle {
             // Check if caller is a buyer (has a confirmed order with minimum volume).
+            // Issue #1279: enforce a floor of 1 unit so small campaign targets (< 100)
+            // cannot let a non-buyer with 0 confirmed volume pass via integer division.
             let buyer_order_volume = get_buyer_order_volume(&env, campaign_id, &caller);
-            let min_order_required = campaign.target_amount / 100; // At least 1% of target
-            if buyer_order_volume < min_order_required {
+            let min_order_required = (campaign.target_amount / 100).max(1); // At least 1% of target, min 1
+            if buyer_order_volume <= 0 || buyer_order_volume < min_order_required {
                 return Err(EscrowError::NotBuyerOrOracle);
             }
         }
@@ -1359,6 +1453,9 @@ impl ProductionEscrowContract {
                 }
             }
             order.status = SplitOrderStatus::Confirmed;
+            // Issue #1279: credit bounded confirmed buyer volume for each co-buyer
+            // who confirmed their share once the split order reaches Confirmed status.
+            record_confirmed_split_order_volume(&env, order_id, &order);
             env.events().publish(
                 (t_order(), symbol_short!("splitcnf")),
                 (order_id, order.total_amount),
@@ -1450,6 +1547,8 @@ impl ProductionEscrowContract {
                     }
                 }
                 order.status = SplitOrderStatus::Confirmed;
+                // Issue #1279: credit bounded confirmed buyer volume for confirming co-buyers.
+                record_confirmed_split_order_volume(&env, order_id, &order);
             }
         }
 
@@ -1511,6 +1610,8 @@ impl ProductionEscrowContract {
         env.storage()
             .persistent()
             .extend_ttl(&DataKey::Order(order_id), TTL_THRESHOLD, TTL_EXTEND);
+        // Issue #1279: update bounded per-campaign buyer confirmed volume in O(1).
+        record_confirmed_order_volume(&env, order_id, order.campaign_id, &order.buyer, order.amount);
         save_campaign(&env, &campaign);
 
         env.events().publish(
@@ -2408,30 +2509,67 @@ fn refund_split_order_pro_rata(
     Ok(())
 }
 
-/// Get the total confirmed order volume for a buyer on a campaign.
-/// Used by advance_milestone to enforce minimum order volume requirement.
-fn get_buyer_order_volume(env: &Env, campaign_id: u64, buyer: &Address) -> i128 {
-    let order_count: u64 = env
-        .storage()
-        .instance()
-        .get(&DataKey::OrderCount)
-        .unwrap_or(0);
-    let mut total = 0i128;
-    for i in 1..=order_count {
-        if let Some(order) = env
-            .storage()
-            .persistent()
-            .get::<_, Order>(&DataKey::Order(i))
-        {
-            if order.campaign_id == campaign_id
-                && order.buyer == *buyer
-                && order.status == OrderStatus::Confirmed
-            {
-                total = total.saturating_add(order.amount);
-            }
+/// Add confirmed purchase volume for `(campaign_id, buyer)` in persistent storage
+/// and extend its TTL (Issue #1279).
+fn add_buyer_confirmed_volume(env: &Env, campaign_id: u64, buyer: &Address, amount: i128) {
+    if amount <= 0 {
+        return;
+    }
+    let key = DataKey::BuyerConfirmedVolume(campaign_id, buyer.clone());
+    let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+    let updated = current.saturating_add(amount);
+    env.storage().persistent().set(&key, &updated);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND);
+}
+
+/// Record confirmed volume for an ordinary order exactly once (Issue #1279).
+fn record_confirmed_order_volume(
+    env: &Env,
+    order_id: u64,
+    campaign_id: u64,
+    buyer: &Address,
+    amount: i128,
+) {
+    let guard_key = DataKey::OrderVolumeCreditRecorded(order_id);
+    if env.storage().persistent().get(&guard_key).unwrap_or(false) {
+        return;
+    }
+    env.storage().persistent().set(&guard_key, &true);
+    env.storage()
+        .persistent()
+        .extend_ttl(&guard_key, TTL_THRESHOLD, TTL_EXTEND);
+    add_buyer_confirmed_volume(env, campaign_id, buyer, amount);
+}
+
+/// Record confirmed volume for a finalized `SplitOrder` (`SplitOrderStatus::Confirmed`)
+/// exactly once (Issue #1279). Only co-buyers who explicitly confirmed their share
+/// (`order.confirmed.get(co_buyer) == Some(true)`) have their funded share credited.
+fn record_confirmed_split_order_volume(env: &Env, order_id: u64, order: &SplitOrder) {
+    let guard_key = DataKey::SplitOrderVolumeCreditRecorded(order_id);
+    if env.storage().persistent().get(&guard_key).unwrap_or(false) {
+        return;
+    }
+    env.storage().persistent().set(&guard_key, &true);
+    env.storage()
+        .persistent()
+        .extend_ttl(&guard_key, TTL_THRESHOLD, TTL_EXTEND);
+
+    for co_buyer in order.co_buyers.iter() {
+        if order.confirmed.get(co_buyer.clone()).unwrap_or(false) {
+            let share = order.shares.get(co_buyer.clone()).unwrap_or(0);
+            add_buyer_confirmed_volume(env, order.campaign_id, &co_buyer, share);
         }
     }
-    total
+}
+
+/// Get the total confirmed order volume for a buyer on a campaign in O(1) (Issue #1279).
+/// Used by `advance_milestone` to enforce the minimum order volume requirement
+/// without scanning global order history.
+fn get_buyer_order_volume(env: &Env, campaign_id: u64, buyer: &Address) -> i128 {
+    let key = DataKey::BuyerConfirmedVolume(campaign_id, buyer.clone());
+    env.storage().persistent().get(&key).unwrap_or(0)
 }
 
 fn resolve_dispute_internal(
@@ -2489,27 +2627,7 @@ fn resolve_dispute_internal(
 
 #[allow(dead_code)]
 fn has_confirmed_order(env: &Env, campaign_id: u64, buyer: &Address) -> bool {
-    // Scan orders by checking up to order_count for confirmed orders by this buyer.
-    let order_count: u64 = env
-        .storage()
-        .instance()
-        .get(&DataKey::OrderCount)
-        .unwrap_or(0);
-    for i in 1..=order_count {
-        if let Some(order) = env
-            .storage()
-            .persistent()
-            .get::<_, Order>(&DataKey::Order(i))
-        {
-            if order.campaign_id == campaign_id
-                && order.buyer == *buyer
-                && order.status == OrderStatus::Confirmed
-            {
-                return true;
-            }
-        }
-    }
-    false
+    get_buyer_order_volume(env, campaign_id, buyer) > 0
 }
 
 fn release_tranche_internal(

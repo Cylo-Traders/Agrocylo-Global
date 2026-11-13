@@ -24,7 +24,7 @@ use std::println;
 
 use soroban_sdk::{testutils::Address as _, token::StellarAssetClient, Address, Env, Vec};
 
-use crate::{ProductionEscrowContract, ProductionEscrowContractClient};
+use crate::{Milestone, MilestoneConfig, ProductionEscrowContract, ProductionEscrowContractClient};
 
 // -----------------------------------------------------------------------
 // Cost Harness Setup
@@ -251,6 +251,94 @@ fn cost_harness_get_campaigns_pagination() {
 // -----------------------------------------------------------------------
 // Summary and Baseline Recording
 // -----------------------------------------------------------------------
+
+// -----------------------------------------------------------------------
+// Test 6: advance_milestone after 1 vs 1,000 unrelated orders (Issue #1279)
+// -----------------------------------------------------------------------
+
+fn measure_advance_milestone_with_unrelated_orders(unrelated_orders: u32) -> (u64, u64) {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let attester = Address::generate(&env);
+    let farmer = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let other_buyer = Address::generate(&env);
+
+    let token_admin = Address::generate(&env);
+    let token_id = env
+        .register_stellar_asset_contract_v2(token_admin)
+        .address();
+    let sac = StellarAssetClient::new(&env, &token_id);
+    sac.mint(&investor, &100_000_000);
+    sac.mint(&buyer, &100_000_000);
+    sac.mint(&other_buyer, &100_000_000);
+
+    let contract_id = env.register(ProductionEscrowContract, ());
+    let client = ProductionEscrowContractClient::new(&env, &contract_id);
+
+    let mut tokens = Vec::new(&env);
+    tokens.push_back(token_id.clone());
+    let fee_collector = Address::generate(&env);
+    client.initialize(&admin, &tokens, &fee_collector, &300);
+    client.set_attester(&admin, &attester);
+
+    // Campaign 1: unrelated historical campaign with `unrelated_orders` orders
+    let unrelated_campaign = client.create_campaign(&farmer, &token_id, &10_000, &9_999_999_999);
+    client.invest(&investor, &unrelated_campaign, &10_000);
+    client.start_production(&farmer, &unrelated_campaign);
+    for _ in 0..unrelated_orders {
+        env.cost_estimate().budget().reset_unlimited();
+        let oid = client.create_order(&other_buyer, &unrelated_campaign, &10);
+        client.confirm_order(&other_buyer, &oid);
+    }
+
+    // Campaign 2: target campaign where `buyer` has 1 confirmed qualifying order
+    env.cost_estimate().budget().reset_unlimited();
+    let target_campaign = client.create_campaign(&farmer, &token_id, &10_000, &9_999_999_999);
+    client.invest(&investor, &target_campaign, &10_000);
+    client.start_production(&farmer, &target_campaign);
+
+    let mut configs = Vec::new(&env);
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Planted,
+        release_bps: 1000,
+    });
+    client.set_milestone_configs(&admin, &target_campaign, &configs);
+
+    let qualifying_order = client.create_order(&buyer, &target_campaign, &500);
+    client.confirm_order(&buyer, &qualifying_order);
+
+    // Measure ONLY the advance_milestone call under default mainnet budget
+    env.cost_estimate().budget().reset_default();
+    client.advance_milestone(&buyer, &attester, &target_campaign);
+    let budget = env.cost_estimate().budget();
+    (budget.cpu_instruction_cost(), budget.memory_bytes_cost())
+}
+
+#[test]
+fn cost_harness_advance_milestone_1_vs_1000_unrelated_orders() {
+    let (cpu_1, mem_1) = measure_advance_milestone_with_unrelated_orders(1);
+    let (cpu_1000, mem_1000) = measure_advance_milestone_with_unrelated_orders(1_000);
+
+    print_cost_header("advance_milestone (1 unrelated order)", 1, "orders");
+    print_cost_result(cpu_1, mem_1, 0, 0);
+
+    print_cost_header("advance_milestone (1,000 unrelated orders)", 1_000, "orders");
+    print_cost_result(cpu_1000, mem_1000, 0, 0);
+
+    // O(1) bounded lookup: CPU and memory must not scale with unrelated order history.
+    assert_eq!(
+        cpu_1, cpu_1000,
+        "advance_milestone CPU cost must remain constant regardless of unrelated order count"
+    );
+    assert_eq!(
+        mem_1, mem_1000,
+        "advance_milestone memory cost must remain constant regardless of unrelated order count"
+    );
+}
 
 #[test]
 fn cost_harness_summary() {
