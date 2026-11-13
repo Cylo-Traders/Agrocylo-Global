@@ -1,9 +1,9 @@
 extern crate std;
 
 use soroban_sdk::{
-    testutils::{Address as _, Ledger, LedgerInfo},
+    testutils::{Address as _, Ledger, LedgerInfo, MockAuth, MockAuthInvoke},
     token::{Client as TokenClient, StellarAssetClient},
-    Address, Env, Vec,
+    Address, Env, IntoVal, Vec,
 };
 
 use crate::{
@@ -3545,4 +3545,356 @@ fn test_vote_to_resolve_non_arbitrator_rejected() {
         .unwrap_err()
         .unwrap();
     assert_eq!(err, EscrowError::ArbitratorNotFound);
+}
+
+// ===========================================================================
+// Issue #1280 — Explicit Soroban Authorization Tests
+// ===========================================================================
+// These tests deliberately do not use blanket mock_all_auths() on the calls
+// under test. Instead, they clear auths with env.set_auths(&[]) and assert that
+// missing auths, forged signers, or single signers on dual-auth calls trap,
+// while properly constructed MockAuth trees succeed.
+
+#[test]
+fn test_explicit_auth_initialize() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let stranger = Address::generate(&env);
+    let fee_collector = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env
+        .register_stellar_asset_contract_v2(token_admin)
+        .address();
+    let mut tokens = Vec::new(&env);
+    tokens.push_back(token_id);
+
+    let contract_id = env.register(ProductionEscrowContract, ());
+    let client = ProductionEscrowContractClient::new(&env, &contract_id);
+
+    // 1. Missing admin auth traps.
+    assert!(client
+        .try_initialize(&admin, &tokens, &fee_collector, &300)
+        .is_err());
+    assert_eq!(client.get_schema_version(), 0);
+
+    // 2. Stranger signing while claiming admin traps.
+    let forged = client
+        .mock_auths(&[MockAuth {
+            address: &stranger,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&admin, &tokens, &fee_collector, 300u32).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_initialize(&admin, &tokens, &fee_collector, &300);
+    assert!(forged.is_err());
+    assert_eq!(client.get_schema_version(), 0);
+
+    // 3. Explicit admin auth succeeds.
+    client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&admin, &tokens, &fee_collector, 300u32).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .initialize(&admin, &tokens, &fee_collector, &300);
+    assert_eq!(client.get_schema_version(), 1);
+}
+
+#[test]
+fn test_explicit_auth_create_campaign() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let stranger = Address::generate(&t.env);
+
+    t.env.set_auths(&[]);
+
+    // 1. Missing farmer auth traps.
+    assert!(t
+        .client
+        .try_create_campaign(&t.farmer, &t.token_id, &10_000, &deadline)
+        .is_err());
+
+    // 2. Stranger signing on behalf of farmer traps.
+    let forged = t
+        .client
+        .mock_auths(&[MockAuth {
+            address: &stranger,
+            invoke: &MockAuthInvoke {
+                contract: &t.client.address,
+                fn_name: "create_campaign",
+                args: (&t.farmer, &t.token_id, 10_000i128, deadline).into_val(&t.env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    assert!(forged.is_err());
+
+    // 3. Explicit farmer auth succeeds.
+    let id = t
+        .client
+        .mock_auths(&[MockAuth {
+            address: &t.farmer,
+            invoke: &MockAuthInvoke {
+                contract: &t.client.address,
+                fn_name: "create_campaign",
+                args: (&t.farmer, &t.token_id, 10_000i128, deadline).into_val(&t.env),
+                sub_invokes: &[],
+            },
+        }])
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    assert_eq!(id, 1);
+    assert_eq!(t.client.get_campaign(&1).farmer, t.farmer);
+}
+
+#[test]
+fn test_explicit_auth_invest_with_transfer() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    let stranger = Address::generate(&t.env);
+
+    t.env.set_auths(&[]);
+
+    // 1. Missing investor auth traps.
+    assert!(t.client.try_invest(&t.investor1, &id, &5_000).is_err());
+
+    // 2. Stranger signing for investor traps.
+    let forged = t
+        .client
+        .mock_auths(&[MockAuth {
+            address: &stranger,
+            invoke: &MockAuthInvoke {
+                contract: &t.client.address,
+                fn_name: "invest",
+                args: (&t.investor1, id, 5_000i128).into_val(&t.env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_invest(&t.investor1, &id, &5_000);
+    assert!(forged.is_err());
+
+    // 3. Explicit investor auth with nested token transfer succeeds.
+    t.client
+        .mock_auths(&[MockAuth {
+            address: &t.investor1,
+            invoke: &MockAuthInvoke {
+                contract: &t.client.address,
+                fn_name: "invest",
+                args: (&t.investor1, id, 5_000i128).into_val(&t.env),
+                sub_invokes: &[MockAuthInvoke {
+                    contract: &t.token_id,
+                    fn_name: "transfer",
+                    args: (&t.investor1, &t.client.address, 5_000i128).into_val(&t.env),
+                    sub_invokes: &[],
+                }],
+            },
+        }])
+        .invest(&t.investor1, &id, &5_000);
+
+    assert_eq!(t.client.get_campaign(&id).total_raised, 5_000);
+}
+
+#[test]
+fn test_explicit_dual_auth_mark_harvest() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+
+    t.env.set_auths(&[]);
+
+    // 1. Neither signs -> traps.
+    assert!(t
+        .client
+        .try_mark_harvest(&t.farmer, &t.attester, &id)
+        .is_err());
+
+    // 2. Farmer only signs (missing attester) -> traps.
+    let farmer_only = t
+        .client
+        .mock_auths(&[MockAuth {
+            address: &t.farmer,
+            invoke: &MockAuthInvoke {
+                contract: &t.client.address,
+                fn_name: "mark_harvest",
+                args: (&t.farmer, &t.attester, id).into_val(&t.env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_mark_harvest(&t.farmer, &t.attester, &id);
+    assert!(farmer_only.is_err());
+    assert_eq!(
+        t.client.get_campaign(&id).status,
+        CampaignStatus::InProduction
+    );
+
+    // 3. Attester only signs (missing farmer) -> traps.
+    let attester_only = t
+        .client
+        .mock_auths(&[MockAuth {
+            address: &t.attester,
+            invoke: &MockAuthInvoke {
+                contract: &t.client.address,
+                fn_name: "mark_harvest",
+                args: (&t.farmer, &t.attester, id).into_val(&t.env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_mark_harvest(&t.farmer, &t.attester, &id);
+    assert!(attester_only.is_err());
+    assert_eq!(
+        t.client.get_campaign(&id).status,
+        CampaignStatus::InProduction
+    );
+
+    // 4. Dual auth (both farmer and attester) succeeds.
+    t.client
+        .mock_auths(&[
+            MockAuth {
+                address: &t.farmer,
+                invoke: &MockAuthInvoke {
+                    contract: &t.client.address,
+                    fn_name: "mark_harvest",
+                    args: (&t.farmer, &t.attester, id).into_val(&t.env),
+                    sub_invokes: &[],
+                },
+            },
+            MockAuth {
+                address: &t.attester,
+                invoke: &MockAuthInvoke {
+                    contract: &t.client.address,
+                    fn_name: "mark_harvest",
+                    args: (&t.farmer, &t.attester, id).into_val(&t.env),
+                    sub_invokes: &[],
+                },
+            },
+        ])
+        .mark_harvest(&t.farmer, &t.attester, &id);
+
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Harvested);
+}
+
+#[test]
+fn test_explicit_auth_create_order_with_transfer() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.mark_harvest(&t.farmer, &t.attester, &id);
+
+    let stranger = Address::generate(&t.env);
+
+    t.env.set_auths(&[]);
+
+    // 1. Missing buyer auth traps.
+    assert!(t.client.try_create_order(&t.buyer, &id, &2_000).is_err());
+
+    // 2. Stranger signing for buyer traps.
+    let forged = t
+        .client
+        .mock_auths(&[MockAuth {
+            address: &stranger,
+            invoke: &MockAuthInvoke {
+                contract: &t.client.address,
+                fn_name: "create_order",
+                args: (&t.buyer, id, 2_000i128).into_val(&t.env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_create_order(&t.buyer, &id, &2_000);
+    assert!(forged.is_err());
+
+    // 3. Buyer auth with nested token transfer succeeds.
+    let order_id = t
+        .client
+        .mock_auths(&[MockAuth {
+            address: &t.buyer,
+            invoke: &MockAuthInvoke {
+                contract: &t.client.address,
+                fn_name: "create_order",
+                args: (&t.buyer, id, 2_000i128).into_val(&t.env),
+                sub_invokes: &[MockAuthInvoke {
+                    contract: &t.token_id,
+                    fn_name: "transfer",
+                    args: (&t.buyer, &t.client.address, 2_000i128).into_val(&t.env),
+                    sub_invokes: &[],
+                }],
+            },
+        }])
+        .create_order(&t.buyer, &id, &2_000);
+
+    assert_eq!(order_id, 1);
+    assert_eq!(t.client.get_order(&order_id).amount, 2_000);
+}
+
+#[test]
+fn test_explicit_auth_arbitrator_vote_to_resolve() {
+    let t = setup();
+    let (id, arbitrators) = setup_arbitrated_dispute(&t, 2);
+    let a1 = arbitrators.get(0).unwrap();
+    let stranger = Address::generate(&t.env);
+
+    t.env.set_auths(&[]);
+
+    // 1. Missing arbitrator auth traps.
+    assert!(t
+        .client
+        .try_vote_to_resolve(&a1, &id, &DisputeResolution::FullPayoutToInvestors)
+        .is_err());
+
+    // 2. Stranger auth claiming to be arbitrator traps.
+    let forged = t
+        .client
+        .mock_auths(&[MockAuth {
+            address: &stranger,
+            invoke: &MockAuthInvoke {
+                contract: &t.client.address,
+                fn_name: "vote_to_resolve",
+                args: (
+                    &a1,
+                    id,
+                    DisputeResolution::FullPayoutToInvestors,
+                )
+                    .into_val(&t.env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_vote_to_resolve(&a1, &id, &DisputeResolution::FullPayoutToInvestors);
+    assert!(forged.is_err());
+
+    // 3. Explicit arbitrator auth succeeds.
+    t.client
+        .mock_auths(&[MockAuth {
+            address: &a1,
+            invoke: &MockAuthInvoke {
+                contract: &t.client.address,
+                fn_name: "vote_to_resolve",
+                args: (
+                    &a1,
+                    id,
+                    DisputeResolution::FullPayoutToInvestors,
+                )
+                    .into_val(&t.env),
+                sub_invokes: &[],
+            },
+        }])
+        .vote_to_resolve(&a1, &id, &DisputeResolution::FullPayoutToInvestors);
+
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Disputed);
 }
