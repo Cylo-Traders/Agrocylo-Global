@@ -2116,6 +2116,7 @@ impl ProductionEscrowContract {
         resolution: DisputeResolution,
     ) -> Result<(), EscrowError> {
         arbitrator.require_auth();
+        require_not_paused(&env)?;
 
         let arbitrators: Vec<Address> = env
             .storage()
