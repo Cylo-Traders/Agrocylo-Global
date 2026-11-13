@@ -697,6 +697,11 @@ impl ProductionEscrowContract {
         Ok(())
     }
 
+    /// Public readback of the configured independent attester address (Issue #1284).
+    pub fn get_attester(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Attester)
+    }
+
     // -----------------------------------------------------------------------
     // Campaign creation
     // -----------------------------------------------------------------------
