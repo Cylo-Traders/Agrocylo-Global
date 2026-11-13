@@ -1,8 +1,9 @@
 # External Audit Scope: Production Contracts
 
-**Status**: Ready for external security review (technical review completed; external sign-off pending)
+> **Last verified against commit:** `25d942522b76e4252752249142326a757d3d78d6`
+> **Audit & Release Status**: Internal technical review and scope documentation only — **external security audit sign-off is NOT completed** (tracked by #1292; see also `contracts/SECURITY_AUDIT.md` §15 staleness notice). Both `production_escrow` (`production-escrow-v2`) and `contracts/escrow` custody user funds on their respective product surfaces.
 
-This document describes the four production contracts that will custody mainnet funds: `production_escrow`, `governance`, `investment_basket`, and `registry`. It covers the threat model, trust assumptions, money flows, and invariants that together form the security scope of this system.
+This document describes the production contracts in the workspace (`production_escrow`, `escrow`, `governance`, `investment_basket`, and `registry`). It covers the threat model, trust assumptions, money flows, and invariants that together form the security scope of this system.
 
 ---
 
@@ -19,10 +20,10 @@ This document describes the four production contracts that will custody mainnet 
 - `settle(farmer, campaign_id)` → farmer claims returns (only if Settled)
 - `claim_returns(investor, campaign_id)` → investor claims returns after Settled
 - `refund(investor, campaign_id)` → investor claims refund after Failed
-- `create_order(buyer, farmer, amount, token, delivery_deadline)` → buyer orders from farmer
-- `deliver_order(farmer, order_id)` → farmer marks order delivered
-- `confirm_order(buyer, order_id)` → buyer confirms receipt  
-- `refund_order(buyer, order_id)` → buyer claims refund if delivery deadline passes
+- `create_order(buyer, campaign_id, amount)` → buyer creates an order against an `InProduction` or `Harvested` campaign
+- `cancel_order(buyer, order_id)` → buyer cancels a pending order within `CANCEL_WINDOW_SECS` (30 minutes)
+- `confirm_order(buyer, order_id)` → buyer confirms receipt, crediting net revenue (`amount - fee`) to the campaign
+- `batch_refund_orders(order_ids)` → refunds pending orders once `ORDER_EXPIRY_SECS` (96 hours) has elapsed
 - `finalize_failed(campaign_id)` → admin marks campaign Failed once deadline passes
 
 **External Dependencies**:
