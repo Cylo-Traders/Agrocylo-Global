@@ -1958,3 +1958,14 @@ fn test_vote_to_resolve_non_arbitrator_rejected() {
         EscrowError::ArbitratorNotFound
     );
 }
+
+#[test]
+fn test_get_path_payment_router_reads_configured_router() {
+    let (env, client, _buyer, _farmer, _collector, _xlm, _usdc, admin, _investor, _id) =
+        setup_test();
+    assert_eq!(client.get_path_payment_router(), None);
+
+    let router = Address::generate(&env);
+    client.set_path_payment_router(&admin, &router);
+    assert_eq!(client.get_path_payment_router(), Some(router));
+}

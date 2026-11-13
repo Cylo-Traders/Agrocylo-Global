@@ -914,6 +914,11 @@ impl InvestmentBasketContract {
     pub fn get_admin(env: Env) -> Result<Address, BasketError> {
         read_admin(&env)
     }
+
+    /// Read-only getter for the configured production escrow contract reference (Issue #1287).
+    pub fn get_escrow_contract(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::EscrowContractRef)
+    }
 }
 
 // ---------------------------------------------------------------------------

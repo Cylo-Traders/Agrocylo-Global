@@ -983,6 +983,11 @@ impl EscrowContract {
         Ok(())
     }
 
+    /// Read-only getter for the configured path-payment router (Issue #1287).
+    pub fn get_path_payment_router(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::PathPaymentRouter)
+    }
+
     pub fn set_max_slippage_bps(
         env: Env,
         admin: Address,

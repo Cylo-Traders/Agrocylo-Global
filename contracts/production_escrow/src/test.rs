@@ -3546,3 +3546,13 @@ fn test_vote_to_resolve_non_arbitrator_rejected() {
         .unwrap();
     assert_eq!(err, EscrowError::ArbitratorNotFound);
 }
+
+#[test]
+fn test_get_registry_contract_reads_configured_registry() {
+    let t = setup();
+    assert_eq!(t.client.get_registry_contract(), None);
+
+    let registry = Address::generate(&t.env);
+    t.client.set_registry_contract(&t.admin, &registry);
+    assert_eq!(t.client.get_registry_contract(), Some(registry));
+}

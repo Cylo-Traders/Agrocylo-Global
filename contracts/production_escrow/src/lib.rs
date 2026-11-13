@@ -606,6 +606,11 @@ impl ProductionEscrowContract {
         Ok(())
     }
 
+    /// Read-only getter for the configured registry contract address (Issue #1287).
+    pub fn get_registry_contract(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::RegistryContract)
+    }
+
     /// Update fee configuration. Authorized caller is the governance contract
     /// once configured via `set_governance_contract` (Issue #660); falls back
     /// to admin-only while governance is unset.
