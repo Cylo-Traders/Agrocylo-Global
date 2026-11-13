@@ -931,7 +931,10 @@ impl ProductionEscrowContract {
     // Milestone-based partial release
     // -----------------------------------------------------------------------
 
-    /// Admin sets the milestone release configuration for a campaign.
+    /// Admin or configured governance contract sets the milestone release configuration
+    /// for a campaign (Issue #1298). Governance-gated once `set_governance_contract`
+    /// is configured, falling back to admin-only control while governance is unset so
+    /// existing deployments and bootstrap flows continue working unchanged.
     /// Each config entry maps a milestone stage to a percentage (basis points)
     /// of total_raised to release when that milestone is advanced.
     /// Configs must be provided in sequential order (Planted -> Growing -> ...).
@@ -942,10 +945,8 @@ impl ProductionEscrowContract {
         configs: Vec<MilestoneConfig>,
     ) -> Result<(), EscrowError> {
         admin_caller.require_auth();
-        let admin_addr = admin(&env)?;
-        if admin_caller != admin_addr {
-            return Err(EscrowError::NotAdmin);
-        }
+        require_governed_caller(&env, &admin_caller)?;
+        bump_instance(&env);
         let campaign = load_campaign(&env, campaign_id)?;
         // Only allow config before any milestones have been advanced.
         if campaign.current_milestone > 0 {
