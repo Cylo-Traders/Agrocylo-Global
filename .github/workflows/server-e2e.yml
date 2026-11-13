@@ -78,6 +78,13 @@ jobs:
         working-directory: agro-production/client
         run: npm ci --legacy-peer-deps
 
+      - name: Validate Prisma schema (fast-fail gate #744)
+        env:
+          PRISMA_GENERATE_DATABASE_URL: postgresql://prisma-generate:unused@localhost:5432/prisma_generate
+        run: |
+          node ../../scripts/check-prisma-schemas.cjs
+          npx prisma validate
+
       - name: Generate Prisma client
         env:
           PRISMA_GENERATE_DATABASE_URL: postgresql://prisma-generate:unused@localhost:5432/prisma_generate
