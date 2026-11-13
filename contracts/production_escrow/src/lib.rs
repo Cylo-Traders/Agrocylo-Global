@@ -132,6 +132,8 @@ pub enum SplitOrderError {
     SplitOrderNotFound = 8,
     SplitOrderNotDisputed = 9,
     SplitOrderAlreadyDisputed = 10,
+    /// Issue #1273: split-order funding deadline has not elapsed and campaign is still active.
+    SplitOrderFundingNotExpired = 11,
     // Mirrors of the `EscrowError` variants that the shared helpers used by
     // the split-order entry points (`load_campaign`, `checked_add`,
     // `checked_mul`, `admin`) can actually produce.
@@ -1302,6 +1304,83 @@ impl ProductionEscrowContract {
         Ok(())
     }
 
+    /// Issue #1273: Authenticated exit for a funded co-buyer while a split order
+    /// is still in `SplitOrderStatus::Funding`. Refunds every co-buyer who has
+    /// actually funded (`order.funded == true`) their exact share, marks their
+    /// funded flag `false`, and transitions the split order to terminal
+    /// `SplitOrderStatus::Refunded` so late arrivals cannot later activate an
+    /// undercollateralized order or duplicate campaign revenue.
+    pub fn cancel_split_order(
+        env: Env,
+        caller: Address,
+        order_id: u64,
+    ) -> Result<i128, SplitOrderError> {
+        caller.require_auth();
+        require_not_paused(&env)?;
+        bump_instance(&env);
+
+        let mut order = load_split_order(&env, order_id)?;
+        if order.status != SplitOrderStatus::Funding {
+            return Err(SplitOrderError::SplitOrderAlreadyFunded);
+        }
+        if !order.shares.contains_key(caller.clone()) {
+            return Err(SplitOrderError::NotCoBuyer);
+        }
+        if !order.funded.get(caller.clone()).unwrap_or(false) {
+            return Err(SplitOrderError::NotCoBuyer);
+        }
+
+        let campaign = load_campaign(&env, order.campaign_id)?;
+        let total_refunded = refund_funded_split_participants(&env, &mut order, &campaign.token)?;
+        order.status = SplitOrderStatus::Refunded;
+        save_split_order(&env, order_id, &order);
+
+        env.events().publish(
+            (t_order(), symbol_short!("splitcan")),
+            (order_id, caller, total_refunded),
+        );
+        Ok(total_refunded)
+    }
+
+    /// Issue #1273: Permissionless expiry/terminal-campaign refund for a split
+    /// order stuck in `SplitOrderStatus::Funding` after `ORDER_EXPIRY_SECS` (or
+    /// immediately once its parent campaign has become `Failed` or `Settled`).
+    /// Refunds only co-buyers who actually funded (`order.funded == true`) and
+    /// transitions the split order to `SplitOrderStatus::Refunded`.
+    pub fn refund_expired_split_order(
+        env: Env,
+        order_id: u64,
+    ) -> Result<i128, SplitOrderError> {
+        require_not_paused(&env)?;
+        bump_instance(&env);
+
+        let mut order = load_split_order(&env, order_id)?;
+        if order.status != SplitOrderStatus::Funding {
+            return Err(SplitOrderError::SplitOrderAlreadyFunded);
+        }
+
+        let campaign = load_campaign(&env, order.campaign_id)?;
+        let now = env.ledger().timestamp();
+        let expired = now > order.created_at.saturating_add(ORDER_EXPIRY_SECS);
+        let campaign_terminal = matches!(
+            campaign.status,
+            CampaignStatus::Failed | CampaignStatus::Settled
+        );
+        if !expired && !campaign_terminal {
+            return Err(SplitOrderError::SplitOrderFundingNotExpired);
+        }
+
+        let total_refunded = refund_funded_split_participants(&env, &mut order, &campaign.token)?;
+        order.status = SplitOrderStatus::Refunded;
+        save_split_order(&env, order_id, &order);
+
+        env.events().publish(
+            (t_order(), symbol_short!("splitexp")),
+            (order_id, total_refunded),
+        );
+        Ok(total_refunded)
+    }
+
     /// A co-buyer confirms receipt. Revenue is credited to the campaign and
     /// the fee collected once either a strict majority-by-value of
     /// co-buyers have confirmed, or every co-buyer has (unanimous) —
@@ -2385,6 +2464,30 @@ fn save_split_order(env: &Env, order_id: u64, order: &SplitOrder) {
 /// Refunds each co-buyer their pro-rata share of `pool` (out of
 /// `order.total_amount`). Integer-division dust from rounding is left in the
 /// contract.
+/// Issue #1273: Refunds only co-buyers who have actually funded (`order.funded == true`)
+/// their exact pledged share and clears their funded flag so duplicate refunds are impossible.
+fn refund_funded_split_participants(
+    env: &Env,
+    order: &mut SplitOrder,
+    token: &Address,
+) -> Result<i128, SplitOrderError> {
+    let token_client = token::Client::new(env, token);
+    let mut total_refunded: i128 = 0;
+    for co_buyer in order.co_buyers.iter() {
+        if !order.funded.get(co_buyer.clone()).unwrap_or(false) {
+            continue;
+        }
+        let share = order.shares.get(co_buyer.clone()).unwrap_or(0);
+        order.funded.set(co_buyer.clone(), false);
+        order.funded_count = order.funded_count.saturating_sub(1);
+        if share > 0 {
+            token_client.transfer(&env.current_contract_address(), &co_buyer, &share);
+            total_refunded = checked_add(total_refunded, share)?;
+        }
+    }
+    Ok(total_refunded)
+}
+
 fn refund_split_order_pro_rata(
     env: &Env,
     order: &SplitOrder,
