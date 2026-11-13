@@ -757,3 +757,57 @@ fn test_reassignment_cannot_inflate_active_proposal_tally() {
     assert_eq!(gov.get_voter_weight(&a), 100);
     assert_eq!(gov.get_voter_weight(&b), 0);
 }
+
+#[test]
+fn test_unseeded_governance_total_weight_is_zero_and_blocks_quorum() {
+    // Issue #1285: Governance initializes TotalWeight to 0.
+    // Verifies that without voter seeding, total weight is 0 and fails quorum.
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let gov_id = env.register(GovernanceContract, ());
+    let gov = GovernanceContractClient::new(&env, &gov_id);
+    gov.initialize(
+        &admin,
+        &VOTING_PERIOD,
+        &TIMELOCK_DELAY,
+        &UPGRADE_TIMELOCK_DELAY,
+        &QUORUM,
+    );
+    assert_eq!(gov.get_total_weight(), 0);
+    assert_eq!(gov.get_quorum_weight(), QUORUM);
+    assert!(gov.get_total_weight() < gov.get_quorum_weight());
+    assert_eq!(gov.get_voting_period_secs(), VOTING_PERIOD);
+    assert_eq!(gov.get_timelock_delay_secs(), TIMELOCK_DELAY);
+    assert_eq!(gov.get_upgrade_timelock_delay_secs(), UPGRADE_TIMELOCK_DELAY);
+}
+
+#[test]
+fn test_seeding_voter_weights_reaches_quorum_and_updates_total() {
+    // Issue #1285: Explicit voter seeding ensures total weight reaches quorum before handoff.
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let voter1 = Address::generate(&env);
+    let voter2 = Address::generate(&env);
+    let gov_id = env.register(GovernanceContract, ());
+    let gov = GovernanceContractClient::new(&env, &gov_id);
+    gov.initialize(
+        &admin,
+        &VOTING_PERIOD,
+        &TIMELOCK_DELAY,
+        &UPGRADE_TIMELOCK_DELAY,
+        &QUORUM,
+    );
+    assert_eq!(gov.get_total_weight(), 0);
+
+    gov.set_voter_weight(&admin, &voter1, &60);
+    assert_eq!(gov.get_total_weight(), 60);
+    assert_eq!(gov.get_voter_weight(&voter1), 60);
+    assert!(gov.get_total_weight() < gov.get_quorum_weight());
+
+    gov.set_voter_weight(&admin, &voter2, &50);
+    assert_eq!(gov.get_total_weight(), 110);
+    assert_eq!(gov.get_voter_weight(&voter2), 50);
+    assert!(gov.get_total_weight() >= gov.get_quorum_weight());
+}

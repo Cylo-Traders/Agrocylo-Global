@@ -175,6 +175,7 @@ GOV_VOTING_PERIOD_SECS="${GOV_VOTING_PERIOD_SECS:-259200}"
 GOV_TIMELOCK_SECS="${GOV_TIMELOCK_SECS:-172800}"
 GOV_UPGRADE_TIMELOCK_SECS="${GOV_UPGRADE_TIMELOCK_SECS:-604800}"
 GOV_QUORUM_WEIGHT="${GOV_QUORUM_WEIGHT:-1}"
+GOV_VOTERS="${GOV_VOTERS:-}"
 
 if [[ "$VERIFY_ONLY" == "false" ]]; then
     [[ -n "$FEE_COLLECTOR" ]] || { echo "Error: FEE_COLLECTOR is required" >&2; exit 1; }
@@ -415,6 +416,52 @@ if [[ "$VERIFY_ONLY" == "false" ]]; then
         echo "  = production_escrow.registry already $REGISTRY (per manifest)"
     fi
 
+    # ── Issue #1285: Seed governance voter weights and verify reachable quorum before handoff.
+    # Governance initializes TotalWeight to 0. Handing off dependent contracts without seeded
+    # voters or with total weight < quorum leaves governance proposals permanently deadlocked.
+    echo "[wire] seeding governance voters..."
+    if [[ -z "$GOV_VOTERS" ]]; then
+        if [[ "$NETWORK" == "mainnet" ]]; then
+            echo "Error: GOV_VOTERS is required on mainnet before governance handoff (format: 'addr1:weight1,addr2:weight2')" >&2
+            exit 1
+        else
+            echo "  warn: GOV_VOTERS unset on $NETWORK — defaulting voter to admin ($ADMIN) with weight $GOV_QUORUM_WEIGHT"
+            GOV_VOTERS="${ADMIN}:${GOV_QUORUM_WEIGHT}"
+        fi
+    fi
+
+    TOTAL_VOTER_WEIGHT=0
+    IFS=',' read -ra VOTER_PAIRS <<< "$GOV_VOTERS"
+    if (( ${#VOTER_PAIRS[@]} == 0 )); then
+        echo "Error: no valid voters configured in GOV_VOTERS" >&2
+        exit 1
+    fi
+
+    for pair in "${VOTER_PAIRS[@]}"; do
+        [[ -z "$pair" ]] && continue
+        voter_addr="${pair%%:*}"
+        voter_weight="${pair##*:}"
+        if [[ -z "$voter_addr" || -z "$voter_weight" || ! "$voter_weight" =~ ^[0-9]+$ || "$voter_weight" -le 0 ]]; then
+            echo "Error: invalid voter:weight pair '$pair' in GOV_VOTERS" >&2
+            exit 1
+        fi
+        TOTAL_VOTER_WEIGHT=$((TOTAL_VOTER_WEIGHT + voter_weight))
+
+        current_weight="$(invoke_read "$GOVERNANCE" get_voter_weight --voter "$voter_addr" || echo "0")"
+        if [[ "$current_weight" == "$voter_weight" ]]; then
+            echo "  = governance voter $voter_addr already weight $voter_weight"
+        else
+            echo "  + governance voter $voter_addr -> weight $voter_weight"
+            invoke "$GOVERNANCE" set_voter_weight --admin_caller "$ADMIN" --voter "$voter_addr" --weight "$voter_weight"
+        fi
+    done
+
+    if (( TOTAL_VOTER_WEIGHT < GOV_QUORUM_WEIGHT )); then
+        echo "Error: total configured voter weight ($TOTAL_VOTER_WEIGHT) is less than quorum weight ($GOV_QUORUM_WEIGHT). Quorum would be unreachable. Blocking governance handoff." >&2
+        exit 1
+    fi
+    echo "  ok   governance voters configured (total weight: $TOTAL_VOTER_WEIGHT >= quorum: $GOV_QUORUM_WEIGHT)"
+
     echo "[wire] governance wiring (last — locks the other setters)..."
     wire "escrow.governance" \
         "$(invoke_read "$ESCROW" get_governance_contract || true)" "$GOVERNANCE" \
@@ -460,6 +507,30 @@ check "investment_basket.governance"   "$(invoke_read "$BASKET" get_governance_c
 # newly-deployed contract before any funds move. Registry now exposes get_admin
 # too; escrow/production_escrow also have get_guardian we re-read (guardian is
 # set later by maintainers, so a missing guardian is reported, not fatal).
+# ── Issue #1285 governance voter & quorum verification ──────────────────────
+check "governance.quorum_weight"          "$(invoke_read "$GOVERNANCE" get_quorum_weight || true)" "$GOV_QUORUM_WEIGHT"
+check "governance.voting_period_secs"     "$(invoke_read "$GOVERNANCE" get_voting_period_secs || true)" "$GOV_VOTING_PERIOD_SECS"
+check "governance.timelock_delay_secs"    "$(invoke_read "$GOVERNANCE" get_timelock_delay_secs || true)" "$GOV_TIMELOCK_SECS"
+check "governance.upgrade_timelock_delay" "$(invoke_read "$GOVERNANCE" get_upgrade_timelock_delay_secs || true)" "$GOV_UPGRADE_TIMELOCK_SECS"
+
+gov_total_readback="$(invoke_read "$GOVERNANCE" get_total_weight || echo "0")"
+if (( gov_total_readback < GOV_QUORUM_WEIGHT )); then
+    echo "  FAIL governance total_weight ($gov_total_readback) < quorum_weight ($GOV_QUORUM_WEIGHT) — quorum unreachable!" >&2
+    FAILURES=$((FAILURES + 1))
+else
+    echo "  ok   governance reachable quorum ($gov_total_readback >= $GOV_QUORUM_WEIGHT)"
+fi
+
+if [[ -n "${GOV_VOTERS:-}" ]]; then
+    IFS=',' read -ra VERIFY_PAIRS <<< "$GOV_VOTERS"
+    for pair in "${VERIFY_PAIRS[@]}"; do
+        [[ -z "$pair" ]] && continue
+        v_addr="${pair%%:*}"
+        v_wt="${pair##*:}"
+        check "governance.voter_weight.$v_addr" "$(invoke_read "$GOVERNANCE" get_voter_weight --voter "$v_addr" || true)" "$v_wt"
+    done
+fi
+
 check "governance.get_admin"           "$(invoke_read "$GOVERNANCE" get_admin || true)" "$ADMIN"
 check "escrow.get_admin"               "$(invoke_read "$ESCROW" get_admin || true)" "$ADMIN"
 check "production_escrow.get_admin"    "$(invoke_read "$PROD_ESCROW" get_admin || true)" "$ADMIN"

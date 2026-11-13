@@ -820,6 +820,27 @@ impl GovernanceContract {
             .ok_or(GovernanceError::NotInitialized)
     }
 
+    pub fn get_total_weight(env: Env) -> Result<u64, GovernanceError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalWeight)
+            .ok_or(GovernanceError::NotInitialized)
+    }
+
+    pub fn get_voting_period_secs(env: Env) -> Result<u64, GovernanceError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::VotingPeriodSecs)
+            .ok_or(GovernanceError::NotInitialized)
+    }
+
+    pub fn get_timelock_delay_secs(env: Env) -> Result<u64, GovernanceError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::TimelockDelaySecs)
+            .ok_or(GovernanceError::NotInitialized)
+    }
+
     pub fn get_upgrade_timelock_delay_secs(env: Env) -> Result<u64, GovernanceError> {
         env.storage()
             .instance()
