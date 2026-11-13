@@ -4,10 +4,12 @@ import api from "@/lib/apiClient";
 
 export interface Message {
   id: string;
+  conversationId?: string;
   senderAddress: string;
   content: string;
-  isRead: boolean;
+  isRead?: boolean;
   createdAt: string;
+  deletedAt?: string | null;
 }
 
 export interface Conversation {
@@ -21,34 +23,61 @@ export interface Conversation {
   messages?: Message[];
 }
 
-export async function getConversations(sessionToken: string): Promise<Conversation[]> {
-  return api.get<Conversation[]>("/conversations", {
-    headers: { "x-session-token": sessionToken },
-  });
+export interface PaginatedMessagesResponse {
+  messages: Message[];
+  nextCursor?: string;
 }
 
-export async function getConversation(id: string, sessionToken: string): Promise<Conversation> {
-  return api.get<Conversation>(`/conversations/${encodeURIComponent(id)}`, {
-    headers: { "x-session-token": sessionToken },
-  });
+function authHeaders(sessionToken?: string): Record<string, string> | undefined {
+  if (!sessionToken) return undefined;
+  return { Authorization: `Bearer ${sessionToken}` };
 }
 
-export async function createOrGetConversation(
+export async function getCampaignConversation(
   campaignId: string,
-  otherParticipant: string,
-  sessionToken: string,
+  sessionToken?: string,
+): Promise<Conversation | null> {
+  return api.get<Conversation | null>(
+    `/campaigns/${encodeURIComponent(campaignId)}/conversation`,
+    { headers: authHeaders(sessionToken) },
+  );
+}
+
+export async function createCampaignConversation(
+  campaignId: string,
+  sessionToken?: string,
 ): Promise<Conversation> {
-  return api.post<Conversation>("/conversations", { campaignId, otherParticipant }, {
-    headers: { "x-session-token": sessionToken },
-  });
+  return api.post<Conversation>(
+    `/campaigns/${encodeURIComponent(campaignId)}/conversation`,
+    {},
+    { headers: authHeaders(sessionToken) },
+  );
+}
+
+export async function getConversationMessages(
+  conversationId: string,
+  params: { cursor?: string; limit?: number } = {},
+  sessionToken?: string,
+): Promise<PaginatedMessagesResponse> {
+  const search = new URLSearchParams();
+  if (params.cursor) search.set("cursor", params.cursor);
+  if (params.limit) search.set("limit", String(params.limit));
+  const qs = search.toString();
+  const suffix = qs ? `?${qs}` : "";
+  return api.get<PaginatedMessagesResponse>(
+    `/conversations/${encodeURIComponent(conversationId)}/messages${suffix}`,
+    { headers: authHeaders(sessionToken) },
+  );
 }
 
 export async function sendMessage(
   conversationId: string,
   content: string,
-  sessionToken: string,
+  sessionToken?: string,
 ): Promise<Message> {
-  return api.post<Message>(`/conversations/${encodeURIComponent(conversationId)}/messages`, { content }, {
-    headers: { "x-session-token": sessionToken },
-  });
+  return api.post<Message>(
+    `/conversations/${encodeURIComponent(conversationId)}/messages`,
+    { content },
+    { headers: authHeaders(sessionToken) },
+  );
 }

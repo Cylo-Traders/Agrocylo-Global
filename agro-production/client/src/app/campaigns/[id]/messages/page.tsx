@@ -1,64 +1,142 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { loadWalletSession } from "@/lib/walletSession";
-import { getConversations, type Conversation } from "@/services/conversationService";
+import { getAccessToken } from "@/lib/authToken";
+import { isApiError } from "@/lib/apiClient";
+import {
+  createCampaignConversation,
+  getCampaignConversation,
+  type Conversation,
+} from "@/services/conversationService";
 import MessageThread from "@/components/MessageThread";
+
+type PageStatus =
+  | "loading"
+  | "ready"
+  | "empty"
+  | "forbidden"
+  | "expired"
+  | "error";
 
 export default function MessagesPage() {
   const params = useParams();
   const campaignId = params.id as string;
 
-  // Browser storage is read once, lazily, in the first render — not mirrored
-  // from state inside an effect (#1084). `loadWalletSession` is a no-op on
-  // the server, so SSR still renders the "connect your wallet" branch.
   const [session] = useState(() => loadWalletSession());
+  const [accessToken, setAccessTokenState] = useState<string | null>(() =>
+    getAccessToken(),
+  );
+
   const walletSession = useMemo(
-    () => (session ? { address: session.address, token: "" } : null),
-    [session],
+    () =>
+      session
+        ? { address: session.address, token: accessToken ?? "" }
+        : null,
+    [session, accessToken],
   );
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [selectedConversation, setSelectedConversation] =
+    useState<Conversation | null>(null);
+  const [status, setStatus] = useState<PageStatus>("loading");
   const [error, setError] = useState<string | null>(null);
-
-  const sessionToken = walletSession?.token;
+  const [starting, setStarting] = useState(false);
 
   useEffect(() => {
-    if (!sessionToken) return;
+    const onExpired = () => {
+      setAccessTokenState(null);
+      setStatus("expired");
+    };
+    window.addEventListener("agrocylo:session-expired", onExpired);
+    return () => window.removeEventListener("agrocylo:session-expired", onExpired);
+  }, []);
 
-    // Captured as a local so the narrowing survives into the async closure.
-    const token = sessionToken;
-
-    // Cancelled on unmount and whenever the session changes, so a slow
-    // response can never populate a view that no longer belongs to it.
-    let cancelled = false;
-
-    async function loadConversations() {
-      try {
-        const data = await getConversations(token);
-        const campaignConversations = data.filter((c) => c.campaignId === campaignId);
-        if (cancelled) return;
-        setConversations(campaignConversations);
-        if (campaignConversations.length > 0) {
-          setSelectedConversation(campaignConversations[0]);
-        }
-        setError(null);
-      } catch (err) {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load conversations");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+  const loadConversation = useCallback(async () => {
+    if (!walletSession) {
+      setStatus("empty");
+      return;
+    }
+    if (!walletSession.token) {
+      setStatus("expired");
+      return;
     }
 
-    void loadConversations();
-    return () => {
-      cancelled = true;
-    };
-  }, [campaignId, sessionToken]);
+    setStatus("loading");
+    setError(null);
+
+    try {
+      const conv = await getCampaignConversation(campaignId, walletSession.token);
+      if (conv) {
+        setConversations([conv]);
+        setSelectedConversation(conv);
+        setStatus("ready");
+      } else {
+        setConversations([]);
+        setSelectedConversation(null);
+        setStatus("empty");
+      }
+    } catch (err) {
+      if (isApiError(err)) {
+        if (err.status === 401) {
+          setStatus("expired");
+          return;
+        }
+        if (err.status === 403) {
+          setStatus("forbidden");
+          setError(
+            err.message ||
+              "Only the campaign farmer or an active investor can access campaign messages.",
+          );
+          return;
+        }
+      }
+      setError(
+        err instanceof Error ? err.message : "Failed to load conversation",
+      );
+      setStatus("error");
+    }
+  }, [campaignId, walletSession]);
+
+  useEffect(() => {
+    void loadConversation();
+  }, [loadConversation]);
+
+  const handleStartConversation = async () => {
+    if (!walletSession?.token) {
+      setStatus("expired");
+      return;
+    }
+    setStarting(true);
+    setError(null);
+    try {
+      const created = await createCampaignConversation(
+        campaignId,
+        walletSession.token,
+      );
+      setConversations([created]);
+      setSelectedConversation(created);
+      setStatus("ready");
+    } catch (err) {
+      if (isApiError(err) && err.status === 403) {
+        setStatus("forbidden");
+        setError(
+          err.message ||
+            "Only campaign investors and the farmer can start conversations.",
+        );
+      } else if (isApiError(err) && err.status === 401) {
+        setStatus("expired");
+      } else {
+        setError(
+          err instanceof Error ? err.message : "Failed to start conversation",
+        );
+        setStatus("error");
+      }
+    } finally {
+      setStarting(false);
+    }
+  };
 
   if (!walletSession) {
     return (
@@ -68,29 +146,83 @@ export default function MessagesPage() {
     );
   }
 
-  if (loading) {
+  if (status === "loading") {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div
+        role="status"
+        aria-label="Loading conversation"
+        className="flex items-center justify-center min-h-screen"
+      >
         <div className="animate-spin rounded-full h-8 w-8 border border-primary border-t-transparent"></div>
       </div>
     );
   }
 
-  if (error && !conversations.length) {
+  if (status === "expired") {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <p className="text-error mb-4">{error}</p>
-          <p className="text-muted text-sm">No conversations yet.</p>
+        <div className="text-center space-y-3">
+          <p className="text-error">
+            Your wallet session has expired. Please sign in again to view messages.
+          </p>
+          <button
+            type="button"
+            onClick={() => void loadConversation()}
+            className="px-4 py-2 bg-primary text-primary-foreground rounded-lg"
+          >
+            Retry
+          </button>
         </div>
       </div>
     );
   }
 
-  if (conversations.length === 0) {
+  if (status === "forbidden") {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <p className="text-muted">No conversations yet. Start one by clicking &quot;Message&quot; on an investment.</p>
+        <div className="text-center space-y-2">
+          <p className="text-error font-medium">Access denied</p>
+          <p className="text-muted text-sm">
+            {error ?? "Only the farmer or campaign investors can access this conversation."}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center space-y-3">
+          <p className="text-error">{error ?? "Failed to load conversation"}</p>
+          <button
+            type="button"
+            onClick={() => void loadConversation()}
+            className="px-4 py-2 bg-primary text-primary-foreground rounded-lg"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === "empty" || conversations.length === 0) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center space-y-3">
+          <p className="text-muted">
+            No conversations yet. Start one with the campaign farmer.
+          </p>
+          <button
+            type="button"
+            disabled={starting}
+            onClick={() => void handleStartConversation()}
+            className="px-4 py-2 bg-primary text-primary-foreground rounded-lg disabled:opacity-50"
+          >
+            {starting ? "Starting..." : "Start conversation"}
+          </button>
+        </div>
       </div>
     );
   }
