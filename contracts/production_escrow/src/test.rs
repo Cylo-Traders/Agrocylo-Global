@@ -3546,3 +3546,87 @@ fn test_vote_to_resolve_non_arbitrator_rejected() {
         .unwrap();
     assert_eq!(err, EscrowError::ArbitratorNotFound);
 }
+
+
+// ---------------------------------------------------------------------------
+// Issue #1290: Instance-TTL keeper near-threshold & inactivity rehearsal tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_bump_instance_ttl_near_threshold_extends_live_ttl() {
+    use soroban_sdk::testutils::storage::Instance as _;
+    let t = setup();
+
+    let initial_ttl = t.env.as_contract(&t.client.address, || {
+        t.env.storage().instance().get_ttl()
+    });
+    assert!(initial_ttl >= crate::INSTANCE_TTL_EXTEND);
+
+    // Advance ledger so remaining TTL drops to 900 ledgers (near archival threshold).
+    t.env.ledger().with_mut(|li| {
+        li.min_persistent_entry_ttl = 1;
+        li.max_entry_ttl = 100_000_001;
+        li.sequence_number += initial_ttl - 900;
+    });
+    let near_expiry_ttl = t.env.as_contract(&t.client.address, || {
+        t.env.storage().instance().get_ttl()
+    });
+    assert_eq!(near_expiry_ttl, 900);
+
+    // Permissionless keeper call extends live TTL back to INSTANCE_TTL_EXTEND (100_000).
+    t.client.bump_instance_ttl();
+    let refreshed_ttl = t.env.as_contract(&t.client.address, || {
+        t.env.storage().instance().get_ttl()
+    });
+    assert_eq!(refreshed_ttl, crate::INSTANCE_TTL_EXTEND);
+    assert_eq!(t.client.get_admin(), t.admin);
+}
+
+#[test]
+fn test_instance_ttl_keeper_inactivity_rehearsal_keeps_quiet_instance_live() {
+    use soroban_sdk::testutils::storage::Instance as _;
+    let t = setup();
+
+    let initial_ttl = t.env.as_contract(&t.client.address, || {
+        t.env.storage().instance().get_ttl()
+    });
+    t.env.ledger().with_mut(|li| {
+        li.min_persistent_entry_ttl = 1;
+        li.max_entry_ttl = 100_000_001;
+        li.sequence_number += initial_ttl - crate::INSTANCE_TTL_EXTEND;
+    });
+
+    // Rehearse 320,000 ledgers (~18.5 days at 5s/ledger, > 3x the single-extension lifetime)
+    // with zero user transactions — only the keeper calling bump_instance_ttl() every 40,000 ledgers.
+    let cadence_ledgers: u32 = 40_000;
+    for cycle in 1..=8 {
+        t.env.ledger().with_mut(|li| {
+            li.sequence_number += cadence_ledgers;
+            li.timestamp += (cadence_ledgers as u64) * 5;
+        });
+
+        let before_bump = t.env.as_contract(&t.client.address, || {
+            t.env.storage().instance().get_ttl()
+        });
+        assert_eq!(
+            before_bump,
+            crate::INSTANCE_TTL_EXTEND - cadence_ledgers,
+            "cycle {cycle}: expected remaining TTL before keeper bump"
+        );
+
+        t.client.bump_instance_ttl();
+
+        let after_bump = t.env.as_contract(&t.client.address, || {
+            t.env.storage().instance().get_ttl()
+        });
+        assert_eq!(
+            after_bump,
+            crate::INSTANCE_TTL_EXTEND,
+            "cycle {cycle}: keeper bump must restore full INSTANCE_TTL_EXTEND"
+        );
+    }
+
+    // Quiet instance remains live and readable after 320,000 ledgers of user inactivity.
+    assert_eq!(t.client.get_admin(), t.admin);
+    assert!(!t.client.is_paused());
+}

@@ -171,8 +171,8 @@ const TTL_THRESHOLD: u32 = 1_000;
 const TTL_EXTEND: u32 = 100_000;
 const EVENT_SCHEMA_VERSION: u32 = 1;
 
-const INSTANCE_TTL_THRESHOLD: u32 = 1_000;
-const INSTANCE_TTL_EXTEND: u32 = 100_000;
+pub const INSTANCE_TTL_THRESHOLD: u32 = 50_000;
+pub const INSTANCE_TTL_EXTEND: u32 = 100_000;
 
 // Issue #851: Enforce minimum timelock (24 hours).
 const MIN_TIMELOCK_DELAY_SECS: u64 = 86400;
@@ -787,7 +787,9 @@ impl GovernanceContract {
     /// automatically, but also callable directly by keepers/cron to extend TTL during
     /// quiet periods with no user-initiated transactions. Requires no auth.
     pub fn bump_instance_ttl(env: Env) {
-        bump_instance(&env);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_TTL_EXTEND, INSTANCE_TTL_EXTEND);
     }
 
     pub fn get_schema_version(env: Env) -> u32 {

@@ -122,8 +122,8 @@ const CURRENT_SCHEMA_VERSION: u32 = 1;
 // currently TTL-extended on write — tracked separately. The unused
 // persistent-TTL constants were removed here to unblock `clippy -D warnings`.
 
-const INSTANCE_TTL_THRESHOLD: u32 = 1_000;
-const INSTANCE_TTL_EXTEND: u32 = 100_000;
+pub const INSTANCE_TTL_THRESHOLD: u32 = 50_000;
+pub const INSTANCE_TTL_EXTEND: u32 = 100_000;
 
 const COMPLETION_POINTS: i64 = 10;
 const DISPUTE_PENALTY_POINTS: i64 = 15;
@@ -313,7 +313,9 @@ impl RegistryContract {
     /// automatically, but also callable directly by keepers/cron to extend TTL during
     /// quiet periods with no user-initiated transactions. Requires no auth.
     pub fn bump_instance_ttl(env: Env) {
-        bump_instance(&env);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_TTL_EXTEND, INSTANCE_TTL_EXTEND);
     }
 
     /// Storage migration hook. This contract's schema hasn't changed since

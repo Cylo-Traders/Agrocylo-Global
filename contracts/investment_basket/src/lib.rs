@@ -207,8 +207,8 @@ pub const MAX_BASKET_SIZE: u32 = 20;
 const TTL_THRESHOLD: u32 = 1_000;
 const TTL_EXTEND: u32 = 100_000;
 
-const INSTANCE_TTL_THRESHOLD: u32 = 1_000;
-const INSTANCE_TTL_EXTEND: u32 = 100_000;
+pub const INSTANCE_TTL_THRESHOLD: u32 = 50_000;
+pub const INSTANCE_TTL_EXTEND: u32 = 100_000;
 
 /// A basket stuck `Open` (nobody has successfully called `fund_basket`) for
 /// this long becomes withdrawable by its depositors (Issue #682).
@@ -390,7 +390,9 @@ impl InvestmentBasketContract {
     /// automatically, but also callable directly by keepers/cron to extend TTL during
     /// quiet periods with no user-initiated transactions. Requires no auth.
     pub fn bump_instance_ttl(env: Env) {
-        bump_instance(&env);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_TTL_EXTEND, INSTANCE_TTL_EXTEND);
     }
 
     /// Storage migration (Issue #757), worked example: translates baskets

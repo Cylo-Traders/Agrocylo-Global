@@ -260,6 +260,14 @@ const CANCEL_WINDOW_SECONDS: u64 = 30 * 60;
 
 const TTL_THRESHOLD: u32 = 1000;
 const TTL_EXTEND_TO: u32 = 100_000;
+pub const INSTANCE_TTL_THRESHOLD: u32 = 50_000;
+pub const INSTANCE_TTL_EXTEND: u32 = 100_000;
+
+fn bump_instance(env: &Env) {
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND);
+}
 
 /// Fee rate used before `set_fee_config` has ever been called, matching the
 /// previously-hardcoded 3% fee in `create_order`.
@@ -639,6 +647,7 @@ impl EscrowContract {
         if supported_tokens.len() < 2 {
             return Err(EscrowError::MustSupportTwoTokens);
         }
+        bump_instance(&env);
         storage.set(&DataKey::Admin, &admin);
         storage.set(&DataKey::SupportedTokens, &supported_tokens);
         env.storage()
@@ -751,6 +760,15 @@ impl EscrowContract {
             .instance()
             .get(&DataKey::Paused)
             .unwrap_or(false)
+    }
+
+    /// Permissionless TTL bump for marketplace escrow instance storage (Issue #1290).
+    /// Callable by keepers/cron to unconditionally extend remaining instance TTL to
+    /// `INSTANCE_TTL_EXTEND` during quiet periods with no user transactions. Requires no auth.
+    pub fn bump_instance_ttl(env: Env) {
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_TTL_EXTEND, INSTANCE_TTL_EXTEND);
     }
 
     /// Storage migration hook. This contract's schema hasn't changed since
