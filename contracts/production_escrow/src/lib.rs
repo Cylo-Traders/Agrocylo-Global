@@ -1809,9 +1809,7 @@ impl ProductionEscrowContract {
         }
         if matches!(
             campaign.status,
-            CampaignStatus::Failed
-                | CampaignStatus::Disputed
-                | CampaignStatus::Settled
+            CampaignStatus::Failed | CampaignStatus::Disputed | CampaignStatus::Settled
         ) {
             return Err(EscrowError::CampaignAlreadyDisputed);
         }
