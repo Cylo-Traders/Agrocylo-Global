@@ -1,0 +1,57 @@
+{
+  "network": "testnet",
+  "updated": "2026-11-15T22:00:00Z",
+  "verification": {
+    "verified_at": "2026-11-15T22:00:00Z",
+    "deploy_ledger": 1482910,
+    "rpc_url": "https://soroban-testnet.stellar.org",
+    "network_passphrase": "Test SDF Network ; September 2015",
+    "admin": "GA3KNVX2R4ZDJJ3J6CXZJ6MCAJT7DTDDNHOG5EBAXXW2HTYJHJGREK5M"
+  },
+  "contracts": {
+    "governance": {
+      "id": "CAUYF5C7S2NPEKJRWDVADMWR4BZBY3OQWZJ5S6F2XRJEPFGDRWPJY7RN",
+      "wasm": "governance.wasm",
+      "wasm_hash": "e4423416866bd0f3d18f58967f3ed5381ada413338574b29a4a16ecd889de3ad",
+      "salt": "0e2e0baeedfdb0130b1a1dddf97c13dab79f96b76cc97f8428f850c6b0209c61",
+      "initialized": true
+    },
+    "escrow": {
+      "id": "CBJXHC2CDO7CYJWUWG4S3VCP5S5YBKHNQBHUFLGDEPH72QD5UCXSWJOW",
+      "wasm": "escrow.wasm",
+      "wasm_hash": "612983253978ac0ff360b0063236f14daf8a3e8759dd57e09f0a1d4db86cde64",
+      "salt": "41b8752b9b3734bee9db5ccf8b52bcca7677e239e02c6f8991f366474eaf6fef",
+      "initialized": true
+    },
+    "production_escrow": {
+      "id": "CD32EWZUKYGU5LU5AAHM4YEZJVIQ3TBO2YHXGBKPOJVAOJYUWDNVUWU6",
+      "wasm": "production_escrow_v2.wasm",
+      "wasm_hash": "d4cc4df2b47c3931ad1e736de5f70bc1ffbe9ce59b4b216ca4e9304d7ba19646",
+      "salt": "0f11b93c532a7046239fb847bdc9991445bb22698676b24f782b71403c55691e",
+      "initialized": true
+    },
+    "registry": {
+      "id": "CAUCYVBEPUBFCB3LKLXIT6MWUSLRNGYVRRT37QUKAGSN6CCS2GIR5EQG",
+      "wasm": "registry.wasm",
+      "wasm_hash": "05be3de60925cc70490d9bd847d1cbd76b1280b63c20a0afb3f65dd063ae5cec",
+      "salt": "175deebfb23597dfd991696e2e6d90d895278972239b3a5ed810e90282da1ad7",
+      "initialized": true
+    },
+    "investment_basket": {
+      "id": "CDAWHGW4IP24A4ZPJA3BJPJPVW6P74SAGBNG2JPZ6F3LJ5S5CFFQKXRK",
+      "wasm": "investment_basket.wasm",
+      "wasm_hash": "3128dbda39793b5177d50787070a3c7afd8f40caf862c2216504b1509ad013db",
+      "salt": "a39b5042749b8c646afda1aed8b129726ecf4e4b9e9b5f26fb8fe1a114b50169",
+      "initialized": true
+    }
+  },
+  "wiring": {
+    "escrow.registry": "CAUCYVBEPUBFCB3LKLXIT6MWUSLRNGYVRRT37QUKAGSN6CCS2GIR5EQG",
+    "escrow.governance": "CAUYF5C7S2NPEKJRWDVADMWR4BZBY3OQWZJ5S6F2XRJEPFGDRWPJY7RN",
+    "escrow.path_payment_router": "CAI6RSBJAILHIN75A4MHE6ITYAZ7MKFCH3C5Z56C77IXONSZEYYEACHH",
+    "production_escrow.registry": "CAUCYVBEPUBFCB3LKLXIT6MWUSLRNGYVRRT37QUKAGSN6CCS2GIR5EQG",
+    "production_escrow.governance": "CAUYF5C7S2NPEKJRWDVADMWR4BZBY3OQWZJ5S6F2XRJEPFGDRWPJY7RN",
+    "registry.governance": "CAUYF5C7S2NPEKJRWDVADMWR4BZBY3OQWZJ5S6F2XRJEPFGDRWPJY7RN",
+    "investment_basket.governance": "CAUYF5C7S2NPEKJRWDVADMWR4BZBY3OQWZJ5S6F2XRJEPFGDRWPJY7RN"
+  }
+}
