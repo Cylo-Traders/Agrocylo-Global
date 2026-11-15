@@ -97,10 +97,7 @@ router.get(
     const minPrice = parsed.data.minPrice ?? parsed.data.priceMin;
     const maxPrice = parsed.data.maxPrice ?? parsed.data.priceMax;
     const page = Math.max(Number(parsed.data.page ?? '1'), 1);
-    const limit = Math.min(
-      Math.max(Number(parsed.data.limit ?? '50'), 1),
-      100,
-    );
+    const limit = Math.min(Math.max(Number(parsed.data.limit ?? '50'), 1), 100);
     const where = {
       ...(category ? { category } : {}),
       ...(campaignId ? { campaignId } : {}),
@@ -220,11 +217,25 @@ router.post(
         where: { id: input.campaignId },
       });
       if (!campaign) {
-        problemDetail(res, req, 404, 'Campaign Not Found', `No campaign with id ${input.campaignId}`);
+        problemDetail(
+          res,
+          req,
+          404,
+          'Campaign Not Found',
+          `No campaign with id ${input.campaignId}`,
+        );
         return;
       }
-      if (campaign.farmerAddress.toLowerCase() !== walletAddress.toLowerCase()) {
-        problemDetail(res, req, 403, 'Forbidden', 'You can only create products for your own campaigns');
+      if (
+        campaign.farmerAddress.toLowerCase() !== walletAddress.toLowerCase()
+      ) {
+        problemDetail(
+          res,
+          req,
+          403,
+          'Forbidden',
+          'You can only create products for your own campaigns',
+        );
         return;
       }
     }
@@ -266,12 +277,28 @@ router.patch(
     });
 
     if (!existing) {
-      problemDetail(res, req, 404, 'Product Not Found', `No product with id ${id}`);
+      problemDetail(
+        res,
+        req,
+        404,
+        'Product Not Found',
+        `No product with id ${id}`,
+      );
       return;
     }
 
-    if (existing.campaign && existing.campaign.farmerAddress.toLowerCase() !== walletAddress.toLowerCase()) {
-      problemDetail(res, req, 403, 'Forbidden', 'You can only update your own products');
+    if (
+      existing.campaign &&
+      existing.campaign.farmerAddress.toLowerCase() !==
+        walletAddress.toLowerCase()
+    ) {
+      problemDetail(
+        res,
+        req,
+        403,
+        'Forbidden',
+        'You can only update your own products',
+      );
       return;
     }
 
@@ -279,11 +306,19 @@ router.patch(
       where: { id },
       data: {
         ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(input.description !== undefined ? { description: input.description ?? '' } : {}),
+        ...(input.description !== undefined
+          ? { description: input.description ?? '' }
+          : {}),
         ...(input.category !== undefined ? { category: input.category } : {}),
-        ...(input.priceTokens !== undefined ? { priceTokens: BigInt(input.priceTokens) } : {}),
-        ...(input.inventoryCount !== undefined ? { inventoryCount: input.inventoryCount } : {}),
-        ...(input.campaignId !== undefined ? { campaignId: input.campaignId } : {}),
+        ...(input.priceTokens !== undefined
+          ? { priceTokens: BigInt(input.priceTokens) }
+          : {}),
+        ...(input.inventoryCount !== undefined
+          ? { inventoryCount: input.inventoryCount }
+          : {}),
+        ...(input.campaignId !== undefined
+          ? { campaignId: input.campaignId }
+          : {}),
         ...(input.imageUrl !== undefined ? { imageUrl: input.imageUrl } : {}),
         ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
       },
@@ -310,12 +345,28 @@ router.delete(
     });
 
     if (!existing) {
-      problemDetail(res, req, 404, 'Product Not Found', `No product with id ${id}`);
+      problemDetail(
+        res,
+        req,
+        404,
+        'Product Not Found',
+        `No product with id ${id}`,
+      );
       return;
     }
 
-    if (existing.campaign && existing.campaign.farmerAddress.toLowerCase() !== walletAddress.toLowerCase()) {
-      problemDetail(res, req, 403, 'Forbidden', 'You can only delete your own products');
+    if (
+      existing.campaign &&
+      existing.campaign.farmerAddress.toLowerCase() !==
+        walletAddress.toLowerCase()
+    ) {
+      problemDetail(
+        res,
+        req,
+        403,
+        'Forbidden',
+        'You can only delete your own products',
+      );
       return;
     }
 

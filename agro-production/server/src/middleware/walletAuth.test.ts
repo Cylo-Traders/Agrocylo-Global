@@ -1,25 +1,28 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import jwt from "jsonwebtoken";
-import type { Response } from "express";
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import jwt from 'jsonwebtoken';
+import type { Response } from 'express';
 
-vi.mock("../config/index.js", () => ({
-  config: { jwtSecret: "test-secret-at-least-32-chars-long!!" },
+vi.mock('../config/index.js', () => ({
+  config: { jwtSecret: 'test-secret-at-least-32-chars-long!!' },
 }));
 
-vi.mock("../services/walletAuthService.js", () => ({
+vi.mock('../services/walletAuthService.js', () => ({
   verifySession: vi.fn(),
   AuthError: class AuthError extends Error {
-    constructor(public status: number, message: string) {
+    constructor(
+      public status: number,
+      message: string,
+    ) {
       super(message);
     }
   },
-  HANDOFF_AUDIENCE: "agrocylo-sso-handoff",
+  HANDOFF_AUDIENCE: 'agrocylo-sso-handoff',
 }));
 
-const { requireWallet } = await import("./walletAuth.js");
+const { requireWallet } = await import('./walletAuth.js');
 
-const JWT_SECRET = "test-secret-at-least-32-chars-long!!";
-const WALLET = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const JWT_SECRET = 'test-secret-at-least-32-chars-long!!';
+const WALLET = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
 function makeRes() {
   const res: Partial<Response> = {
@@ -29,16 +32,16 @@ function makeRes() {
   return res as Response;
 }
 
-describe("requireWallet rejects handoff tokens (Issue #686)", () => {
+describe('requireWallet rejects handoff tokens (Issue #686)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("rejects a token carrying the SSO handoff audience claim", async () => {
+  it('rejects a token carrying the SSO handoff audience claim', async () => {
     const handoffToken = jwt.sign({ walletAddress: WALLET }, JWT_SECRET, {
-      expiresIn: "60s",
-      audience: "agrocylo-sso-handoff",
-      jwtid: "some-jti",
+      expiresIn: '60s',
+      audience: 'agrocylo-sso-handoff',
+      jwtid: 'some-jti',
     });
 
     const req: any = { header: () => `Bearer ${handoffToken}` };
@@ -51,10 +54,14 @@ describe("requireWallet rejects handoff tokens (Issue #686)", () => {
     expect(res.status).toHaveBeenCalledWith(401);
   });
 
-  it("accepts a normal session token without a handoff audience claim", async () => {
-    const sessionToken = jwt.sign({ walletAddress: WALLET, role: "USER" }, JWT_SECRET, {
-      expiresIn: "15m",
-    });
+  it('accepts a normal session token without a handoff audience claim', async () => {
+    const sessionToken = jwt.sign(
+      { walletAddress: WALLET, role: 'USER' },
+      JWT_SECRET,
+      {
+        expiresIn: '15m',
+      },
+    );
 
     const req: any = { header: () => `Bearer ${sessionToken}` };
     const res = makeRes();

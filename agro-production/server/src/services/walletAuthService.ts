@@ -41,7 +41,9 @@ export interface VerifiedSession {
   sessionToken: string;
 }
 
-export async function createChallenge(walletAddress: string): Promise<ChallengeResult> {
+export async function createChallenge(
+  walletAddress: string,
+): Promise<ChallengeResult> {
   const nonce = randomUUID();
   const expiresAt = new Date(Date.now() + NONCE_EXPIRY_SECS * 1000);
 
@@ -166,7 +168,10 @@ export async function verifyHandoffAndCreateSession(
     const decoded = jwt.verify(handoffToken, config.jwtSecret, {
       audience: HANDOFF_AUDIENCE,
     }) as jwt.JwtPayload;
-    if (typeof decoded.walletAddress !== 'string' || typeof decoded.jti !== 'string') {
+    if (
+      typeof decoded.walletAddress !== 'string' ||
+      typeof decoded.jti !== 'string'
+    ) {
       throw new Error('Malformed handoff token payload.');
     }
     walletAddress = decoded.walletAddress;

@@ -1,29 +1,34 @@
-import { Router, type Request, type Response } from "express";
-import { z } from "zod";
-import { prisma } from "../db/client.js";
-import { requireWallet, type WalletRequest } from "../middleware/walletAuth.js";
-import { jsonValidated, validateParams, validateQuery, validateResponse } from "../middleware/validate.js";
-import { problemDetail } from "../middleware/errors.js";
+import { Router, type Request, type Response } from 'express';
+import { z } from 'zod';
+import { prisma } from '../db/client.js';
+import { requireWallet, type WalletRequest } from '../middleware/walletAuth.js';
+import {
+  jsonValidated,
+  validateParams,
+  validateQuery,
+  validateResponse,
+} from '../middleware/validate.js';
+import { problemDetail } from '../middleware/errors.js';
 import {
   BasketIdParamSchema,
   ListBasketDepositsQuerySchema,
   ListBasketsQuerySchema,
   type ListBasketDepositsQuery,
   type ListBasketsQuery,
-} from "../schemas/basket.js";
+} from '../schemas/basket.js';
 import {
   BasketDepositSchema,
   BasketDetailSchema,
   BasketListResponseSchema,
   InvestorBasketSummarySchema,
-} from "../schemas/responses.js";
-import { asyncHandler } from "../middleware/asyncHandler.js";
+} from '../schemas/responses.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 
 const router = Router();
 
 // GET /baskets — list investment baskets with optional status filter and pagination
 router.get(
-  "/baskets",
+  '/baskets',
   validateQuery(ListBasketsQuerySchema),
   validateResponse(BasketListResponseSchema),
   asyncHandler(async (req: Request, res: Response) => {
@@ -35,7 +40,7 @@ router.get(
         where,
         skip: (page - 1) * limit,
         take: limit,
-        orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: 'desc' },
       }),
       prisma.basket.count({ where }),
     ]);
@@ -49,17 +54,23 @@ router.get(
 
 // GET /baskets/:id — basket detail with depositor positions
 router.get(
-  "/baskets/:id",
+  '/baskets/:id',
   validateParams(BasketIdParamSchema),
   validateResponse(BasketDetailSchema),
   asyncHandler(async (req: Request, res: Response) => {
     const basket = await prisma.basket.findUnique({
       where: { id: req.params.id },
-      include: { deposits: { orderBy: { createdAt: "desc" } } },
+      include: { deposits: { orderBy: { createdAt: 'desc' } } },
     });
 
     if (!basket) {
-      problemDetail(res, req, 404, "Basket Not Found", `No basket with id ${req.params.id}`);
+      problemDetail(
+        res,
+        req,
+        404,
+        'Basket Not Found',
+        `No basket with id ${req.params.id}`,
+      );
       return;
     }
 
@@ -69,13 +80,13 @@ router.get(
 
 // GET /baskets/:id/deposits — depositor positions for a basket
 router.get(
-  "/baskets/:id/deposits",
+  '/baskets/:id/deposits',
   validateParams(BasketIdParamSchema),
   validateResponse(z.array(BasketDepositSchema)),
   asyncHandler(async (req: Request, res: Response) => {
     const deposits = await prisma.basketDeposit.findMany({
       where: { basketId: req.params.id },
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
     });
     jsonValidated(res, z.array(BasketDepositSchema), 200, deposits);
   }),
@@ -83,15 +94,16 @@ router.get(
 
 // GET /basket-deposits?depositorAddress=... — a depositor's position across all baskets
 router.get(
-  "/basket-deposits",
+  '/basket-deposits',
   validateQuery(ListBasketDepositsQuerySchema),
   validateResponse(z.array(BasketDepositSchema)),
   asyncHandler(async (req: Request, res: Response) => {
-    const { depositorAddress } = req.query as unknown as ListBasketDepositsQuery;
+    const { depositorAddress } =
+      req.query as unknown as ListBasketDepositsQuery;
 
     const deposits = await prisma.basketDeposit.findMany({
       where: { depositorAddress },
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
     });
 
     jsonValidated(res, z.array(BasketDepositSchema), 200, deposits);
@@ -105,7 +117,7 @@ router.get(
 // basket is the basket owning the most recent deposit; amounts are i128
 // stroop strings exactly as indexed on-chain.
 router.get(
-  "/investor/basket",
+  '/investor/basket',
   requireWallet,
   validateResponse(InvestorBasketSummarySchema),
   asyncHandler(async (req: WalletRequest, res: Response) => {
@@ -113,7 +125,7 @@ router.get(
 
     const deposits = await prisma.basketDeposit.findMany({
       where: { depositorAddress: walletAddress },
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
     });
 
     if (deposits.length === 0) {
@@ -121,7 +133,7 @@ router.get(
         res,
         req,
         404,
-        "Basket Not Found",
+        'Basket Not Found',
         `No basket deposits found for ${walletAddress}`,
       );
       return;
@@ -129,7 +141,7 @@ router.get(
 
     // Active-basket selection: the basket owning the most recent deposit.
     const basket = await prisma.basket.findUnique({
-      where: { id: deposits[0]!.basketId },
+      where: { id: deposits[0].basketId },
     });
 
     if (!basket) {
@@ -137,8 +149,8 @@ router.get(
         res,
         req,
         404,
-        "Basket Not Found",
-        `No basket with id ${deposits[0]!.basketId}`,
+        'Basket Not Found',
+        `No basket with id ${deposits[0].basketId}`,
       );
       return;
     }
@@ -150,7 +162,7 @@ router.get(
     let totalAllocated = 0n;
     let totalReturned = 0n;
     for (const position of positions) {
-      totalAllocated += BigInt(position.amount || "0");
+      totalAllocated += BigInt(position.amount || '0');
       if (position.claimed && position.payoutAmount) {
         totalReturned += BigInt(position.payoutAmount);
       }

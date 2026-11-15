@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Mocks — vi.hoisted provides variables visible to both vi.mock factories and
@@ -28,7 +28,7 @@ const {
   mockGetLedger: vi.fn().mockResolvedValue({ hash: 'abcd1234' }),
 }));
 
-vi.mock("../db/client.js", () => ({
+vi.mock('../db/client.js', () => ({
   prisma: {
     eventCursor: {
       findUnique: mockEventCursorFindUnique,
@@ -44,36 +44,36 @@ vi.mock("../db/client.js", () => ({
   },
 }));
 
-vi.mock("../config/logger.js", () => ({
+vi.mock('../config/logger.js', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-vi.mock("../config/index.js", () => ({
+vi.mock('../config/index.js', () => ({
   config: {
-    rpcUrl: "https://soroban-testnet.stellar.org",
-    contractId: "CTEST000000000000000000000000000000000000000000000000AA",
+    rpcUrl: 'https://soroban-testnet.stellar.org',
+    contractId: 'CTEST000000000000000000000000000000000000000000000000AA',
   },
 }));
 
-vi.mock("./parser.js", () => ({
+vi.mock('./parser.js', () => ({
   ProductionEventParser: { tryParse: vi.fn().mockReturnValue(null) },
 }));
 
-vi.mock("./persister.js", () => ({
+vi.mock('./persister.js', () => ({
   EventPersister: { persist: vi.fn().mockResolvedValue(undefined) },
   DependencyMissingError: class DependencyMissingError extends Error {
     dependency: string;
     dependencyOnChainId: string;
     constructor(dependency: string, dependencyOnChainId: string) {
       super(`${dependency} ${dependencyOnChainId} has not been indexed yet`);
-      this.name = "DependencyMissingError";
+      this.name = 'DependencyMissingError';
       this.dependency = dependency;
       this.dependencyOnChainId = dependencyOnChainId;
     }
   },
 }));
 
-vi.mock("@stellar/stellar-sdk", () => ({
+vi.mock('@stellar/stellar-sdk', () => ({
   rpc: {
     Server: vi.fn().mockImplementation(function () {
       return {
@@ -82,7 +82,9 @@ vi.mock("@stellar/stellar-sdk", () => ({
         // Watcher fetches single ledgers via SDK 17 getLedgers; mockGetLedger
         // supplies the per-sequence ledger fields.
         getLedgers: async ({ startLedger }: { startLedger: number }) => ({
-          ledgers: [{ ...(await mockGetLedger(startLedger)), sequence: startLedger }],
+          ledgers: [
+            { ...(await mockGetLedger(startLedger)), sequence: startLedger },
+          ],
         }),
       };
     }),
@@ -92,14 +94,14 @@ vi.mock("@stellar/stellar-sdk", () => ({
 // ---------------------------------------------------------------------------
 // After all mocks are declared we can import the module under test.
 // ---------------------------------------------------------------------------
-import { startProductionWatcher, replayDeadLetterEvents } from "./watcher.js";
-import { DependencyMissingError } from "./persister.js";
-import { ProductionEventParser } from "./parser.js";
-import { EventPersister } from "./persister.js";
-import logger from "../config/logger.js";
-import { EVENT_SCHEMA_VERSION } from "./schema.js";
+import { startProductionWatcher, replayDeadLetterEvents } from './watcher.js';
+import { DependencyMissingError } from './persister.js';
+import { ProductionEventParser } from './parser.js';
+import { EventPersister } from './persister.js';
+import logger from '../config/logger.js';
+import { EVENT_SCHEMA_VERSION } from './schema.js';
 
-describe("startProductionWatcher", () => {
+describe('startProductionWatcher', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
@@ -110,10 +112,10 @@ describe("startProductionWatcher", () => {
     vi.clearAllTimers();
   });
 
-  describe("cursor loading", () => {
-    it("resumes from the persisted cursor when an eventCursor record exists", async () => {
+  describe('cursor loading', () => {
+    it('resumes from the persisted cursor when an eventCursor record exists', async () => {
       mockEventCursorFindUnique.mockResolvedValueOnce({
-        contractId: "CTEST",
+        contractId: 'CTEST',
         ledger: 300,
         eventIndex: 2,
       });
@@ -121,28 +123,28 @@ describe("startProductionWatcher", () => {
       await startProductionWatcher();
 
       expect(logger.info).toHaveBeenCalledWith(
-        "Production watcher: resuming from persisted cursor",
+        'Production watcher: resuming from persisted cursor',
         expect.objectContaining({ ledger: 300, eventIndex: 2 }),
       );
     });
 
-    it("falls back to the current ledger tip when no cursor exists", async () => {
+    it('falls back to the current ledger tip when no cursor exists', async () => {
       mockEventCursorFindUnique.mockResolvedValueOnce(null);
       mockGetLatestLedger.mockResolvedValueOnce({ sequence: 500 });
 
       await startProductionWatcher();
 
       expect(logger.info).toHaveBeenCalledWith(
-        "Production watcher: no cursor found, starting from current ledger",
+        'Production watcher: no cursor found, starting from current ledger',
         expect.objectContaining({ ledger: 500 }),
       );
     });
   });
 
-  describe("gap handling", () => {
-    it("logs an error when gap exceeds MAX_BACKFILL_BATCH but continues", async () => {
+  describe('gap handling', () => {
+    it('logs an error when gap exceeds MAX_BACKFILL_BATCH but continues', async () => {
       mockEventCursorFindUnique.mockResolvedValueOnce({
-        contractId: "CTEST",
+        contractId: 'CTEST',
         ledger: 100,
         eventIndex: 0,
       });
@@ -152,14 +154,14 @@ describe("startProductionWatcher", () => {
       await vi.advanceTimersByTimeAsync(5_000);
 
       expect(logger.error).toHaveBeenCalledWith(
-        "Production watcher: large ledger gap detected, backfill may not cover all events",
+        'Production watcher: large ledger gap detected, backfill may not cover all events',
         expect.objectContaining({ gap: 1100, maxBatch: 100 }),
       );
     });
 
-    it("does not log a gap warning when the gap is within MAX_BACKFILL_BATCH", async () => {
+    it('does not log a gap warning when the gap is within MAX_BACKFILL_BATCH', async () => {
       mockEventCursorFindUnique.mockResolvedValueOnce({
-        contractId: "CTEST",
+        contractId: 'CTEST',
         ledger: 490,
         eventIndex: 0,
       });
@@ -169,16 +171,16 @@ describe("startProductionWatcher", () => {
       await vi.advanceTimersByTimeAsync(5_000);
 
       expect(logger.error).not.toHaveBeenCalledWith(
-        "Production watcher: large ledger gap detected, backfill may not cover all events",
+        'Production watcher: large ledger gap detected, backfill may not cover all events',
         expect.anything(),
       );
     });
   });
 
-  describe("poll loop", () => {
-    it("calls getEvents with the correct startLedger on the first tick", async () => {
+  describe('poll loop', () => {
+    it('calls getEvents with the correct startLedger on the first tick', async () => {
       mockEventCursorFindUnique.mockResolvedValueOnce({
-        contractId: "CTEST",
+        contractId: 'CTEST',
         ledger: 300,
         eventIndex: 0,
       });
@@ -193,9 +195,9 @@ describe("startProductionWatcher", () => {
       );
     });
 
-    it("advances the cursor after processing events", async () => {
+    it('advances the cursor after processing events', async () => {
       mockEventCursorFindUnique.mockResolvedValueOnce({
-        contractId: "CTEST",
+        contractId: 'CTEST',
         ledger: 300,
         eventIndex: 0,
       });
@@ -203,12 +205,12 @@ describe("startProductionWatcher", () => {
 
       const fakeEvent = {
         ledger: 302,
-        id: "302-0",
-        type: "contract",
+        id: '302-0',
+        type: 'contract',
         ledgerClosedAt: new Date().toISOString(),
-        contractId: "CTEST",
+        contractId: 'CTEST',
         topic: [],
-        value: "",
+        value: '',
       };
       mockGetEvents.mockResolvedValueOnce({ events: [fakeEvent] });
       vi.mocked(ProductionEventParser.tryParse).mockReturnValueOnce(null);
@@ -234,10 +236,10 @@ describe("startProductionWatcher", () => {
       expect(calls[1][0]).toMatchObject({ startLedger: 302 });
     });
 
-    it("logs and continues when getEvents throws", async () => {
+    it('logs and continues when getEvents throws', async () => {
       mockEventCursorFindUnique.mockResolvedValueOnce(null);
       mockGetLatestLedger.mockResolvedValue({ sequence: 500 });
-      mockGetEvents.mockRejectedValueOnce(new Error("RPC timeout"));
+      mockGetEvents.mockRejectedValueOnce(new Error('RPC timeout'));
 
       await startProductionWatcher();
       await vi.advanceTimersByTimeAsync(5_000);
@@ -249,23 +251,23 @@ describe("startProductionWatcher", () => {
       // this PR touched the file for its own reasons (adding a Sentry
       // alert call in the same catch block).
       expect(logger.error).toHaveBeenCalledWith(
-        "Soroban watcher poll error",
+        'Soroban watcher poll error',
         expect.objectContaining({ error: expect.any(Error) }),
       );
     });
 
-    it("skips events that fail to parse (tryParse returns null)", async () => {
+    it('skips events that fail to parse (tryParse returns null)', async () => {
       mockEventCursorFindUnique.mockResolvedValueOnce(null);
       mockGetLatestLedger.mockResolvedValue({ sequence: 500 });
 
       const badEvent = {
         ledger: 501,
-        id: "501-0",
-        type: "contract",
+        id: '501-0',
+        type: 'contract',
         ledgerClosedAt: new Date().toISOString(),
-        contractId: "CTEST",
+        contractId: 'CTEST',
         topic: [],
-        value: "",
+        value: '',
       };
       mockGetEvents.mockResolvedValueOnce({ events: [badEvent] });
       vi.mocked(ProductionEventParser.tryParse).mockReturnValueOnce(null);
@@ -278,35 +280,37 @@ describe("startProductionWatcher", () => {
       expect(mockEventCursorUpsert).toHaveBeenCalled();
     });
 
-    it("persists events that parse successfully", async () => {
+    it('persists events that parse successfully', async () => {
       mockEventCursorFindUnique.mockResolvedValueOnce(null);
       mockGetLatestLedger.mockResolvedValue({ sequence: 500 });
 
       const rawEvent = {
         ledger: 501,
-        id: "501-0",
-        type: "contract",
+        id: '501-0',
+        type: 'contract',
         ledgerClosedAt: new Date().toISOString(),
-        contractId: "CTEST",
+        contractId: 'CTEST',
         topic: [],
-        value: "",
+        value: '',
       };
       const parsedEvent = {
-        action: "campaign.created" as const,
+        action: 'campaign.created' as const,
         schemaVersion: EVENT_SCHEMA_VERSION,
         ledger: 501,
         eventIndex: 0,
         timestamp: new Date(),
-        rawId: "501-0",
-        campaignId: "1",
-        farmer: "GFARMER",
-        token: "GTOKEN",
-        targetAmount: "10000",
-        deadline: "9999999",
+        rawId: '501-0',
+        campaignId: '1',
+        farmer: 'GFARMER',
+        token: 'GTOKEN',
+        targetAmount: '10000',
+        deadline: '9999999',
       };
 
       mockGetEvents.mockResolvedValueOnce({ events: [rawEvent] });
-      vi.mocked(ProductionEventParser.tryParse).mockReturnValueOnce(parsedEvent);
+      vi.mocked(ProductionEventParser.tryParse).mockReturnValueOnce(
+        parsedEvent,
+      );
 
       await startProductionWatcher();
       await vi.advanceTimersByTimeAsync(5_000);
@@ -314,33 +318,37 @@ describe("startProductionWatcher", () => {
       expect(EventPersister.persist).toHaveBeenCalledWith(parsedEvent);
     });
 
-    it("sends persist failures to dead-letter and does NOT advance cursor past them", async () => {
+    it('sends persist failures to dead-letter and does NOT advance cursor past them', async () => {
       mockEventCursorFindUnique.mockResolvedValueOnce(null);
       mockGetLatestLedger.mockResolvedValue({ sequence: 500 });
 
       const rawEvent = {
         ledger: 501,
-        id: "501-0",
-        type: "contract",
+        id: '501-0',
+        type: 'contract',
         ledgerClosedAt: new Date().toISOString(),
-        contractId: "CTEST",
+        contractId: 'CTEST',
         topic: [],
-        value: "",
+        value: '',
       };
       const parsedEvent = {
-        action: "campaign.settled" as const,
+        action: 'campaign.settled' as const,
         schemaVersion: EVENT_SCHEMA_VERSION,
         ledger: 501,
         eventIndex: 0,
         timestamp: new Date(),
-        rawId: "501-0",
-        campaignId: "1",
-        totalRevenue: "500",
+        rawId: '501-0',
+        campaignId: '1',
+        totalRevenue: '500',
       };
 
       mockGetEvents.mockResolvedValueOnce({ events: [rawEvent] });
-      vi.mocked(ProductionEventParser.tryParse).mockReturnValueOnce(parsedEvent);
-      vi.mocked(EventPersister.persist).mockRejectedValue(new Error("write failed"));
+      vi.mocked(ProductionEventParser.tryParse).mockReturnValueOnce(
+        parsedEvent,
+      );
+      vi.mocked(EventPersister.persist).mockRejectedValue(
+        new Error('write failed'),
+      );
 
       await startProductionWatcher();
       // Advance past poll interval (5s) plus retry delays (~2.8s total)
@@ -351,8 +359,8 @@ describe("startProductionWatcher", () => {
         expect.objectContaining({
           where: { ledger_eventIndex: { ledger: 501, eventIndex: 0 } },
           create: expect.objectContaining({
-            eventType: "dead_letter",
-            status: "failed",
+            eventType: 'dead_letter',
+            status: 'failed',
             ledger: 501,
           }),
         }),
@@ -362,9 +370,9 @@ describe("startProductionWatcher", () => {
       expect(mockEventCursorUpsert).not.toHaveBeenCalled();
     });
 
-    it("dead-letters a dependency-missing event and stores it for replay (issue #1067)", async () => {
+    it('dead-letters a dependency-missing event and stores it for replay (issue #1067)', async () => {
       mockEventCursorFindUnique.mockResolvedValueOnce({
-        contractId: "CTEST",
+        contractId: 'CTEST',
         ledger: 300,
         eventIndex: 0,
       });
@@ -372,30 +380,32 @@ describe("startProductionWatcher", () => {
 
       const rawEvent = {
         ledger: 302,
-        id: "302-0",
-        type: "contract",
+        id: '302-0',
+        type: 'contract',
         ledgerClosedAt: new Date().toISOString(),
-        contractId: "CTEST",
+        contractId: 'CTEST',
         topic: [],
-        value: "",
+        value: '',
       };
       const parsedEvent = {
-        action: "campaign.invested" as const,
+        action: 'campaign.invested' as const,
         schemaVersion: EVENT_SCHEMA_VERSION,
         ledger: 302,
         eventIndex: 0,
         timestamp: new Date(),
-        rawId: "302-0",
-        campaignId: "7",
-        investor: "GINVESTOR0000000000000000000000000000000000000000000000",
-        amount: "100",
-        totalRaised: "100",
+        rawId: '302-0',
+        campaignId: '7',
+        investor: 'GINVESTOR0000000000000000000000000000000000000000000000',
+        amount: '100',
+        totalRaised: '100',
       };
 
       mockGetEvents.mockResolvedValueOnce({ events: [rawEvent] });
-      vi.mocked(ProductionEventParser.tryParse).mockReturnValueOnce(parsedEvent);
+      vi.mocked(ProductionEventParser.tryParse).mockReturnValueOnce(
+        parsedEvent,
+      );
       vi.mocked(EventPersister.persist).mockRejectedValue(
-        new DependencyMissingError("campaign", "7"),
+        new DependencyMissingError('campaign', '7'),
       );
 
       await startProductionWatcher();
@@ -407,7 +417,7 @@ describe("startProductionWatcher", () => {
         expect.objectContaining({
           where: { ledger_eventIndex: { ledger: 302, eventIndex: 0 } },
           create: expect.objectContaining({
-            eventType: "dead_letter",
+            eventType: 'dead_letter',
             ledger: 302,
           }),
         }),
@@ -417,9 +427,9 @@ describe("startProductionWatcher", () => {
       expect(mockEventCursorUpsert).not.toHaveBeenCalled();
     });
 
-    it("replays dead-lettered child events after the parent campaign is indexed (issue #1067)", async () => {
+    it('replays dead-lettered child events after the parent campaign is indexed (issue #1067)', async () => {
       mockEventCursorFindUnique.mockResolvedValueOnce({
-        contractId: "CTEST",
+        contractId: 'CTEST',
         ledger: 300,
         eventIndex: 0,
       });
@@ -427,46 +437,46 @@ describe("startProductionWatcher", () => {
 
       const parentRaw = {
         ledger: 302,
-        id: "302-0",
-        type: "contract",
+        id: '302-0',
+        type: 'contract',
         ledgerClosedAt: new Date().toISOString(),
-        contractId: "CTEST",
+        contractId: 'CTEST',
         topic: [],
-        value: "",
+        value: '',
       };
       const childRaw = {
         ledger: 301,
-        id: "301-0",
-        type: "contract",
+        id: '301-0',
+        type: 'contract',
         ledgerClosedAt: new Date().toISOString(),
-        contractId: "CTEST",
+        contractId: 'CTEST',
         topic: [],
-        value: "",
+        value: '',
       };
       const parentEvent = {
-        action: "campaign.created" as const,
+        action: 'campaign.created' as const,
         schemaVersion: EVENT_SCHEMA_VERSION,
         ledger: 302,
         eventIndex: 0,
         timestamp: new Date(),
-        rawId: "302-0",
-        campaignId: "7",
-        farmer: "GFARMER",
-        token: "GTOKEN",
-        targetAmount: "1000",
-        deadline: "9999999",
+        rawId: '302-0',
+        campaignId: '7',
+        farmer: 'GFARMER',
+        token: 'GTOKEN',
+        targetAmount: '1000',
+        deadline: '9999999',
       };
       const childEvent = {
-        action: "campaign.invested" as const,
+        action: 'campaign.invested' as const,
         schemaVersion: EVENT_SCHEMA_VERSION,
         ledger: 301,
         eventIndex: 0,
         timestamp: new Date(),
-        rawId: "301-0",
-        campaignId: "7",
-        investor: "GINVESTOR0000000000000000000000000000000000000000000000",
-        amount: "100",
-        totalRaised: "100",
+        rawId: '301-0',
+        campaignId: '7',
+        investor: 'GINVESTOR0000000000000000000000000000000000000000000000',
+        amount: '100',
+        totalRaised: '100',
       };
 
       mockGetEvents.mockResolvedValueOnce({ events: [parentRaw] });
@@ -477,9 +487,9 @@ describe("startProductionWatcher", () => {
       // A previously dead-lettered investment whose parent has now arrived.
       mockTransactionFindMany.mockResolvedValueOnce([
         {
-          id: "dl-1",
-          eventType: "dead_letter",
-          status: "failed",
+          id: 'dl-1',
+          eventType: 'dead_letter',
+          status: 'failed',
           payload: { rawEvent: childRaw },
           ledger: 301,
           eventIndex: 0,
@@ -493,23 +503,25 @@ describe("startProductionWatcher", () => {
       expect(EventPersister.persist).toHaveBeenCalledTimes(2);
       expect(EventPersister.persist).toHaveBeenLastCalledWith(childEvent);
       // The dead-letter row is removed on successful replay.
-      expect(mockTransactionDelete).toHaveBeenCalledWith({ where: { id: "dl-1" } });
+      expect(mockTransactionDelete).toHaveBeenCalledWith({
+        where: { id: 'dl-1' },
+      });
     });
 
-    it("re-arms the dead letter when a replay still fails (issue #1067)", async () => {
+    it('re-arms the dead letter when a replay still fails (issue #1067)', async () => {
       const row = {
-        id: "dl-1",
-        eventType: "dead_letter",
-        status: "failed",
+        id: 'dl-1',
+        eventType: 'dead_letter',
+        status: 'failed',
         payload: {
           rawEvent: {
             ledger: 301,
-            id: "301-0",
-            type: "contract",
+            id: '301-0',
+            type: 'contract',
             ledgerClosedAt: new Date().toISOString(),
-            contractId: "CTEST",
+            contractId: 'CTEST',
             topic: [],
-            value: "",
+            value: '',
           },
         },
         ledger: 301,
@@ -517,35 +529,37 @@ describe("startProductionWatcher", () => {
       };
       mockTransactionFindMany.mockResolvedValueOnce([row]);
       vi.mocked(ProductionEventParser.tryParse).mockReturnValueOnce({
-        action: "campaign.invested" as const,
+        action: 'campaign.invested' as const,
         schemaVersion: EVENT_SCHEMA_VERSION,
         ledger: 301,
         eventIndex: 0,
         timestamp: new Date(),
-        rawId: "301-0",
-        campaignId: "7",
-        investor: "GINVESTOR0000000000000000000000000000000000000000000000",
-        amount: "100",
-        totalRaised: "100",
+        rawId: '301-0',
+        campaignId: '7',
+        investor: 'GINVESTOR0000000000000000000000000000000000000000000000',
+        amount: '100',
+        totalRaised: '100',
       });
       vi.mocked(EventPersister.persist).mockRejectedValueOnce(
-        new DependencyMissingError("campaign", "7"),
+        new DependencyMissingError('campaign', '7'),
       );
 
       const result = await replayDeadLetterEvents();
 
       expect(result).toEqual({ replayed: 0, failed: 1 });
       // The row was deleted and then re-armed via the deduplicated upsert.
-      expect(mockTransactionDelete).toHaveBeenCalledWith({ where: { id: "dl-1" } });
+      expect(mockTransactionDelete).toHaveBeenCalledWith({
+        where: { id: 'dl-1' },
+      });
       expect(mockTransactionUpsert).toHaveBeenCalled();
     });
 
-    it("respects confirmation depth and skips unconfirmed events", async () => {
+    it('respects confirmation depth and skips unconfirmed events', async () => {
       mockEventCursorFindUnique.mockResolvedValueOnce({
-        contractId: "CTEST",
+        contractId: 'CTEST',
         ledger: 480,
         eventIndex: 0,
-        ledgerHash: "hash480",
+        ledgerHash: 'hash480',
       });
       // Tip is 500, confirmation depth is 10, so confirmed tip is 490
       // Events at 491-500 should be skipped
@@ -553,41 +567,43 @@ describe("startProductionWatcher", () => {
 
       const unconfirmedEvent = {
         ledger: 495, // > confirmed tip (490)
-        id: "495-0",
-        type: "contract",
+        id: '495-0',
+        type: 'contract',
         ledgerClosedAt: new Date().toISOString(),
-        contractId: "CTEST",
+        contractId: 'CTEST',
         topic: [],
-        value: "",
+        value: '',
       };
       const confirmedEvent = {
         ledger: 485, // < confirmed tip (490)
-        id: "485-0",
-        type: "contract",
+        id: '485-0',
+        type: 'contract',
         ledgerClosedAt: new Date().toISOString(),
-        contractId: "CTEST",
+        contractId: 'CTEST',
         topic: [],
-        value: "",
+        value: '',
       };
       mockGetEvents.mockResolvedValueOnce({
         events: [confirmedEvent, unconfirmedEvent],
       });
 
       const parsedEvent = {
-        action: "campaign.created" as const,
+        action: 'campaign.created' as const,
         schemaVersion: EVENT_SCHEMA_VERSION,
         ledger: 485,
         eventIndex: 0,
         timestamp: new Date(),
-        rawId: "485-0",
-        campaignId: "1",
-        farmer: "GFARMER",
-        token: "GTOKEN",
-        targetAmount: "10000",
-        deadline: "9999999",
+        rawId: '485-0',
+        campaignId: '1',
+        farmer: 'GFARMER',
+        token: 'GTOKEN',
+        targetAmount: '10000',
+        deadline: '9999999',
       };
-      vi.mocked(ProductionEventParser.tryParse).mockReturnValueOnce(parsedEvent);
-      mockGetLedger.mockResolvedValueOnce({ hash: "hash485" });
+      vi.mocked(ProductionEventParser.tryParse).mockReturnValueOnce(
+        parsedEvent,
+      );
+      mockGetLedger.mockResolvedValueOnce({ hash: 'hash485' });
 
       await startProductionWatcher();
       await vi.advanceTimersByTimeAsync(5_000);
@@ -604,17 +620,17 @@ describe("startProductionWatcher", () => {
       );
     });
 
-    it("detects reorg when ledger hash diverges and rolls back stale transactions", async () => {
+    it('detects reorg when ledger hash diverges and rolls back stale transactions', async () => {
       mockEventCursorFindUnique.mockResolvedValueOnce({
-        contractId: "CTEST",
+        contractId: 'CTEST',
         ledger: 400,
         eventIndex: 0,
-        ledgerHash: "original_hash_400",
+        ledgerHash: 'original_hash_400',
       });
       mockGetLatestLedger.mockResolvedValue({ sequence: 410 });
 
       // Reorg detected: hash at ledger 400 has changed
-      mockGetLedger.mockResolvedValueOnce({ hash: "NEW_hash_400" });
+      mockGetLedger.mockResolvedValueOnce({ hash: 'NEW_hash_400' });
 
       mockGetEvents.mockResolvedValueOnce({ events: [] });
       mockTransactionDeleteMany.mockResolvedValueOnce({ count: 5 });
@@ -624,11 +640,11 @@ describe("startProductionWatcher", () => {
 
       // Should detect reorg and attempt rollback
       expect(logger.warn).toHaveBeenCalledWith(
-        "Reorg detected: ledger hash mismatch",
+        'Reorg detected: ledger hash mismatch',
         expect.objectContaining({
           trackedLedger: 400,
-          expectedHash: "original_hash_400",
-          observedHash: "NEW_hash_400",
+          expectedHash: 'original_hash_400',
+          observedHash: 'NEW_hash_400',
         }),
       );
 
@@ -640,20 +656,20 @@ describe("startProductionWatcher", () => {
       );
     });
 
-    it("handles rollback poison pill by removing conflicting transactions before re-projection", async () => {
+    it('handles rollback poison pill by removing conflicting transactions before re-projection', async () => {
       // This test verifies that the @@unique([ledger, eventIndex]) constraint
       // no longer causes a poison-pill by ensuring transactions are deleted
       // before re-projecting from the fork point
       mockEventCursorFindUnique.mockResolvedValueOnce({
-        contractId: "CTEST",
+        contractId: 'CTEST',
         ledger: 350,
         eventIndex: 0,
-        ledgerHash: "hash350",
+        ledgerHash: 'hash350',
       });
       mockGetLatestLedger.mockResolvedValue({ sequence: 360 });
 
       // Reorg at ledger 355
-      mockGetLedger.mockResolvedValueOnce({ hash: "different_hash_350" });
+      mockGetLedger.mockResolvedValueOnce({ hash: 'different_hash_350' });
       mockTransactionDeleteMany.mockResolvedValueOnce({
         count: 2, // 2 stale transactions from ledger 350+ were deleted
       });
@@ -665,7 +681,8 @@ describe("startProductionWatcher", () => {
 
       // Verify rollback occurred before any re-projection would happen
       // using invocationCallOrder from the mock call history
-      const deleteCallOrder = mockTransactionDeleteMany.mock.invocationCallOrder[0];
+      const deleteCallOrder =
+        mockTransactionDeleteMany.mock.invocationCallOrder[0];
       const upsertCallOrder = mockEventCursorUpsert.mock.invocationCallOrder[0];
       expect(deleteCallOrder).toBeLessThan(upsertCallOrder);
     });

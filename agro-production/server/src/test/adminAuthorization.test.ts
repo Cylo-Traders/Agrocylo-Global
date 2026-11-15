@@ -38,7 +38,8 @@ import app from '../app.js';
 import { config } from '../config/index.js';
 
 const ADMIN_WALLET = 'GADMINWALLETADDRESSAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
-const NON_ADMIN_WALLET = 'GUSERRWALLETADDRESSAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+const NON_ADMIN_WALLET =
+  'GUSERRWALLETADDRESSAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
 function sessionFor(walletAddress: string): string {
   return `Bearer ${jwt.sign({ walletAddress }, config.jwtSecret)}`;
@@ -70,7 +71,10 @@ describe('Admin Authorization', () => {
     });
 
     it('rejects a token signed with the wrong secret', async () => {
-      const forged = jwt.sign({ walletAddress: ADMIN_WALLET }, 'not-the-server-secret');
+      const forged = jwt.sign(
+        { walletAddress: ADMIN_WALLET },
+        'not-the-server-secret',
+      );
 
       const res = await request(app)
         .get('/api/v1/admin/reconciliation/alerts')
@@ -95,8 +99,11 @@ describe('Admin Authorization', () => {
     });
 
     it('ignores the header and authorizes by the session wallet', async () => {
-      mockUserFindUnique.mockImplementation(({ where }: { where: { walletAddress: string } }) =>
-        Promise.resolve({ role: where.walletAddress === ADMIN_WALLET ? 'ADMIN' : 'INVESTOR' }),
+      mockUserFindUnique.mockImplementation(
+        ({ where }: { where: { walletAddress: string } }) =>
+          Promise.resolve({
+            role: where.walletAddress === ADMIN_WALLET ? 'ADMIN' : 'INVESTOR',
+          }),
       );
 
       const res = await request(app)

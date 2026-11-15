@@ -34,7 +34,7 @@ export async function createNotification(
     },
   });
 
-  return notification as NotificationRecord;
+  return notification;
 }
 
 export async function listNotifications(
@@ -54,7 +54,7 @@ export async function listNotifications(
     take: limit,
   });
 
-  return notifications as NotificationRecord[];
+  return notifications;
 }
 
 export async function markAsRead(notificationId: string): Promise<void> {
@@ -78,12 +78,14 @@ export async function getNotificationPreferences(
     where: { walletAddress },
   });
 
-  return pref?.preferences as Record<string, boolean> || {
-    campaign_updates: true,
-    order_updates: true,
-    milestone_events: true,
-    dispute_alerts: true,
-  };
+  return (
+    (pref?.preferences as Record<string, boolean>) || {
+      campaign_updates: true,
+      order_updates: true,
+      milestone_events: true,
+      dispute_alerts: true,
+    }
+  );
 }
 
 export async function updateNotificationPreferences(

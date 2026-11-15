@@ -70,8 +70,13 @@ export const CreateProductSchema = z.object({
   name: z.string().min(1, 'Product name is required'),
   description: z.string().nullable().optional(),
   category: ProductCategorySchema,
-  priceTokens: z.string().regex(/^\d+$/, 'priceTokens must be a positive numeric string in stroops'),
-  inventoryCount: z.number().int().nonnegative('inventoryCount must be non-negative'),
+  priceTokens: z
+    .string()
+    .regex(/^\d+$/, 'priceTokens must be a positive numeric string in stroops'),
+  inventoryCount: z
+    .number()
+    .int()
+    .nonnegative('inventoryCount must be non-negative'),
   campaignId: z.string().optional(),
   imageUrl: z.string().nullable().optional(),
   isActive: z.boolean().optional(),

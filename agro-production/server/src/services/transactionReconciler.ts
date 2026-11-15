@@ -11,7 +11,10 @@ export interface ReconciliationResult {
 
 const STATIC: readonly TransactionStatus[] = ['indexed', 'failed'];
 
-export async function reconcileTransaction(txHash: string, currentStatus: TransactionStatus): Promise<ReconciliationResult> {
+export async function reconcileTransaction(
+  txHash: string,
+  currentStatus: TransactionStatus,
+): Promise<ReconciliationResult> {
   let latestIndexedLedger: number | null = null;
 
   const cursor = await prisma.eventCursor.findFirst({

@@ -1,23 +1,23 @@
-import { Router, type Request, type Response } from "express";
-import { randomUUID } from "node:crypto";
-import { z } from "zod";
-import { prisma } from "../db/client.js";
+import { Router, type Request, type Response } from 'express';
+import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
+import { prisma } from '../db/client.js';
 import {
   jsonValidated,
   validateBody,
   validateParams,
   validateQuery,
   validateResponse,
-} from "../middleware/validate.js";
-import { writeLimiter } from "../middleware/rateLimit.js";
-import { requireWallet, type WalletRequest } from "../middleware/walletAuth.js";
+} from '../middleware/validate.js';
+import { writeLimiter } from '../middleware/rateLimit.js';
+import { requireWallet, type WalletRequest } from '../middleware/walletAuth.js';
 import {
   buildIdempotencyCacheKey,
   getCachedResponse,
   requireIdempotencyKey,
   setCachedResponse,
-} from "../middleware/idempotency.js";
-import { problemDetail } from "../middleware/errors.js";
+} from '../middleware/idempotency.js';
+import { problemDetail } from '../middleware/errors.js';
 import {
   CampaignIdParamSchema,
   CreateCampaignSchema,
@@ -28,7 +28,7 @@ import {
   type InvestInput,
   type ListCampaignsQuery,
   type ListInvestmentsQuery,
-} from "../schemas/campaign.js";
+} from '../schemas/campaign.js';
 import {
   CampaignDetailSchema,
   CampaignListResponseSchema,
@@ -36,10 +36,10 @@ import {
   CampaignSchema,
   InvestmentSchema,
   InvestorPortfolioSummarySchema,
-} from "../schemas/responses.js";
-import { broadcast } from "../services/wsServer.js";
-import { getStatusMetadata } from "../services/campaignStatusService.js";
-import { asyncHandler } from "../middleware/asyncHandler.js";
+} from '../schemas/responses.js';
+import { broadcast } from '../services/wsServer.js';
+import { getStatusMetadata } from '../services/campaignStatusService.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 
 const router = Router();
 
@@ -51,7 +51,7 @@ const router = Router();
 // (no payout event for direct campaign investments yet), so totalReturned is
 // always "0" for now — the field documents the contract for when that lands.
 router.get(
-  "/investor/portfolio",
+  '/investor/portfolio',
   requireWallet,
   validateResponse(InvestorPortfolioSummarySchema),
   asyncHandler(async (req: WalletRequest, res: Response) => {
@@ -59,7 +59,7 @@ router.get(
 
     const investments = await prisma.investment.findMany({
       where: { investorAddress: walletAddress },
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
       include: {
         campaign: {
           select: {
@@ -79,25 +79,26 @@ router.get(
 
     let totalInvested = 0n;
     for (const investment of investments) {
-      totalInvested += BigInt(investment.amount || "0");
+      totalInvested += BigInt(investment.amount || '0');
     }
 
     jsonValidated(res, InvestorPortfolioSummarySchema, 200, {
       investorAddress: walletAddress,
       positions: investments,
       totalInvested: totalInvested.toString(),
-      totalReturned: "0",
+      totalReturned: '0',
     });
   }),
 );
 
 // GET /campaigns — list with optional status filter and pagination
 router.get(
-  "/campaigns",
+  '/campaigns',
   validateQuery(ListCampaignsQuerySchema),
   validateResponse(CampaignListResponseSchema),
   asyncHandler(async (req: Request, res: Response) => {
-    const { status, farmerAddress, page, limit } = req.query as unknown as ListCampaignsQuery;
+    const { status, farmerAddress, page, limit } =
+      req.query as unknown as ListCampaignsQuery;
 
     const where = {
       ...(status ? { status } : {}),
@@ -108,7 +109,7 @@ router.get(
         where,
         skip: (page - 1) * limit,
         take: limit,
-        orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: 'desc' },
         include: { _count: { select: { investments: true, orders: true } } },
       }),
       prisma.campaign.count({ where }),
@@ -123,25 +124,28 @@ router.get(
 
 // GET /campaigns/:id — campaign detail with investments (supports UUID or onChainId)
 router.get(
-  "/campaigns/:id",
+  '/campaigns/:id',
   validateParams(CampaignIdParamSchema),
   validateResponse(CampaignDetailSchema),
   asyncHandler(async (req: Request, res: Response) => {
     const campaign = await prisma.campaign.findFirst({
       where: {
-        OR: [
-          { id: req.params.id },
-          { onChainId: req.params.id },
-        ],
+        OR: [{ id: req.params.id }, { onChainId: req.params.id }],
       },
       include: {
-        investments: { orderBy: { createdAt: "desc" } },
-        orders: { orderBy: { createdAt: "desc" } },
+        investments: { orderBy: { createdAt: 'desc' } },
+        orders: { orderBy: { createdAt: 'desc' } },
       },
     });
 
     if (!campaign) {
-      problemDetail(res, req, 404, "Campaign Not Found", `No campaign with id ${req.params.id}`);
+      problemDetail(
+        res,
+        req,
+        404,
+        'Campaign Not Found',
+        `No campaign with id ${req.params.id}`,
+      );
       return;
     }
 
@@ -151,67 +155,84 @@ router.get(
 
 // GET /campaigns/:id/milestones — campaign milestone/tranche state
 router.get(
-  "/campaigns/:id/milestones",
+  '/campaigns/:id/milestones',
   validateParams(CampaignIdParamSchema),
   validateResponse(CampaignMilestonesSchema),
   asyncHandler(async (req: Request, res: Response) => {
     const campaignId = req.params.id;
     const campaign = await prisma.campaign.findFirst({
       where: {
-        OR: [
-          { id: campaignId },
-          { onChainId: campaignId },
-        ],
+        OR: [{ id: campaignId }, { onChainId: campaignId }],
       },
       include: {
         transactions: {
           where: {
             eventType: {
-              in: ["campaign.produce", "campaign.harvest", "campaign.settled"],
+              in: ['campaign.produce', 'campaign.harvest', 'campaign.settled'],
             },
           },
-          orderBy: { ledger: "asc" },
+          orderBy: { ledger: 'asc' },
         },
       },
     });
 
     if (!campaign) {
-      problemDetail(res, req, 404, "Campaign Not Found", `No campaign with id ${campaignId}`);
+      problemDetail(
+        res,
+        req,
+        404,
+        'Campaign Not Found',
+        `No campaign with id ${campaignId}`,
+      );
       return;
     }
 
-    const totalRaised = BigInt(campaign.totalRaised || "0");
-    const trancheReleased = BigInt(campaign.trancheReleased || "0");
-    const percentageReleased = totalRaised > 0n
-      ? Math.min(100, Math.round(Number((trancheReleased * 100n) / totalRaised)))
-      : (campaign.status === "IN_PRODUCTION" ? 50 : (["HARVESTED", "SETTLED"].includes(campaign.status) ? 100 : 0));
+    const totalRaised = BigInt(campaign.totalRaised || '0');
+    const trancheReleased = BigInt(campaign.trancheReleased || '0');
+    const percentageReleased =
+      totalRaised > 0n
+        ? Math.min(
+            100,
+            Math.round(Number((trancheReleased * 100n) / totalRaised)),
+          )
+        : campaign.status === 'IN_PRODUCTION'
+          ? 50
+          : ['HARVESTED', 'SETTLED'].includes(campaign.status)
+            ? 100
+            : 0;
 
-    let currentMilestone = campaign.status.toString();
+    const currentMilestone = campaign.status.toString();
     let nextExpectedMilestone: string | null = null;
 
     switch (campaign.status) {
-      case "FUNDING":
-      case "FUNDED":
-        nextExpectedMilestone = "IN_PRODUCTION";
+      case 'FUNDING':
+      case 'FUNDED':
+        nextExpectedMilestone = 'IN_PRODUCTION';
         break;
-      case "IN_PRODUCTION":
-        nextExpectedMilestone = "HARVESTED";
+      case 'IN_PRODUCTION':
+        nextExpectedMilestone = 'HARVESTED';
         break;
-      case "HARVESTED":
-        nextExpectedMilestone = "SETTLED";
+      case 'HARVESTED':
+        nextExpectedMilestone = 'SETTLED';
         break;
-      case "SETTLED":
-      case "FAILED":
-      case "DISPUTED":
+      case 'SETTLED':
+      case 'FAILED':
+      case 'DISPUTED':
         nextExpectedMilestone = null;
         break;
     }
 
-    const produceTx = campaign.transactions.find((t) => t.eventType === "campaign.produce");
-    const harvestTx = campaign.transactions.find((t) => t.eventType === "campaign.harvest");
-    const settledTx = campaign.transactions.find((t) => t.eventType === "campaign.settled");
+    const produceTx = campaign.transactions.find(
+      (t) => t.eventType === 'campaign.produce',
+    );
+    const harvestTx = campaign.transactions.find(
+      (t) => t.eventType === 'campaign.harvest',
+    );
+    const settledTx = campaign.transactions.find(
+      (t) => t.eventType === 'campaign.settled',
+    );
 
-    const statusMetadata = getStatusMetadata(campaign.status as any);
+    const statusMetadata = getStatusMetadata(campaign.status);
 
     const milestoneState = {
       campaignId: campaign.id,
@@ -227,27 +248,29 @@ router.get(
       nextExpectedMilestone,
       milestones: [
         {
-          name: "FUNDING",
+          name: 'FUNDING',
           percentage: 0,
           completed: true,
           completedAt: campaign.createdAt.toISOString(),
         },
         {
-          name: "IN_PRODUCTION",
+          name: 'IN_PRODUCTION',
           percentage: 50,
-          completed: ["IN_PRODUCTION", "HARVESTED", "SETTLED"].includes(campaign.status),
+          completed: ['IN_PRODUCTION', 'HARVESTED', 'SETTLED'].includes(
+            campaign.status,
+          ),
           completedAt: produceTx ? produceTx.processedAt.toISOString() : null,
         },
         {
-          name: "HARVESTED",
+          name: 'HARVESTED',
           percentage: 100,
-          completed: ["HARVESTED", "SETTLED"].includes(campaign.status),
+          completed: ['HARVESTED', 'SETTLED'].includes(campaign.status),
           completedAt: harvestTx ? harvestTx.processedAt.toISOString() : null,
         },
         {
-          name: "SETTLED",
+          name: 'SETTLED',
           percentage: 100,
-          completed: campaign.status === "SETTLED",
+          completed: campaign.status === 'SETTLED',
           completedAt: settledTx ? settledTx.processedAt.toISOString() : null,
         },
       ],
@@ -260,7 +283,7 @@ router.get(
 // POST /campaigns — register a newly-created campaign (off-chain metadata)
 // Requires authenticated session; farmerAddress is derived from session, not body
 router.post(
-  "/campaigns",
+  '/campaigns',
   requireWallet,
   writeLimiter,
   requireIdempotencyKey,
@@ -269,7 +292,10 @@ router.post(
   asyncHandler(async (req: WalletRequest, res: Response) => {
     const farmerAddress = req.walletAddress!;
     const idempotencyKey = (req as any).idempotencyKey as string;
-    const { tokenAddress, targetAmount, deadline } = req.body as Omit<CreateCampaignInput, "farmerAddress">;
+    const { tokenAddress, targetAmount, deadline } = req.body as Omit<
+      CreateCampaignInput,
+      'farmerAddress'
+    >;
 
     const cacheKey = buildIdempotencyCacheKey(req);
     const cached = await getCachedResponse(cacheKey);
@@ -280,7 +306,7 @@ router.post(
 
     await prisma.user.upsert({
       where: { walletAddress: farmerAddress },
-      create: { walletAddress: farmerAddress, role: "FARMER" },
+      create: { walletAddress: farmerAddress, role: 'FARMER' },
       update: {},
     });
 
@@ -302,7 +328,7 @@ router.post(
     await prisma.transaction.create({
       data: {
         campaignId: campaign.id,
-        eventType: "campaign.created_intent",
+        eventType: 'campaign.created_intent',
         payload: { idempotencyKey, intent: true, intentId },
         ledger: 0,
         eventIndex: 0,
@@ -318,7 +344,7 @@ router.post(
 
 // GET /campaigns/:id/investments — investments for a campaign (supports UUID or onChainId)
 router.get(
-  "/campaigns/:id/investments",
+  '/campaigns/:id/investments',
   validateParams(CampaignIdParamSchema),
   validateResponse(z.array(InvestmentSchema)),
   asyncHandler(async (req: Request, res: Response) => {
@@ -331,7 +357,7 @@ router.get(
     const campaignId = campaign ? campaign.id : req.params.id;
     const investments = await prisma.investment.findMany({
       where: { campaignId },
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
     });
     jsonValidated(res, z.array(InvestmentSchema), 200, investments);
   }),
@@ -339,7 +365,7 @@ router.get(
 
 // GET /investments?investorAddress=... — all investments for a user
 router.get(
-  "/investments",
+  '/investments',
   validateQuery(ListInvestmentsQuerySchema),
   validateResponse(z.array(InvestmentSchema)),
   asyncHandler(async (req: Request, res: Response) => {
@@ -347,7 +373,7 @@ router.get(
 
     const investments = await prisma.investment.findMany({
       where: { investorAddress },
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
       include: {
         campaign: {
           select: {
@@ -372,7 +398,7 @@ router.get(
 // POST /campaigns/:id/invest — record an investment (indexer shortcut)
 // Requires authenticated session; investorAddress is derived from session, not body
 router.post(
-  "/campaigns/:id/invest",
+  '/campaigns/:id/invest',
   requireWallet,
   writeLimiter,
   requireIdempotencyKey,
@@ -382,7 +408,7 @@ router.post(
   asyncHandler(async (req: WalletRequest, res: Response) => {
     const investorAddress = req.walletAddress!;
     const idempotencyKey = (req as any).idempotencyKey as string;
-    const { amount } = req.body as Omit<InvestInput, "investorAddress">;
+    const { amount } = req.body as Omit<InvestInput, 'investorAddress'>;
 
     const cacheKey = buildIdempotencyCacheKey(req);
     const cached = await getCachedResponse(cacheKey);
@@ -391,21 +417,29 @@ router.post(
       return;
     }
 
-    const campaign = await prisma.campaign.findUnique({ where: { id: req.params.id } });
+    const campaign = await prisma.campaign.findUnique({
+      where: { id: req.params.id },
+    });
     if (!campaign) {
-      problemDetail(res, req, 404, "Campaign Not Found", `No campaign with id ${req.params.id}`);
+      problemDetail(
+        res,
+        req,
+        404,
+        'Campaign Not Found',
+        `No campaign with id ${req.params.id}`,
+      );
       return;
     }
     // Issue #1068 overfunding policy: the contract accepts contributions
     // beyond the target, and the watcher marks a campaign FUNDED once
     // totalRaised >= targetAmount. Late intents are therefore rejected here
     // only after the funding event has been indexed and status flipped.
-    if (campaign.status !== "FUNDING") {
+    if (campaign.status !== 'FUNDING') {
       problemDetail(
         res,
         req,
         409,
-        "Campaign Not Accepting Investments",
+        'Campaign Not Accepting Investments',
         `Campaign status is ${campaign.status}`,
       );
       return;
@@ -413,7 +447,7 @@ router.post(
 
     await prisma.user.upsert({
       where: { walletAddress: investorAddress },
-      create: { walletAddress: investorAddress, role: "INVESTOR" },
+      create: { walletAddress: investorAddress, role: 'INVESTOR' },
       update: {},
     });
 
@@ -430,7 +464,7 @@ router.post(
     await prisma.transaction.create({
       data: {
         campaignId: campaign.id,
-        eventType: "campaign.invested_intent",
+        eventType: 'campaign.invested_intent',
         payload: { idempotencyKey, intent: true },
         ledger: 0,
         eventIndex: 0,

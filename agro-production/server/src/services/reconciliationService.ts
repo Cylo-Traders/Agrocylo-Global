@@ -1,18 +1,30 @@
-import { Account, rpc, Contract, nativeToScVal, scValToNative as sdkScValToNative, TransactionBuilder, xdr } from "@stellar/stellar-sdk";
-import type { Prisma } from "@prisma/client";
-import { prisma } from "../db/client.js";
-import { config } from "../config/index.js";
-import logger from "../config/logger.js";
+import {
+  Account,
+  rpc,
+  Contract,
+  nativeToScVal,
+  scValToNative as sdkScValToNative,
+  TransactionBuilder,
+  xdr,
+} from '@stellar/stellar-sdk';
+import type { Prisma } from '@prisma/client';
+import { prisma } from '../db/client.js';
+import { config } from '../config/index.js';
+import logger from '../config/logger.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export interface DriftFinding {
-  entityType: "campaign" | "order" | "dispute" | "basket";
+  entityType: 'campaign' | 'order' | 'dispute' | 'basket';
   entityId: string;
-  contractSet: "production_escrow" | "escrow" | "investment_basket";
-  driftType: "status_mismatch" | "amount_mismatch" | "missing_on_chain" | "missing_in_db";
+  contractSet: 'production_escrow' | 'escrow' | 'investment_basket';
+  driftType:
+    | 'status_mismatch'
+    | 'amount_mismatch'
+    | 'missing_on_chain'
+    | 'missing_in_db';
   dbValue: Record<string, unknown>;
   chainValue: Record<string, unknown>;
 }
@@ -31,35 +43,35 @@ export interface ReconciliationReport {
 
 // Contract on-chain status enums (from production_escrow/src/lib.rs)
 const CAMPAIGN_STATUS_MAP: Record<number, string> = {
-  0: "Funding",
-  1: "Funded",
-  2: "InProduction",
-  3: "Harvested",
-  4: "Settled",
-  5: "Failed",
-  6: "Disputed",
+  0: 'Funding',
+  1: 'Funded',
+  2: 'InProduction',
+  3: 'Harvested',
+  4: 'Settled',
+  5: 'Failed',
+  6: 'Disputed',
 };
 
 const ORDER_STATUS_MAP: Record<number, string> = {
-  0: "Pending",
-  1: "Confirmed",
-  2: "Refunded",
+  0: 'Pending',
+  1: 'Confirmed',
+  2: 'Refunded',
 };
 
 // DB status -> on-chain status normalization
 const DB_TO_CHAIN_CAMPAIGN: Record<string, string> = {
-  FUNDING: "Funding",
-  FUNDED: "Funded",
-  IN_PRODUCTION: "InProduction",
-  HARVESTED: "Harvested",
-  SETTLED: "Settled",
-  FAILED: "Failed",
-  DISPUTED: "Disputed",
+  FUNDING: 'Funding',
+  FUNDED: 'Funded',
+  IN_PRODUCTION: 'InProduction',
+  HARVESTED: 'Harvested',
+  SETTLED: 'Settled',
+  FAILED: 'Failed',
+  DISPUTED: 'Disputed',
 };
 
 const DB_TO_CHAIN_ORDER: Record<string, string> = {
-  PENDING: "Pending",
-  CONFIRMED: "Confirmed",
+  PENDING: 'Pending',
+  CONFIRMED: 'Confirmed',
 };
 
 // ---------------------------------------------------------------------------
@@ -67,9 +79,9 @@ const DB_TO_CHAIN_ORDER: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 function getNetworkPassphrase(): string {
-  return config.nodeEnv === "production"
-    ? "Public Global Stellar Network ; September 2015"
-    : "Test SDF Network ; September 2015";
+  return config.nodeEnv === 'production'
+    ? 'Public Global Stellar Network ; September 2015'
+    : 'Test SDF Network ; September 2015';
 }
 
 async function simulateContractFn(
@@ -80,11 +92,11 @@ async function simulateContractFn(
 ): Promise<xdr.ScVal | null> {
   const contract = new Contract(contractId);
   const sourceAccount = new Account(
-    "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    "0",
+    'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    '0',
   );
   const tx = new TransactionBuilder(sourceAccount, {
-    fee: "100",
+    fee: '100',
     networkPassphrase: getNetworkPassphrase(),
     timebounds: { minTime: 0, maxTime: 0 },
   })
@@ -93,11 +105,13 @@ async function simulateContractFn(
     .build();
 
   const result = await server.simulateTransaction(tx);
-  if ("error" in result && result.error) {
-    logger.warn(`[ProductionReconciliation] Contract call ${method} failed: ${result.error}`);
+  if ('error' in result && result.error) {
+    logger.warn(
+      `[ProductionReconciliation] Contract call ${method} failed: ${result.error}`,
+    );
     return null;
   }
-  if ("result" in result && result.result) {
+  if ('result' in result && result.result) {
     return result.result.retval;
   }
   return null;
@@ -119,11 +133,17 @@ async function reconcileCampaigns(
   const errors: string[] = [];
   let checked = 0;
 
-  const activeStatuses = ["FUNDING", "FUNDED", "IN_PRODUCTION", "HARVESTED", "DISPUTED"];
+  const activeStatuses = [
+    'FUNDING',
+    'FUNDED',
+    'IN_PRODUCTION',
+    'HARVESTED',
+    'DISPUTED',
+  ];
   const campaigns = await prisma.campaign.findMany({
     where: { status: { in: activeStatuses as any[] } },
     take: 200,
-    orderBy: { createdAt: "desc" },
+    orderBy: { createdAt: 'desc' },
   });
 
   for (const campaign of campaigns) {
@@ -134,42 +154,55 @@ async function reconcileCampaigns(
     }
 
     try {
-      const args = [nativeToScVal(campaignIdNum, { type: "u64" })];
-      const result = await simulateContractFn(server, contractId, "get_campaign", args);
+      const args = [nativeToScVal(campaignIdNum, { type: 'u64' })];
+      const result = await simulateContractFn(
+        server,
+        contractId,
+        'get_campaign',
+        args,
+      );
 
       if (result === null) {
         findings.push({
-          entityType: "campaign",
+          entityType: 'campaign',
           entityId: campaign.onChainId,
-          contractSet: "production_escrow",
-          driftType: "missing_on_chain",
-          dbValue: { status: campaign.status, totalRaised: campaign.totalRaised },
-          chainValue: { error: "contract call returned null" },
+          contractSet: 'production_escrow',
+          driftType: 'missing_on_chain',
+          dbValue: {
+            status: campaign.status,
+            totalRaised: campaign.totalRaised,
+          },
+          chainValue: { error: 'contract call returned null' },
         });
         checked++;
         continue;
       }
 
       const native = scValToNative(result) as Record<string, unknown> | null;
-      if (!native || typeof native !== "object") {
-        errors.push(`Campaign ${campaign.onChainId}: unexpected contract response`);
+      if (!native || typeof native !== 'object') {
+        errors.push(
+          `Campaign ${campaign.onChainId}: unexpected contract response`,
+        );
         checked++;
         continue;
       }
 
-      const chainStatus = CAMPAIGN_STATUS_MAP[Number(native["status"])] ?? String(native["status"]);
-      const chainTotalRaised = String(native["total_raised"] ?? "");
-      const chainTargetAmount = String(native["target_amount"] ?? "");
-      const chainTrancheReleased = String(native["tranche_released"] ?? "");
+      const chainStatus =
+        CAMPAIGN_STATUS_MAP[Number(native['status'])] ??
+        String(native['status']);
+      const chainTotalRaised = String(native['total_raised'] ?? '');
+      const chainTargetAmount = String(native['target_amount'] ?? '');
+      const chainTrancheReleased = String(native['tranche_released'] ?? '');
 
       // Status drift
-      const expectedChainStatus = DB_TO_CHAIN_CAMPAIGN[campaign.status] ?? campaign.status;
+      const expectedChainStatus =
+        DB_TO_CHAIN_CAMPAIGN[campaign.status] ?? campaign.status;
       if (chainStatus !== expectedChainStatus) {
         findings.push({
-          entityType: "campaign",
+          entityType: 'campaign',
           entityId: campaign.onChainId,
-          contractSet: "production_escrow",
-          driftType: "status_mismatch",
+          contractSet: 'production_escrow',
+          driftType: 'status_mismatch',
           dbValue: { status: campaign.status },
           chainValue: { status: chainStatus },
         });
@@ -178,28 +211,33 @@ async function reconcileCampaigns(
       // Amount drift (totalRaised)
       if (chainTotalRaised && chainTotalRaised !== campaign.totalRaised) {
         findings.push({
-          entityType: "campaign",
+          entityType: 'campaign',
           entityId: campaign.onChainId,
-          contractSet: "production_escrow",
-          driftType: "amount_mismatch",
+          contractSet: 'production_escrow',
+          driftType: 'amount_mismatch',
           dbValue: { totalRaised: campaign.totalRaised },
           chainValue: { totalRaised: chainTotalRaised },
         });
       }
 
       // Amount drift (trancheReleased)
-      if (chainTrancheReleased && chainTrancheReleased !== campaign.trancheReleased) {
+      if (
+        chainTrancheReleased &&
+        chainTrancheReleased !== campaign.trancheReleased
+      ) {
         findings.push({
-          entityType: "campaign",
+          entityType: 'campaign',
           entityId: campaign.onChainId,
-          contractSet: "production_escrow",
-          driftType: "amount_mismatch",
+          contractSet: 'production_escrow',
+          driftType: 'amount_mismatch',
           dbValue: { trancheReleased: campaign.trancheReleased },
           chainValue: { trancheReleased: chainTrancheReleased },
         });
       }
     } catch (err) {
-      errors.push(`Campaign ${campaign.onChainId}: ${err instanceof Error ? err.message : String(err)}`);
+      errors.push(
+        `Campaign ${campaign.onChainId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     checked++;
@@ -221,9 +259,9 @@ async function reconcileOrders(
   let checked = 0;
 
   const orders = await prisma.order.findMany({
-    where: { status: "PENDING" },
+    where: { status: 'PENDING' },
     take: 200,
-    orderBy: { createdAt: "desc" },
+    orderBy: { createdAt: 'desc' },
   });
 
   for (const order of orders) {
@@ -234,40 +272,47 @@ async function reconcileOrders(
     }
 
     try {
-      const args = [nativeToScVal(orderIdNum, { type: "u64" })];
-      const result = await simulateContractFn(server, contractId, "get_order", args);
+      const args = [nativeToScVal(orderIdNum, { type: 'u64' })];
+      const result = await simulateContractFn(
+        server,
+        contractId,
+        'get_order',
+        args,
+      );
 
       if (result === null) {
         findings.push({
-          entityType: "order",
+          entityType: 'order',
           entityId: order.onChainId,
-          contractSet: "production_escrow",
-          driftType: "missing_on_chain",
+          contractSet: 'production_escrow',
+          driftType: 'missing_on_chain',
           dbValue: { status: order.status, amount: order.amount },
-          chainValue: { error: "contract call returned null" },
+          chainValue: { error: 'contract call returned null' },
         });
         checked++;
         continue;
       }
 
       const native = scValToNative(result) as Record<string, unknown> | null;
-      if (!native || typeof native !== "object") {
+      if (!native || typeof native !== 'object') {
         errors.push(`Order ${order.onChainId}: unexpected contract response`);
         checked++;
         continue;
       }
 
-      const chainStatus = ORDER_STATUS_MAP[Number(native["status"])] ?? String(native["status"]);
-      const chainAmount = String(native["amount"] ?? "");
+      const chainStatus =
+        ORDER_STATUS_MAP[Number(native['status'])] ?? String(native['status']);
+      const chainAmount = String(native['amount'] ?? '');
 
       // Status drift
-      const expectedChainStatus = DB_TO_CHAIN_ORDER[order.status] ?? order.status;
+      const expectedChainStatus =
+        DB_TO_CHAIN_ORDER[order.status] ?? order.status;
       if (chainStatus !== expectedChainStatus) {
         findings.push({
-          entityType: "order",
+          entityType: 'order',
           entityId: order.onChainId,
-          contractSet: "production_escrow",
-          driftType: "status_mismatch",
+          contractSet: 'production_escrow',
+          driftType: 'status_mismatch',
           dbValue: { status: order.status },
           chainValue: { status: chainStatus },
         });
@@ -276,16 +321,18 @@ async function reconcileOrders(
       // Amount drift
       if (chainAmount && chainAmount !== order.amount) {
         findings.push({
-          entityType: "order",
+          entityType: 'order',
           entityId: order.onChainId,
-          contractSet: "production_escrow",
-          driftType: "amount_mismatch",
+          contractSet: 'production_escrow',
+          driftType: 'amount_mismatch',
           dbValue: { amount: order.amount },
           chainValue: { amount: chainAmount },
         });
       }
     } catch (err) {
-      errors.push(`Order ${order.onChainId}: ${err instanceof Error ? err.message : String(err)}`);
+      errors.push(
+        `Order ${order.onChainId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     checked++;
@@ -310,23 +357,26 @@ async function reconcileDisputes(
   // not as separate entities. We check campaigns in DISPUTED status against
   // the DB dispute records.
   const disputedCampaigns = await prisma.campaign.findMany({
-    where: { status: "DISPUTED" },
+    where: { status: 'DISPUTED' },
     take: 200,
   });
 
   for (const campaign of disputedCampaigns) {
     const dbDispute = await prisma.dispute.findFirst({
-      where: { campaignId: campaign.id, status: { in: ["Open", "EvidenceSubmitted"] } },
+      where: {
+        campaignId: campaign.id,
+        status: { in: ['Open', 'EvidenceSubmitted'] },
+      },
     });
 
     if (!dbDispute) {
       findings.push({
-        entityType: "dispute",
+        entityType: 'dispute',
         entityId: campaign.onChainId,
-        contractSet: "production_escrow",
-        driftType: "missing_in_db",
+        contractSet: 'production_escrow',
+        driftType: 'missing_in_db',
         dbValue: { campaignStatus: campaign.status, dispute: null },
-        chainValue: { campaignStatus: "Disputed" },
+        chainValue: { campaignStatus: 'Disputed' },
       });
     }
 
@@ -349,13 +399,19 @@ async function reconcileBaskets(
 
   const basketContractId = config.basketContractId;
   if (!basketContractId) {
-    return { checked: 0, findings: [], errors: ["BASKET_CONTRACT_ID not configured — skipping basket reconciliation"] };
+    return {
+      checked: 0,
+      findings: [],
+      errors: [
+        'BASKET_CONTRACT_ID not configured — skipping basket reconciliation',
+      ],
+    };
   }
 
   const openBaskets = await prisma.basket.findMany({
-    where: { status: "OPEN" },
+    where: { status: 'OPEN' },
     take: 100,
-    orderBy: { createdAt: "desc" },
+    orderBy: { createdAt: 'desc' },
   });
 
   for (const basket of openBaskets) {
@@ -366,57 +422,75 @@ async function reconcileBaskets(
     }
 
     try {
-      const args = [nativeToScVal(basketIdNum, { type: "u64" })];
-      const result = await simulateContractFn(server, basketContractId, "get_basket", args);
+      const args = [nativeToScVal(basketIdNum, { type: 'u64' })];
+      const result = await simulateContractFn(
+        server,
+        basketContractId,
+        'get_basket',
+        args,
+      );
 
       if (result === null) {
         findings.push({
-          entityType: "basket",
+          entityType: 'basket',
           entityId: basket.onChainId,
-          contractSet: "investment_basket",
-          driftType: "missing_on_chain",
-          dbValue: { status: basket.status, totalDeposited: basket.totalDeposited },
-          chainValue: { error: "contract call returned null" },
+          contractSet: 'investment_basket',
+          driftType: 'missing_on_chain',
+          dbValue: {
+            status: basket.status,
+            totalDeposited: basket.totalDeposited,
+          },
+          chainValue: { error: 'contract call returned null' },
         });
         checked++;
         continue;
       }
 
       const native = scValToNative(result) as Record<string, unknown> | null;
-      if (!native || typeof native !== "object") {
+      if (!native || typeof native !== 'object') {
         errors.push(`Basket ${basket.onChainId}: unexpected contract response`);
         checked++;
         continue;
       }
 
       // Basket status: 0 = Open, 1 = Funded
-      const chainStatusNum = Number(native["status"]);
-      const chainStatus = chainStatusNum === 0 ? "OPEN" : chainStatusNum === 1 ? "FUNDED" : String(chainStatusNum);
-      const chainTotalDeposited = String(native["total_deposited"] ?? "");
+      const chainStatusNum = Number(native['status']);
+      const chainStatus =
+        chainStatusNum === 0
+          ? 'OPEN'
+          : chainStatusNum === 1
+            ? 'FUNDED'
+            : String(chainStatusNum);
+      const chainTotalDeposited = String(native['total_deposited'] ?? '');
 
       if (chainStatus !== basket.status) {
         findings.push({
-          entityType: "basket",
+          entityType: 'basket',
           entityId: basket.onChainId,
-          contractSet: "investment_basket",
-          driftType: "status_mismatch",
+          contractSet: 'investment_basket',
+          driftType: 'status_mismatch',
           dbValue: { status: basket.status },
           chainValue: { status: chainStatus },
         });
       }
 
-      if (chainTotalDeposited && chainTotalDeposited !== basket.totalDeposited) {
+      if (
+        chainTotalDeposited &&
+        chainTotalDeposited !== basket.totalDeposited
+      ) {
         findings.push({
-          entityType: "basket",
+          entityType: 'basket',
           entityId: basket.onChainId,
-          contractSet: "investment_basket",
-          driftType: "amount_mismatch",
+          contractSet: 'investment_basket',
+          driftType: 'amount_mismatch',
           dbValue: { totalDeposited: basket.totalDeposited },
           chainValue: { totalDeposited: chainTotalDeposited },
         });
       }
     } catch (err) {
-      errors.push(`Basket ${basket.onChainId}: ${err instanceof Error ? err.message : String(err)}`);
+      errors.push(
+        `Basket ${basket.onChainId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     checked++;
@@ -443,7 +517,7 @@ async function persistAlerts(findings: DriftFinding[]): Promise<void> {
         },
       });
     } catch (err) {
-      logger.error("[ProductionReconciliation] Failed to persist alert", {
+      logger.error('[ProductionReconciliation] Failed to persist alert', {
         error: err instanceof Error ? err.message : String(err),
         finding,
       });
@@ -457,7 +531,9 @@ async function persistAlerts(findings: DriftFinding[]): Promise<void> {
 
 export async function runProductionReconciliation(): Promise<ReconciliationReport> {
   const startedAt = new Date();
-  logger.info("[ProductionReconciliation] Starting scheduled reconciliation run");
+  logger.info(
+    '[ProductionReconciliation] Starting scheduled reconciliation run',
+  );
 
   const server = new rpc.Server(config.rpcUrl);
   const contractId = config.productionEscrowContractId || config.contractId;
@@ -476,7 +552,9 @@ export async function runProductionReconciliation(): Promise<ReconciliationRepor
       allFindings.push(...campaignResult.findings);
       allErrors.push(...campaignResult.errors);
     } catch (err) {
-      allErrors.push(`Campaign reconciliation failed: ${err instanceof Error ? err.message : String(err)}`);
+      allErrors.push(
+        `Campaign reconciliation failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     try {
@@ -485,7 +563,9 @@ export async function runProductionReconciliation(): Promise<ReconciliationRepor
       allFindings.push(...orderResult.findings);
       allErrors.push(...orderResult.errors);
     } catch (err) {
-      allErrors.push(`Order reconciliation failed: ${err instanceof Error ? err.message : String(err)}`);
+      allErrors.push(
+        `Order reconciliation failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     try {
@@ -494,10 +574,14 @@ export async function runProductionReconciliation(): Promise<ReconciliationRepor
       allFindings.push(...disputeResult.findings);
       allErrors.push(...disputeResult.errors);
     } catch (err) {
-      allErrors.push(`Dispute reconciliation failed: ${err instanceof Error ? err.message : String(err)}`);
+      allErrors.push(
+        `Dispute reconciliation failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   } else {
-    allErrors.push("No PRODUCTION_CONTRACT_ID configured — skipping reconciliation");
+    allErrors.push(
+      'No PRODUCTION_CONTRACT_ID configured — skipping reconciliation',
+    );
   }
 
   // Basket reconciliation uses a separate contract
@@ -507,7 +591,9 @@ export async function runProductionReconciliation(): Promise<ReconciliationRepor
     allFindings.push(...basketResult.findings);
     allErrors.push(...basketResult.errors);
   } catch (err) {
-    allErrors.push(`Basket reconciliation failed: ${err instanceof Error ? err.message : String(err)}`);
+    allErrors.push(
+      `Basket reconciliation failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 
   if (allFindings.length > 0) {
@@ -528,7 +614,7 @@ export async function runProductionReconciliation(): Promise<ReconciliationRepor
   };
 
   if (allFindings.length > 0) {
-    logger.warn("[ProductionReconciliation] Drift detected", {
+    logger.warn('[ProductionReconciliation] Drift detected', {
       driftsFound: allFindings.length,
       campaignsChecked,
       ordersChecked,
@@ -536,7 +622,7 @@ export async function runProductionReconciliation(): Promise<ReconciliationRepor
       durationMs: completedAt.getTime() - startedAt.getTime(),
     });
   } else {
-    logger.info("[ProductionReconciliation] No drift detected", {
+    logger.info('[ProductionReconciliation] No drift detected', {
       campaignsChecked,
       ordersChecked,
       disputesChecked,
@@ -553,49 +639,62 @@ export async function runProductionReconciliation(): Promise<ReconciliationRepor
 // Manual single-entity reconciliation
 // ---------------------------------------------------------------------------
 
-export async function reconcileSingleCampaign(campaignOnChainId: string): Promise<DriftFinding[]> {
+export async function reconcileSingleCampaign(
+  campaignOnChainId: string,
+): Promise<DriftFinding[]> {
   const server = new rpc.Server(config.rpcUrl);
   const contractId = config.productionEscrowContractId || config.contractId;
-  if (!contractId) throw new Error("PRODUCTION_CONTRACT_ID not configured");
+  if (!contractId) throw new Error('PRODUCTION_CONTRACT_ID not configured');
 
-  const campaign = await prisma.campaign.findUnique({ where: { onChainId: campaignOnChainId } });
-  if (!campaign) throw new Error(`Campaign ${campaignOnChainId} not found in database`);
+  const campaign = await prisma.campaign.findUnique({
+    where: { onChainId: campaignOnChainId },
+  });
+  if (!campaign)
+    throw new Error(`Campaign ${campaignOnChainId} not found in database`);
 
   const findings: DriftFinding[] = [];
   const campaignIdNum = parseInt(campaignOnChainId, 10);
-  if (isNaN(campaignIdNum)) throw new Error(`Invalid on-chain campaign ID: ${campaignOnChainId}`);
+  if (isNaN(campaignIdNum))
+    throw new Error(`Invalid on-chain campaign ID: ${campaignOnChainId}`);
 
-  const args = [nativeToScVal(campaignIdNum, { type: "u64" })];
-  const result = await simulateContractFn(server, contractId, "get_campaign", args);
+  const args = [nativeToScVal(campaignIdNum, { type: 'u64' })];
+  const result = await simulateContractFn(
+    server,
+    contractId,
+    'get_campaign',
+    args,
+  );
 
   if (result === null) {
     findings.push({
-      entityType: "campaign",
+      entityType: 'campaign',
       entityId: campaignOnChainId,
-      contractSet: "production_escrow",
-      driftType: "missing_on_chain",
+      contractSet: 'production_escrow',
+      driftType: 'missing_on_chain',
       dbValue: { status: campaign.status, totalRaised: campaign.totalRaised },
-      chainValue: { error: "contract call returned null" },
+      chainValue: { error: 'contract call returned null' },
     });
     return findings;
   }
 
   const native = scValToNative(result) as Record<string, unknown> | null;
-  if (!native || typeof native !== "object") {
-    throw new Error("Unexpected contract response format");
+  if (!native || typeof native !== 'object') {
+    throw new Error('Unexpected contract response format');
   }
 
-  const chainStatus = CAMPAIGN_STATUS_MAP[Number(native["status"])] ?? String(native["status"]);
-  const chainTotalRaised = String(native["total_raised"] ?? "");
-  const chainTrancheReleased = String(native["tranche_released"] ?? "");
-  const expectedChainStatus = DB_TO_CHAIN_CAMPAIGN[campaign.status] ?? campaign.status;
+  const chainStatus =
+    CAMPAIGN_STATUS_MAP[Number(native['status'])] ?? String(native['status']);
+  const chainTotalRaised = String(native['total_raised'] ?? '');
+  const chainTrancheReleased = String(native['tranche_released'] ?? '');
+  const expectedChainStatus =
+    DB_TO_CHAIN_CAMPAIGN[campaign.status] ?? campaign.status;
 
   if (chainStatus !== expectedChainStatus) {
     findings.push({
-      entityType: "campaign",
+      entityType: 'campaign',
       entityId: campaignOnChainId,
-      contractSet: "production_escrow",
-      driftType: "status_mismatch",
+      contractSet: 'production_escrow',
+      driftType: 'status_mismatch',
       dbValue: { status: campaign.status },
       chainValue: { status: chainStatus },
     });
@@ -603,21 +702,24 @@ export async function reconcileSingleCampaign(campaignOnChainId: string): Promis
 
   if (chainTotalRaised && chainTotalRaised !== campaign.totalRaised) {
     findings.push({
-      entityType: "campaign",
+      entityType: 'campaign',
       entityId: campaignOnChainId,
-      contractSet: "production_escrow",
-      driftType: "amount_mismatch",
+      contractSet: 'production_escrow',
+      driftType: 'amount_mismatch',
       dbValue: { totalRaised: campaign.totalRaised },
       chainValue: { totalRaised: chainTotalRaised },
     });
   }
 
-  if (chainTrancheReleased && chainTrancheReleased !== campaign.trancheReleased) {
+  if (
+    chainTrancheReleased &&
+    chainTrancheReleased !== campaign.trancheReleased
+  ) {
     findings.push({
-      entityType: "campaign",
+      entityType: 'campaign',
       entityId: campaignOnChainId,
-      contractSet: "production_escrow",
-      driftType: "amount_mismatch",
+      contractSet: 'production_escrow',
+      driftType: 'amount_mismatch',
       dbValue: { trancheReleased: campaign.trancheReleased },
       chainValue: { trancheReleased: chainTrancheReleased },
     });

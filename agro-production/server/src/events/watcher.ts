@@ -161,7 +161,7 @@ async function recordDeadLetter(
       id: rawEvent.id,
     });
     captureAlert(
-      "contract_watcher_ingestion_failure",
+      'contract_watcher_ingestion_failure',
       `Event ${rawEvent.id} at ledger ${rawEvent.ledger} moved to dead-letter queue`,
       { ledger: rawEvent.ledger, eventId: rawEvent.id },
     );
@@ -189,9 +189,10 @@ export interface DeadLetterReplayResult {
  * Called automatically after a `campaign.created` event is indexed, and
  * exported for operators to replay exhausted events manually.
  */
-export async function replayDeadLetterEvents(
-  opts?: { campaignOnChainId?: string; limit?: number },
-): Promise<DeadLetterReplayResult> {
+export async function replayDeadLetterEvents(opts?: {
+  campaignOnChainId?: string;
+  limit?: number;
+}): Promise<DeadLetterReplayResult> {
   const limit = Math.max(1, Math.min(opts?.limit ?? 50, 500));
   const deadLetters = await prisma.transaction.findMany({
     where: { eventType: 'dead_letter', status: 'failed' },
@@ -250,8 +251,14 @@ export async function replayDeadLetterEvents(
 }
 
 /** SDK 17 dropped `getLedger(seq)`; fetch one ledger via `getLedgers` instead. */
-async function getLedgerHash(server: rpc.Server, sequence: number): Promise<string> {
-  const { ledgers } = await server.getLedgers({ startLedger: sequence, pagination: { limit: 1 } });
+async function getLedgerHash(
+  server: rpc.Server,
+  sequence: number,
+): Promise<string> {
+  const { ledgers } = await server.getLedgers({
+    startLedger: sequence,
+    pagination: { limit: 1 },
+  });
   const ledger = ledgers[0];
   if (!ledger || ledger.sequence !== sequence) {
     throw new Error(`Ledger ${sequence} not available from RPC`);
@@ -531,7 +538,11 @@ export async function startProductionWatcher(): Promise<
 
         currentLedger = maxEventLedger;
         currentEventIndex = maxEventIndex;
-        await advanceCursor(currentLedger, currentEventIndex, trackedLedgerHash ?? undefined);
+        await advanceCursor(
+          currentLedger,
+          currentEventIndex,
+          trackedLedgerHash ?? undefined,
+        );
         logger.debug('Production watcher: cursor advanced', {
           ledger: currentLedger,
           eventIndex: currentEventIndex,

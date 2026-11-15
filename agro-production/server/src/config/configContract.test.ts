@@ -14,7 +14,10 @@ function walk(dir: string, files: string[] = []): string[] {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       walk(full, files);
-    } else if (/\.(ts|tsx)$/.test(entry.name) && !entry.name.endsWith('.test.ts')) {
+    } else if (
+      /\.(ts|tsx)$/.test(entry.name) &&
+      !entry.name.endsWith('.test.ts')
+    ) {
       files.push(full);
     }
   }
@@ -36,7 +39,9 @@ describe('config contract', () => {
       while ((match = configKeyPattern.exec(content)) !== null) {
         const key = match[1];
         if (!knownKeys.has(key)) {
-          missing.add(`${key} (referenced in ${path.relative(SRC_ROOT, file)})`);
+          missing.add(
+            `${key} (referenced in ${path.relative(SRC_ROOT, file)})`,
+          );
         }
       }
     }

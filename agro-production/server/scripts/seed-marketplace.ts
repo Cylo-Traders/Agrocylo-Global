@@ -27,6 +27,8 @@ const products = [
   },
 ];
 
-await prisma.product.deleteMany({ where: { id: { in: products.map((product) => product.id) } } });
+await prisma.product.deleteMany({
+  where: { id: { in: products.map((product) => product.id) } },
+});
 await prisma.product.createMany({ data: products });
 await prisma.$disconnect();

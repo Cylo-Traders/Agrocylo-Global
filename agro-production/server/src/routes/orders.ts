@@ -1,54 +1,67 @@
-import { Router, type Request, type Response } from "express";
-import { randomUUID } from "node:crypto";
-import { z } from "zod";
-import { prisma } from "../db/client.js";
+import { Router, type Request, type Response } from 'express';
+import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
+import { prisma } from '../db/client.js';
 import {
   jsonValidated,
   validateBody,
   validateParams,
   validateQuery,
   validateResponse,
-} from "../middleware/validate.js";
-import { problemDetail } from "../middleware/errors.js";
-import { writeLimiter } from "../middleware/rateLimit.js";
-import { requireWallet, type WalletRequest } from "../middleware/walletAuth.js";
+} from '../middleware/validate.js';
+import { problemDetail } from '../middleware/errors.js';
+import { writeLimiter } from '../middleware/rateLimit.js';
+import { requireWallet, type WalletRequest } from '../middleware/walletAuth.js';
 import {
   CreateOrderSchema,
   ListOrdersQuerySchema,
   OrderIdParamSchema,
   type ListOrdersQuery,
-} from "../schemas/order.js";
-import { OrderSchema } from "../schemas/responses.js";
+} from '../schemas/order.js';
+import { OrderSchema } from '../schemas/responses.js';
 import {
   requireIdempotencyKey,
   getCachedResponse,
   setCachedResponse,
-} from "../middleware/idempotency.js";
-import logger from "../config/logger.js";
-import { asyncHandler } from "../middleware/asyncHandler.js";
+} from '../middleware/idempotency.js';
+import logger from '../config/logger.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 
 const router = Router();
 
 // GET /orders?buyerAddress=... or ?farmerAddress=...
 router.get(
-  "/orders",
+  '/orders',
   requireWallet,
   validateQuery(ListOrdersQuerySchema),
   validateResponse(z.array(OrderSchema)),
   asyncHandler(async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
-    const { buyerAddress, farmerAddress } = req.query as unknown as ListOrdersQuery;
+    const { buyerAddress, farmerAddress } =
+      req.query as unknown as ListOrdersQuery;
 
     if (buyerAddress) {
       if (buyerAddress !== walletAddress) {
-        problemDetail(res, req, 403, "Forbidden", "Cannot view another wallet's orders");
+        problemDetail(
+          res,
+          req,
+          403,
+          'Forbidden',
+          "Cannot view another wallet's orders",
+        );
         return;
       }
       const orders = await prisma.order.findMany({
         where: { buyerAddress },
-        orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: 'desc' },
         include: {
-          campaign: { select: { farmerAddress: true, tokenAddress: true, onChainId: true } },
+          campaign: {
+            select: {
+              farmerAddress: true,
+              tokenAddress: true,
+              onChainId: true,
+            },
+          },
         },
       });
       jsonValidated(res, z.array(OrderSchema), 200, orders);
@@ -57,32 +70,50 @@ router.get(
 
     if (farmerAddress) {
       if (farmerAddress !== walletAddress) {
-        problemDetail(res, req, 403, "Forbidden", "Cannot view another wallet's orders");
+        problemDetail(
+          res,
+          req,
+          403,
+          'Forbidden',
+          "Cannot view another wallet's orders",
+        );
         return;
       }
       const campaigns = await prisma.campaign.findMany({
-        where: { farmerAddress: farmerAddress! },
+        where: { farmerAddress: farmerAddress },
         select: { id: true },
       });
       const campaignIds = campaigns.map((c) => c.id);
       const orders = await prisma.order.findMany({
         where: { campaignId: { in: campaignIds } },
-        orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: 'desc' },
         include: {
-          campaign: { select: { farmerAddress: true, tokenAddress: true, onChainId: true } },
+          campaign: {
+            select: {
+              farmerAddress: true,
+              tokenAddress: true,
+              onChainId: true,
+            },
+          },
         },
       });
       jsonValidated(res, z.array(OrderSchema), 200, orders);
       return;
     }
 
-    problemDetail(res, req, 400, "Bad Request", "Either buyerAddress or farmerAddress is required");
+    problemDetail(
+      res,
+      req,
+      400,
+      'Bad Request',
+      'Either buyerAddress or farmerAddress is required',
+    );
   }),
 );
 
 // POST /orders — requires authenticated session; buyerAddress derived from session
 router.post(
-  "/orders",
+  '/orders',
   requireWallet,
   requireIdempotencyKey,
   writeLimiter,
@@ -105,17 +136,28 @@ router.post(
         return;
       }
 
-      const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
+      const campaign = await prisma.campaign.findUnique({
+        where: { id: campaignId },
+      });
       if (!campaign) {
-        problemDetail(res, req, 404, "Campaign Not Found", `No campaign with id ${campaignId}`);
+        problemDetail(
+          res,
+          req,
+          404,
+          'Campaign Not Found',
+          `No campaign with id ${campaignId}`,
+        );
         return;
       }
-      if (campaign.status !== "HARVESTED" && campaign.status !== "IN_PRODUCTION") {
+      if (
+        campaign.status !== 'HARVESTED' &&
+        campaign.status !== 'IN_PRODUCTION'
+      ) {
         problemDetail(
           res,
           req,
           409,
-          "Campaign Not Accepting Orders",
+          'Campaign Not Accepting Orders',
           `Campaign status is ${campaign.status}`,
         );
         return;
@@ -123,7 +165,7 @@ router.post(
 
       await prisma.user.upsert({
         where: { walletAddress: buyerAddress },
-        create: { walletAddress: buyerAddress, role: "BUYER" },
+        create: { walletAddress: buyerAddress, role: 'BUYER' },
         update: {},
       });
 
@@ -146,7 +188,7 @@ router.post(
       await prisma.transaction.create({
         data: {
           campaignId: campaign.id,
-          eventType: "order.created_intent",
+          eventType: 'order.created_intent',
           payload: { idempotencyKey, intent: true, intentId },
           ledger: 0,
           eventIndex: 0,
@@ -158,27 +200,41 @@ router.post(
       await setCachedResponse(scopedKey, 201, response);
       jsonValidated(res, OrderSchema, 201, response);
     } catch (error) {
-      logger.error("[POST /orders] Failed to create order", { error });
-      problemDetail(res, req, 500, "Internal Server Error", "Failed to create order");
+      logger.error('[POST /orders] Failed to create order', { error });
+      problemDetail(
+        res,
+        req,
+        500,
+        'Internal Server Error',
+        'Failed to create order',
+      );
     }
   }),
 );
 
 // GET /orders/:id
 router.get(
-  "/orders/:id",
+  '/orders/:id',
   requireWallet,
   validateParams(OrderIdParamSchema),
   validateResponse(OrderSchema),
   asyncHandler(async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
-    const order = await prisma.order.findUnique({ where: { id: req.params.id } });
+    const order = await prisma.order.findUnique({
+      where: { id: req.params.id },
+    });
     if (!order) {
-      problemDetail(res, req, 404, "Order Not Found", `No order with id ${req.params.id}`);
+      problemDetail(
+        res,
+        req,
+        404,
+        'Order Not Found',
+        `No order with id ${req.params.id}`,
+      );
       return;
     }
     if (order.buyerAddress !== walletAddress) {
-      problemDetail(res, req, 403, "Forbidden", "Not the buyer for this order");
+      problemDetail(res, req, 403, 'Forbidden', 'Not the buyer for this order');
       return;
     }
     jsonValidated(res, OrderSchema, 200, order);
@@ -187,7 +243,7 @@ router.get(
 
 // PUT /orders/:id — update txHash after on-chain confirmation
 router.put(
-  "/orders/:id",
+  '/orders/:id',
   requireWallet,
   writeLimiter,
   validateParams(OrderIdParamSchema),
@@ -195,13 +251,21 @@ router.put(
   validateResponse(OrderSchema),
   asyncHandler(async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
-    const order = await prisma.order.findUnique({ where: { id: req.params.id } });
+    const order = await prisma.order.findUnique({
+      where: { id: req.params.id },
+    });
     if (!order) {
-      problemDetail(res, req, 404, "Order Not Found", `No order with id ${req.params.id}`);
+      problemDetail(
+        res,
+        req,
+        404,
+        'Order Not Found',
+        `No order with id ${req.params.id}`,
+      );
       return;
     }
     if (order.buyerAddress !== walletAddress) {
-      problemDetail(res, req, 403, "Forbidden", "Not the buyer for this order");
+      problemDetail(res, req, 403, 'Forbidden', 'Not the buyer for this order');
       return;
     }
 
@@ -217,7 +281,7 @@ router.put(
 // PATCH /orders/:id/confirm
 // PATCH /orders/:id/confirm — requires authenticated session; buyerAddress derived from session
 router.patch(
-  "/orders/:id/confirm",
+  '/orders/:id/confirm',
   requireWallet,
   writeLimiter,
   validateParams(OrderIdParamSchema),
@@ -225,23 +289,37 @@ router.patch(
   asyncHandler(async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
 
-    const order = await prisma.order.findUnique({ where: { id: req.params.id } });
+    const order = await prisma.order.findUnique({
+      where: { id: req.params.id },
+    });
     if (!order) {
-      problemDetail(res, req, 404, "Order Not Found", `No order with id ${req.params.id}`);
+      problemDetail(
+        res,
+        req,
+        404,
+        'Order Not Found',
+        `No order with id ${req.params.id}`,
+      );
       return;
     }
     if (order.buyerAddress !== walletAddress) {
-      problemDetail(res, req, 403, "Forbidden", "Not the buyer for this order");
+      problemDetail(res, req, 403, 'Forbidden', 'Not the buyer for this order');
       return;
     }
-    if (order.status !== "PENDING") {
-      problemDetail(res, req, 409, "Order Already Confirmed", "Order is not pending");
+    if (order.status !== 'PENDING') {
+      problemDetail(
+        res,
+        req,
+        409,
+        'Order Already Confirmed',
+        'Order is not pending',
+      );
       return;
     }
 
     const updated = await prisma.order.update({
       where: { id: order.id },
-      data: { status: "CONFIRMED" },
+      data: { status: 'CONFIRMED' },
     });
 
     jsonValidated(res, OrderSchema, 200, updated);

@@ -91,7 +91,9 @@ function runE2ESuite() {
   // Setup / teardown
   // ---------------------------------------------------------------------------
   beforeAll(async () => {
-    prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: E2E_DB_URL }) });
+    prisma = new PrismaClient({
+      adapter: new PrismaPg({ connectionString: E2E_DB_URL }),
+    });
     await prisma.$connect();
 
     // Wipe slate for this test run.

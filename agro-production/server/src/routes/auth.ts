@@ -1,6 +1,10 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import { jsonValidated, validateBody, validateQuery } from '../middleware/validate.js';
+import {
+  jsonValidated,
+  validateBody,
+  validateQuery,
+} from '../middleware/validate.js';
 import { authLimiter } from '../middleware/rateLimit.js';
 import { problemDetail } from '../middleware/errors.js';
 import {
@@ -61,7 +65,9 @@ router.get(
   validateQuery(ChallengeRequestSchema),
   async (req: Request, res: Response) => {
     try {
-      const { walletAddress } = req.query as unknown as { walletAddress: string };
+      const { walletAddress } = req.query as unknown as {
+        walletAddress: string;
+      };
       const result = await createChallenge(walletAddress);
       jsonValidated(res, ChallengeResponseSchema, 200, result);
     } catch (err) {
@@ -69,7 +75,13 @@ router.get(
         problemDetail(res, req, err.status, err.message);
         return;
       }
-      problemDetail(res, req, 500, 'Internal Server Error', 'Failed to create challenge');
+      problemDetail(
+        res,
+        req,
+        500,
+        'Internal Server Error',
+        'Failed to create challenge',
+      );
     }
   },
 );
@@ -86,14 +98,24 @@ router.post(
         nonce: string;
         signature: string;
       };
-      const result = await verifySignatureAndCreateSession(walletAddress, nonce, signature);
+      const result = await verifySignatureAndCreateSession(
+        walletAddress,
+        nonce,
+        signature,
+      );
       jsonValidated(res, SessionResponseSchema, 200, result);
     } catch (err) {
       if (err instanceof AuthError) {
         problemDetail(res, req, err.status, err.message);
         return;
       }
-      problemDetail(res, req, 500, 'Internal Server Error', 'Failed to create session');
+      problemDetail(
+        res,
+        req,
+        500,
+        'Internal Server Error',
+        'Failed to create session',
+      );
     }
   },
 );
@@ -114,7 +136,13 @@ router.post(
         problemDetail(res, req, err.status, err.message);
         return;
       }
-      problemDetail(res, req, 500, 'Internal Server Error', 'Failed to verify handoff token');
+      problemDetail(
+        res,
+        req,
+        500,
+        'Internal Server Error',
+        'Failed to verify handoff token',
+      );
     }
   },
 );
@@ -130,7 +158,13 @@ router.post(
       await revokeSession(sessionToken);
       res.status(204).send();
     } catch (err) {
-      problemDetail(res, req, 500, 'Internal Server Error', 'Failed to revoke session');
+      problemDetail(
+        res,
+        req,
+        500,
+        'Internal Server Error',
+        'Failed to revoke session',
+      );
     }
   },
 );
@@ -150,7 +184,13 @@ router.post(
         problemDetail(res, req, err.status, err.message);
         return;
       }
-      problemDetail(res, req, 500, 'Internal Server Error', 'Failed to refresh token');
+      problemDetail(
+        res,
+        req,
+        500,
+        'Internal Server Error',
+        'Failed to refresh token',
+      );
     }
   },
 );

@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
-import { createRateLimitMock, createWalletAuthMock } from '../test/helpers/middlewareMocks.js';
+import {
+  createRateLimitMock,
+  createWalletAuthMock,
+} from '../test/helpers/middlewareMocks.js';
 
 vi.mock('../db/client.js', () => ({
   prisma: {
@@ -39,7 +42,9 @@ describe('Analytics API (Issue #1189)', () => {
       },
     ]);
 
-    const res = await request(app).get('/api/v1/analytics/price-index').expect(200);
+    const res = await request(app)
+      .get('/api/v1/analytics/price-index')
+      .expect(200);
 
     expect(res.body).toHaveProperty('data');
     expect(Array.isArray(res.body.data)).toBe(true);

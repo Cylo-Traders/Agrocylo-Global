@@ -2,11 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 import { createRateLimitMock } from './helpers/middlewareMocks.js';
 
-const { mockCampaignFindMany, mockCampaignCount, mockUserFindUnique } = vi.hoisted(() => ({
-  mockCampaignFindMany: vi.fn(),
-  mockCampaignCount: vi.fn(),
-  mockUserFindUnique: vi.fn(),
-}));
+const { mockCampaignFindMany, mockCampaignCount, mockUserFindUnique } =
+  vi.hoisted(() => ({
+    mockCampaignFindMany: vi.fn(),
+    mockCampaignCount: vi.fn(),
+    mockUserFindUnique: vi.fn(),
+  }));
 
 vi.mock('../db/client.js', () => ({
   prisma: {
@@ -44,7 +45,10 @@ describe('async route handler rejections', () => {
 
     expect(res.status).toBe(500);
     expect(res.headers['content-type']).toContain('application/problem+json');
-    expect(res.body).toMatchObject({ status: 500, title: 'Internal Server Error' });
+    expect(res.body).toMatchObject({
+      status: 500,
+      title: 'Internal Server Error',
+    });
     expect(JSON.stringify(res.body)).not.toContain('connection reset');
   });
 });

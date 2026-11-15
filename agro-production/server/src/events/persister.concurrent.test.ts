@@ -1,23 +1,23 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { EventPersister } from "./persister.js";
-import type { CampaignCreatedEvent, OrderCreatedEvent } from "./types.js";
-import { EVENT_SCHEMA_VERSION } from "./schema.js";
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { EventPersister } from './persister.js';
+import type { CampaignCreatedEvent, OrderCreatedEvent } from './types.js';
+import { EVENT_SCHEMA_VERSION } from './schema.js';
 
 // ---------------------------------------------------------------------------
 // Mock Prisma, logger, and wsServer for unit-level concurrency tests
 // ---------------------------------------------------------------------------
-vi.mock("../db/client.js", () => {
+vi.mock('../db/client.js', () => {
   const tx = {
     user: { upsert: vi.fn().mockResolvedValue({}) },
     campaign: {
-      upsert: vi.fn().mockResolvedValue({ id: "camp-uuid" }),
+      upsert: vi.fn().mockResolvedValue({ id: 'camp-uuid' }),
       findUnique: vi.fn().mockResolvedValue({
-        id: "camp-uuid",
-        onChainId: "1",
-        targetAmount: "10000",
-        totalRaised: "0",
-        totalRevenue: "0",
-        status: "FUNDING",
+        id: 'camp-uuid',
+        onChainId: '1',
+        targetAmount: '10000',
+        totalRaised: '0',
+        totalRevenue: '0',
+        status: 'FUNDING',
       }),
       update: vi.fn().mockResolvedValue({}),
     },
@@ -25,10 +25,10 @@ vi.mock("../db/client.js", () => {
     order: {
       upsert: vi.fn().mockResolvedValue({}),
       findUnique: vi.fn().mockResolvedValue({
-        id: "order-uuid",
-        onChainId: "10",
-        campaignId: "camp-uuid",
-        amount: "500",
+        id: 'order-uuid',
+        onChainId: '10',
+        campaignId: 'camp-uuid',
+        amount: '500',
       }),
       update: vi.fn().mockResolvedValue({}),
     },
@@ -45,21 +45,21 @@ vi.mock("../db/client.js", () => {
         create: vi.fn().mockResolvedValue({}),
       },
       campaign: {
-        findUnique: vi.fn().mockResolvedValue({ id: "camp-uuid" }),
+        findUnique: vi.fn().mockResolvedValue({ id: 'camp-uuid' }),
         update: vi.fn().mockResolvedValue({}),
       },
-      $transaction: vi.fn().mockImplementation(
-        (fn: (tx: unknown) => Promise<unknown>) => fn(tx),
-      ),
+      $transaction: vi
+        .fn()
+        .mockImplementation((fn: (tx: unknown) => Promise<unknown>) => fn(tx)),
     },
   };
 });
 
-vi.mock("../config/logger.js", () => ({
+vi.mock('../config/logger.js', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-vi.mock("../services/wsServer.js", () => ({ broadcast: vi.fn() }));
+vi.mock('../services/wsServer.js', () => ({ broadcast: vi.fn() }));
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -67,8 +67,8 @@ vi.mock("../services/wsServer.js", () => ({ broadcast: vi.fn() }));
 const baseEvent = {
   ledger: 300,
   eventIndex: 0,
-  timestamp: new Date("2024-07-01T00:00:00Z"),
-  rawId: "300-0",
+  timestamp: new Date('2024-07-01T00:00:00Z'),
+  rawId: '300-0',
   schemaVersion: EVENT_SCHEMA_VERSION,
 };
 
@@ -77,11 +77,11 @@ function makeCampaignCreated(
 ): CampaignCreatedEvent {
   return {
     ...baseEvent,
-    action: "campaign.created",
-    campaignId: "1",
-    farmer: "GFARMER000000000000000000000000000000000000000000000000",
-    token: "GTOKEN000000000000000000000000000000000000000000000000AA",
-    targetAmount: "10000",
+    action: 'campaign.created',
+    campaignId: '1',
+    farmer: 'GFARMER000000000000000000000000000000000000000000000000',
+    token: 'GTOKEN000000000000000000000000000000000000000000000000AA',
+    targetAmount: '10000',
     deadline: String(Math.floor(Date.now() / 1000) + 86400),
     ...overrides,
   };
@@ -92,11 +92,11 @@ function makeOrderCreated(
 ): OrderCreatedEvent {
   return {
     ...baseEvent,
-    action: "order.created",
-    orderId: "10",
-    buyer: "GBUYER000000000000000000000000000000000000000000000000AA",
-    campaignId: "1",
-    amount: "500",
+    action: 'order.created',
+    orderId: '10',
+    buyer: 'GBUYER000000000000000000000000000000000000000000000000AA',
+    campaignId: '1',
+    amount: '500',
     ...overrides,
   };
 }
@@ -104,18 +104,18 @@ function makeOrderCreated(
 // ---------------------------------------------------------------------------
 // Concurrency Tests
 // ---------------------------------------------------------------------------
-describe("EventPersister — concurrent transaction scenarios", () => {
+describe('EventPersister — concurrent transaction scenarios', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("handles two concurrent persists of the same event without double write", async () => {
-    const { prisma } = await import("../db/client.js");
+  it('handles two concurrent persists of the same event without double write', async () => {
+    const { prisma } = await import('../db/client.js');
 
     // First call sees no duplicate, second call sees the first already committed.
     vi.mocked(prisma.transaction.findUnique)
       .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ id: "tx-1" } as never);
+      .mockResolvedValueOnce({ id: 'tx-1' } as never);
 
     const event = makeCampaignCreated();
 
@@ -128,8 +128,8 @@ describe("EventPersister — concurrent transaction scenarios", () => {
     expect(prisma.$transaction).toHaveBeenCalledOnce();
   });
 
-  it("handles concurrent persists of different events independently", async () => {
-    const { prisma } = await import("../db/client.js");
+  it('handles concurrent persists of different events independently', async () => {
+    const { prisma } = await import('../db/client.js');
 
     vi.mocked(prisma.transaction.findUnique).mockResolvedValue(null);
 
@@ -144,8 +144,8 @@ describe("EventPersister — concurrent transaction scenarios", () => {
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
   });
 
-  it("does not lose writes when unique constraint violation is simulated", async () => {
-    const { prisma } = await import("../db/client.js");
+  it('does not lose writes when unique constraint violation is simulated', async () => {
+    const { prisma } = await import('../db/client.js');
 
     vi.mocked(prisma.transaction.findUnique).mockResolvedValue(null);
 
@@ -153,7 +153,7 @@ describe("EventPersister — concurrent transaction scenarios", () => {
     vi.mocked(prisma.$transaction)
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(
-        Object.assign(new Error("Unique constraint failed"), { code: "P2002" }),
+        Object.assign(new Error('Unique constraint failed'), { code: 'P2002' }),
       );
 
     const event = makeCampaignCreated();
@@ -163,12 +163,12 @@ describe("EventPersister — concurrent transaction scenarios", () => {
       EventPersister.persist(event),
     ]);
 
-    expect(result1.status).toBe("fulfilled");
-    expect(result2.status).toBe("rejected");
+    expect(result1.status).toBe('fulfilled');
+    expect(result2.status).toBe('rejected');
   });
 
-  it("processes a burst of unique events without race conditions", async () => {
-    const { prisma } = await import("../db/client.js");
+  it('processes a burst of unique events without race conditions', async () => {
+    const { prisma } = await import('../db/client.js');
 
     vi.mocked(prisma.transaction.findUnique).mockResolvedValue(null);
 

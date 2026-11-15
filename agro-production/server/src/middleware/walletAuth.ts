@@ -1,6 +1,10 @@
 import type { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import { verifySession, AuthError, HANDOFF_AUDIENCE } from '../services/walletAuthService.js';
+import {
+  verifySession,
+  AuthError,
+  HANDOFF_AUDIENCE,
+} from '../services/walletAuthService.js';
 import { config } from '../config/index.js';
 
 export interface WalletRequest extends Request {
@@ -22,13 +26,17 @@ export function requireWallet(
   const authHeader = req.header('authorization');
 
   if (!authHeader) {
-    res.status(401).json({ message: 'Missing or invalid Authorization header' });
+    res
+      .status(401)
+      .json({ message: 'Missing or invalid Authorization header' });
     return;
   }
 
   const parts = authHeader.split(' ');
   if (parts.length !== 2 || parts[0] !== 'Bearer') {
-    res.status(401).json({ message: 'Missing or invalid Authorization header' });
+    res
+      .status(401)
+      .json({ message: 'Missing or invalid Authorization header' });
     return;
   }
 

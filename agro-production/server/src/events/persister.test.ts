@@ -37,12 +37,13 @@ vi.mock('../db/client.js', () => {
       upsert: vi.fn().mockResolvedValue({
         id: 'inv-uuid',
         campaignId: 'camp-uuid',
-        investorAddress: 'GINVESTOR0000000000000000000000000000000000000000000000',
+        investorAddress:
+          'GINVESTOR0000000000000000000000000000000000000000000000',
         amount: '5000',
         ledger: 200,
         txHash: null,
         createdAt: new Date('2024-06-01T00:00:00Z'),
-      })
+      }),
     },
     order: {
       upsert: vi.fn().mockResolvedValue({}),
@@ -598,7 +599,8 @@ describe('EventPersister', () => {
         investment: {
           upsert: vi.fn().mockResolvedValue({
             id: 'inv-uuid',
-            investorAddress: 'GINVESTOR0000000000000000000000000000000000000000000000',
+            investorAddress:
+              'GINVESTOR0000000000000000000000000000000000000000000000',
             amount: '5000',
             ledger: 200,
             txHash: null,
@@ -617,9 +619,11 @@ describe('EventPersister', () => {
         },
         dispute: {
           upsert: vi.fn().mockResolvedValue({ id: 'dispute-uuid' }),
-          findMany: vi.fn().mockResolvedValue([
-            { id: 'dispute-uuid', campaignId: 'camp-uuid', status: 'Open' },
-          ]),
+          findMany: vi
+            .fn()
+            .mockResolvedValue([
+              { id: 'dispute-uuid', campaignId: 'camp-uuid', status: 'Open' },
+            ]),
           update: vi.fn().mockResolvedValue({}),
         },
         disputeAuditEntry: { create: vi.fn().mockResolvedValue({}) },
@@ -652,7 +656,9 @@ describe('EventPersister', () => {
     }
 
     /** $transaction mock that runs the handler writes and then fails to commit. */
-    async function runAgainstRollback(run: () => Promise<unknown>): Promise<void> {
+    async function runAgainstRollback(
+      run: () => Promise<unknown>,
+    ): Promise<void> {
       const { prisma } = await import('../db/client.js');
       vi.mocked(prisma.$transaction).mockImplementationOnce(
         async (fn: (tx: any) => Promise<unknown>) => {
@@ -665,7 +671,10 @@ describe('EventPersister', () => {
     }
 
     it.each([
-      ['campaign.invested', () => EventPersister.persist(makeCampaignInvested())],
+      [
+        'campaign.invested',
+        () => EventPersister.persist(makeCampaignInvested()),
+      ],
       ['campaign.settled', () => EventPersister.persist(makeCampaignSettled())],
       ['order.created', () => EventPersister.persist(makeOrderCreated())],
       ['order.confirmed', () => EventPersister.persist(makeOrderConfirmed())],
@@ -676,8 +685,10 @@ describe('EventPersister', () => {
             ...baseEvent,
             action: 'dispute.opened',
             campaignId: '1',
-            initiatorAddress: 'GINITIATOR000000000000000000000000000000000000000000',
-            respondentAddress: 'GRESPONDENT00000000000000000000000000000000000000000',
+            initiatorAddress:
+              'GINITIATOR000000000000000000000000000000000000000000',
+            respondentAddress:
+              'GRESPONDENT00000000000000000000000000000000000000000',
             orderId: '10',
           } as never),
       ],
@@ -688,7 +699,8 @@ describe('EventPersister', () => {
             ...baseEvent,
             action: 'dispute.evidence_submitted',
             disputeId: 'dispute-uuid',
-            submitterAddress: 'GSUBMITTER000000000000000000000000000000000000000000',
+            submitterAddress:
+              'GSUBMITTER000000000000000000000000000000000000000000',
             evidenceUrl: 'https://example.com/evidence',
             evidenceHash: 'hash-1',
           } as never),
@@ -718,13 +730,16 @@ describe('EventPersister', () => {
       ['basket.funded', () => EventPersister.persist(makeBasketFunded())],
       ['basket.withdrawn', () => EventPersister.persist(makeBasketWithdrawn())],
       ['basket.claimed', () => EventPersister.persist(makeBasketClaimed())],
-    ])('emits zero events when the %s transaction rolls back', async (_action, run) => {
-      const { broadcast } = await import('../services/wsServer.js');
+    ])(
+      'emits zero events when the %s transaction rolls back',
+      async (_action, run) => {
+        const { broadcast } = await import('../services/wsServer.js');
 
-      await runAgainstRollback(run);
+        await runAgainstRollback(run);
 
-      expect(vi.mocked(broadcast)).not.toHaveBeenCalled();
-    });
+        expect(vi.mocked(broadcast)).not.toHaveBeenCalled();
+      },
+    );
 
     it('emits the captured payloads after the transaction commits', async () => {
       const { prisma } = await import('../db/client.js');
@@ -741,7 +756,8 @@ describe('EventPersister', () => {
         expect.objectContaining({
           orderId: '10',
           campaignId: 'camp-uuid',
-          buyerAddress: 'GBUYER000000000000000000000000000000000000000000000000AA',
+          buyerAddress:
+            'GBUYER000000000000000000000000000000000000000000000000AA',
           status: 'PENDING',
         }),
       );
@@ -751,7 +767,9 @@ describe('EventPersister', () => {
       const { prisma } = await import('../db/client.js');
       const { broadcast } = await import('../services/wsServer.js');
       const tx = buildTx();
-      tx.transaction.findUnique = vi.fn().mockResolvedValue({ id: 'tx-inside' });
+      tx.transaction.findUnique = vi
+        .fn()
+        .mockResolvedValue({ id: 'tx-inside' });
       vi.mocked(prisma.$transaction).mockImplementationOnce(
         async (fn: (txArg: any) => Promise<unknown>) => fn(tx),
       );
@@ -778,7 +796,10 @@ describe('EventPersister', () => {
     }
 
     it.each([
-      ['campaign.invested', () => EventPersister.persist(makeCampaignInvested())],
+      [
+        'campaign.invested',
+        () => EventPersister.persist(makeCampaignInvested()),
+      ],
       ['campaign.settled', () => EventPersister.persist(makeCampaignSettled())],
       ['order.created', () => EventPersister.persist(makeOrderCreated())],
     ])(
@@ -855,13 +876,10 @@ describe('EventPersister', () => {
           }),
       );
 
-      await EventPersister.persist(
-        makeCampaignInvested({ totalRaised }),
-      );
+      await EventPersister.persist(makeCampaignInvested({ totalRaised }));
 
       const call = txCampaignUpdate.mock.calls[0]?.[0] as
-        | { data: { status?: string } }
-        | undefined;
+        { data: { status?: string } } | undefined;
       return call?.data?.status;
     }
 

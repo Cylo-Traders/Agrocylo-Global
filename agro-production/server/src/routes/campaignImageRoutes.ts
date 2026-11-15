@@ -27,10 +27,16 @@ router.post(
 
     if (!walletAddress) throw new HttpError(401, 'Unauthorized.');
     if (!image) {
-      throw new HttpError(400, 'Missing or unsupported image. Must be a jpg, png, or webp file uploaded as field "image".');
+      throw new HttpError(
+        400,
+        'Missing or unsupported image. Must be a jpg, png, or webp file uploaded as field "image".',
+      );
     }
     if (isUnsupportedMimeType(image)) {
-      throw new HttpError(415, 'Unsupported Media Type. Allowed: jpg, png, webp.');
+      throw new HttpError(
+        415,
+        'Unsupported Media Type. Allowed: jpg, png, webp.',
+      );
     }
 
     const result = await uploadCampaignImage({

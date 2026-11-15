@@ -84,7 +84,10 @@ router.put(
   validateBody(PreferencesSchema),
   async (req: WalletRequest, res: Response) => {
     try {
-      await updateNotificationPreferences(req.walletAddress!, req.body as Record<string, boolean>);
+      await updateNotificationPreferences(
+        req.walletAddress!,
+        req.body as Record<string, boolean>,
+      );
       res.status(204).send();
     } catch (err) {
       problemDetail(res, req, 500, 'Failed to update notification preferences');
