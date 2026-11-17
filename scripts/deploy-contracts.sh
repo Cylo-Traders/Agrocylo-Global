@@ -235,6 +235,12 @@ if [[ "$VERIFY_ONLY" == "false" && "$SKIP_BUILD" == "false" ]]; then
     for c in "${CONTRACTS[@]}"; do
         echo "  - $c"
         ( cd "${DIR[$c]}" && cargo build --release --target wasm32v1-none -q )
+        # Optimize with wasm-opt: the raw cargo output can exceed the
+        # network's maxContractSizeBytes (128 KiB on testnet/mainnet), which
+        # makes `contract upload` fail with TxSorobanInvalid.
+        _wasm="$WASM_DIR/${WASM[$c]}"
+        "$CLI" contract optimize --wasm "$_wasm" --wasm-out "$_wasm.opt" >/dev/null 2>&1
+        if [[ -f "$_wasm.opt" ]]; then mv "$_wasm.opt" "$_wasm"; fi
     done
     echo ""
 fi

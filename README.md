@@ -225,6 +225,14 @@ The repository includes Docker Compose orchestration for containerized developme
 
 For local development of `agro-production/server` and `agro-production/client`, see "Running locally" below — the recommended approach is npm-based development, not Docker.
 
+### 🚀 Deployment
+
+See [`docs/deployment/DEPLOY_CLIENTS_AND_SERVERS.md`](docs/deployment/DEPLOY_CLIENTS_AND_SERVERS.md)
+for deploying the two backends and two frontends (database/storage setup, Fly.io
+or Render/Vercel, CORS, and verification). For the automated Fly.io pipeline,
+contract deployment, and mainnet launch, see
+[`docs/deployment/README.md`](docs/deployment/README.md).
+
 ### 🔌 API Documentation
 
 #### Product Endpoints
