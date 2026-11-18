@@ -181,9 +181,16 @@ required pattern:
   rather than silently re-running (and potentially clobbering real data with
   the backfill default) against already-current entries.
 
-The other 4 contracts' `migrate` is currently a no-op stub (their schema
-hasn't changed since `CURRENT_SCHEMA_VERSION` was introduced) that exists
-so the hook is uniformly available before it's ever needed. A future
+`production_escrow::migrate` (bumped to schema v2 in Issue #1279) uses the
+same cursor-gated batch pattern (`OrderMigrationCursor`,
+`SplitOrderMigrationCursor`, `MIGRATION_BATCH_SIZE = 50`) to backfill
+`DataKey::BuyerConfirmedVolume(campaign_id, buyer)` from legacy confirmed
+`Order` and `SplitOrder` records, with per-order idempotency flags
+(`OrderVolumeCreditRecorded` and `SplitOrderVolumeCreditRecorded`) preventing
+double-counting. For `SplitOrderStatus::Confirmed` records, only co-buyers
+who confirmed their share (`order.confirmed.get(co_buyer) == Some(true)`) have
+their funded share credited. The remaining 3 contracts' `migrate` is a no-op
+stub until their schema changes. A future
 layout-changing upgrade on any of them follows the same shape: a shadow
 `OldXxxVN` type, an explicit read-old/write-new loop, and a cursor (or
 equivalent completeness marker) gating the version flip.

@@ -98,6 +98,9 @@ These constants ensure:
 | `Contributions(id)` | Persistent | first invest, each invest |
 | `Claimed(campaign_id, investor)` | Persistent | claim_returns, refund, batch_refund_investors |
 | `Order(id)` | Persistent | create_order, confirm_order, batch_refund_orders |
+| `BuyerConfirmedVolume(campaign_id, buyer)` | Persistent | confirm_order, confirm_split_receipt, resolve_split_dispute, migrate |
+| `OrderVolumeCreditRecorded(order_id)` | Persistent | confirm_order, migrate |
+| `SplitOrderVolumeCreditRecorded(split_order_id)` | Persistent | confirm_split_receipt, resolve_split_dispute, migrate |
 
 ---
 
