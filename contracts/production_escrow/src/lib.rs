@@ -132,6 +132,12 @@ pub enum SplitOrderError {
     SplitOrderNotFound = 8,
     SplitOrderNotDisputed = 9,
     SplitOrderAlreadyDisputed = 10,
+    /// Issue #1273: the 96h funding window has not elapsed yet.
+    SplitFundingWindowOpen = 11,
+    /// Issue #1273: the caller never funded a share, so there is nothing to refund.
+    SplitNoFundedContribution = 12,
+    /// Issue #1273: the 96h funding window closed before full funding.
+    SplitFundingDeadlinePassed = 13,
     // Mirrors of the `EscrowError` variants that the shared helpers used by
     // the split-order entry points (`load_campaign`, `checked_add`,
     // `checked_mul`, `admin`) can actually produce.
@@ -323,6 +329,16 @@ pub enum DataKey {
     Order(u64),
     /// Per-campaign milestone release configuration (Vec<MilestoneConfig>).
     MilestoneConfigs(u64),
+    /// Issue #1279: confirmed gross order volume per campaign and buyer.
+    /// Bounded O(1) read used by milestone authorization; backfilled by the
+    /// bounded migration entry points below for legacy order history.
+    BuyerConfirmedVolume(u64, Address),
+    /// One-time migration marker so a legacy order is counted at most once.
+    BuyerVolumeMigrated(u64),
+    SplitVolumeMigrated(u64),
+    /// Cursors for the bounded (admin-driven) legacy backfill.
+    BuyerVolumeMigrationCursor,
+    SplitVolumeMigrationCursor,
     /// Arbitrator pool addresses.
     Arbitrators,
     /// Minimum number of arbitrator votes required to resolve.
@@ -332,6 +348,12 @@ pub enum DataKey {
     /// Multi-party split order (Issue #654).
     SplitOrder(u64),
     SplitOrderCount,
+    /// Issue #1273: unix timestamp after which an underfunded split order
+    /// can be exited unilaterally by any listed co-buyer (or the admin).
+    SplitFundingDeadline(u64),
+    /// Issue #1273: a co-buyer that took the unilateral exit. Stored outside
+    /// `SplitOrder` so pre-fix orders remain deserializable.
+    SplitFundingExited(u64, Address),
     /// On-chain storage layout version (Issue #757).
     SchemaVersion,
     /// Guardian allowed to `pause` instantly (Issue #757).
@@ -378,6 +400,14 @@ pub const ORDER_EXPIRY_SECS: u64 = 96 * 3600;
 /// `order.created_at`, rather than waiting out the full 96-hour
 /// `ORDER_EXPIRY_SECS` window.
 pub const CANCEL_WINDOW_SECS: u64 = 30 * 60;
+
+/// Issue #1273: split orders share the ordinary order expiry window. A
+/// listed co-buyer may exit unilaterally once this many seconds have passed
+/// without full funding; no missing co-buyer authorization is required.
+pub const SPLIT_FUNDING_DEADLINE_SECS: u64 = ORDER_EXPIRY_SECS;
+
+/// Issue #1279: upper bound on orders inspected per migration transaction.
+pub const MAX_VOLUME_MIGRATION_BATCH: u32 = 50;
 
 /// The ordered sequence of milestones. Index 1 = Planted, 2 = Growing, etc.
 /// A campaign starts at milestone 0 (no milestones advanced).
@@ -1005,8 +1035,11 @@ impl ProductionEscrowContract {
         let is_oracle = caller == admin_addr;
         if !is_oracle {
             // Check if caller is a buyer (has a confirmed order with minimum volume).
+            // Issue #1279: bounded per-campaign/per-buyer state, not a scan
+            // of every order ever created. Integer division must not turn the
+            // minimum into zero for tiny campaign targets.
             let buyer_order_volume = get_buyer_order_volume(&env, campaign_id, &caller);
-            let min_order_required = campaign.target_amount / 100; // At least 1% of target
+            let min_order_required = (campaign.target_amount / 100).max(1);
             if buyer_order_volume < min_order_required {
                 return Err(EscrowError::NotBuyerOrOracle);
             }
@@ -1041,6 +1074,130 @@ impl ProductionEscrowContract {
             (campaign_id, caller, next_idx + 1, tranche_amount),
         );
         Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Bounded buyer-volume migration (Issue #1279)
+    // -----------------------------------------------------------------------
+
+    /// Admin-only: backfill confirmed volume from up to `limit` ordinary
+    /// orders (capped at `MAX_VOLUME_MIGRATION_BATCH`) per call. Callers keep
+    /// invoking until 0 is returned; each order is processed exactly once.
+    pub fn migrate_buyer_volume_batch(
+        env: Env,
+        caller: Address,
+        limit: u32,
+    ) -> Result<u32, EscrowError> {
+        caller.require_auth();
+        if caller != admin(&env)? {
+            return Err(EscrowError::NotAdmin);
+        }
+        let order_count: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::OrderCount)
+            .unwrap_or(0);
+        let mut cursor: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::BuyerVolumeMigrationCursor)
+            .unwrap_or(1);
+        let batch = limit.min(MAX_VOLUME_MIGRATION_BATCH);
+        let mut processed = 0u32;
+        while cursor <= order_count && processed < batch {
+            if let Some(order) = env
+                .storage()
+                .persistent()
+                .get::<_, Order>(&DataKey::Order(cursor))
+            {
+                if order.status == OrderStatus::Confirmed {
+                    backfill_confirmed_volume(
+                        &env,
+                        DataKey::BuyerVolumeMigrated(cursor),
+                        order.campaign_id,
+                        &order.buyer,
+                        order.amount,
+                    );
+                } else {
+                    env.storage()
+                        .persistent()
+                        .set(&DataKey::BuyerVolumeMigrated(cursor), &true);
+                }
+            } else {
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::BuyerVolumeMigrated(cursor), &true);
+            }
+            cursor += 1;
+            processed += 1;
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::BuyerVolumeMigrationCursor, &cursor);
+        Ok(processed)
+    }
+
+    /// Admin-only: backfill confirmed split-share volume for up to `limit`
+    /// split orders. Each co-buyer's own confirmed share counts for that
+    /// co-buyer; unconfirmed/withdrawn shares are never counted.
+    pub fn migrate_split_volume_batch(
+        env: Env,
+        caller: Address,
+        limit: u32,
+    ) -> Result<u32, EscrowError> {
+        caller.require_auth();
+        if caller != admin(&env)? {
+            return Err(EscrowError::NotAdmin);
+        }
+        let count: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::SplitOrderCount)
+            .unwrap_or(0);
+        let mut cursor: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::SplitVolumeMigrationCursor)
+            .unwrap_or(1);
+        let batch = limit.min(MAX_VOLUME_MIGRATION_BATCH);
+        let mut processed = 0u32;
+        while cursor <= count && processed < batch {
+            if let Some(order) = env
+                .storage()
+                .persistent()
+                .get::<_, SplitOrder>(&DataKey::SplitOrder(cursor))
+            {
+                let split_marker = DataKey::SplitVolumeMigrated(cursor);
+                if order.status == SplitOrderStatus::Confirmed
+                    && !env.storage().persistent().has(&split_marker)
+                {
+                    for co_buyer in order.co_buyers.iter() {
+                        if order.confirmed.get(co_buyer.clone()).unwrap_or(false) {
+                            let share = order.shares.get(co_buyer.clone()).unwrap_or(0);
+                            if share > 0 {
+                                add_buyer_confirmed_volume(
+                                    &env,
+                                    order.campaign_id,
+                                    &co_buyer,
+                                    share,
+                                );
+                            }
+                        }
+                    }
+                }
+                env.storage().persistent().set(&split_marker, &true);
+            } else {
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::SplitVolumeMigrated(cursor), &true);
+            }
+            cursor += 1;
+            processed += 1;
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::SplitVolumeMigrationCursor, &cursor);
+        Ok(processed)
     }
 
     // -----------------------------------------------------------------------
@@ -1232,6 +1389,7 @@ impl ProductionEscrowContract {
             .instance()
             .set(&DataKey::SplitOrderCount, &order_id);
 
+        let created_at = env.ledger().timestamp();
         let order = SplitOrder {
             campaign_id,
             total_amount,
@@ -1243,10 +1401,16 @@ impl ProductionEscrowContract {
             funded_count: 0,
             confirmed_count: 0,
             confirmed_value: 0,
-            created_at: env.ledger().timestamp(),
+            created_at,
             status: SplitOrderStatus::Funding,
         };
         save_split_order(&env, order_id, &order);
+        // Separate ledger entry: adding a field to `SplitOrder` would break
+        // deserialization of orders created before this fix (schema v1).
+        env.storage().persistent().set(
+            &DataKey::SplitFundingDeadline(order_id),
+            &(created_at + SPLIT_FUNDING_DEADLINE_SECS),
+        );
 
         env.events().publish(
             (t_order(), symbol_short!("splitnew")),
@@ -1271,11 +1435,22 @@ impl ProductionEscrowContract {
         if order.status != SplitOrderStatus::Funding {
             return Err(SplitOrderError::SplitOrderAlreadyFunded);
         }
+        // Issue #1273: no new money after the funding window closes, so an
+        // exit can never be followed by an undercollateralized activation.
+        if env.ledger().timestamp() >= split_funding_deadline(&env, order_id, &order) {
+            return Err(SplitOrderError::SplitFundingDeadlinePassed);
+        }
         let share = order
             .shares
             .get(co_buyer.clone())
             .ok_or(SplitOrderError::NotCoBuyer)?;
-        if order.funded.get(co_buyer.clone()).unwrap_or(false) {
+        if order.funded.get(co_buyer.clone()).unwrap_or(false)
+            || env
+                .storage()
+                .persistent()
+                .get::<_, bool>(&DataKey::SplitFundingExited(order_id, co_buyer.clone()))
+                .unwrap_or(false)
+        {
             return Err(SplitOrderError::AlreadyContributed);
         }
 
@@ -1332,6 +1507,9 @@ impl ProductionEscrowContract {
         order.confirmed.set(co_buyer.clone(), true);
         order.confirmed_count += 1;
         order.confirmed_value = checked_add(order.confirmed_value, share)?;
+        // Issue #1279: each participant's own confirmed share counts for
+        // that participant in milestone authorization.
+        add_buyer_confirmed_volume(&env, order.campaign_id, &co_buyer, share);
 
         let majority_by_value =
             order.confirmed_value.checked_mul(2).unwrap_or(i128::MAX) > order.total_amount;
@@ -1464,6 +1642,128 @@ impl ProductionEscrowContract {
         load_split_order(&env, order_id)
     }
 
+    /// Issue #1279: bounded confirmed gross volume for one campaign/buyer.
+    pub fn get_buyer_confirmed_volume(env: Env, campaign_id: u64, buyer: Address) -> i128 {
+        get_buyer_order_volume(&env, campaign_id, &buyer)
+    }
+
+    /// Issue #1273: contributions still held in escrow for a split order.
+    /// Exited/refunded co-buyers are omitted; `funded_count` in `SplitOrder`
+    /// counts the same outstanding contributions.
+    pub fn get_split_order_funding(
+        env: Env,
+        order_id: u64,
+    ) -> Result<Vec<(Address, i128)>, SplitOrderError> {
+        let order = load_split_order(&env, order_id)?;
+        let mut contributions = Vec::new(&env);
+        for co_buyer in order.co_buyers.iter() {
+            if order.funded.get(co_buyer.clone()).unwrap_or(false) {
+                let share = order.shares.get(co_buyer.clone()).unwrap_or(0);
+                if share > 0 {
+                    contributions.push_back((co_buyer, share));
+                }
+            }
+        }
+        Ok(contributions)
+    }
+
+    /// Issue #1273: unix timestamp at which an underfunded split order may
+    /// be exited. Stored per order; legacy orders fall back to `created_at`.
+    pub fn get_split_funding_deadline(env: Env, order_id: u64) -> Result<u64, SplitOrderError> {
+        let order = load_split_order(&env, order_id)?;
+        Ok(split_funding_deadline(&env, order_id, &order))
+    }
+
+    /// Issue #1273: unilateral exit from a split order that never reached
+    /// full funding. Callable by any listed co-buyer after the 96h deadline
+    /// (refunds only that co-buyer's actually funded share) or by the admin
+    /// (refunds all outstanding shares and makes the order terminal).
+    ///
+    /// Authorization: caller `require_auth`; no missing co-buyer signature.
+    /// Pause policy: refund-only, so this safety valve stays available while
+    /// paused — every other split entry point remains pause-gated (#1246).
+    /// Events: `splitrfnd` (per co-buyer exit) and `splitradm` (admin exit),
+    /// both carrying `(order_id, refunded_addresses_count, amount, status)`.
+    /// States: `Funding` -> `Funding` while shares remain, then terminal
+    /// `Refunded` once no escrowed contributions are left.
+    pub fn exit_unfunded_split_order(
+        env: Env,
+        caller: Address,
+        order_id: u64,
+    ) -> Result<i128, SplitOrderError> {
+        caller.require_auth();
+        let mut order = load_split_order(&env, order_id)?;
+        if order.status != SplitOrderStatus::Funding {
+            return Err(SplitOrderError::SplitOrderAlreadyFunded);
+        }
+        if env.ledger().timestamp() < split_funding_deadline(&env, order_id, &order) {
+            return Err(SplitOrderError::SplitFundingWindowOpen);
+        }
+
+        let admin_addr = admin(&env)?;
+        let is_admin = caller == admin_addr;
+        let is_listed = order.co_buyers.iter().any(|address| address == caller);
+        if !is_admin && !is_listed {
+            return Err(SplitOrderError::NotCoBuyer);
+        }
+        if !is_admin && !order.funded.get(caller.clone()).unwrap_or(false) {
+            return Err(SplitOrderError::SplitNoFundedContribution);
+        }
+
+        let campaign = load_campaign(&env, order.campaign_id)?;
+        let token_client = token::Client::new(&env, &campaign.token);
+        let mut refunded = 0i128;
+        let mut refunded_count = 0u32;
+
+        if is_admin {
+            for co_buyer in order.co_buyers.iter() {
+                if !order.funded.get(co_buyer.clone()).unwrap_or(false) {
+                    continue;
+                }
+                let share = order.shares.get(co_buyer.clone()).unwrap_or(0);
+                if share <= 0 {
+                    continue;
+                }
+                token_client.transfer(&env.current_contract_address(), &co_buyer, &share);
+                order.funded.set(co_buyer.clone(), false);
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::SplitFundingExited(order_id, co_buyer), &true);
+                refunded += share;
+                refunded_count += 1;
+            }
+        } else {
+            let share = order.shares.get(caller.clone()).unwrap_or(0);
+            if share <= 0 {
+                return Err(SplitOrderError::SplitNoFundedContribution);
+            }
+            token_client.transfer(&env.current_contract_address(), &caller, &share);
+            order.funded.set(caller.clone(), false);
+            env.storage()
+                .persistent()
+                .set(&DataKey::SplitFundingExited(order_id, caller), &true);
+            refunded = share;
+            refunded_count = 1;
+        }
+
+        order.funded_count = order.funded_count.saturating_sub(refunded_count);
+        if order.funded_count == 0 {
+            order.status = SplitOrderStatus::Refunded;
+        }
+        save_split_order(&env, order_id, &order);
+
+        let topic = if is_admin {
+            symbol_short!("splitradm")
+        } else {
+            symbol_short!("splitrfnd")
+        };
+        env.events().publish(
+            (t_order(), topic),
+            (order_id, refunded_count, refunded, order.status.clone()),
+        );
+        Ok(refunded)
+    }
+
     /// Buyer confirms receipt. The gross order amount includes the fee;
     /// only the net amount retained by escrow is credited as campaign revenue.
     /// Cannot confirm orders after campaign is settled (Issue #455).
@@ -1491,6 +1791,8 @@ impl ProductionEscrowContract {
         let net_revenue = checked_sub(order.amount, order.fee)?;
         campaign.total_revenue = checked_add(campaign.total_revenue, net_revenue)?;
         order.status = OrderStatus::Confirmed;
+        // Issue #1279: exactly-once (status checked above), gross amount.
+        add_buyer_confirmed_volume(&env, order.campaign_id, &order.buyer, order.amount);
 
         // Transfer fee to collector if fee > 0.
         if order.fee > 0 {
@@ -2380,6 +2682,15 @@ fn save_split_order(env: &Env, order_id: u64, order: &SplitOrder) {
     );
 }
 
+/// Issue #1273: legacy split orders have no deadline entry, so their
+/// `created_at` plus the standard window is used as a deterministic fallback.
+fn split_funding_deadline(env: &Env, order_id: u64, order: &SplitOrder) -> u64 {
+    env.storage()
+        .persistent()
+        .get(&DataKey::SplitFundingDeadline(order_id))
+        .unwrap_or(order.created_at + SPLIT_FUNDING_DEADLINE_SECS)
+}
+
 /// Refunds each co-buyer their pro-rata share of `pool` (out of
 /// `order.total_amount`). Integer-division dust from rounding is left in the
 /// contract.
@@ -2406,30 +2717,47 @@ fn refund_split_order_pro_rata(
     Ok(())
 }
 
-/// Get the total confirmed order volume for a buyer on a campaign.
-/// Used by advance_milestone to enforce minimum order volume requirement.
-fn get_buyer_order_volume(env: &Env, campaign_id: u64, buyer: &Address) -> i128 {
-    let order_count: u64 = env
-        .storage()
-        .instance()
-        .get(&DataKey::OrderCount)
-        .unwrap_or(0);
-    let mut total = 0i128;
-    for i in 1..=order_count {
-        if let Some(order) = env
-            .storage()
-            .persistent()
-            .get::<_, Order>(&DataKey::Order(i))
-        {
-            if order.campaign_id == campaign_id
-                && order.buyer == *buyer
-                && order.status == OrderStatus::Confirmed
-            {
-                total = total.saturating_add(order.amount);
-            }
-        }
+/// Issue #1279: bounded confirmed-volume read. The value is maintained
+/// exactly once when an ordinary order or split-share confirmation happens,
+/// so milestone authorization never scans global order history. `amount` is
+/// gross (fee included), matching the old scan's `Order.amount`.
+fn add_buyer_confirmed_volume(env: &Env, campaign_id: u64, buyer: &Address, amount: i128) {
+    let key = DataKey::BuyerConfirmedVolume(campaign_id, buyer.clone());
+    let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+    env.storage()
+        .persistent()
+        .set(&key, &current.saturating_add(amount));
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND);
+}
+
+/// Issue #1279: legacy confirmation backfill. One marker per source order
+/// makes the migration idempotent even if a caller restarts with an old cursor.
+fn backfill_confirmed_volume(
+    env: &Env,
+    marker: DataKey,
+    campaign_id: u64,
+    buyer: &Address,
+    amount: i128,
+) -> bool {
+    if env.storage().persistent().has(&marker) {
+        return false;
     }
-    total
+    let key = DataKey::BuyerConfirmedVolume(campaign_id, buyer.clone());
+    let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+    env.storage()
+        .persistent()
+        .set(&key, &current.saturating_add(amount));
+    env.storage().persistent().set(&marker, &true);
+    true
+}
+
+fn get_buyer_order_volume(env: &Env, campaign_id: u64, buyer: &Address) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&DataKey::BuyerConfirmedVolume(campaign_id, buyer.clone()))
+        .unwrap_or(0)
 }
 
 fn resolve_dispute_internal(

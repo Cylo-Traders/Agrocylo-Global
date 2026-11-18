@@ -99,3 +99,33 @@ When integrating with this contract:
 ---
 
 **Issue References**: #454 (self-reported harvest risk), #455 (order finalization), #456 (TTL policy), #457 (overflow handling)
+
+## Split-order funding exit (Issue #1273)
+
+A split order stays `Funding` until every listed co-buyer funds its share.
+`create_split_order` now records a per-order `SplitFundingDeadline`
+(`created_at + 96 h`, matching `ORDER_EXPIRY_SECS`; legacy orders fall back to
+the same calculation from their stored `created_at`). After that deadline,
+`exit_unfunded_split_order(caller, order_id)` provides the missing exit:
+
+- Any listed co-buyer may call it and receives exactly their own actually
+  funded share. No missing co-buyer authorization is required. Unfunded
+  callers get `SplitNoFundedContribution`; callers already refunded cannot be
+  paid again.
+- The admin may call it to refund all outstanding shares in one transaction.
+  Either way, only transferred contributions are returned; fees are charged
+  solely on confirmation, so none are deducted here.
+- Each order stays `Funding` while other funded shares remain (they can exit
+  too) and becomes terminal `Refunded` once `funded_count` reaches zero.
+  `fund_split_order` rejects exited callers, calls past the deadline, and any
+  call on a terminal order — an exit can never be followed by an
+  undercollateralized `Active` order or a second revenue credit.
+- `get_split_order_funding(order_id)` returns the addresses and amounts still
+  held in escrow (exited/refunded shares are omitted);
+  `get_split_funding_deadline(order_id)` exposes the cutoff.
+- Events: `splitrfnd` for a co-buyer exit and `splitradm` for an admin exit,
+  each with `(order_id, refunded_addresses_count, amount, resulting_status)`.
+- Pause policy: all new-obligation split entry points remain pause-gated
+  (#1246). The exit is deliberately **not** pause-gated: it only returns
+  escrowed funds and reduces liabilities, so an emergency pause cannot trap
+  a funded co-buyer's contribution until governance unpauses.

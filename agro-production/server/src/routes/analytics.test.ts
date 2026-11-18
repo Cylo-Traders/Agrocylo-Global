@@ -25,6 +25,7 @@ vi.mock('../middleware/rateLimit.js', () => createRateLimitMock());
 
 import app from '../app.js';
 import { prisma } from '../db/client.js';
+import { PriceIndexResponseSchema } from './analytics.js';
 
 describe('Analytics API (Issue #1189)', () => {
   beforeEach(() => {
@@ -51,6 +52,25 @@ describe('Analytics API (Issue #1189)', () => {
     expect(res.body.data.length).toBeGreaterThan(0);
     expect(res.body.data[0]).toHaveProperty('crop', 'White Maize');
     expect(res.body.data[0]).toHaveProperty('averagePrice', 4.5);
+    expect(res.body.data[0].sampleCount).toBe(1);
+    expect(() => PriceIndexResponseSchema.parse(res.body)).not.toThrow();
+    expect(res.body.meta).toMatchObject({
+      source: 'marketplace',
+      currency: 'XLM',
+      unit: 'XLM per product token',
+    });
+  });
+
+  it('returns an empty dataset with no fabricated benchmarks when there are no products', async () => {
+    (prisma.product.findMany as any).mockResolvedValue([]);
+
+    const res = await request(app)
+      .get('/api/v1/analytics/price-index')
+      .expect(200);
+
+    expect(res.body.data).toEqual([]);
+    expect(() => PriceIndexResponseSchema.parse(res.body)).not.toThrow();
+    expect(res.body.meta.computedAt).toBeTruthy();
   });
 
   it('GET /analytics/price-index without /api/v1 prefix also succeeds (no 404)', async () => {
@@ -60,7 +80,6 @@ describe('Analytics API (Issue #1189)', () => {
 
     expect(res.body).toHaveProperty('data');
     expect(Array.isArray(res.body.data)).toBe(true);
-    // Returns default benchmarks when DB has no products
-    expect(res.body.data.length).toBe(4);
+    expect(res.body.data).toEqual([]);
   });
 });
