@@ -7,8 +7,9 @@ use soroban_sdk::{
 };
 
 use crate::{
-    CampaignStatus, DisputeResolution, EscrowError, OrderStatus, ProductionEscrowContract,
-    ProductionEscrowContractClient, SplitOrderStatus, ORDER_EXPIRY_SECS,
+    CampaignStatus, DataKey, DisputeResolution, EscrowError, Order, OrderStatus,
+    ProductionEscrowContract, ProductionEscrowContractClient, SplitOrderError, SplitOrderStatus,
+    MAX_VOLUME_MIGRATION_BATCH, ORDER_EXPIRY_SECS, SPLIT_FUNDING_DEADLINE_SECS,
 };
 
 // ---------------------------------------------------------------------------
@@ -3081,6 +3082,38 @@ fn milestone_configs_50pct(t: &TestEnv) -> Vec<MilestoneConfig> {
     configs // 5 x 10% = 50% total
 }
 
+/// Issue #1277: valid milestone fixture. `create_order` requires an
+/// InProduction/Harvested campaign; `start_production` already releases 30%,
+/// so the five milestone tranches must total at most the remaining 40% of
+/// the 70% cumulative cap. The caller is a confirmed buyer and the attester
+/// is authorized independently of the farmer.
+fn setup_buyer_milestone_campaign(t: &TestEnv<'_>) -> u64 {
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &future_deadline(t));
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id); // 30% released
+
+    let mut configs = Vec::new(&t.env);
+    for milestone in [
+        Milestone::Planted,
+        Milestone::Growing,
+        Milestone::Harvested,
+        Milestone::Shipped,
+        Milestone::Delivered,
+    ] {
+        configs.push_back(MilestoneConfig {
+            milestone,
+            release_bps: 800, // 8% x 5 = 40%; 30% + 40% = 70% cap
+        });
+    }
+    t.client.set_milestone_configs(&t.admin, &id, &configs);
+
+    let order_id = t.client.create_order(&t.buyer, &id, &1_000);
+    t.client.confirm_order(&t.buyer, &order_id);
+    id
+}
+
 #[test]
 fn test_set_milestone_configs_ok() {
     let t = setup();
@@ -3140,79 +3173,52 @@ fn test_set_milestone_configs_rejects_wrong_order() {
 #[test]
 fn test_advance_milestone_planted_ok() {
     let t = setup();
-    let deadline = future_deadline(&t);
-    let id = t
-        .client
-        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
-    t.client.invest(&t.investor1, &id, &10_000);
-    let configs = milestone_configs_50pct(&t);
-    t.client.set_milestone_configs(&t.admin, &id, &configs);
+    let id = setup_buyer_milestone_campaign(&t);
 
     let farmer_before = balance(&t, &t.farmer);
-    t.client.advance_milestone(&t.admin, &t.attester, &id);
-    // 10% of 10_000 = 1_000
-    assert_eq!(balance(&t, &t.farmer), farmer_before + 1_000);
+    t.client.advance_milestone(&t.buyer, &t.attester, &id);
+    assert_eq!(balance(&t, &t.farmer), farmer_before + 800);
 
     let c = t.client.get_campaign(&id);
     assert_eq!(c.current_milestone, 1);
-    assert_eq!(c.tranche_released, 1_000);
+    assert_eq!(c.tranche_released, 3_800);
 }
 
 #[test]
 fn test_advance_milestone_growing_ok() {
     let t = setup();
-    let deadline = future_deadline(&t);
-    let id = t
-        .client
-        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
-    t.client.invest(&t.investor1, &id, &10_000);
-    let configs = milestone_configs_50pct(&t);
-    t.client.set_milestone_configs(&t.admin, &id, &configs);
+    let id = setup_buyer_milestone_campaign(&t);
 
-    t.client.advance_milestone(&t.admin, &t.attester, &id); // Planted: 1_000
+    t.client.advance_milestone(&t.buyer, &t.attester, &id); // Planted
     let farmer_before = balance(&t, &t.farmer);
-    t.client.advance_milestone(&t.admin, &t.attester, &id); // Growing: 1_000
-    assert_eq!(balance(&t, &t.farmer), farmer_before + 1_000);
+    t.client.advance_milestone(&t.buyer, &t.attester, &id); // Growing
+    assert_eq!(balance(&t, &t.farmer), farmer_before + 800);
 
     let c = t.client.get_campaign(&id);
     assert_eq!(c.current_milestone, 2);
-    assert_eq!(c.tranche_released, 2_000);
+    assert_eq!(c.tranche_released, 4_600);
 }
 
 #[test]
 fn test_advance_milestone_all_five_ok() {
     let t = setup();
-    let deadline = future_deadline(&t);
-    let id = t
-        .client
-        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
-    t.client.invest(&t.investor1, &id, &10_000);
-    let configs = milestone_configs_50pct(&t);
-    t.client.set_milestone_configs(&t.admin, &id, &configs);
+    let id = setup_buyer_milestone_campaign(&t);
 
     let farmer_before = balance(&t, &t.farmer);
     for _ in 0..5 {
-        t.client.advance_milestone(&t.admin, &t.attester, &id);
+        t.client.advance_milestone(&t.buyer, &t.attester, &id);
     }
-    // 5 x 1_000 = 5_000 (50% of 10_000)
-    assert_eq!(balance(&t, &t.farmer), farmer_before + 5_000);
+    assert_eq!(balance(&t, &t.farmer), farmer_before + 4_000);
     let c = t.client.get_campaign(&id);
     assert_eq!(c.current_milestone, 5);
-    assert_eq!(c.tranche_released, 5_000);
+    assert_eq!(c.tranche_released, 7_000);
 }
 
 #[test]
 fn test_advance_milestone_rejects_farmer() {
     let t = setup();
-    let deadline = future_deadline(&t);
-    let id = t
-        .client
-        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
-    t.client.invest(&t.investor1, &id, &10_000);
-    let configs = milestone_configs_50pct(&t);
-    t.client.set_milestone_configs(&t.admin, &id, &configs);
+    let id = setup_buyer_milestone_campaign(&t);
 
-    // Farmer cannot advance milestones (not a buyer).
     let err = t
         .client
         .try_advance_milestone(&t.farmer, &t.attester, &id)
@@ -3224,18 +3230,26 @@ fn test_advance_milestone_rejects_farmer() {
 #[test]
 fn test_advance_milestone_admin_as_oracle_ok() {
     let t = setup();
-    let deadline = future_deadline(&t);
-    let id = t
-        .client
-        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
-    t.client.invest(&t.investor1, &id, &10_000);
-    let configs = milestone_configs_50pct(&t);
-    t.client.set_milestone_configs(&t.admin, &id, &configs);
+    let id = setup_buyer_milestone_campaign(&t);
 
-    // Admin acts as oracle — no order needed.
     let farmer_before = balance(&t, &t.farmer);
     t.client.advance_milestone(&t.admin, &t.attester, &id);
-    assert_eq!(balance(&t, &t.farmer), farmer_before + 1_000);
+    assert_eq!(balance(&t, &t.farmer), farmer_before + 800);
+}
+
+#[test]
+fn test_advance_milestone_rejects_wrong_attester() {
+    let t = setup();
+    let id = setup_buyer_milestone_campaign(&t);
+    let other = Address::generate(&t.env);
+
+    let err = t
+        .client
+        .try_advance_milestone(&t.buyer, &other, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::NotAdmin);
+    assert_eq!(t.client.get_campaign(&id).current_milestone, 0);
 }
 
 #[test]
@@ -3258,21 +3272,14 @@ fn test_advance_milestone_rejects_no_config() {
 #[test]
 fn test_advance_milestone_rejects_past_end() {
     let t = setup();
-    let deadline = future_deadline(&t);
-    let id = t
-        .client
-        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
-    t.client.invest(&t.investor1, &id, &10_000);
-    let configs = milestone_configs_50pct(&t);
-    t.client.set_milestone_configs(&t.admin, &id, &configs);
+    let id = setup_buyer_milestone_campaign(&t);
 
     for _ in 0..5 {
-        t.client.advance_milestone(&t.admin, &t.attester, &id);
+        t.client.advance_milestone(&t.buyer, &t.attester, &id);
     }
-    // 6th advance should fail — no more milestones.
     let err = t
         .client
-        .try_advance_milestone(&t.admin, &t.attester, &id)
+        .try_advance_milestone(&t.buyer, &t.attester, &id)
         .unwrap_err()
         .unwrap();
     assert_eq!(err, EscrowError::InvalidMilestone);
@@ -3280,63 +3287,55 @@ fn test_advance_milestone_rejects_past_end() {
 
 #[test]
 fn test_advance_milestone_over_release_prevented() {
-    // 5 milestones each at 30% = 150% total. The 70% MAX_TRANCHE_BPS cap
-    // should reject the 3rd milestone (cumulative 90% > 70%).
+    // start_production releases 30%; two 30% milestones would total 90%,
+    // above the 70% cumulative tranche cap, so the second is rejected.
     let t = setup();
     let deadline = future_deadline(&t);
     let id = t
         .client
         .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
     t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
 
     let mut configs = Vec::new(&t.env);
-    for i in 0..5 {
+    for milestone in [
+        Milestone::Planted,
+        Milestone::Growing,
+        Milestone::Harvested,
+        Milestone::Shipped,
+        Milestone::Delivered,
+    ] {
         configs.push_back(MilestoneConfig {
-            milestone: match i {
-                0 => Milestone::Planted,
-                1 => Milestone::Growing,
-                2 => Milestone::Harvested,
-                3 => Milestone::Shipped,
-                _ => Milestone::Delivered,
-            },
-            release_bps: 3000, // 30% each
+            milestone,
+            release_bps: 3_000,
         });
     }
     t.client.set_milestone_configs(&t.admin, &id, &configs);
+    let order_id = t.client.create_order(&t.buyer, &id, &1_000);
+    t.client.confirm_order(&t.buyer, &order_id);
 
-    t.client.advance_milestone(&t.admin, &t.attester, &id); // 30% = 3_000
-    t.client.advance_milestone(&t.admin, &t.attester, &id); // 30% = 3_000 (total 6_000)
+    t.client.advance_milestone(&t.buyer, &t.attester, &id); // 30 + 30 = 60%
     let err = t
         .client
-        .try_advance_milestone(&t.admin, &t.attester, &id)
+        .try_advance_milestone(&t.buyer, &t.attester, &id)
         .unwrap_err()
         .unwrap();
-    // 3rd milestone would push to 9_000 > 7_000 max.
     assert_eq!(err, EscrowError::InvalidTranche);
+    assert_eq!(t.client.get_campaign(&id).tranche_released, 6_000);
 }
 
 #[test]
 fn test_advance_milestone_refund_after_partial_release() {
-    // After advancing some milestones, campaign fails.
-    // Investor gets proportional refund from remaining pool.
     let t = setup();
-    let deadline = future_deadline(&t);
-    let id = t
-        .client
-        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
-    t.client.invest(&t.investor1, &id, &10_000);
-    let configs = milestone_configs_50pct(&t);
-    t.client.set_milestone_configs(&t.admin, &id, &configs);
+    let id = setup_buyer_milestone_campaign(&t);
 
-    // Advance 2 milestones: 2_000 released (20%).
-    t.client.advance_milestone(&t.admin, &t.attester, &id);
-    t.client.advance_milestone(&t.admin, &t.attester, &id);
+    t.client.advance_milestone(&t.buyer, &t.attester, &id);
+    t.client.advance_milestone(&t.buyer, &t.attester, &id);
 
-    // Campaign fails. Remaining pool = 10_000 - 2_000 = 8_000.
-    t.client.mark_campaign_failed(&t.farmer, &id);
-    let refund = t.client.refund(&t.investor1, &id);
-    // Investor has 100% of contribution -> 100% of pool = 8_000.
-    assert_eq!(refund, 8_000);
+    // Pool = 10_000 raised + 970 net order revenue - 4_600 released.
+    // Post-production failure is admin-only (farmer unilateral window ended).
+    t.client.mark_campaign_failed(&t.admin, &id);
+    assert_eq!(t.client.refund(&t.investor1, &id), 6_370);
 }
 
 // ---------------------------------------------------------------------------
@@ -3545,4 +3544,396 @@ fn test_vote_to_resolve_non_arbitrator_rejected() {
         .unwrap_err()
         .unwrap();
     assert_eq!(err, EscrowError::ArbitratorNotFound);
+}
+
+// ---------------------------------------------------------------------------
+// 14. Split-order funding exits (Issue #1273)
+// ---------------------------------------------------------------------------
+
+fn split_order_fixture(t: &TestEnv<'_>, shares: &[i128]) -> (u64, std::vec::Vec<Address>, u64) {
+    let campaign_id =
+        t.client
+            .create_campaign(&t.farmer, &t.token_id, &10_000, &future_deadline(t));
+    t.client.invest(&t.investor1, &campaign_id, &10_000);
+    t.client.start_production(&t.farmer, &campaign_id);
+
+    let mut co_buyers: std::vec::Vec<Address> = std::vec![t.buyer.clone()];
+    let mut on_chain_buyers = Vec::new(&t.env);
+    on_chain_buyers.push_back(t.buyer.clone());
+    for i in 1..shares.len() {
+        let co_buyer = Address::generate(&t.env);
+        StellarAssetClient::new(&t.env, &t.token_id).mint(&co_buyer, shares.get(i).unwrap());
+        co_buyers.push(co_buyer.clone());
+        on_chain_buyers.push_back(co_buyer);
+    }
+    let mut on_chain_shares = Vec::new(&t.env);
+    for share in shares {
+        on_chain_shares.push_back(*share);
+    }
+
+    let order_id =
+        t.client
+            .create_split_order(&t.buyer, &campaign_id, &on_chain_buyers, &on_chain_shares);
+    (campaign_id, co_buyers, order_id)
+}
+
+#[test]
+fn test_split_partial_funding_exit_refunds_only_funded_share() {
+    let t = setup();
+    let (_campaign_id, co_buyers, order_id) = split_order_fixture(&t, &[500, 500]);
+    t.client.fund_split_order(&co_buyers[0], &order_id);
+
+    assert_eq!(balance(&t, &co_buyers[0]), 999_500);
+    let funded = t.client.get_split_order_funding(&order_id);
+    assert_eq!(funded.len(), 1);
+    assert_eq!(funded.get(0).unwrap(), (co_buyers[0].clone(), 500));
+
+    let deadline = t.client.get_split_funding_deadline(&order_id);
+    assert_eq!(
+        deadline,
+        t.env.ledger().timestamp() + SPLIT_FUNDING_DEADLINE_SECS
+    );
+    let err = t
+        .client
+        .try_exit_unfunded_split_order(&co_buyers[0], &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::SplitFundingWindowOpen);
+
+    advance_ledger(&t.env, SPLIT_FUNDING_DEADLINE_SECS);
+    // The absent co-buyer cannot receive a refund (and cannot fund late).
+    let err = t
+        .client
+        .try_exit_unfunded_split_order(&co_buyers[1], &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::SplitNoFundedContribution);
+    let err = t
+        .client
+        .try_fund_split_order(&co_buyers[1], &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::SplitFundingDeadlinePassed);
+
+    assert_eq!(
+        t.client.exit_unfunded_split_order(&co_buyers[0], &order_id),
+        500
+    );
+    assert_eq!(balance(&t, &co_buyers[0]), 1_000_000);
+    assert_eq!(t.client.get_split_order_funding(&order_id).len(), 0);
+    assert_eq!(
+        t.client.get_split_order(&order_id).status,
+        SplitOrderStatus::Refunded
+    );
+
+    // Duplicate exit cannot pay twice; terminal state is explicit.
+    let err = t
+        .client
+        .try_exit_unfunded_split_order(&co_buyers[0], &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::SplitOrderAlreadyFunded);
+    let err = t
+        .client
+        .try_fund_split_order(&co_buyers[0], &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::SplitOrderAlreadyFunded);
+    assert_eq!(balance(&t, &t.client.address), 7_000);
+}
+
+#[test]
+fn test_split_exit_requires_deadline_and_full_funding_blocks_exit() {
+    let t = setup();
+    let (_campaign_id, co_buyers, order_id) = split_order_fixture(&t, &[500, 500]);
+    t.client.fund_split_order(&co_buyers[0], &order_id);
+    t.client.fund_split_order(&co_buyers[1], &order_id);
+    assert_eq!(
+        t.client.get_split_order(&order_id).status,
+        SplitOrderStatus::Active
+    );
+    advance_ledger(&t.env, SPLIT_FUNDING_DEADLINE_SECS);
+    let err = t
+        .client
+        .try_exit_unfunded_split_order(&co_buyers[0], &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::SplitOrderAlreadyFunded);
+}
+
+#[test]
+fn test_split_partial_exits_keep_refundable_and_never_activate_underfunded() {
+    let t = setup();
+    let (_campaign_id, co_buyers, order_id) = split_order_fixture(&t, &[500, 500, 500]);
+    t.client.fund_split_order(&co_buyers[0], &order_id);
+    t.client.fund_split_order(&co_buyers[1], &order_id);
+    advance_ledger(&t.env, SPLIT_FUNDING_DEADLINE_SECS);
+
+    t.client.exit_unfunded_split_order(&co_buyers[0], &order_id);
+    let order = t.client.get_split_order(&order_id);
+    assert_eq!(order.status, SplitOrderStatus::Funding);
+    assert_eq!(order.funded_count, 1);
+    assert_eq!(t.client.get_split_order_funding(&order_id).len(), 1);
+
+    let err = t
+        .client
+        .try_exit_unfunded_split_order(&co_buyers[0], &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::SplitNoFundedContribution);
+    t.client.exit_unfunded_split_order(&co_buyers[1], &order_id);
+    assert_eq!(
+        t.client.get_split_order(&order_id).status,
+        SplitOrderStatus::Refunded
+    );
+    assert_eq!(balance(&t, &co_buyers[0]), 1_000_000);
+    assert_eq!(balance(&t, &co_buyers[1]), 500);
+    assert_eq!(balance(&t, &t.client.address), 7_000);
+}
+
+#[test]
+fn test_split_admin_exit_refunds_all_outstanding_shares() {
+    let t = setup();
+    let (_campaign_id, co_buyers, order_id) = split_order_fixture(&t, &[500, 500, 500]);
+    t.client.fund_split_order(&co_buyers[0], &order_id);
+    t.client.fund_split_order(&co_buyers[1], &order_id);
+    advance_ledger(&t.env, SPLIT_FUNDING_DEADLINE_SECS);
+
+    assert_eq!(
+        t.client.exit_unfunded_split_order(&t.admin, &order_id),
+        1_000
+    );
+    assert_eq!(balance(&t, &co_buyers[0]), 1_000_000);
+    assert_eq!(balance(&t, &co_buyers[1]), 500);
+    assert_eq!(balance(&t, &co_buyers[2]), 500);
+    assert_eq!(
+        t.client.get_split_order(&order_id).status,
+        SplitOrderStatus::Refunded
+    );
+    let err = t
+        .client
+        .try_exit_unfunded_split_order(&t.admin, &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::SplitOrderAlreadyFunded);
+}
+
+// ---------------------------------------------------------------------------
+// 15. Bounded buyer-volume lookup (Issue #1279)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_buyer_volume_is_bounded_and_exactly_once() {
+    let t = setup();
+    let id = setup_buyer_milestone_campaign(&t);
+
+    // Confirmation recorded gross volume (fee included) exactly once.
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &t.buyer), 1_000);
+    let err = t
+        .client
+        .try_confirm_order(&t.buyer, &1)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::OrderNotPending);
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &t.buyer), 1_000);
+
+    // A non-buyer with no qualifying purchase is rejected, and the raw
+    // admin/oracle path remains available with independent attestation.
+    let stranger = Address::generate(&t.env);
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &stranger), 0);
+    let err = t
+        .client
+        .try_advance_milestone(&stranger, &t.attester, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::NotBuyerOrOracle);
+
+    t.client.advance_milestone(&t.buyer, &t.attester, &id);
+    assert_eq!(t.client.get_campaign(&id).current_milestone, 1);
+}
+
+#[test]
+fn test_unconfirmed_and_refunded_orders_do_not_count() {
+    let t = setup();
+    let id = setup_buyer_milestone_campaign(&t);
+    let pending_id = t.client.create_order(&t.investor2, &id, &500);
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &t.investor2), 0);
+
+    let err = t
+        .client
+        .try_advance_milestone(&t.investor2, &t.attester, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::NotBuyerOrOracle);
+
+    t.client.cancel_order(&t.investor2, &pending_id);
+    assert_eq!(
+        t.client.get_order(&pending_id).status,
+        OrderStatus::Refunded
+    );
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &t.investor2), 0);
+}
+
+#[test]
+fn test_non_buyer_rejected_for_target_smaller_than_one_hundred() {
+    let t = setup();
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &50, &future_deadline(&t));
+    t.client.invest(&t.investor1, &id, &50);
+    t.client.start_production(&t.farmer, &id);
+
+    let mut configs = Vec::new(&t.env);
+    configs.push_back(MilestoneConfig {
+        milestone: Milestone::Planted,
+        release_bps: 500,
+    });
+    t.client.set_milestone_configs(&t.admin, &id, &configs);
+
+    // target_amount / 100 == 0: the minimum must still be one unit.
+    let err = t
+        .client
+        .try_advance_milestone(&t.buyer, &t.attester, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::NotBuyerOrOracle);
+
+    let order_id = t.client.create_order(&t.buyer, &id, &1);
+    t.client.confirm_order(&t.buyer, &order_id);
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &t.buyer), 1);
+    t.client.advance_milestone(&t.buyer, &t.attester, &id);
+    assert_eq!(t.client.get_campaign(&id).current_milestone, 1);
+}
+
+#[test]
+fn test_split_confirmed_shares_count_for_each_participant() {
+    let t = setup();
+    let (_campaign_id, co_buyers, order_id) = split_order_fixture(&t, &[500, 500, 500]);
+    for co_buyer in &co_buyers {
+        t.client.fund_split_order(co_buyer, &order_id);
+    }
+    t.client.confirm_split_receipt(&co_buyers[0], &order_id);
+    assert_eq!(
+        t.client
+            .get_buyer_confirmed_volume(&_campaign_id, &co_buyers[0]),
+        500
+    );
+    assert_eq!(
+        t.client
+            .get_buyer_confirmed_volume(&_campaign_id, &co_buyers[1]),
+        0
+    );
+    let err = t
+        .client
+        .try_confirm_split_receipt(&co_buyers[0], &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::AlreadyConfirmed);
+    assert_eq!(
+        t.client
+            .get_buyer_confirmed_volume(&_campaign_id, &co_buyers[0]),
+        500
+    );
+}
+
+#[test]
+fn test_legacy_volume_migration_is_bounded_and_idempotent() {
+    let t = setup();
+    let id = setup_buyer_milestone_campaign(&t);
+    // Simulate pre-#1279 state: confirmed order exists but no volume entry.
+    let contract_id = t.client.address.clone();
+    t.env.as_contract(&contract_id, || {
+        t.env
+            .storage()
+            .persistent()
+            .remove(&DataKey::BuyerConfirmedVolume(id, t.buyer.clone()));
+    });
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &t.buyer), 0);
+    let err = t
+        .client
+        .try_advance_milestone(&t.buyer, &t.attester, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::NotBuyerOrOracle);
+
+    let err = t
+        .client
+        .try_migrate_buyer_volume_batch(&t.buyer, &1)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::NotAdmin);
+    assert_eq!(
+        t.client
+            .migrate_buyer_volume_batch(&t.admin, &MAX_VOLUME_MIGRATION_BATCH),
+        1
+    );
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &t.buyer), 1_000);
+    assert_eq!(
+        t.client
+            .migrate_buyer_volume_batch(&t.admin, &MAX_VOLUME_MIGRATION_BATCH),
+        0
+    );
+    assert_eq!(t.client.get_buyer_confirmed_volume(&id, &t.buyer), 1_000);
+    t.client.advance_milestone(&t.buyer, &t.attester, &id);
+}
+
+fn milestone_history_env(unrelated_orders: u32) -> (TestEnv<'static>, u64, u64) {
+    let t = setup();
+    let id = setup_buyer_milestone_campaign(&t);
+    let mut order_count: u64 = 1; // the confirmed buyer order from the fixture
+    for i in 0..unrelated_orders {
+        order_count += 1;
+        let historical = Order {
+            id: order_count,
+            campaign_id: id + 1,
+            buyer: t.investor1.clone(),
+            amount: 1_000,
+            fee: 0,
+            created_at: t.env.ledger().timestamp(),
+            status: OrderStatus::Refunded,
+        };
+        let contract_id = t.client.address.clone();
+        t.env.as_contract(&contract_id, || {
+            t.env
+                .storage()
+                .persistent()
+                .set(&DataKey::Order(order_count), &historical);
+        });
+        let _ = i;
+    }
+    let contract_id = t.client.address.clone();
+    t.env.as_contract(&contract_id, || {
+        t.env
+            .storage()
+            .instance()
+            .set(&DataKey::OrderCount, &order_count);
+    });
+    let mut budget = t.env.cost_estimate().budget();
+    budget.reset_default();
+    (t, id, order_count)
+}
+
+#[test]
+fn test_milestone_cost_is_bounded_by_history_size() {
+    let (small, small_id, _) = milestone_history_env(1);
+    small
+        .client
+        .advance_milestone(&small.buyer, &small.attester, &small_id);
+    let small_cpu = small.env.cost_estimate().budget().cpu_instruction_cost();
+
+    let (large, large_id, count) = milestone_history_env(1_000);
+    assert_eq!(count, 1_001);
+    large
+        .client
+        .advance_milestone(&large.buyer, &large.attester, &large_id);
+    let large_cpu = large.env.cost_estimate().budget().cpu_instruction_cost();
+
+    // A global scan would grow ~1000x with the history. The host charges
+    // some sublinear overhead for a larger storage footprint, so require
+    // that the comparable milestone call stays within a 10x budget while
+    // the authorization read itself is a single keyed entry.
+    assert!(
+        large_cpu < small_cpu * 10,
+        "milestone CPU grew scan-like with history: {small_cpu} -> {large_cpu}"
+    );
 }

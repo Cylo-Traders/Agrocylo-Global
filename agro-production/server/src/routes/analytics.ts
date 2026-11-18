@@ -1,21 +1,54 @@
 import { Router, type Request, type Response } from 'express';
+import { z } from 'zod';
 import { prisma } from '../db/client.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 
 const router = Router();
 
-export interface PriceIndexEntry {
-  crop: string;
-  region: string;
-  averagePrice: number;
-  sampleCount: number;
-  computedAt: string;
-}
-
 /**
- * GET /analytics/price-index — Regional crop price index (Issue #696, Issue #1189)
- * Used by farmer dashboard widget to display regional price trends.
+ * GET /analytics/price-index response contract (Issue #696, #1189, #1258).
+ *
+ * `averagePrice` is XLM per product token. Listings store `priceTokens` in
+ * stroops (1 XLM = 10_000_000 stroops); the entry is the integer mean of the
+ * grouped listings converted to XLM and rounded to four decimals.
+ *
+ * `sampleCount` counts active marketplace product listings in the group. It
+ * is not a count of confirmed orders, trades or external observations, and
+ * no benchmark rows are fabricated when there is no marketplace data.
+ *
+ * `region` is derived from the linked campaign's farmer address
+ * (`Region-<first six characters>`), or `Global` when the listing has no
+ * campaign. It is not a declared geo-location.
+ *
+ * `computedAt` is the UTC time the aggregation ran; `meta` repeats the
+ * units and semantics so clients can label the data without guessing.
  */
+export const PriceIndexEntrySchema = z.object({
+  crop: z.string(),
+  region: z.string(),
+  averagePrice: z.number().nonnegative(),
+  sampleCount: z.number().int().positive(),
+  computedAt: z.string().datetime(),
+});
+
+export const PriceIndexResponseSchema = z.object({
+  data: z.array(PriceIndexEntrySchema),
+  meta: z.object({
+    source: z.literal('marketplace'),
+    currency: z.literal('XLM'),
+    unit: z.literal('XLM per product token'),
+    sampleSemantics: z.literal(
+      'count of active marketplace product listings in the group',
+    ),
+    regionSource: z.literal(
+      'linked campaign farmer address prefix, or Global when unlinked',
+    ),
+    computedAt: z.string().datetime(),
+  }),
+});
+
+export type PriceIndexResponse = z.infer<typeof PriceIndexResponseSchema>;
+
 router.get(
   '/analytics/price-index',
   asyncHandler(async (_req: Request, res: Response) => {
@@ -25,9 +58,8 @@ router.get(
       take: 100,
     });
 
-    const now = new Date().toISOString();
+    const computedAt = new Date().toISOString();
 
-    // Group active products by category to form regional/crop price indices
     const grouped = new Map<
       string,
       { totalTokens: bigint; count: number; region: string }
@@ -50,56 +82,33 @@ router.get(
       grouped.set(key, existing);
     }
 
-    const data: PriceIndexEntry[] = [];
-
-    for (const [key, val] of grouped.entries()) {
+    const data = [...grouped.entries()].map(([key, val]) => {
       const [crop] = key.split(':');
-      // Convert stroops (10^7) to XLM unit price for display
       const avgPrice = Number(val.totalTokens / BigInt(val.count)) / 10_000_000;
-      data.push({
+      return {
         crop,
         region: val.region,
         averagePrice: Number(avgPrice.toFixed(4)),
         sampleCount: val.count,
-        computedAt: now,
-      });
-    }
+        computedAt,
+      };
+    });
 
-    // Default benchmarks if marketplace has not yet accumulated sufficient transactions
-    if (data.length === 0) {
-      data.push(
-        {
-          crop: 'Maize (White)',
-          region: 'East Africa',
-          averagePrice: 4.5,
-          sampleCount: 142,
-          computedAt: now,
-        },
-        {
-          crop: 'Soybeans',
-          region: 'Southern Africa',
-          averagePrice: 8.2,
-          sampleCount: 88,
-          computedAt: now,
-        },
-        {
-          crop: 'Cassava',
-          region: 'West Africa',
-          averagePrice: 2.1,
-          sampleCount: 205,
-          computedAt: now,
-        },
-        {
-          crop: 'Sorghum',
-          region: 'Sahel',
-          averagePrice: 3.8,
-          sampleCount: 64,
-          computedAt: now,
-        },
-      );
-    }
+    const response: PriceIndexResponse = {
+      data,
+      meta: {
+        source: 'marketplace',
+        currency: 'XLM',
+        unit: 'XLM per product token',
+        sampleSemantics:
+          'count of active marketplace product listings in the group',
+        regionSource:
+          'linked campaign farmer address prefix, or Global when unlinked',
+        computedAt,
+      },
+    };
 
-    res.status(200).json({ data });
+    res.status(200).json(response);
   }),
 );
 
