@@ -31,7 +31,15 @@ const IndexerReadinessSchema = z.object({
 router.get(
   '/readiness',
   asyncHandler(async (req: Request, res: Response) => {
-    const readiness = await getIndexerReadiness(config.contractId, 300);
+    const contractId =
+      typeof req.query['contractId'] === 'string' && req.query['contractId'].trim()
+        ? req.query['contractId'].trim()
+        : config.contractId;
+    const maxLagSeconds =
+      typeof req.query['maxLagSeconds'] === 'string' && !isNaN(Number(req.query['maxLagSeconds']))
+        ? Number(req.query['maxLagSeconds'])
+        : 300;
+    const readiness = await getIndexerReadiness(contractId, maxLagSeconds);
     jsonValidated(res, IndexerReadinessSchema, 200, {
       ...readiness,
       lastProcessedTime: readiness.lastProcessedTime?.toISOString() ?? null,
