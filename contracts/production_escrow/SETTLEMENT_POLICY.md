@@ -1,6 +1,6 @@
 # Settlement Policy for Production Escrow Contract
 
-**Last verified against commit:** `670e7b4` (`upstream/main`; source: `src/lib.rs`). This section
+**Last verified against commit:** `96580a9` (`upstream/main`; source: `src/lib.rs`). This section
 describes behavior that is actually implemented; the "Required Auditable
 Settlement Framework" below is aspirational and is explicitly not yet in the
 contract.

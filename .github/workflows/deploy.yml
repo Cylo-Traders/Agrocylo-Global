@@ -32,20 +32,58 @@ env:
   NODE_VERSION: "22"
 
 jobs:
-  # ── Check that CI passed (Issue #910) ───────────────────────────────────────
+  # ── Check that CI passed (Issue #910, #1301) ──────────────────────────────────
   # Ensures we never deploy when CI is failing. The CI workflow must pass
   # before any deployment steps run.
   ci-gate:
     name: CI gate check
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
     steps:
-      - name: Check if CI workflow passed
+      - name: Check if CI workflow passed on commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "CI must pass before deployment proceeds"
-          # Note: In practice, this is enforced by branch protection rules.
-          # This job exists as a clear gate and future extensibility point
-          # for CI status checks via GitHub API if needed.
+          COMMIT_SHA="${{ github.sha }}"
+          OWNER="${{ github.repository_owner }}"
+          REPO="${{ github.event.repository.name }}"
+
+          echo "Verifying CI workflow status for commit: $COMMIT_SHA"
+
+          # Get all check runs for this commit
+          CHECKS=$(gh api repos/$OWNER/$REPO/commits/$COMMIT_SHA/check-runs \
+            --jq '.check_runs[] | select(.name == "CI") | {name: .name, status: .status, conclusion: .conclusion}')
+
+          if [ -z "$CHECKS" ]; then
+            echo "::error::No CI workflow found for commit $COMMIT_SHA"
+            exit 1
+          fi
+
+          # Extract the CI check status and conclusion
+          CI_STATUS=$(echo "$CHECKS" | jq -r '.status')
+          CI_CONCLUSION=$(echo "$CHECKS" | jq -r '.conclusion')
+
+          echo "CI workflow status: $CI_STATUS"
+          echo "CI workflow conclusion: $CI_CONCLUSION"
+
+          # Check if CI is still in progress
+          if [ "$CI_STATUS" != "completed" ]; then
+            echo "::error::CI workflow is still in progress (status: $CI_STATUS). Cannot proceed with deployment."
+            exit 1
+          fi
+
+          # Check if CI passed
+          if [ "$CI_CONCLUSION" != "success" ]; then
+            echo "::error::CI workflow did not pass (conclusion: $CI_CONCLUSION). Deployment blocked."
+            echo "Required statuses: success"
+            echo "Actual status: $CI_CONCLUSION"
+            exit 1
+          fi
+
+          echo "✓ CI workflow passed on commit $COMMIT_SHA"
 
   # ── Determine target environment ────────────────────────────────────────────
   resolve-env:

@@ -1,6 +1,8 @@
 # Persistent Storage TTL Extension Policy (Issue #456)
 
-**Last verified against commit:** `670e7b4` (`upstream/main`; call sites in `src/lib.rs`).
+**Last verified against commit:** `96580a9` (`upstream/main`; call sites in `src/lib.rs`).
+
+**TTL Keeper**: Operational automation for TTL extension is available in `scripts/ttl-keeper.sh` and documented in `docs/contracts/TTL_KEEPER.md` (Issue #1290).
 
 ## Overview
 

@@ -1,0 +1,48 @@
+{
+  "network": "testnet",
+  "submitter_identity": "ttl-keeper",
+  "submitter_description": "Account that submits TTL bump transactions. Must have balance for submission fees (~0.001 XLM per bump). Do not log or check in the secret key.",
+  "ttl_threshold_ledgers": 50000,
+  "ttl_threshold_description": "Extend instance TTL when remaining ledgers fall below this. Default 50,000 ledgers (~69 hours at 5s/ledger).",
+  "ttl_extend_ledgers": 100000,
+  "ttl_extend_description": "Extend instance TTL by this many ledgers on each bump. Default 100,000 ledgers (~139 hours at 5s/ledger).",
+  "cadence_seconds": 300,
+  "cadence_description": "How often to check and potentially bump TTLs (seconds). Default 300 (5 min) for testnet. Use 1800 (30 min) for mainnet to reduce transaction load.",
+  "contracts": [
+    {
+      "name": "production_escrow",
+      "contract_id": "CD32EWZUKYGU5LU5AAHM4YEZJVIQ3TBO2YHXGBKPOJVAOJYUWDNVUWU6",
+      "enabled": true,
+      "priority": 1,
+      "description": "Campaign escrow — fund-critical, highest priority. Custody of all investor principal and farmer tranches."
+    },
+    {
+      "name": "governance",
+      "contract_id": "CAUYF5C7S2NPEKJRWDVADMWR4BZBY3OQWZJ5S6F2XRJEPFGDRWPJY7RN",
+      "enabled": true,
+      "priority": 2,
+      "description": "Governance timelock — required for all parameter changes and contract upgrades. Must remain operational."
+    },
+    {
+      "name": "registry",
+      "contract_id": "CAUCYVBEPUBFCB3LKLXIT6MWUSLRNGYVRRT37QUKAGSN6CCS2GIR5EQG",
+      "enabled": true,
+      "priority": 3,
+      "description": "Farmer/buyer registry — operational, enables registration and campaign listing."
+    },
+    {
+      "name": "investment_basket",
+      "contract_id": "CDAWHGW4IP24A4ZPJA3BJPJPVW6P74SAGBNG2JPZ6F3LJ5S5CFFQKXRK",
+      "enabled": true,
+      "priority": 3,
+      "description": "Batched investment pools — operational, processes investor deposits and distributions."
+    },
+    {
+      "name": "escrow",
+      "contract_id": "CBJXHC2CDO7CYJWUWG4S3VCP5S5YBKHNQBHUFLGDEPH72QD5UCXSWJOW",
+      "enabled": false,
+      "priority": 4,
+      "description": "Marketplace escrow — operational for marketplace orders, kept separate from campaign escrow."
+    }
+  ]
+}
