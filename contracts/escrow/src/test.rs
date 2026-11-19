@@ -1958,3 +1958,74 @@ fn test_vote_to_resolve_non_arbitrator_rejected() {
         EscrowError::ArbitratorNotFound
     );
 }
+// ---------------------------------------------------------------------------
+// Issue #1289: Explicit Zero-Fee and Multi-Rate Configuration Tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_zero_fee_rate_configuration_and_order_execution() {
+    let (_env, client, buyer, farmer, fee_collector, xlm, _usdc, admin, _investor, contract_id) =
+        setup_test();
+
+    // Configure explicit zero fee rate
+    client.set_fee_config(&admin, &fee_collector, &0);
+    assert_eq!(client.get_fee_rate_bps(), 0);
+    assert_eq!(client.get_fee_collector().unwrap(), fee_collector);
+
+    let amount = 10_000i128;
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &xlm.address, &amount);
+
+    let order = client.get_order_details(&order_id);
+    assert_eq!(order.amount, 10_000);
+    assert_eq!(xlm.balance(&fee_collector), 0);
+    assert_eq!(xlm.balance(&contract_id), 10_000);
+
+    // Confirm receipt; farmer receives full 10,000, zero platform fee paid
+    client.mock_all_auths().confirm_receipt(&buyer, &order_id);
+    assert_eq!(xlm.balance(&farmer), 10_000);
+    assert_eq!(xlm.balance(&fee_collector), 0);
+}
+
+#[test]
+fn test_nonzero_fee_rate_configurations_and_collector_updates() {
+    let (env, client, buyer, farmer, fee_collector, xlm, _usdc, admin, _investor, _id) =
+        setup_test();
+
+    // 1. Configure 50 bps (0.5%)
+    client.set_fee_config(&admin, &fee_collector, &50);
+    assert_eq!(client.get_fee_rate_bps(), 50);
+
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &xlm.address, &10_000);
+    let order = client.get_order_details(&order_id);
+    assert_eq!(order.amount, 9_950);
+    assert_eq!(xlm.balance(&fee_collector), 50);
+
+    // 2. Configure 300 bps (3.0%)
+    client.set_fee_config(&admin, &fee_collector, &300);
+    assert_eq!(client.get_fee_rate_bps(), 300);
+
+    let order_id2 = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &xlm.address, &10_000);
+    let order2 = client.get_order_details(&order_id2);
+    assert_eq!(order2.amount, 9_700);
+    // collector already had 50 from previous order, now + 300 = 350
+    assert_eq!(xlm.balance(&fee_collector), 350);
+
+    // 3. Collector-only update with same rate
+    let new_collector = Address::generate(&env);
+    client.set_fee_config(&admin, &new_collector, &300);
+    assert_eq!(client.get_fee_rate_bps(), 300);
+    assert_eq!(client.get_fee_collector().unwrap(), new_collector);
+
+    let order_id3 = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &xlm.address, &10_000);
+    let order3 = client.get_order_details(&order_id3);
+    assert_eq!(order3.amount, 9_700);
+    assert_eq!(xlm.balance(&new_collector), 300);
+}

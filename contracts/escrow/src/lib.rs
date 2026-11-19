@@ -838,7 +838,9 @@ impl EscrowContract {
             .checked_sub(fee)
             .ok_or(EscrowError::ArithmeticError)?;
 
-        token_client.transfer(&buyer, &fee_collector, &fee);
+        if fee > 0 {
+            token_client.transfer(&buyer, &fee_collector, &fee);
+        }
         token_client.transfer(&buyer, &env.current_contract_address(), &net_amount);
 
         let order_id = record_new_order(&env, buyer, farmer, token, net_amount, amount);
@@ -952,11 +954,13 @@ impl EscrowContract {
             .checked_sub(fee)
             .ok_or(EscrowError::ArithmeticError)?;
 
-        token::Client::new(&env, &settlement_token).transfer(
-            &env.current_contract_address(),
-            &fee_collector,
-            &fee,
-        );
+        if fee > 0 {
+            token::Client::new(&env, &settlement_token).transfer(
+                &env.current_contract_address(),
+                &fee_collector,
+                &fee,
+            );
+        }
 
         let order_id = record_new_order(
             &env,
