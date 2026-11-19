@@ -2880,6 +2880,8 @@ fn release_tranche_internal(
 }
 
 #[cfg(test)]
+mod auth_tests;
+#[cfg(test)]
 mod cost_harness_tests;
 #[cfg(test)]
 mod invariant_tests;

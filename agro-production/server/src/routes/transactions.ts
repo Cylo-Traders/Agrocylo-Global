@@ -78,8 +78,13 @@ router.post(
       return;
     }
 
+    // Scope the idempotency lookup to the authenticated wallet so a cross-wallet
+    // requestId or txHash collision never leaks foreign transaction data.
     const existing = await prisma.transaction.findFirst({
-      where: { OR: [{ id: requestId }, { txHash }] },
+      where: {
+        walletAddress,
+        OR: [{ id: requestId }, { txHash }],
+      },
     });
 
     if (existing) {
@@ -89,6 +94,20 @@ router.post(
         200,
         txToResponse(existing, walletAddress),
       );
+      return;
+    }
+
+    // If a globally unique constraint fires (another wallet owns the same
+    // requestId or txHash) we return 409 without revealing the foreign record.
+    const globalConflict = requestId || txHash
+      ? await prisma.transaction.findFirst({
+          where: { OR: [{ id: requestId }, { txHash }] },
+          select: { id: true },
+        })
+      : null;
+
+    if (globalConflict) {
+      problemDetail(res, req, 409, 'Conflict', 'Request ID or transaction hash already exists');
       return;
     }
 
