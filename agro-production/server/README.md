@@ -75,6 +75,12 @@ cp .env.example .env
 
 The server uses Prisma with PostgreSQL.
 
+Generate the Prisma Client before running the build or linter. Prisma reads `DATABASE_URL` (or `PRISMA_GENERATE_DATABASE_URL`) from the environment, but generation does not connect to the database.
+
+```bash
+npx prisma generate
+```
+
 ```bash
 # Apply all pending migrations
 npx prisma migrate deploy
