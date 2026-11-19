@@ -82,4 +82,65 @@ describe('Analytics API (Issue #1189)', () => {
     expect(Array.isArray(res.body.data)).toBe(true);
     expect(res.body.data).toEqual([]);
   });
+
+  it('aggregates over full listing set (>100 listings) with accurate sampleCount and deterministic ordering (#1342)', async () => {
+    // Generate 150 products (more than the previous 100 limit)
+    const productList = Array.from({ length: 150 }, (_, i) => ({
+      id: `prod-${i}`,
+      name: 'Yellow Corn',
+      category: 'GRAINS',
+      priceTokens: BigInt('20000000'), // 2.0 XLM
+      campaign: { farmerAddress: 'GFARMER_TEST' },
+    }));
+
+    (prisma.product.findMany as any).mockResolvedValue(productList);
+
+    const res = await request(app)
+      .get('/api/v1/analytics/price-index')
+      .expect(200);
+
+    expect(prisma.product.findMany).toHaveBeenCalledWith({
+      where: { isActive: true },
+      include: { campaign: true },
+      orderBy: [{ id: 'asc' }],
+    });
+
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].crop).toBe('Yellow Corn');
+    expect(res.body.data[0].sampleCount).toBe(150); // Not capped at 100!
+    expect(res.body.data[0].averagePrice).toBe(2);
+    expect(() => PriceIndexResponseSchema.parse(res.body)).not.toThrow();
+  });
+
+  it('ensures group ordering and results are deterministic regardless of insertion order (#1342)', async () => {
+    const listA = [
+      {
+        id: 'prod-1',
+        name: 'Wheat',
+        category: 'GRAINS',
+        priceTokens: BigInt('10000000'),
+        campaign: { farmerAddress: 'GFARMER_A' },
+      },
+      {
+        id: 'prod-2',
+        name: 'Barley',
+        category: 'GRAINS',
+        priceTokens: BigInt('30000000'),
+        campaign: { farmerAddress: 'GFARMER_B' },
+      },
+    ];
+
+    const listB = [listA[1], listA[0]]; // Reversed
+
+    (prisma.product.findMany as any).mockResolvedValue(listA);
+    const resA = await request(app).get('/api/v1/analytics/price-index').expect(200);
+
+    (prisma.product.findMany as any).mockResolvedValue(listB);
+    const resB = await request(app).get('/api/v1/analytics/price-index').expect(200);
+
+    const normalize = (items: any[]) => items.map(({ computedAt, ...rest }) => rest);
+    expect(normalize(resA.body.data)).toEqual(normalize(resB.body.data));
+    expect(resA.body.data[0].crop).toBe('Barley');
+    expect(resA.body.data[1].crop).toBe('Wheat');
+  });
 });

@@ -55,7 +55,7 @@ router.get(
     const products = await prisma.product.findMany({
       where: { isActive: true },
       include: { campaign: true },
-      take: 100,
+      orderBy: [{ id: 'asc' }],
     });
 
     const computedAt = new Date().toISOString();
@@ -82,7 +82,9 @@ router.get(
       grouped.set(key, existing);
     }
 
-    const data = [...grouped.entries()].map(([key, val]) => {
+    const data = [...grouped.entries()]
+      .sort(([keyA], [keyB]) => keyA.localeCompare(keyB))
+      .map(([key, val]) => {
       const [crop] = key.split(':');
       const avgPrice = Number(val.totalTokens / BigInt(val.count)) / 10_000_000;
       return {
