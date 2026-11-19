@@ -1,11 +1,12 @@
 # External Audit Scope: Production Contracts
 
-**Last verified against commit:** `670e7b4` (`upstream/main`; function names
-cross-checked against `contracts/production_escrow/src/lib.rs`).
+**Last verified against commit:** `96580a9` (`upstream/main`; function names
+cross-checked against `contracts/production_escrow/src/lib.rs`, deployment manifests, and TTL policy).
 
 **Status**: Internal technical review complete. External sign-off is a separate
 release-evidence deliverable tracked in #1292; until it lands this document is a
-scope/threat-model specification, not evidence of an external audit.
+scope/threat-model specification, not evidence of an external audit. TTL Keeper
+operational readiness tracked in #1290.
 
 This document describes the four production contracts that will custody mainnet funds: `production_escrow`, `governance`, `investment_basket`, and `registry`. It covers the threat model, trust assumptions, money flows, and invariants that together form the security scope of this system.
 
