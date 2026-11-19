@@ -2,6 +2,7 @@ import React from "react";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { InvestmentWithCampaign } from "@/services/investmentService";
+import type { Order } from "@/types";
 
 /**
  * Role dispatch (#1085) and the claim network guard (#1087).
@@ -14,6 +15,7 @@ import type { InvestmentWithCampaign } from "@/services/investmentService";
 const serviceMocks = vi.hoisted(() => ({
   fetchUserInvestments: vi.fn(),
   claimReturns: vi.fn(),
+  fetchOrdersByBuyer: vi.fn(),
 }));
 
 vi.mock("@/services/investmentService", async (importOriginal) => {
@@ -24,6 +26,16 @@ vi.mock("@/services/investmentService", async (importOriginal) => {
     ...actual,
     fetchUserInvestments: serviceMocks.fetchUserInvestments,
     claimReturns: serviceMocks.claimReturns,
+  };
+});
+
+vi.mock("@/services/orderService", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/services/orderService")
+  >();
+  return {
+    ...actual,
+    fetchOrdersByBuyer: serviceMocks.fetchOrdersByBuyer,
   };
 });
 
@@ -82,20 +94,93 @@ const SETTLED_INVESTMENT: InvestmentWithCampaign = {
   },
 };
 
+const MOCK_ORDER: Order = {
+  id: "ord-12345678",
+  onChainId: "chain-ord-1",
+  campaignId: "camp-12345678",
+  buyerAddress: "GBUYERTEST",
+  amount: "25000000",
+  status: "PENDING",
+  ledger: 10,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+  campaign: {
+    farmerAddress: "GFARMER",
+    tokenAddress: "CTOKEN",
+    onChainId: "camp_1",
+  },
+};
+
 describe("InvestmentDashboard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockedUseWallet.mockReturnValue(walletCtx());
   });
 
-  it("shows a placeholder for the buyer role with no investor effects (#1085)", () => {
-    render(<InvestmentDashboard investorAddress="GTESTINVESTOR" role="buyer" />);
+  it("fetches and renders buyer orders with no investor effects (#1085, #1345)", async () => {
+    serviceMocks.fetchOrdersByBuyer.mockResolvedValue([MOCK_ORDER]);
 
-    expect(
-      screen.getByText(/Buyer-specific dashboard features/i),
-    ).toBeInTheDocument();
+    render(<InvestmentDashboard investorAddress="GBUYERTEST" role="buyer" />);
+
+    expect(screen.getByLabelText("Loading orders")).toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(serviceMocks.fetchOrdersByBuyer).toHaveBeenCalledWith("GBUYERTEST"),
+    );
     expect(serviceMocks.fetchUserInvestments).not.toHaveBeenCalled();
     expect(mockedUseWebSocket).not.toHaveBeenCalled();
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Orders list")).toBeInTheDocument(),
+    );
+    expect(screen.getByText("Order #ord-1234")).toBeInTheDocument();
+    expect(screen.getByText("Campaign camp_1")).toBeInTheDocument();
+    expect(screen.getByText("Total Orders")).toBeInTheDocument();
+    expect(screen.getByText("Pending Orders")).toBeInTheDocument();
+    expect(screen.getByText("Total Spent")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View Order" })).toHaveAttribute(
+      "href",
+      "/orders/ord-12345678",
+    );
+    expect(screen.getByRole("link", { name: "View Campaign" })).toHaveAttribute(
+      "href",
+      "/campaigns/camp-12345678",
+    );
+  });
+
+  it("renders empty state with link to browse campaigns when buyer has no orders (#1345)", async () => {
+    serviceMocks.fetchOrdersByBuyer.mockResolvedValue([]);
+
+    render(<InvestmentDashboard investorAddress="GBUYERTEST" role="buyer" />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/No orders yet. Browse campaigns to get started./i),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("link", { name: "Browse campaigns" })).toHaveAttribute(
+      "href",
+      "/campaigns",
+    );
+  });
+
+  it("renders error state with retry button when order fetch fails (#1345)", async () => {
+    serviceMocks.fetchOrdersByBuyer.mockRejectedValueOnce(new Error("Network failed"));
+
+    render(<InvestmentDashboard investorAddress="GBUYERTEST" role="buyer" />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("Network failed"),
+    );
+
+    serviceMocks.fetchOrdersByBuyer.mockResolvedValueOnce([MOCK_ORDER]);
+    await act(async () => {
+      screen.getByRole("button", { name: "Try again" }).click();
+    });
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Orders list")).toBeInTheDocument(),
+    );
   });
 
   it("fetches and renders the investor dashboard for the investor role", async () => {
@@ -186,6 +271,7 @@ describe("InvestmentDashboard", () => {
 
   it("survives role transitions on a mounted instance without breaking hooks (#1085)", async () => {
     serviceMocks.fetchUserInvestments.mockResolvedValue([]);
+    serviceMocks.fetchOrdersByBuyer.mockResolvedValue([MOCK_ORDER]);
 
     const { rerender } = render(
       <InvestmentDashboard investorAddress="GTESTINVESTOR" role="investor" />,
@@ -197,9 +283,9 @@ describe("InvestmentDashboard", () => {
     rerender(
       <InvestmentDashboard investorAddress="GTESTINVESTOR" role="buyer" />,
     );
-    expect(
-      screen.getByText(/Buyer-specific dashboard features/i),
-    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByLabelText("Orders list")).toBeInTheDocument(),
+    );
     expect(serviceMocks.fetchUserInvestments).toHaveBeenCalledTimes(1);
 
     rerender(
