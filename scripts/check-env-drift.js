@@ -59,7 +59,7 @@ const APPS = [
   {
     name: "client",
     envExample: "client/.env.example",
-    sourceDirs: ["client/src"],
+    sourceDirs: ["client/src", "packages/instrumentation/src"],
     extraFiles: ["client/next.config.ts"],
   },
   {
@@ -71,7 +71,7 @@ const APPS = [
   {
     name: "agro-production/client",
     envExample: "agro-production/client/.env.example",
-    sourceDirs: ["agro-production/client/src"],
+    sourceDirs: ["agro-production/client/src", "packages/instrumentation/src"],
     extraFiles: ["agro-production/client/next.config.ts"],
   },
   {
@@ -79,7 +79,7 @@ const APPS = [
     // read by *either* agro-production/server or agro-production/client.
     name: "agro-production (unified)",
     envExample: "agro-production/.env.example",
-    sourceDirs: ["agro-production/server/src", "agro-production/client/src"],
+    sourceDirs: ["agro-production/server/src", "agro-production/client/src", "packages/instrumentation/src"],
     extraFiles: [],
   },
 ];

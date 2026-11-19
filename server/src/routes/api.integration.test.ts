@@ -30,6 +30,8 @@ vi.mock('../middleware/walletAuth.js', () => ({
     req.walletAddress = req.headers['x-wallet-address'];
     next();
   },
+  requireRole: () => (_req: any, _res: any, next: any) => next(),
+  requireAnyRole: () => (_req: any, _res: any, next: any) => next(),
 }));
 
 vi.mock('../services/authService.js', () => ({
@@ -130,7 +132,10 @@ describe('Auth endpoints', () => {
   });
 
   it('POST /auth/refresh returns 200 when authService resolves', async () => {
-    vi.mocked(authService.refreshAccessToken).mockResolvedValue({ accessToken: 'new-token', refreshToken: 'new-refresh' });
+    vi.mocked(authService.refreshAccessToken).mockResolvedValue({
+      accessToken: 'new-token',
+      refreshToken: 'new-refresh',
+    });
     const res = await request(app).post('/auth/refresh').send({ refreshToken: 'valid-refresh' });
     expect(res.status).toBe(200);
     expect(res.body.accessToken).toBe('new-token');
@@ -174,7 +179,7 @@ describe('Product and cart API endpoints', () => {
 
   it('GET /products/:id returns RFC7807 on service errors', async () => {
     vi.mocked(productService.getProductById).mockRejectedValue(
-      new ApiError(404, 'Not Found', 'Product not found'),
+      new ApiError(404, 'Not Found', 'Product not found')
     );
     const res = await request(app).get('/products/00000000-0000-0000-0000-000000000001');
     expect(res.status).toBe(404);
@@ -239,7 +244,9 @@ describe('Product and cart API endpoints', () => {
       items: [{ id: 'p1', name: 'Rice', location: 'Abuja', category: 'Grains' }],
     });
 
-    const res = await request(app).get('/products?search=rice&location=Abuja&minPrice=2000&maxPrice=10000&category=Grains');
+    const res = await request(app).get(
+      '/products?search=rice&location=Abuja&minPrice=2000&maxPrice=10000&category=Grains'
+    );
     expect(res.status).toBe(200);
     expect(productService.listProducts).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -247,7 +254,7 @@ describe('Product and cart API endpoints', () => {
         location: 'Abuja',
         minPrice: '2000',
         maxPrice: '10000',
-        category: 'Grains'
+        category: 'Grains',
       })
     );
   });
@@ -299,17 +306,20 @@ describe('Product and cart API endpoints', () => {
   });
 
   it('GET /notifications returns unread items for a Stellar wallet', async () => {
-    vi.mocked(notificationService.listNotifications).mockResolvedValue([
-      {
-        id: 'n1',
-        walletAddress: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
-        message: 'Order funded',
-        orderId: '42',
-        type: 'created',
-        isRead: false,
-        createdAt: new Date('2026-04-24T12:00:00.000Z'),
-      },
-    ]);
+    vi.mocked(notificationService.listNotifications).mockResolvedValue({
+      items: [
+        {
+          id: 'n1',
+          walletAddress: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+          message: 'Order funded',
+          orderId: '42',
+          type: 'created',
+          isRead: false,
+          createdAt: new Date('2026-04-24T12:00:00.000Z'),
+        },
+      ],
+      total: 1,
+    });
 
     const res = await request(app)
       .get('/notifications')
@@ -320,7 +330,7 @@ describe('Product and cart API endpoints', () => {
     expect(res.body.items[0].orderId).toBe('42');
     expect(notificationService.listNotifications).toHaveBeenCalledWith(
       'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
-      { unreadOnly: true, limit: undefined },
+      { unreadOnly: true, limit: undefined }
     );
   });
 
@@ -336,7 +346,7 @@ describe('Product and cart API endpoints', () => {
     expect(res.body.count).toBe(2);
     expect(notificationService.markNotificationsRead).toHaveBeenCalledWith(
       'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
-      ['n1', 'n2'],
+      ['n1', 'n2']
     );
   });
 
@@ -356,13 +366,13 @@ describe('Product and cart API endpoints', () => {
     });
 
     const res = await request(app).get(
-      '/profiles/GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF/reputation',
+      '/profiles/GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF/reputation'
     );
 
     expect(res.status).toBe(200);
     expect(res.body.score).toBe(88);
     expect(profileService.getProfileReputation).toHaveBeenCalledWith(
-      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'
     );
   });
 
@@ -391,7 +401,7 @@ describe('Product and cart API endpoints', () => {
       expect.any(String),
       { id: 'p1' },
       'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
-      undefined,
+      undefined
     );
   });
 
@@ -428,7 +438,7 @@ describe('Product and cart API endpoints', () => {
         buyerWallet: 'BUYER',
         quantity: '5',
         targetQuantity: '10',
-      }),
+      })
     );
   });
 });

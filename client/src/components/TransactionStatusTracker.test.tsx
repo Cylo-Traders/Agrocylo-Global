@@ -34,21 +34,21 @@ describe("TransactionStatusTracker Component", () => {
     render(<TransactionStatusTracker orderId="ord_111" initialStatus="pending" />);
 
     expect(screen.getByText("Transaction Status")).toBeInTheDocument();
-    expect(screen.getByText("Pending")).toBeInTheDocument();
+    expect(screen.getByTestId("current-status")).toHaveTextContent("Pending");
     expect(screen.getByText("Est. ~5 min to next step")).toBeInTheDocument();
   });
 
   it("renders funded state details successfully", () => {
     render(<TransactionStatusTracker orderId="ord_111" initialStatus="funded" />);
 
-    expect(screen.getByText("Funded")).toBeInTheDocument();
+    expect(screen.getByTestId("current-status")).toHaveTextContent("Funded");
     expect(screen.getByText("Escrow has been funded successfully.")).toBeInTheDocument();
   });
 
   it("renders disputed status with appropriate alert badges and icons", () => {
     render(<TransactionStatusTracker orderId="ord_111" initialStatus="disputed" />);
 
-    expect(screen.getByText("Disputed")).toBeInTheDocument();
+    expect(screen.getByTestId("current-status")).toHaveTextContent("Disputed");
     expect(screen.getByText("A dispute is active. Funds are held until resolved.")).toBeInTheDocument();
   });
 });

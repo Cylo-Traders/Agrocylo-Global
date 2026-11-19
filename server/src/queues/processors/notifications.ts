@@ -5,7 +5,7 @@ import { publishWsEvent } from '../../services/wsEventBus.js';
 import { NotificationService } from '../../services/notificationService.js';
 
 async function handleSendEmail(job: Job<SendEmailJobData>): Promise<void> {
-  const { to, subject, body, html } = job.data;
+  const { to, subject, html } = job.data;
 
   if (!to || !subject) {
     logger.warn('Email job missing required fields', {

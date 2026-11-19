@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Bell, CheckCircle } from 'lucide-react'
 
 export interface NotificationPreferencesState {
@@ -17,22 +17,46 @@ const DEFAULT_PREFERENCES: NotificationPreferencesState = {
 
 const STORAGE_KEY = 'notification_preferences'
 
-export function NotificationPreferences() {
-  const [preferences, setPreferences] = useState<NotificationPreferencesState>(DEFAULT_PREFERENCES)
-  const [saved, setSaved] = useState(false)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
+/**
+ * Read the persisted preferences once, lazily (#1084).
+ *
+ * Browser storage is external state, but a form's own defaults must render
+ * first: reading it through a lazy state initializer keeps the read out of
+ * effects entirely (no setState-in-effect, no cascade render), and an
+ * unparseable or partial stored object is merged onto the defaults instead of
+ * being trusted as-is.
+ */
+function readStoredPreferences(): NotificationPreferencesState {
+  if (typeof window === 'undefined') return DEFAULT_PREFERENCES
+  try {
     const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored) {
-      try {
-        setPreferences(JSON.parse(stored))
-      } catch (e) {
-        console.error('Failed to parse notification preferences', e)
-      }
+    if (!stored) return DEFAULT_PREFERENCES
+    const parsed: unknown = JSON.parse(stored)
+    if (!parsed || typeof parsed !== 'object') return DEFAULT_PREFERENCES
+    const candidate = parsed as Partial<NotificationPreferencesState>
+    return {
+      orderNotifications:
+        typeof candidate.orderNotifications === 'boolean'
+          ? candidate.orderNotifications
+          : DEFAULT_PREFERENCES.orderNotifications,
+      disputeNotifications:
+        typeof candidate.disputeNotifications === 'boolean'
+          ? candidate.disputeNotifications
+          : DEFAULT_PREFERENCES.disputeNotifications,
+      systemNotifications:
+        typeof candidate.systemNotifications === 'boolean'
+          ? candidate.systemNotifications
+          : DEFAULT_PREFERENCES.systemNotifications,
     }
-    setLoading(false)
-  }, [])
+  } catch {
+    return DEFAULT_PREFERENCES
+  }
+}
+
+export function NotificationPreferences() {
+  const [preferences, setPreferences] =
+    useState<NotificationPreferencesState>(readStoredPreferences)
+  const [saved, setSaved] = useState(false)
 
   const handleToggle = (key: keyof NotificationPreferencesState) => {
     setPreferences((prev) => {
@@ -42,17 +66,6 @@ export function NotificationPreferences() {
     })
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
-  }
-
-  if (loading) {
-    return (
-      <div className="bg-surface border border-border rounded-xl p-6">
-        <div className="animate-pulse space-y-4">
-          <div className="h-6 bg-border rounded w-1/3"></div>
-          <div className="h-4 bg-border rounded w-2/3"></div>
-        </div>
-      </div>
-    )
   }
 
   return (
@@ -162,7 +175,7 @@ export function getNotificationPreferences(): NotificationPreferencesState {
   if (stored) {
     try {
       return JSON.parse(stored)
-    } catch (e) {
+    } catch {
       return DEFAULT_PREFERENCES
     }
   }

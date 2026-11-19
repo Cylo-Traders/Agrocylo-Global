@@ -14,19 +14,23 @@ vi.mock("@/lib/signTransaction", () => ({
   signAndSubmitTransaction: vi.fn(),
 }));
 
-vi.mock("@/lib/errorHandling", () => ({
-  classifyError: vi.fn((err) => ({
-    category: "unknown",
-    actionableMessage: err?.message || "An error occurred",
-  })),
-  logErrorWithContext: vi.fn(),
-}));
+vi.mock("@/lib/errorHandling", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/errorHandling")>();
+  return {
+    ...actual,
+    classifyError: vi.fn((err: string | Error) => ({
+      category: typeof err === "string" ? "unknown" : err.name || "unknown",
+      actionableMessage: typeof err === "string" ? err : err?.message || "An error occurred",
+    })),
+  };
+});
 
 import { useTransaction } from "@/hooks/useTransaction";
 import { buildCreateOrder } from "@/lib/contractService";
 import { createOrder } from "@/services/orderService";
 import { signAndSubmitTransaction } from "@/lib/signTransaction";
 import { logErrorWithContext } from "@/lib/errorHandling";
+import type { Order } from "@/types";
 
 const mockBuildCreateOrder = vi.mocked(buildCreateOrder);
 const mockCreateOrder = vi.mocked(createOrder);
@@ -39,7 +43,7 @@ describe("Product checkout error handling", () => {
   });
 
   it("builder failure surfaces in error UI", async () => {
-    mockCreateOrder.mockResolvedValue({ id: "order-123" } as any);
+    mockCreateOrder.mockResolvedValue({ id: "order-123" } as Order);
     mockBuildCreateOrder.mockResolvedValue({
       success: false,
       error: "Contract not initialized",
@@ -48,7 +52,7 @@ describe("Product checkout error handling", () => {
     const { result } = renderHook(() => useTransaction());
 
     const builderFn = async () => {
-      const order = await mockCreateOrder({
+      await mockCreateOrder({
         buyerAddress: "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU",
         campaignId: "campaign-123",
         amount: "5000000",
@@ -78,7 +82,7 @@ describe("Product checkout error handling", () => {
   });
 
   it("wallet rejection surfaces in error UI", async () => {
-    mockCreateOrder.mockResolvedValue({ id: "order-456" } as any);
+    mockCreateOrder.mockResolvedValue({ id: "order-456" } as Order);
     mockBuildCreateOrder.mockResolvedValue({
       success: true,
       data: "prepared-xdr",
@@ -92,7 +96,7 @@ describe("Product checkout error handling", () => {
     const { result } = renderHook(() => useTransaction());
 
     const builderFn = async () => {
-      const order = await mockCreateOrder({
+      await mockCreateOrder({
         buyerAddress: "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU",
         campaignId: "campaign-456",
         amount: "5000000",
@@ -121,7 +125,7 @@ describe("Product checkout error handling", () => {
 
   it("successful transaction creates off-chain order record", async () => {
     const createdOrderId = "order-789";
-    mockCreateOrder.mockResolvedValue({ id: createdOrderId } as any);
+    mockCreateOrder.mockResolvedValue({ id: createdOrderId } as Order);
     mockBuildCreateOrder.mockResolvedValue({
       success: true,
       data: "prepared-xdr",
@@ -136,7 +140,7 @@ describe("Product checkout error handling", () => {
     const { result } = renderHook(() => useTransaction());
 
     const builderFn = async () => {
-      const order = await mockCreateOrder({
+      await mockCreateOrder({
         buyerAddress: "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU",
         campaignId: "campaign-789",
         amount: "5000000",
@@ -168,7 +172,7 @@ describe("Product checkout error handling", () => {
   });
 
   it("logs error context when builder fails", async () => {
-    mockCreateOrder.mockResolvedValue({ id: "order-err" } as any);
+    mockCreateOrder.mockResolvedValue({ id: "order-err" } as Order);
     mockBuildCreateOrder.mockResolvedValue({
       success: false,
       error: "RPC error",
@@ -177,7 +181,7 @@ describe("Product checkout error handling", () => {
     const { result } = renderHook(() => useTransaction());
 
     const builderFn = async () => {
-      const order = await mockCreateOrder({
+      await mockCreateOrder({
         buyerAddress: "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU",
         campaignId: "campaign-err",
         amount: "5000000",

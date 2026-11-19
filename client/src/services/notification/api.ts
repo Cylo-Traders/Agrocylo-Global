@@ -94,16 +94,16 @@ export async function listUnreadNotifications(
 }
 
 export async function markNotificationsRead(
-  _walletAddress: string,
+  walletAddress: string,
   ids: string[],
 ): Promise<{ count: number }> {
-  return apiRequest<{ count: number }>("/notifications/read", {
+  return requestJson<{ count: number }>(`${API_BASE_URL}/notifications/read`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       ...authHeaders(walletAddress),
     },
-    body: { ids },
+    body: JSON.stringify({ ids }),
   });
 }
 
@@ -189,8 +189,8 @@ export async function getNotificationPreferences(
   walletAddress: string,
 ): Promise<NotificationPrefs> {
   void walletAddress;
-  const response = await apiRequest<{ preferences: NotificationPrefs }>(
-    "/notifications/preferences",
+  const response = await requestJson<{ preferences: NotificationPrefs }>(
+    `${API_BASE_URL}/notifications/preferences`,
     {
       method: "GET",
       headers: authHeaders(walletAddress),
@@ -201,18 +201,18 @@ export async function getNotificationPreferences(
 }
 
 export async function updateNotificationPreferences(
-  _walletAddress: string,
+  walletAddress: string,
   preferences: NotificationPrefs,
 ): Promise<NotificationPrefs> {
-  const response = await apiRequest<{ preferences: NotificationPrefs }>(
-    "/notifications/preferences",
+  const response = await requestJson<{ preferences: NotificationPrefs }>(
+    `${API_BASE_URL}/notifications/preferences`,
     {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
         ...authHeaders(walletAddress),
       },
-      body: preferences,
+      body: JSON.stringify(preferences),
     },
   );
   return response.preferences;

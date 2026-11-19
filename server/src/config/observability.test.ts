@@ -5,7 +5,7 @@ import * as Sentry from '@sentry/node';
 vi.mock('@sentry/node', () => ({
   init: vi.fn(),
   startSpan: vi.fn((_options: unknown, callback: (span: unknown) => unknown) =>
-    callback({ setStatus: vi.fn(), recordException: vi.fn(), end: vi.fn() }),
+    callback({ setStatus: vi.fn(), recordException: vi.fn(), end: vi.fn() })
   ),
   setTag: vi.fn(),
   captureException: vi.fn(),
@@ -44,7 +44,7 @@ describe('Observability Configuration', () => {
         expect.objectContaining({
           dsn: 'https://key@sentry.io/project',
           environment: 'production',
-        }),
+        })
       );
     });
 
@@ -61,18 +61,16 @@ describe('Observability Configuration', () => {
   describe('Sensitive data scrubbing', () => {
     it('should scrub wallet addresses from strings', async () => {
       const { SENSITIVE_PATTERNS } = await import('./observability.js');
-      const testString = 'User GBUQWP3BOUZX34STELLA55MKHXUBZ4JTMCE6ADIIX7A2TCNJCBHHNFM requested access';
-      const scrubbed = JSON.stringify(
-        { data: testString },
-        (key, value) => {
-          if (typeof value === 'string') {
-            return value
-              .replace(SENSITIVE_PATTERNS[0]!, '[WALLET_ADDRESS_REDACTED]')
-              .replace(SENSITIVE_PATTERNS[1]!, '[PRIVATE_KEY_REDACTED]');
-          }
-          return value;
-        },
-      );
+      const testString =
+        'User GBUQWP3BOUZX34STELLA55MKHXUBZ4JTMCE6ADIIX7A2TCNJCBHHNFM requested access';
+      const scrubbed = JSON.stringify({ data: testString }, (key, value) => {
+        if (typeof value === 'string') {
+          return value
+            .replace(SENSITIVE_PATTERNS[0]!, '[WALLET_ADDRESS_REDACTED]')
+            .replace(SENSITIVE_PATTERNS[1]!, '[PRIVATE_KEY_REDACTED]');
+        }
+        return value;
+      });
 
       expect(scrubbed).toContain('[WALLET_ADDRESS_REDACTED]');
       expect(scrubbed).not.toContain('GBUQWP3BOUZX34');
@@ -133,7 +131,7 @@ describe('Observability Configuration', () => {
     it('should extract traceparent from headers', async () => {
       const { extractTraceContext } = await import('./observability.js');
       const headers = {
-        'traceparent': '00-trace-id-span-id-01',
+        traceparent: '00-trace-id-span-id-01',
       };
 
       const context = extractTraceContext(headers);
@@ -174,7 +172,7 @@ describe('Observability Configuration', () => {
         error,
         expect.objectContaining({
           extra: context,
-        }),
+        })
       );
     });
 
@@ -191,12 +189,7 @@ describe('Observability Configuration', () => {
       const { withSpan } = await import('./observability.js');
       const requestId = 'req-correlation-123';
 
-      await withSpan(
-        'test_operation',
-        async () => 'result',
-        { operation: 'test' },
-        requestId,
-      );
+      await withSpan('test_operation', async () => 'result', { operation: 'test' }, requestId);
 
       expect(Sentry.startSpan).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -204,16 +197,13 @@ describe('Observability Configuration', () => {
           op: 'function',
           attributes: expect.objectContaining({ request_id: requestId }),
         }),
-        expect.any(Function),
+        expect.any(Function)
       );
     });
 
     it('should handle span success', async () => {
       const { withSpan } = await import('./observability.js');
-      const result = await withSpan(
-        'successful_operation',
-        async () => 'success_result',
-      );
+      const result = await withSpan('successful_operation', async () => 'success_result');
 
       expect(result).toBe('success_result');
     });
@@ -223,12 +213,9 @@ describe('Observability Configuration', () => {
       const error = new Error('Operation failed');
 
       expect(
-        withSpan(
-          'failing_operation',
-          async () => {
-            throw error;
-          },
-        ),
+        withSpan('failing_operation', async () => {
+          throw error;
+        })
       ).rejects.toThrow('Operation failed');
       expect(Sentry.captureException).toHaveBeenCalledWith(error);
     });

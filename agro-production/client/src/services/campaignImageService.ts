@@ -16,8 +16,7 @@
  * the same tab) and the UI offers Retry / Skip with a partial-success note.
  */
 
-import api from "../lib/apiClient";
-import { isApiError, isNetworkError } from "../lib/apiClient";
+import api, { isApiError, isNetworkError } from "../lib/apiClient";
 
 const RETRY_STATE_KEY = "ap:campaign-image-retry";
 

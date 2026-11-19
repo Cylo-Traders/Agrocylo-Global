@@ -82,6 +82,24 @@ export default function OnboardingPage() {
     setError(null);
 
     try {
+      // Establish the wallet auth session FIRST — createProfile/registerLocation
+      // are auth-required, and calling them before reauthenticate() produced the
+      // post-onboarding session-expiry loop (#1185). A rejected signature is
+      // fatal (the seed below would 401 anyway); a transient network blip falls
+      // through to the offline completion path.
+      try {
+        await reauthenticate();
+      } catch (authError) {
+        if (!isNetworkFetchError(authError)) {
+          setError(
+            authError instanceof Error
+              ? authError.message
+              : "Sign in to finish setting up your profile.",
+          );
+          return;
+        }
+      }
+
       const created = await createProfile(
         {
           role,
@@ -90,15 +108,6 @@ export default function OnboardingPage() {
         },
         address,
       );
-      // Establish the wallet auth session before seeding the profile, so that
-      // when the redirect effect below fires the dashboard readiness gate
-      // already has the session token it needs. Failure is non-fatal: the
-      // gate can re-prompt.
-      try {
-        await reauthenticate();
-      } catch {
-        // ignore - the dashboard gate offers a recovery action
-      }
 
       // Seed the profile cache so AuthGuard sees the user as onboarded immediately,
       // without waiting for a refetch round-trip.
@@ -118,6 +127,8 @@ export default function OnboardingPage() {
           );
         } catch (locationError) {
           console.error("Location registration failed", locationError);
+          // Surface non-fatal error to user
+          alert("Your profile was created successfully, but we couldn't save your location. You can update it later in settings.");
           trackFunnelStep("onboarding_completion", "location_save_failed", {
             reason:
               locationError instanceof Error
@@ -169,7 +180,7 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div className="from-secondary/30 to-background flex min-h-screen flex-col items-center bg-gradient-to-b px-4 pt-32 pb-16 md:pt-40">
+    <div className="from-secondary/30 to-background flex min-h-screen flex-col items-center overflow-x-hidden bg-gradient-to-b px-4 pt-32 pb-[calc(env(safe-area-inset-bottom)+4rem)] md:pt-40">
       <div className="w-full max-w-2xl">
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-bold tracking-tight md:text-4xl">

@@ -57,7 +57,9 @@ const analyticsEventSchema = z.object({
   anonymousId: z.string().max(128).optional(),
   path: z.string().max(512).optional(),
   referrer: z.string().max(512).optional(),
-  properties: z.record(z.string().max(64), z.union([z.string().max(1024), z.number(), z.boolean(), z.null()])).optional(),
+  properties: z
+    .record(z.string().max(64), z.union([z.string().max(1024), z.number(), z.boolean(), z.null()]))
+    .optional(),
 });
 
 const analyticsBatchSchema = z.object({
@@ -94,14 +96,17 @@ function maskAddress(value: string): string {
   return `${trimmed.slice(0, 6)}…${trimmed.slice(-4)}`;
 }
 
-function sanitizeValue(key: string, value: string | number | boolean | null): string | number | boolean | null {
+function sanitizeValue(
+  key: string,
+  value: string | number | boolean | null
+): string | number | boolean | null {
   if (value === null) return null;
   if (typeof value === 'boolean') return value;
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
-  let next = value.trim().slice(0, MAX_PROP_STRING_LEN);
+  const next = value.trim().slice(0, MAX_PROP_STRING_LEN);
   const lowered = key.toLowerCase();
   if (lowered.includes('email')) {
-    const [name, domain] = next.split('@');
+    const [name = '', domain] = next.split('@');
     if (!domain) return 'redacted';
     return `${name.slice(0, 2)}***@${domain}`;
   }
@@ -109,14 +114,19 @@ function sanitizeValue(key: string, value: string | number | boolean | null): st
     return maskAddress(next);
   }
   // Strip obvious secrets/tokens
-  if (lowered.includes('token') || lowered.includes('secret') || lowered.includes('password') || lowered.includes('signature')) {
+  if (
+    lowered.includes('token') ||
+    lowered.includes('secret') ||
+    lowered.includes('password') ||
+    lowered.includes('signature')
+  ) {
     return 'redacted';
   }
   return next;
 }
 
 function sanitizeProperties(
-  properties: Record<string, string | number | boolean | null> | undefined,
+  properties: Record<string, string | number | boolean | null> | undefined
 ): Record<string, string | number | boolean | null> {
   if (!properties) return {};
   const out: Record<string, string | number | boolean | null> = {};
@@ -127,13 +137,26 @@ function sanitizeProperties(
   return out;
 }
 
-export function ingestAnalyticsBatch(body: unknown, rawBodySize?: number): { stored: number; skipped: number } {
+export function ingestAnalyticsBatch(
+  body: unknown,
+  rawBodySize?: number
+): { stored: number; skipped: number } {
   if (typeof rawBodySize === 'number' && rawBodySize > MAX_BODY_BYTES) {
-    throw new ApiError(400, 'Bad Request', `Analytics payload exceeds ${MAX_BODY_BYTES} bytes`, 'https://cylos.io/errors/validation');
+    throw new ApiError(
+      400,
+      'Bad Request',
+      `Analytics payload exceeds ${MAX_BODY_BYTES} bytes`,
+      'https://cylos.io/errors/validation'
+    );
   }
   const parsed = analyticsBatchSchema.safeParse(body);
   if (!parsed.success) {
-    throw new ApiError(400, 'Bad Request', parsed.error.message, 'https://cylos.io/errors/validation');
+    throw new ApiError(
+      400,
+      'Bad Request',
+      parsed.error.message,
+      'https://cylos.io/errors/validation'
+    );
   }
   const { consent, events } = parsed.data;
 

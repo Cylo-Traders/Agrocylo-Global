@@ -99,7 +99,7 @@ export default function Header() {
           />
         </Link>
 
-        <ul className="hidden flex-1 items-center justify-center gap-7 md:flex lg:gap-8 xl:gap-10">
+        <ul className="hidden flex-1 items-center justify-center gap-7 lg:flex lg:gap-8 xl:gap-10">
           {navItems.map((item) => (
             <li key={item.title}>
               <Link
@@ -130,7 +130,7 @@ export default function Header() {
         </ul>
 
         <div className="flex items-center justify-end gap-1">
-          <div className="hidden items-center gap-1 md:flex lg:max-w-[360px]">
+          <div className="hidden items-center gap-1 lg:flex lg:max-w-[360px]">
             {showDashboard && (
               <Button
                 asChild
@@ -176,13 +176,16 @@ export default function Header() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-11 md:hidden"
+                className="size-11 lg:hidden"
                 aria-label="Open navigation menu"
               >
                 <Menu className="size-5" />
               </Button>
             </SheetTrigger>
-            <SheetContent side="right" className="w-[min(22rem,100vw)] px-0 py-0">
+            <SheetContent
+              side="right"
+              className="w-[min(22rem,100vw)] max-w-full px-0 py-0"
+            >
               <div className="flex h-full flex-col">
                 <SheetHeader className="border-b px-6 pt-6 pb-4">
                   <SheetTitle className="text-left text-lg">Menu</SheetTitle>

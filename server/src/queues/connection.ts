@@ -1,4 +1,4 @@
-import { config } from "../config/index.js";
+import { config } from '../config/index.js';
 
 export interface ConnectionOptions {
   host?: string;
@@ -17,8 +17,8 @@ export interface ConnectionOptions {
  * broken URL fails fast instead of silently reaching the default database.
  */
 function parseDatabasePath(pathname: string): number | undefined {
-  const trimmed = pathname.replace(/\/+$/, "");
-  if (!trimmed || trimmed === "/") return undefined;
+  const trimmed = pathname.replace(/\/+$/, '');
+  if (!trimmed || trimmed === '/') return undefined;
   if (!/^\/\d+$/.test(trimmed)) {
     throw new Error(`Invalid Redis database path in REDIS_URL: "${pathname}"`);
   }
@@ -42,11 +42,13 @@ export function createRedisConnection(): ConnectionOptions {
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
   };
+  if (url.username) {
+    connection.username = decodeURIComponent(url.username);
+  }
   if (url.password) {
-    connection.username = decodeURIComponent(url.username) || undefined;
     connection.password = decodeURIComponent(url.password);
   }
-  if (url.protocol === "rediss:" || url.protocol === "tls:") {
+  if (url.protocol === 'rediss:' || url.protocol === 'tls:') {
     connection.tls = {};
   }
   const db = parseDatabasePath(url.pathname);

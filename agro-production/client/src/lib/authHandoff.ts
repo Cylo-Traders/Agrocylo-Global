@@ -8,6 +8,7 @@ import api from "./apiClient";
 export interface HandoffSession {
   accessToken: string;
   sessionToken: string;
+  refreshToken: string;
   walletAddress: string;
   expiresAt: string;
 }

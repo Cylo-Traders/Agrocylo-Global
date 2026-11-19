@@ -78,7 +78,7 @@ The `test:e2e` script will:
 
 The E2E suite runs automatically in CI on every PR or push that touches:
 - `agro-production/server/**`
-- `agro-production/contract/**`
+- `contracts/**`
 - `agro-production/client/src/lib/contractService.ts`
 
 See `.github/workflows/server-e2e.yml`. The job spins up a PostgreSQL service container, runs `npm run test:e2e`, and must complete within **10 minutes**.
@@ -109,6 +109,6 @@ npm test
 ## Contract Tests
 
 ```bash
-cd agro-production/contract
+cd contracts
 cargo test
 ```

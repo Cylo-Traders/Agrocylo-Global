@@ -28,7 +28,7 @@ export const I128_MAX = 2n ** 127n - 1n;
  * Canonical = trimmed, no exponent, no leading zeros, integer decimal string.
  */
 export function isCanonicalAmount(value: string): boolean {
-  if (typeof value !== "string") return false;
+  if (typeof value !== 'string') return false;
   if (!CANONICAL_INT_RE.test(value)) return false;
   try {
     const bi = BigInt(value);
@@ -45,9 +45,9 @@ export function isCanonicalAmount(value: string): boolean {
  * "abc", "", "1.2.3", "  ".
  */
 export function isValidAmountString(value: string): boolean {
-  if (typeof value !== "string") return false;
+  if (typeof value !== 'string') return false;
   const trimmed = value.trim();
-  if (trimmed === "") return false;
+  if (trimmed === '') return false;
   // Reject non-numeric
   if (!LOOSE_NUMERIC_RE.test(value)) return false;
   try {
@@ -83,13 +83,13 @@ export function isValidAmountString(value: string): boolean {
  * Throws if input is not numeric or out of i128 range.
  */
 export function canonicalizeAmount(input: string | bigint | number): string {
-  if (typeof input === "bigint") {
+  if (typeof input === 'bigint') {
     if (input < I128_MIN || input > I128_MAX) {
       throw new RangeError(`Amount out of i128 range: ${input}`);
     }
     return input.toString();
   }
-  if (typeof input === "number") {
+  if (typeof input === 'number') {
     if (!Number.isFinite(input)) throw new Error(`Invalid amount number: ${input}`);
     // Numbers may be in scientific notation; convert via string
     return canonicalizeAmount(String(input));
@@ -97,14 +97,14 @@ export function canonicalizeAmount(input: string | bigint | number): string {
 
   // string path
   const raw = String(input).trim();
-  if (raw === "") throw new Error("Empty amount string");
+  if (raw === '') throw new Error('Empty amount string');
 
   // Fast path: already canonical
   if (CANONICAL_INT_RE.test(raw)) {
     const bi = BigInt(raw);
     if (bi < I128_MIN || bi > I128_MAX) throw new RangeError(`Amount out of i128 range: ${raw}`);
     // Normalize -0 -> 0
-    if (bi === 0n) return "0";
+    if (bi === 0n) return '0';
     return bi.toString();
   }
 
@@ -113,8 +113,8 @@ export function canonicalizeAmount(input: string | bigint | number): string {
   // Strategy: expand scientific notation and decimal manually.
   const lower = raw.toLowerCase();
   // Check for exponent
-  if (lower.includes("e")) {
-    const [mantissa, expStr] = lower.split("e");
+  if (lower.includes('e')) {
+    const [mantissa, expStr] = lower.split('e');
     if (mantissa === undefined || expStr === undefined) throw new Error(`Invalid amount: ${input}`);
     const exp = parseInt(expStr, 10);
     if (Number.isNaN(exp)) throw new Error(`Invalid exponent in amount: ${input}`);
@@ -122,12 +122,12 @@ export function canonicalizeAmount(input: string | bigint | number): string {
   }
 
   // Decimal without exponent
-  if (raw.includes(".")) {
-    const [intPart, fracPart = ""] = raw.split(".");
+  if (raw.includes('.')) {
+    const [intPart = '', fracPart = ''] = raw.split('.');
     // If fractional part is all zeros, just return int part canonicalized
     if (/^0*$/.test(fracPart)) {
       // e.g. "1000.0" -> "1000"
-      const intCanonical = intPart.trim() === "" ? "0" : intPart.trim();
+      const intCanonical = intPart.trim() === '' ? '0' : intPart.trim();
       // Remove leading zeros / sign handling
       return canonicalizeAmount(intCanonical);
     }
@@ -137,35 +137,39 @@ export function canonicalizeAmount(input: string | bigint | number): string {
     // "1000" vs "1000.0" equivalence, we allow ".0*" only.
     // If fractional non-zero, we throw to surface data error rather than
     // silently truncating.
-    throw new Error(`Fractional amount not allowed for integer canonicalization: ${input} (fractional part "${fracPart}")`);
+    throw new Error(
+      `Fractional amount not allowed for integer canonicalization: ${input} (fractional part "${fracPart}")`
+    );
   }
 
   // Leading zeros case like "001000" or "+1000" or "-001000"
   // Strip sign, leading zeros, then re-add sign
-  const sign = raw.startsWith("-") ? "-" : raw.startsWith("+") ? "" : "";
-  const unsigned = raw.replace(/^[+-]/, "").replace(/^0+/, "") || "0";
+  const sign = raw.startsWith('-') ? '-' : raw.startsWith('+') ? '' : '';
+  const unsigned = raw.replace(/^[+-]/, '').replace(/^0+/, '') || '0';
   const candidate = sign + unsigned;
   // Remove -0
-  if (candidate === "-0" || candidate === "+0") return "0";
+  if (candidate === '-0' || candidate === '+0') return '0';
   // Validate trailing zeros correctly? Already handled
-  if (!CANONICAL_INT_RE.test(candidate)) throw new Error(`Invalid amount after normalization: ${input} -> ${candidate}`);
+  if (!CANONICAL_INT_RE.test(candidate))
+    throw new Error(`Invalid amount after normalization: ${input} -> ${candidate}`);
   const bi = BigInt(candidate);
-  if (bi < I128_MIN || bi > I128_MAX) throw new RangeError(`Amount out of i128 range: ${candidate}`);
+  if (bi < I128_MIN || bi > I128_MAX)
+    throw new RangeError(`Amount out of i128 range: ${candidate}`);
   return bi.toString();
 }
 
 function canonicalizeWithExponent(mantissa: string, exp: number): string {
   // mantissa may have decimal point and sign
-  const sign = mantissa.startsWith("-") ? "-" : "";
-  const unsignedMantissa = mantissa.replace(/^[+-]/, "");
-  const [intPartRaw, fracPartRaw = ""] = unsignedMantissa.split(".");
-  const intPart = intPartRaw.replace(/^0+/, "") || "0";
+  const sign = mantissa.startsWith('-') ? '-' : '';
+  const unsignedMantissa = mantissa.replace(/^[+-]/, '');
+  const [intPartRaw = '', fracPartRaw = ''] = unsignedMantissa.split('.');
+  const intPart = intPartRaw.replace(/^0+/, '') || '0';
   const fracPart = fracPartRaw; // keep as is, don't trim zeros yet; they matter for exponent shift
 
   // Combine digits and track decimal position
-  const digits = (intPart === "0" ? "" : intPart) + fracPart;
-  const digitsStripped = digits.replace(/^0+/, "") || "0";
-  if (digitsStripped === "0") return "0";
+  const digits = (intPart === '0' ? '' : intPart) + fracPart;
+  const digitsStripped = digits.replace(/^0+/, '') || '0';
+  if (digitsStripped === '0') return '0';
 
   // Original decimal point was at intPart.length from left
   // After exponent, decimal point moves exp to the right
@@ -186,11 +190,13 @@ function canonicalizeWithExponent(mantissa: string, exp: number): string {
   // Let's handle generic.
 
   if (netExp >= 0) {
-    const result = digitsStripped + "0".repeat(netExp);
+    const result = digitsStripped + '0'.repeat(netExp);
     // Remove leading zeros already done, but ensure canonical
-    const canonical = (sign === "-" && result !== "0" ? "-" : "") + result.replace(/^0+/, "") || "0";
+    const canonical =
+      (sign === '-' && result !== '0' ? '-' : '') + result.replace(/^0+/, '') || '0';
     const bi = BigInt(canonical);
-    if (bi < I128_MIN || bi > I128_MAX) throw new RangeError(`Amount out of i128 range: ${canonical}`);
+    if (bi < I128_MIN || bi > I128_MAX)
+      throw new RangeError(`Amount out of i128 range: ${canonical}`);
     return bi.toString();
   } else {
     // netExp negative => division by 10^-netExp
@@ -208,12 +214,15 @@ function canonicalizeWithExponent(mantissa: string, exp: number): string {
         const integerDigits = digitsStripped.slice(0, digitsStripped.length - absExp);
         const fractionalDigits = digitsStripped.slice(digitsStripped.length - absExp);
         if (!/^0*$/.test(fractionalDigits)) {
-          throw new Error(`Fractional amount not allowed: ${mantissa}e${exp} -> fractional part "${fractionalDigits}"`);
+          throw new Error(
+            `Fractional amount not allowed: ${mantissa}e${exp} -> fractional part "${fractionalDigits}"`
+          );
         }
-        const intCanonical = integerDigits.replace(/^0+/, "") || "0";
-        const candidate = (sign === "-" && intCanonical !== "0" ? "-" : "") + intCanonical;
+        const intCanonical = integerDigits.replace(/^0+/, '') || '0';
+        const candidate = (sign === '-' && intCanonical !== '0' ? '-' : '') + intCanonical;
         const bi = BigInt(candidate);
-        if (bi < I128_MIN || bi > I128_MAX) throw new RangeError(`Amount out of i128 range: ${candidate}`);
+        if (bi < I128_MIN || bi > I128_MAX)
+          throw new RangeError(`Amount out of i128 range: ${candidate}`);
         return bi.toString();
       }
     } else {
@@ -223,10 +232,11 @@ function canonicalizeWithExponent(mantissa: string, exp: number): string {
       if (!/^0*$/.test(fractionalDigits)) {
         throw new Error(`Fractional amount not allowed: ${mantissa}e${exp}`);
       }
-      const intCanonical = integerDigits.replace(/^0+/, "") || "0";
-      const candidate = (sign === "-" && intCanonical !== "0" ? "-" : "") + intCanonical;
+      const intCanonical = integerDigits.replace(/^0+/, '') || '0';
+      const candidate = (sign === '-' && intCanonical !== '0' ? '-' : '') + intCanonical;
       const bi = BigInt(candidate);
-      if (bi < I128_MIN || bi > I128_MAX) throw new RangeError(`Amount out of i128 range: ${candidate}`);
+      if (bi < I128_MIN || bi > I128_MAX)
+        throw new RangeError(`Amount out of i128 range: ${candidate}`);
       return bi.toString();
     }
   }
@@ -270,16 +280,18 @@ export function amountsEqualLoose(a: string, b: string): boolean {
  * Zod-compatible guard: throws if not valid canonical amount.
  * Use in Zod refine or manual validation at API boundary.
  */
-export function assertValidAmount(value: string, fieldName = "amount"): void {
+export function assertValidAmount(value: string, fieldName = 'amount'): void {
   if (!isValidAmountString(value)) {
-    throw new Error(`${fieldName} must be a valid integer amount string (i128 range), got: ${String(value).slice(0, 100)}`);
+    throw new Error(
+      `${fieldName} must be a valid integer amount string (i128 range), got: ${String(value).slice(0, 100)}`
+    );
   }
 }
 
 /**
  * Helper to canonicalize or throw with field context.
  */
-export function toCanonicalAmount(value: string, fieldName = "amount"): string {
+export function toCanonicalAmount(value: string, fieldName = 'amount'): string {
   try {
     return canonicalizeAmount(value);
   } catch (e) {

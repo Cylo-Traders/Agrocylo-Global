@@ -27,6 +27,21 @@ export function getRefreshToken(): string | null {
   return window.localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
 }
 
+export function getSessionWallet(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(AUTH_WALLET_STORAGE_KEY);
+}
+
+/**
+ * Update only the token pair (used by the silent refresh flow) so the
+ * session wallet recorded at sign-in is left untouched.
+ */
+export function setSessionTokens(accessToken: string, refreshToken: string): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, accessToken);
+  window.localStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, refreshToken);
+}
+
 export function setAuthSession(
   walletAddress: string,
   accessToken: string,

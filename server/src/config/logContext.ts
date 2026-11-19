@@ -1,4 +1,4 @@
-import { AsyncLocalStorage } from "node:async_hooks";
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 export type LogContext = {
   requestId?: string;
@@ -19,4 +19,3 @@ export function runWithLogContext<T>(ctx: LogContext, fn: () => T): T {
 export function getLogContext(): LogContext | undefined {
   return storage.getStore();
 }
-

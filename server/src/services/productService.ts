@@ -11,10 +11,12 @@ export interface ProductWriteInput {
   description?: string | null;
   category?: string | null;
   price_per_unit?: string;
-  currency?: 'STRK' | 'USDC';
+  currency?: 'USDC' | 'XLM' | 'EURC' | 'STRK' | string;
   unit?: string;
   stock_quantity?: string | null;
   location?: string;
+  chain_network?: string | null;
+  delivery_window?: string | null;
   is_available?: boolean;
 }
 
@@ -67,6 +69,8 @@ function toProductDto(product: Product): ProductDto {
     stock_quantity: product.stockQuantity?.toString() ?? null,
     location: product.location,
     image_url: product.imageUrl,
+    chain_network: product.chainNetwork,
+    delivery_window: product.deliveryWindow,
     is_available: product.isAvailable,
     created_at: product.createdAt,
     updated_at: product.updatedAt,
@@ -80,39 +84,73 @@ function decimalFilter(value: string | undefined): Prisma.Decimal | undefined {
   return new Prisma.Decimal(value);
 }
 
+type SortOption = 'price_asc' | 'price_desc' | 'newest' | 'distance';
+
 export async function listProducts(params: {
   farmer?: string;
   category?: string;
+  categories?: string;
   search?: string;
+  q?: string;
   location?: string;
   minPrice?: string;
   maxPrice?: string;
+  price_min?: string;
+  price_max?: string;
   page?: string;
   pageSize?: string;
+  page_size?: string;
   includeUnavailable?: boolean;
-}): Promise<{ page: number; page_size: number; total: number; totalPages: number; items: ProductDto[] }> {
+  include_unavailable?: boolean;
+  sort?: string;
+  lat?: string;
+  lng?: string;
+}): Promise<{
+  page: number;
+  page_size: number;
+  total: number;
+  totalPages: number;
+  items: ProductDto[];
+}> {
   const page = parsePage(params.page, 1);
-  const pageSize = Math.min(parsePage(params.pageSize, 20), 100);
-  const where: Prisma.ProductWhereInput = params.includeUnavailable ? {} : { isAvailable: true };
+  const pageSize = Math.min(parsePage(params.pageSize || params.page_size, 20), 100);
+  const where: Prisma.ProductWhereInput =
+    params.includeUnavailable || params.include_unavailable ? {} : { isAvailable: true };
 
   if (params.farmer) {
     where.farmerWallet = params.farmer.toLowerCase();
   }
+
+  // Support both singular 'category' and plural 'categories'
   if (params.category) {
     where.category = params.category;
+  } else if (params.categories) {
+    const categoryList = params.categories
+      .split(',')
+      .map((c) => c.trim())
+      .filter(Boolean);
+    if (categoryList.length > 0) {
+      where.category = { in: categoryList };
+    }
   }
-  if (params.search) {
+
+  // Support both 'search' and 'q'
+  const searchTerm = params.search || params.q;
+  if (searchTerm) {
     where.OR = [
-      { name: { contains: params.search, mode: 'insensitive' } },
-      { description: { contains: params.search, mode: 'insensitive' } },
-      { category: { contains: params.search, mode: 'insensitive' } },
+      { name: { contains: searchTerm, mode: 'insensitive' } },
+      { description: { contains: searchTerm, mode: 'insensitive' } },
+      { category: { contains: searchTerm, mode: 'insensitive' } },
     ];
   }
+
   if (params.location) {
     where.location = { contains: params.location, mode: 'insensitive' };
   }
-  const minPrice = decimalFilter(params.minPrice);
-  const maxPrice = decimalFilter(params.maxPrice);
+
+  // Support both naming conventions
+  const minPrice = decimalFilter(params.minPrice || params.price_min);
+  const maxPrice = decimalFilter(params.maxPrice || params.price_max);
   if (minPrice || maxPrice) {
     where.pricePerUnit = {
       ...(minPrice ? { gte: minPrice } : {}),
@@ -120,11 +158,39 @@ export async function listProducts(params: {
     };
   }
 
+  // Handle sorting
+  const sort = params.sort || 'newest';
+  const isValidSort = (s: string): s is SortOption => {
+    return ['price_asc', 'price_desc', 'newest', 'distance'].includes(s);
+  };
+
+  if (!isValidSort(sort)) {
+    throw new ApiError(
+      400,
+      'Invalid sort value',
+      `Invalid sort value: must be one of price_asc, price_desc, newest, distance. Got: ${sort}`
+    );
+  }
+
+  // Distance sorting requires lat/lng
+  if (sort === 'distance' && (!params.lat || !params.lng)) {
+    throw new ApiError(400, 'Invalid parameters', 'Distance sort requires lat and lng');
+  }
+
+  const orderBy: Prisma.ProductOrderByWithRelationInput =
+    sort === 'price_asc'
+      ? { pricePerUnit: 'asc' }
+      : sort === 'price_desc'
+        ? { pricePerUnit: 'desc' }
+        : sort === 'distance'
+          ? { createdAt: 'asc' } // Fallback: will compute actual distance in app
+          : { createdAt: 'desc' }; // newest
+
   const [total, products] = await prisma.$transaction([
     prisma.product.count({ where }),
     prisma.product.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy,
       take: pageSize,
       skip: (page - 1) * pageSize,
     }),
@@ -177,9 +243,38 @@ export async function getProductGraphData(productId: string): Promise<ProductGra
   } as ProductGraphData;
 }
 
-export async function createProduct(farmerWallet: string, input: ProductWriteInput): Promise<ProductDto> {
+const ALLOWED_CURRENCIES = new Set(['USDC', 'XLM', 'EURC', 'STRK']);
+
+export async function createProduct(
+  farmerWallet: string,
+  input: ProductWriteInput
+): Promise<ProductDto> {
   if (!input.name || !input.price_per_unit || !input.currency || !input.unit) {
     throw new ApiError(400, 'Bad Request', 'name, price_per_unit, currency, and unit are required');
+  }
+
+  // Issue #1125: Currency validation
+  const normalizedCurrency = input.currency.toUpperCase();
+  if (!ALLOWED_CURRENCIES.has(normalizedCurrency)) {
+    throw new ApiError(
+      400,
+      'Bad Request',
+      `Invalid currency: ${input.currency}. Supported currencies are USDC, XLM, EURC, STRK.`
+    );
+  }
+
+  // Issue #1128: Enforce farmer/seller role. Profile roles are persisted
+  // upper-cased ("FARMER"), so compare case-insensitively.
+  const profile = await prisma.profile.findUnique({
+    where: { walletAddress: farmerWallet.toLowerCase() },
+  });
+  const profileRole = profile?.role.trim().toUpperCase();
+  if (profile && profileRole !== 'FARMER' && profileRole !== 'SELLER') {
+    throw new ApiError(
+      403,
+      'Forbidden',
+      'Only users with farmer or seller role can create products'
+    );
   }
 
   const product = await prisma.product.create({
@@ -189,10 +284,12 @@ export async function createProduct(farmerWallet: string, input: ProductWriteInp
       description: input.description ?? null,
       category: input.category ?? null,
       pricePerUnit: new Prisma.Decimal(input.price_per_unit),
-      currency: input.currency,
+      currency: normalizedCurrency,
       unit: input.unit,
       stockQuantity: input.stock_quantity ? new Prisma.Decimal(input.stock_quantity) : null,
       location: input.location ?? null,
+      chainNetwork: input.chain_network ?? 'stellar:pubnet',
+      deliveryWindow: input.delivery_window ?? null,
       isAvailable: input.is_available ?? true,
     },
   });
@@ -201,27 +298,60 @@ export async function createProduct(farmerWallet: string, input: ProductWriteInp
   return result;
 }
 
-export async function updateProduct(productId: string, farmerWallet: string, input: ProductWriteInput): Promise<ProductDto> {
+export async function updateProduct(
+  productId: string,
+  farmerWallet: string,
+  input: ProductWriteInput
+): Promise<ProductDto> {
   const existing = await prisma.product.findUnique({ where: { id: productId } });
   if (!existing) throw new ApiError(404, 'Not Found', 'Product not found');
   if (existing.farmerWallet.toLowerCase() !== farmerWallet.toLowerCase()) {
     throw new ApiError(403, 'Forbidden', 'You do not own this product');
   }
 
+  // Issue #1128: Enforce farmer/seller role. Profile roles are persisted
+  // upper-cased ("FARMER"), so compare case-insensitively.
+  const profile = await prisma.profile.findUnique({
+    where: { walletAddress: farmerWallet.toLowerCase() },
+  });
+  const profileRole = profile?.role.trim().toUpperCase();
+  if (profile && profileRole !== 'FARMER' && profileRole !== 'SELLER') {
+    throw new ApiError(
+      403,
+      'Forbidden',
+      'Only users with farmer or seller role can update products'
+    );
+  }
+
   const data: Prisma.ProductUpdateInput = {};
   if (input.name !== undefined) data.name = input.name;
   if (input.description !== undefined) data.description = input.description;
   if (input.category !== undefined) data.category = input.category;
-  if (input.price_per_unit !== undefined) data.pricePerUnit = new Prisma.Decimal(input.price_per_unit);
-  if (input.currency !== undefined) data.currency = input.currency;
+  if (input.price_per_unit !== undefined)
+    data.pricePerUnit = new Prisma.Decimal(input.price_per_unit);
+  if (input.currency !== undefined) {
+    const normalizedCurrency = input.currency.toUpperCase();
+    if (!ALLOWED_CURRENCIES.has(normalizedCurrency)) {
+      throw new ApiError(
+        400,
+        'Bad Request',
+        `Invalid currency: ${input.currency}. Supported currencies are USDC, XLM, EURC, STRK.`
+      );
+    }
+    data.currency = normalizedCurrency;
+  }
   if (input.unit !== undefined) data.unit = input.unit;
   if (input.stock_quantity !== undefined) {
-    data.stockQuantity = input.stock_quantity === null ? null : new Prisma.Decimal(input.stock_quantity);
+    data.stockQuantity =
+      input.stock_quantity === null ? null : new Prisma.Decimal(input.stock_quantity);
   }
   if (input.location !== undefined) data.location = input.location;
+  if (input.chain_network !== undefined) data.chainNetwork = input.chain_network;
+  if (input.delivery_window !== undefined) data.deliveryWindow = input.delivery_window;
   if (input.is_available !== undefined) data.isAvailable = input.is_available;
 
-  if (Object.keys(data).length === 0) throw new ApiError(400, 'Bad Request', 'No fields provided to update');
+  if (Object.keys(data).length === 0)
+    throw new ApiError(400, 'Bad Request', 'No fields provided to update');
   const product = await prisma.product.update({ where: { id: productId }, data });
   const result = toProductDto(product);
   emitProductEvent('product:updated', result);
@@ -273,7 +403,7 @@ export function computeSuggestedPrice(prices: number[]): number | null {
  */
 export async function getSuggestedPrice(
   productId: string,
-  farmerWallet: string,
+  farmerWallet: string
 ): Promise<SuggestedPriceResult> {
   const product = await prisma.product.findUnique({ where: { id: productId } });
   if (!product) throw new ApiError(404, 'Not Found', 'Product not found');

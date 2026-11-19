@@ -46,7 +46,7 @@ export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
 };
 
 export async function getNotificationPreferences(
-  walletAddress: string,
+  walletAddress: string
 ): Promise<NotificationPrefs> {
   const row = await prisma.notificationPreference.findUnique({
     where: { walletAddress },
@@ -60,12 +60,17 @@ export async function getNotificationPreferences(
 
 export async function upsertNotificationPreferences(
   walletAddress: string,
-  body: unknown,
+  body: unknown
 ): Promise<NotificationPrefs> {
   try {
     const parsed = notificationPrefsSchema.safeParse(body);
     if (!parsed.success) {
-      throw new ApiError(400, 'Bad Request', parsed.error.message, 'https://cylos.io/errors/validation');
+      throw new ApiError(
+        400,
+        'Bad Request',
+        parsed.error.message,
+        'https://cylos.io/errors/validation'
+      );
     }
 
     const row = await prisma.notificationPreference.upsert({

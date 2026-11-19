@@ -1,28 +1,28 @@
-import type { Prisma } from "@prisma/client";
-import { prisma } from "../../config/database.js";
-import logger from "../../config/logger.js";
-import type { IndexedEvent } from "../../types/indexedEvent.js";
-import { ReferralService } from "../referralService.js";
-import { canonicalizeAmount } from "../../lib/money.js";
-import { IdentityService } from "../identityService.js";
-import { CampaignStatus } from "../../constants/status.js";
+import type { Prisma } from '@prisma/client';
+import { prisma } from '../../config/database.js';
+import logger from '../../config/logger.js';
+import type { IndexedEvent } from '../../types/indexedEvent.js';
+import { ReferralService } from '../referralService.js';
+import { canonicalizeAmount } from '../../lib/money.js';
+import { IdentityService } from '../identityService.js';
+import { CampaignStatus } from '../../constants/status.js';
 
-type PrismaTx = Omit<typeof prisma, "$connect" | "$disconnect" | "$on" | "$use" | "$extends">;
+type PrismaTx = Omit<typeof prisma, '$connect' | '$disconnect' | '$on' | '$use' | '$extends'>;
 
 // Helper to detect Prisma unique violation (P2002)
 function isUniqueViolation(error: unknown): boolean {
   return (
-    typeof error === "object" &&
+    typeof error === 'object' &&
     error !== null &&
-    "code" in error &&
-    (error as { code?: string }).code === "P2002"
+    'code' in error &&
+    (error as { code?: string }).code === 'P2002'
   );
 }
 
 function canonicalAmountOrThrow(raw: string | undefined, fieldName: string): string {
-  if (raw === undefined || raw === null) return "0";
+  if (raw === undefined || raw === null) return '0';
   const trimmed = String(raw).trim();
-  if (trimmed === "") return "0";
+  if (trimmed === '') return '0';
   try {
     return canonicalizeAmount(trimmed);
   } catch (e) {
@@ -31,7 +31,7 @@ function canonicalAmountOrThrow(raw: string | undefined, fieldName: string): str
 }
 
 function canonicalWallet(addr: string | undefined): string | null {
-  if (!addr || addr.trim() === "") return null;
+  if (!addr || addr.trim() === '') return null;
   return addr.trim().toLowerCase();
 }
 
@@ -86,7 +86,7 @@ export class BlockchainEventPersistenceService {
       } catch (txError) {
         // Idempotent: unique violation means another concurrent writer or replay already inserted
         if (isUniqueViolation(txError)) {
-          logger.warn("Blockchain event already persisted (unique violation, idempotent replay)", {
+          logger.warn('Blockchain event already persisted (unique violation, idempotent replay)', {
             sourceEventId: event.sourceEventId,
             ledger: event.ledger,
             eventIndex: event.eventIndex,
@@ -102,7 +102,9 @@ export class BlockchainEventPersistenceService {
       // Quarantine poisoned events to dead_letters without halting checkpoint — caller (watcher) will catch and advance
       const isValidationError =
         error instanceof Error &&
-        (error.message.includes("Invalid") || error.message.includes("amount") || error.message.includes("wallet"));
+        (error.message.includes('Invalid') ||
+          error.message.includes('amount') ||
+          error.message.includes('wallet'));
       if (isValidationError) {
         try {
           await prisma.deadLetter.upsert({
@@ -120,27 +122,30 @@ export class BlockchainEventPersistenceService {
               payload: event.payload as Prisma.InputJsonValue,
             },
           });
-          logger.warn("Event quarantined to dead_letters", { sourceEventId: event.sourceEventId, error: (error as Error).message });
+          logger.warn('Event quarantined to dead_letters', {
+            sourceEventId: event.sourceEventId,
+            error: (error as Error).message,
+          });
           return; // swallow to prevent halting checkpoint
         } catch (deadErr) {
-          logger.error("Failed to write dead_letter", { deadErr, originalError: error });
+          logger.error('Failed to write dead_letter', { deadErr, originalError: error });
         }
       }
-      logger.error("Failed to persist indexed blockchain event", { event, error });
+      logger.error('Failed to persist indexed blockchain event', { event, error });
       throw error;
     }
   }
 
   private static async triggerReferralRewardIfApplicable(event: IndexedEvent): Promise<void> {
     try {
-      if (event.eventType === "order.confirmed" && event.actorAddress) {
+      if (event.eventType === 'order.confirmed' && event.actorAddress) {
         const canonicalActor = canonicalWallet(event.actorAddress);
         if (!canonicalActor) return;
         const order = event.orderIdOnChain
           ? await prisma.order.findUnique({ where: { orderIdOnChain: event.orderIdOnChain } })
           : null;
         // Use canonical amount if available; fallback to event amount
-        let amount = order?.amount ?? event.amount ?? "0";
+        let amount = order?.amount ?? event.amount ?? '0';
         try {
           amount = canonicalizeAmount(amount);
         } catch {
@@ -151,13 +156,15 @@ export class BlockchainEventPersistenceService {
           amount,
           triggerOrderId: event.orderIdOnChain,
         });
-      } else if (event.eventType === "campaign.invested" && event.actorAddress) {
+      } else if (event.eventType === 'campaign.invested' && event.actorAddress) {
         const canonicalActor = canonicalWallet(event.actorAddress);
         if (!canonicalActor) return;
-        let amount = event.amount ?? "0";
+        let amount = event.amount ?? '0';
         try {
           amount = canonicalizeAmount(amount);
-        } catch {}
+        } catch {
+          /* ignore */
+        }
         await ReferralService.triggerRewardOnConfirmedActivity({
           refereeWallet: canonicalActor,
           amount,
@@ -165,51 +172,56 @@ export class BlockchainEventPersistenceService {
         });
       }
     } catch (error) {
-      logger.error("Failed to evaluate referral reward for event", { event, error });
+      logger.error('Failed to evaluate referral reward for event', { event, error });
     }
   }
 
   private static async upsertUsers(tx: PrismaTx, event: IndexedEvent): Promise<void> {
     // Use canonical identity service (single code path with authService)
-    await IdentityService.ensureUsersForEvent(tx as any, event.actorAddress, event.secondaryAddress);
+    await IdentityService.ensureUsersForEvent(
+      tx as any,
+      event.actorAddress,
+      event.secondaryAddress
+    );
   }
 
   private static async projectEntity(tx: PrismaTx, event: IndexedEvent): Promise<void> {
     switch (event.eventType) {
-      case "campaign.created": {
-        const canonicalAmount = canonicalAmountOrThrow(event.amount, "campaign.goalAmount");
+      case 'campaign.created': {
+        const canonicalAmount = canonicalAmountOrThrow(event.amount, 'campaign.goalAmount');
         const canonicalCreator = canonicalWallet(event.actorAddress);
-        if (!event.campaignIdOnChain) throw new Error("campaign.created missing campaignIdOnChain");
+        if (!event.campaignIdOnChain) throw new Error('campaign.created missing campaignIdOnChain');
         await tx.campaign.upsert({
           where: { campaignIdOnChain: event.campaignIdOnChain },
           update: {
-            creatorAddress: canonicalCreator ?? event.actorAddress ?? "",
+            creatorAddress: canonicalCreator ?? event.actorAddress ?? '',
             goalAmount: canonicalAmount,
-            token: event.token ?? "",
+            token: event.token ?? '',
             status: CampaignStatus.ACTIVE,
           },
           create: {
-            campaignIdOnChain: event.campaignIdOnChain ?? "",
-            creatorAddress: canonicalCreator ?? event.actorAddress ?? "",
+            campaignIdOnChain: event.campaignIdOnChain ?? '',
+            creatorAddress: canonicalCreator ?? event.actorAddress ?? '',
             goalAmount: canonicalAmount,
-            token: event.token ?? "",
+            token: event.token ?? '',
             status: CampaignStatus.ACTIVE,
           },
         });
         return;
       }
-      case "campaign.invested": {
-        const canonicalAmount = canonicalAmountOrThrow(event.amount, "investment.amount");
-        if (!event.campaignIdOnChain) throw new Error("campaign.invested missing campaignIdOnChain");
+      case 'campaign.invested': {
+        const canonicalAmount = canonicalAmountOrThrow(event.amount, 'investment.amount');
+        if (!event.campaignIdOnChain)
+          throw new Error('campaign.invested missing campaignIdOnChain');
         // Ensure campaign exists as placeholder if not yet created (avoid FK orphan, but campaign has no FK)
         await tx.campaign.upsert({
           where: { campaignIdOnChain: event.campaignIdOnChain },
           update: {},
           create: {
-            campaignIdOnChain: event.campaignIdOnChain ?? "",
-            creatorAddress: "",
-            goalAmount: "0",
-            token: event.token ?? "",
+            campaignIdOnChain: event.campaignIdOnChain ?? '',
+            creatorAddress: '',
+            goalAmount: '0',
+            token: event.token ?? '',
             status: CampaignStatus.ACTIVE,
           },
         });
@@ -218,42 +230,44 @@ export class BlockchainEventPersistenceService {
           update: {},
           create: {
             sourceEventId: event.sourceEventId,
-            campaignIdOnChain: event.campaignIdOnChain ?? "",
-            investorAddress: canonicalWallet(event.actorAddress) ?? event.actorAddress ?? "",
+            campaignIdOnChain: event.campaignIdOnChain ?? '',
+            investorAddress: canonicalWallet(event.actorAddress) ?? event.actorAddress ?? '',
             amount: canonicalAmount,
-            token: event.token ?? "",
+            token: event.token ?? '',
             txHash: event.txHash ?? null,
             createdAt: event.timestamp,
           },
         });
         return;
       }
-      case "campaign.settled": {
-        if (!event.campaignIdOnChain) throw new Error("campaign.settled missing campaignIdOnChain");
+      case 'campaign.settled': {
+        if (!event.campaignIdOnChain) throw new Error('campaign.settled missing campaignIdOnChain');
         await tx.campaign.upsert({
           where: { campaignIdOnChain: event.campaignIdOnChain },
           update: { status: event.status ?? CampaignStatus.SETTLED },
           create: {
-            campaignIdOnChain: event.campaignIdOnChain ?? "",
-            creatorAddress: canonicalWallet(event.actorAddress) ?? event.actorAddress ?? "",
-            goalAmount: "0",
-            token: event.token ?? "",
+            campaignIdOnChain: event.campaignIdOnChain ?? '',
+            creatorAddress: canonicalWallet(event.actorAddress) ?? event.actorAddress ?? '',
+            goalAmount: '0',
+            token: event.token ?? '',
             status: event.status ?? CampaignStatus.SETTLED,
           },
         });
         return;
       }
-      case "order.created": {
-        if (!event.orderIdOnChain) throw new Error("order.created missing orderIdOnChain");
-        const canonicalAmount = canonicalAmountOrThrow(event.amount, "order.amount");
+      case 'order.created': {
+        if (!event.orderIdOnChain) throw new Error('order.created missing orderIdOnChain');
+        const canonicalAmount = canonicalAmountOrThrow(event.amount, 'order.amount');
         const buyer = canonicalWallet(event.actorAddress);
         const seller = canonicalWallet(event.secondaryAddress);
-        const existing = await tx.order.findUnique({ where: { orderIdOnChain: event.orderIdOnChain } });
+        const existing = await tx.order.findUnique({
+          where: { orderIdOnChain: event.orderIdOnChain },
+        });
         if (existing) {
           // If placeholder (needsBackfill) exists, backfill missing fields and clear flag, but preserve later status
           if ((existing as any).needsBackfill) {
             // Preserve status if it's already beyond PENDING — delivered/completed/refunded are later than created
-            const shouldKeepStatus = existing.status !== "PENDING";
+            const shouldKeepStatus = existing.status !== 'PENDING';
             await tx.order.update({
               where: { orderIdOnChain: event.orderIdOnChain },
               data: {
@@ -261,17 +275,17 @@ export class BlockchainEventPersistenceService {
                 sellerAddress: seller ?? (existing as any).sellerAddress,
                 amount: canonicalAmount,
                 token: event.token ?? (existing as any).token,
-                status: shouldKeepStatus ? existing.status : "PENDING",
+                status: shouldKeepStatus ? existing.status : 'PENDING',
                 needsBackfill: false,
               } as any,
             });
           } else {
             // Existing real order — idempotent update, only fill if missing, don't downgrade status
             // If status already COMPLETED/REFUNDED etc, don't revert to PENDING
-            const finalStatuses = new Set(["COMPLETED", "REFUNDED", "DISPUTED", "DELIVERED"]);
+            const finalStatuses = new Set(['COMPLETED', 'REFUNDED', 'DISPUTED', 'DELIVERED']);
             if (finalStatuses.has(existing.status)) {
               // Just ensure amount/token not stuck at "0" if they were placeholder (should not happen now)
-              if (existing.amount === "0" || !existing.sellerAddress || !existing.buyerAddress) {
+              if (existing.amount === '0' || !existing.sellerAddress || !existing.buyerAddress) {
                 await tx.order.update({
                   where: { orderIdOnChain: event.orderIdOnChain },
                   data: {
@@ -291,7 +305,7 @@ export class BlockchainEventPersistenceService {
                 sellerAddress: seller ?? existing.sellerAddress,
                 amount: canonicalAmount,
                 token: event.token ?? existing.token,
-                status: "PENDING",
+                status: 'PENDING',
               } as any,
             });
           }
@@ -300,88 +314,94 @@ export class BlockchainEventPersistenceService {
         // No existing — normal create
         await tx.order.create({
           data: {
-            orderIdOnChain: event.orderIdOnChain ?? "",
+            orderIdOnChain: event.orderIdOnChain ?? '',
             buyerAddress: buyer,
             sellerAddress: seller,
             amount: canonicalAmount,
-            token: event.token ?? "",
-            status: "PENDING",
+            token: event.token ?? '',
+            status: 'PENDING',
             needsBackfill: false,
           } as any,
         });
         return;
       }
-      case "order.delivered": {
-        if (!event.orderIdOnChain) throw new Error("order.delivered missing orderIdOnChain");
+      case 'order.delivered': {
+        if (!event.orderIdOnChain) throw new Error('order.delivered missing orderIdOnChain');
         const buyer = canonicalWallet(event.secondaryAddress);
         const seller = canonicalWallet(event.actorAddress);
-        const existing = await tx.order.findUnique({ where: { orderIdOnChain: event.orderIdOnChain } });
+        const existing = await tx.order.findUnique({
+          where: { orderIdOnChain: event.orderIdOnChain },
+        });
         if (existing) {
           await tx.order.update({
             where: { orderIdOnChain: event.orderIdOnChain },
-            data: { status: "DELIVERED", needsBackfill: false } as any,
+            data: { status: 'DELIVERED', needsBackfill: false } as any,
           });
           return;
         }
         // Out-of-order: create placeholder with needsBackfill=true, nullable addresses handled
         await tx.order.create({
           data: {
-            orderIdOnChain: event.orderIdOnChain ?? "",
+            orderIdOnChain: event.orderIdOnChain ?? '',
             buyerAddress: buyer,
             sellerAddress: seller,
-            amount: "0",
-            token: "",
-            status: "DELIVERED",
+            amount: '0',
+            token: '',
+            status: 'DELIVERED',
             needsBackfill: true,
           } as any,
         });
         return;
       }
-      case "order.confirmed": {
-        if (!event.orderIdOnChain) throw new Error("order.confirmed missing orderIdOnChain");
+      case 'order.confirmed': {
+        if (!event.orderIdOnChain) throw new Error('order.confirmed missing orderIdOnChain');
         const buyer = canonicalWallet(event.actorAddress);
         const seller = canonicalWallet(event.secondaryAddress);
-        const existing = await tx.order.findUnique({ where: { orderIdOnChain: event.orderIdOnChain } });
+        const existing = await tx.order.findUnique({
+          where: { orderIdOnChain: event.orderIdOnChain },
+        });
         if (existing) {
           await tx.order.update({
             where: { orderIdOnChain: event.orderIdOnChain },
-            data: { status: "COMPLETED", needsBackfill: false } as any,
+            data: { status: 'COMPLETED', needsBackfill: false } as any,
           });
           return;
         }
         await tx.order.create({
           data: {
-            orderIdOnChain: event.orderIdOnChain ?? "",
+            orderIdOnChain: event.orderIdOnChain ?? '',
             buyerAddress: buyer,
             sellerAddress: seller,
-            amount: "0",
-            token: "",
-            status: "COMPLETED",
+            amount: '0',
+            token: '',
+            status: 'COMPLETED',
             needsBackfill: true,
           } as any,
         });
         return;
       }
-      case "order.refunded": {
-        if (!event.orderIdOnChain) throw new Error("order.refunded missing orderIdOnChain");
+      case 'order.refunded': {
+        if (!event.orderIdOnChain) throw new Error('order.refunded missing orderIdOnChain');
         const buyer = canonicalWallet(event.actorAddress);
         // seller not in event — keep null, not empty string
-        const existing = await tx.order.findUnique({ where: { orderIdOnChain: event.orderIdOnChain } });
+        const existing = await tx.order.findUnique({
+          where: { orderIdOnChain: event.orderIdOnChain },
+        });
         if (existing) {
           await tx.order.update({
             where: { orderIdOnChain: event.orderIdOnChain },
-            data: { status: "REFUNDED", needsBackfill: false } as any,
+            data: { status: 'REFUNDED', needsBackfill: false } as any,
           });
           return;
         }
         await tx.order.create({
           data: {
-            orderIdOnChain: event.orderIdOnChain ?? "",
+            orderIdOnChain: event.orderIdOnChain ?? '',
             buyerAddress: buyer,
             sellerAddress: null,
-            amount: "0",
-            token: "",
-            status: "REFUNDED",
+            amount: '0',
+            token: '',
+            status: 'REFUNDED',
             needsBackfill: true,
           } as any,
         });

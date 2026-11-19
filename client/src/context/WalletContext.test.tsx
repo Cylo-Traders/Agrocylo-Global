@@ -3,6 +3,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { WalletProvider, WalletContext } from "./WalletContext";
 import React, { useContext } from "react";
 import type { WalletContextType } from "@/types/wallet";
+import { setAuthSession, setSessionTokens } from "@/lib/authToken";
+import { refreshAuthSession } from "@/lib/walletSession";
 
 const mockFreighter = {
   getPublicKey: vi.fn(),
@@ -25,6 +27,19 @@ vi.mock("@/lib/analytics", () => ({
   trackWalletDisconnected: vi.fn(),
 }));
 
+vi.mock("@/lib/walletSession", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/lib/walletSession")>();
+  return { ...actual, refreshAuthSession: vi.fn() };
+});
+
+const mockRefreshAuthSession = vi.mocked(refreshAuthSession);
+
+function makeJwt(expSeconds: number, wallet: string): string {
+  const payload = { walletAddress: wallet, exp: expSeconds };
+  return `header.${btoa(JSON.stringify(payload))}.signature`;
+}
+
 function TestConsumer() {
   const ctx = useContext(WalletContext);
   return (
@@ -34,6 +49,7 @@ function TestConsumer() {
       <span data-testid="address">{ctx.address ?? "null"}</span>
       <span data-testid="error">{ctx.error ?? "null"}</span>
       <span data-testid="networkMismatch">{String(ctx.networkMismatch)}</span>
+      <span data-testid="authenticated">{String(ctx.authenticated)}</span>
     </div>
   );
 }
@@ -50,13 +66,11 @@ describe("WalletContext — restore flow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    // @ts-ignore
     window.freighter = mockFreighter;
   });
 
   afterEach(() => {
     localStorage.clear();
-    // @ts-ignore
     delete window.freighter;
   });
 
@@ -125,7 +139,6 @@ describe("WalletContext — networkMismatch", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    // @ts-ignore
     window.freighter = mockFreighter;
     vi.stubEnv("NEXT_PUBLIC_STELLAR_ENV", "mainnet");
     vi.stubEnv(
@@ -140,7 +153,6 @@ describe("WalletContext — networkMismatch", () => {
   afterEach(() => {
     localStorage.clear();
     vi.unstubAllEnvs();
-    // @ts-ignore
     delete window.freighter;
   });
 
@@ -164,5 +176,69 @@ describe("WalletContext — networkMismatch", () => {
       expect(screen.getByTestId("connected").textContent).toBe("true");
       expect(screen.getByTestId("networkMismatch").textContent).toBe("false");
     });
+  });
+});
+
+describe("WalletContext — session restore after reload (#1185)", () => {
+  const ADDR = "GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    window.freighter = mockFreighter;
+    mockFreighter.getPublicKey.mockResolvedValue(ADDR);
+    mockFreighter.getNetwork.mockResolvedValue("TESTNET");
+    localStorage.setItem("walletAddress", ADDR);
+    localStorage.setItem("walletNetwork", "TESTNET");
+    localStorage.setItem("activeWalletId", "freighter");
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+    delete window.freighter;
+  });
+
+  it("marks the session authenticated when a valid token was persisted", async () => {
+    setAuthSession(ADDR, makeJwt(Math.floor(Date.now() / 1000) + 60, ADDR), "refresh");
+
+    renderWithProvider();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("connected").textContent).toBe("true");
+      expect(screen.getByTestId("authenticated").textContent).toBe("true");
+    });
+    expect(mockRefreshAuthSession).not.toHaveBeenCalled();
+  });
+
+  it("silently refreshes an expired token for the matching session wallet", async () => {
+    setAuthSession(ADDR, makeJwt(Math.floor(Date.now() / 1000) - 60, ADDR), "refresh");
+    mockRefreshAuthSession.mockImplementation(async () => {
+      setSessionTokens(makeJwt(Math.floor(Date.now() / 1000) + 60, ADDR), "refresh2");
+      return "refreshed";
+    });
+
+    renderWithProvider();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("authenticated").textContent).toBe("true");
+    });
+    expect(mockRefreshAuthSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not adopt a session that belongs to a different wallet", async () => {
+    setAuthSession(
+      "GDIFFERENT",
+      makeJwt(Math.floor(Date.now() / 1000) + 60, "GDIFFERENT"),
+      "refresh",
+    );
+
+    renderWithProvider();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("connected").textContent).toBe("true");
+      expect(screen.getByTestId("restoring").textContent).toBe("false");
+    });
+    expect(screen.getByTestId("authenticated").textContent).toBe("false");
+    expect(mockRefreshAuthSession).not.toHaveBeenCalled();
   });
 });

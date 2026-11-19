@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import NetworkMismatchBanner from "./NetworkMismatchBanner";
 import { WalletContext } from "@/context/WalletContext";
@@ -23,12 +23,25 @@ describe("NetworkMismatchBanner", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("renders a persistent alert when networkMismatch is true", () => {
+  it("renders an alert when networkMismatch is true", () => {
     vi.stubEnv("NEXT_PUBLIC_STELLAR_ENV", "mainnet");
     renderWith({ networkMismatch: true, network: "TESTNET" });
 
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent(/wrong wallet network/i);
     expect(alert).toHaveTextContent(/Mainnet/);
+  });
+
+  it("hides the banner when the dismiss button is clicked", () => {
+    vi.stubEnv("NEXT_PUBLIC_STELLAR_ENV", "mainnet");
+    renderWith({ networkMismatch: true, network: "TESTNET" });
+
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /dismiss network mismatch/i }),
+    );
+
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

@@ -2,6 +2,11 @@
 
 This document describes the CI/CD pipeline, how to deploy, how to roll back, and who has access.
 
+> **Deploying the apps by hand?** See
+> [`DEPLOY_CLIENTS_AND_SERVERS.md`](./DEPLOY_CLIENTS_AND_SERVERS.md) for the
+> provider-agnostic setup and deploy order for the two backends and two
+> frontends (database/storage setup, Fly.io/Render/Vercel, CORS, verification).
+>
 > **Launching on mainnet?** Follow [`MAINNET_LAUNCH.md`](./MAINNET_LAUNCH.md) — the
 > ordered contract → backend → indexer → frontend cutover, the go/no-go gates, the
 > per-phase rollback plan, and the capped soft-launch ramp.

@@ -1,9 +1,9 @@
-import { prisma } from "../config/database.js";
-import logger from "../config/logger.js";
-import { captureAlert } from "../config/sentry.js";
-import { NotificationEventType } from "../enums/notificationEventType.js";
-import { NotificationService } from "./notificationService.js";
-import { getNotificationPreferences } from "./notificationPreferenceService.js";
+import { prisma } from '../config/database.js';
+import logger from '../config/logger.js';
+import { captureAlert } from '../config/sentry.js';
+import { NotificationEventType } from '../enums/notificationEventType.js';
+import { NotificationService } from './notificationService.js';
+import { getNotificationPreferences } from './notificationPreferenceService.js';
 
 /**
  * Normalized current-conditions reading, independent of the upstream weather
@@ -18,7 +18,7 @@ export interface WeatherReading {
 }
 
 export interface WeatherAlert {
-  severity: "watch" | "warning";
+  severity: 'watch' | 'warning';
   condition: string;
 }
 
@@ -41,29 +41,29 @@ export function evaluateThresholds(reading: WeatherReading): WeatherAlert[] {
   const alerts: WeatherAlert[] = [];
 
   if (reading.precipitationMm >= WEATHER_THRESHOLDS.extremeRainMm) {
-    alerts.push({ severity: "warning", condition: "Extreme rainfall" });
+    alerts.push({ severity: 'warning', condition: 'Extreme rainfall' });
   } else if (reading.precipitationMm >= WEATHER_THRESHOLDS.heavyRainMm) {
-    alerts.push({ severity: "watch", condition: "Heavy rainfall" });
+    alerts.push({ severity: 'watch', condition: 'Heavy rainfall' });
   }
 
   if (reading.windSpeedKph >= WEATHER_THRESHOLDS.extremeWindKph) {
-    alerts.push({ severity: "warning", condition: "Extreme wind" });
+    alerts.push({ severity: 'warning', condition: 'Extreme wind' });
   } else if (reading.windSpeedKph >= WEATHER_THRESHOLDS.highWindKph) {
-    alerts.push({ severity: "watch", condition: "High wind" });
+    alerts.push({ severity: 'watch', condition: 'High wind' });
   }
 
   if (reading.temperatureC <= WEATHER_THRESHOLDS.frostC) {
-    alerts.push({ severity: "warning", condition: "Frost risk" });
+    alerts.push({ severity: 'warning', condition: 'Frost risk' });
   }
 
   if (reading.temperatureC >= WEATHER_THRESHOLDS.extremeHeatC) {
-    alerts.push({ severity: "warning", condition: "Extreme heat" });
+    alerts.push({ severity: 'warning', condition: 'Extreme heat' });
   }
 
   return alerts;
 }
 
-const WEATHER_API_BASE = "https://api.open-meteo.com/v1/forecast";
+const WEATHER_API_BASE = 'https://api.open-meteo.com/v1/forecast';
 
 /** Bounded wall-clock budget for upstream weather calls (Issue #971). */
 const WEATHER_FETCH_TIMEOUT_MS = 10_000;
@@ -79,7 +79,7 @@ function unusableWeatherPayload(message: string): never {
  * upstream-data failure rather than being silently coerced to zero.
  */
 function parseFiniteWeatherNumber(value: unknown, field: string): number {
-  if (value === undefined || value === null || value === "") {
+  if (value === undefined || value === null || value === '') {
     return unusableWeatherPayload(`missing required numeric field '${field}'`);
   }
   const n = Number(value);
@@ -91,9 +91,9 @@ function parseFiniteWeatherNumber(value: unknown, field: string): number {
 
 /** Parses the provider timestamp, rejecting missing or malformed values. */
 function parseWeatherTimestamp(value: unknown): Date {
-  const raw = value === undefined || value === null ? "" : String(value);
-  if (raw.trim() === "") {
-    return unusableWeatherPayload("missing reading timestamp");
+  const raw = value === undefined || value === null ? '' : String(value);
+  if (raw.trim() === '') {
+    return unusableWeatherPayload('missing reading timestamp');
   }
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) {
@@ -111,7 +111,7 @@ function parseWeatherTimestamp(value: unknown): Date {
  */
 export async function fetchCurrentWeather(
   lat: number,
-  lng: number,
+  lng: number
 ): Promise<{ reading: WeatherReading; raw: unknown }> {
   const url = `${WEATHER_API_BASE}?latitude=${lat}&longitude=${lng}&current=temperature_2m,precipitation,wind_speed_10m,weather_code`;
   const controller = new AbortController();
@@ -123,17 +123,17 @@ export async function fetchCurrentWeather(
     }
     const raw: unknown = await response.json();
     const current = (raw as Record<string, unknown>)?.current;
-    if (!current || typeof current !== "object" || Array.isArray(current)) {
+    if (!current || typeof current !== 'object' || Array.isArray(current)) {
       return unusableWeatherPayload("expected a 'current' object, got none");
     }
     const fields = current as Record<string, unknown>;
-    const temperatureC = parseFiniteWeatherNumber(fields["temperature_2m"], "temperature_2m");
-    const precipitationMm = parseFiniteWeatherNumber(fields["precipitation"], "precipitation");
-    const windSpeedKph = parseFiniteWeatherNumber(fields["wind_speed_10m"], "wind_speed_10m");
+    const temperatureC = parseFiniteWeatherNumber(fields['temperature_2m'], 'temperature_2m');
+    const precipitationMm = parseFiniteWeatherNumber(fields['precipitation'], 'precipitation');
+    const windSpeedKph = parseFiniteWeatherNumber(fields['wind_speed_10m'], 'wind_speed_10m');
     const conditionCode = Math.trunc(
-      parseFiniteWeatherNumber(fields["weather_code"], "weather_code"),
+      parseFiniteWeatherNumber(fields['weather_code'], 'weather_code')
     );
-    const recordedAt = parseWeatherTimestamp(fields["time"]);
+    const recordedAt = parseWeatherTimestamp(fields['time']);
 
     return {
       raw,
@@ -148,7 +148,7 @@ async function persistReading(
   walletAddress: string,
   location: { lat: number; lng: number },
   reading: WeatherReading,
-  raw: unknown,
+  raw: unknown
 ): Promise<void> {
   await prisma.weatherReading.create({
     data: {
@@ -159,17 +159,14 @@ async function persistReading(
       precipitationMm: reading.precipitationMm,
       windSpeedKph: reading.windSpeedKph,
       conditionCode: reading.conditionCode,
-      source: "open-meteo",
+      source: 'open-meteo',
       rawPayload: raw as object,
       recordedAt: reading.recordedAt,
     },
   });
 }
 
-async function dispatchAlerts(
-  walletAddress: string,
-  alerts: WeatherAlert[],
-): Promise<void> {
+async function dispatchAlerts(walletAddress: string, alerts: WeatherAlert[]): Promise<void> {
   if (alerts.length === 0) return;
 
   const prefs = await getNotificationPreferences(walletAddress);
@@ -182,8 +179,8 @@ async function dispatchAlerts(
         type: NotificationEventType.WEATHER_ALERT,
         condition: alert.condition,
         severity: alert.severity,
-      }),
-    ),
+      })
+    )
   );
 }
 
@@ -227,15 +224,15 @@ export function startWeatherPolling(intervalMs = 60 * 60 * 1000): void {
   if (pollTimer) return;
   pollTimer = setInterval(() => {
     pollAllFarmerLocations().catch((error) => {
-      logger.error("[weatherService] Polling cycle failed", error);
+      logger.error('[weatherService] Polling cycle failed', error);
       // Issue #756: this whole-cycle failure (as opposed to one farmer's
       // skipped reading, above) means the scheduled job produced zero
       // readings this run — exactly the "silently-never-started" class of
       // failure this issue calls out weather polling for specifically.
       captureAlert(
-        "scheduled_job_failed",
-        "Weather polling cycle failed — no readings collected this run",
-        { error: error instanceof Error ? error.message : String(error) },
+        'scheduled_job_failed',
+        'Weather polling cycle failed — no readings collected this run',
+        { error: error instanceof Error ? error.message : String(error) }
       );
     });
   }, intervalMs);

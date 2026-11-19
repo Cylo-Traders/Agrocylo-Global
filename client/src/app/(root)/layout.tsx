@@ -22,7 +22,7 @@ export default function RootLayout({
       <main
         id="main-content"
         tabIndex={-1}
-        className="flex-1 overflow-x-clip pb-[calc(env(safe-area-inset-bottom)+4.5rem)] md:pb-0"
+        className="flex-1 overflow-x-clip pb-[calc(env(safe-area-inset-bottom)+5.5rem)] md:pb-0"
       >
         {children}
       </main>

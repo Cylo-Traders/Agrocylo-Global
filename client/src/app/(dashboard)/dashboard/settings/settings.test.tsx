@@ -108,7 +108,7 @@ describe("SettingsPage", () => {
 
     await waitFor(() => {
       expect(mockUpdateProfile).toHaveBeenCalledWith("GTEST", {
-        display_name: "New Name",
+        displayName: "New Name",
         bio: "New bio",
       });
       expect(mockSetProfile).toHaveBeenCalled();

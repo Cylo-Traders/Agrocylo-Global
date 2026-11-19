@@ -36,10 +36,6 @@ export default function IntegratorKeysPage() {
   const [farmerWallets, setFarmerWallets] = useState("");
   const [region, setRegion] = useState("");
 
-  useEffect(() => {
-    void loadKeys();
-  }, []);
-
   async function loadKeys() {
     setIsLoading(true);
     setError(null);
@@ -53,6 +49,10 @@ export default function IntegratorKeysPage() {
       setIsLoading(false);
     }
   }
+
+  useEffect(() => {
+    void loadKeys();
+  }, []);
 
   async function handleCreate() {
     if (!orgName.trim()) {

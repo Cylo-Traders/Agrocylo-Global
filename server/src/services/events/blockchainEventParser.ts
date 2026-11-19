@@ -1,16 +1,16 @@
-import { scValToNative } from "@stellar/stellar-sdk";
-import type { IndexedEvent, IndexedEventType } from "../../types/indexedEvent.js";
-import type { RawRpcEvent } from "../../types/rawRpcEvent.js";
-import { CampaignStatus, OrderStatus } from "../../constants/status.js";
+import { scValToNative } from '@stellar/stellar-sdk';
+import type { IndexedEvent, IndexedEventType } from '../../types/indexedEvent.js';
+import type { RawRpcEvent } from '../../types/rawRpcEvent.js';
+import { CampaignStatus, OrderStatus } from '../../constants/status.js';
 
 const SUPPORTED_EVENT_TYPES = new Set<IndexedEventType>([
-  "campaign.created",
-  "campaign.invested",
-  "campaign.settled",
-  "order.created",
-  "order.delivered",
-  "order.confirmed",
-  "order.refunded",
+  'campaign.created',
+  'campaign.invested',
+  'campaign.settled',
+  'order.created',
+  'order.delivered',
+  'order.confirmed',
+  'order.refunded',
 ]);
 
 function toStringValue(value: unknown): string | undefined {
@@ -20,10 +20,10 @@ function toStringValue(value: unknown): string | undefined {
 
 function toDateValue(value: unknown): Date {
   if (value instanceof Date) return value;
-  if (typeof value === "number") {
+  if (typeof value === 'number') {
     return new Date(value > 1_000_000_000_000 ? value : value * 1000);
   }
-  if (typeof value === "string") {
+  if (typeof value === 'string') {
     const d = new Date(value); // handles ISO date strings
     if (!Number.isNaN(d.getTime())) return d;
     const parsed = Number.parseInt(value, 10);
@@ -35,7 +35,7 @@ function toDateValue(value: unknown): Date {
 }
 
 function getEventIndex(eventId: string): number {
-  const parsed = Number.parseInt(eventId.split("-")[1] ?? "", 10);
+  const parsed = Number.parseInt(eventId.split('-')[1] ?? '', 10);
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
@@ -49,7 +49,7 @@ export class BlockchainEventParser {
   static parseDecoded(
     topics: unknown[],
     value: unknown,
-    meta: { id: string; ledger: number; txHash?: string; ledgerClosedAt?: string | number },
+    meta: { id: string; ledger: number; txHash?: string; ledgerClosedAt?: string | number }
   ): IndexedEvent | null {
     const entity = toStringValue(topics[0])?.toLowerCase();
     const action = toStringValue(topics[1])?.toLowerCase();
@@ -63,8 +63,8 @@ export class BlockchainEventParser {
     const common = {
       sourceEventId: meta.id,
       eventType,
-      entity: entity as IndexedEvent["entity"],
-      action: action as IndexedEvent["action"],
+      entity: entity as IndexedEvent['entity'],
+      action: action as IndexedEvent['action'],
       ledger: meta.ledger,
       eventIndex: getEventIndex(meta.id),
       timestamp,
@@ -73,7 +73,7 @@ export class BlockchainEventParser {
     };
 
     switch (eventType) {
-      case "campaign.created":
+      case 'campaign.created':
         return {
           ...common,
           campaignIdOnChain: toStringValue(data[0]),
@@ -82,7 +82,7 @@ export class BlockchainEventParser {
           token: toStringValue(data[3]),
           status: CampaignStatus.ACTIVE,
         };
-      case "campaign.invested":
+      case 'campaign.invested':
         return {
           ...common,
           campaignIdOnChain: toStringValue(data[0]),
@@ -90,7 +90,7 @@ export class BlockchainEventParser {
           amount: toStringValue(data[2]),
           token: toStringValue(data[3]),
         };
-      case "campaign.settled":
+      case 'campaign.settled':
         return {
           ...common,
           campaignIdOnChain: toStringValue(data[0]),
@@ -99,11 +99,11 @@ export class BlockchainEventParser {
         };
 
       // Contract: publish((order, created), (order_id, buyer, farmer, amount, token))
-      case "order.created":
+      case 'order.created':
         return {
           ...common,
           orderIdOnChain: toStringValue(data[0]),
-          actorAddress: toStringValue(data[1]),     // buyer
+          actorAddress: toStringValue(data[1]), // buyer
           secondaryAddress: toStringValue(data[2]), // farmer
           amount: toStringValue(data[3]),
           token: toStringValue(data[4]),
@@ -111,31 +111,31 @@ export class BlockchainEventParser {
         };
 
       // Contract: publish((order, delivered), (order_id, farmer, buyer, delivery_timestamp))
-      case "order.delivered":
+      case 'order.delivered':
         return {
           ...common,
           orderIdOnChain: toStringValue(data[0]),
-          actorAddress: toStringValue(data[1]),     // farmer
+          actorAddress: toStringValue(data[1]), // farmer
           secondaryAddress: toStringValue(data[2]), // buyer
           status: OrderStatus.DELIVERED,
         };
 
       // Contract: publish((order, confirmed), (order_id, buyer, farmer))
-      case "order.confirmed":
+      case 'order.confirmed':
         return {
           ...common,
           orderIdOnChain: toStringValue(data[0]),
-          actorAddress: toStringValue(data[1]),     // buyer
+          actorAddress: toStringValue(data[1]), // buyer
           secondaryAddress: toStringValue(data[2]), // farmer
           status: OrderStatus.COMPLETED,
         };
 
       // Contract: publish((order, refunded), (order_id, buyer))
-      case "order.refunded":
+      case 'order.refunded':
         return {
           ...common,
           orderIdOnChain: toStringValue(data[0]),
-          actorAddress: toStringValue(data[1]),     // buyer
+          actorAddress: toStringValue(data[1]), // buyer
           status: OrderStatus.REFUNDED,
         };
 

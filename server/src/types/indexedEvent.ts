@@ -1,19 +1,27 @@
 export type IndexedEventType =
-  | "campaign.created"
-  | "campaign.invested"
-  | "campaign.settled"
-  | "order.created"
-  | "order.delivered"
-  | "order.confirmed"
-  | "order.refunded"
-  | "basket.funded"
-  | "basket.skipped";
+  | 'campaign.created'
+  | 'campaign.invested'
+  | 'campaign.settled'
+  | 'order.created'
+  | 'order.delivered'
+  | 'order.confirmed'
+  | 'order.refunded'
+  | 'basket.funded'
+  | 'basket.skipped';
 
 export interface IndexedEvent {
   sourceEventId: string;
   eventType: IndexedEventType;
-  entity: "campaign" | "order" | "basket";
-  action: "created" | "invested" | "settled" | "delivered" | "confirmed" | "refunded" | "funded" | "skipped";
+  entity: 'campaign' | 'order' | 'basket';
+  action:
+    | 'created'
+    | 'invested'
+    | 'settled'
+    | 'delivered'
+    | 'confirmed'
+    | 'refunded'
+    | 'funded'
+    | 'skipped';
   ledger: number;
   eventIndex: number;
   timestamp: Date;

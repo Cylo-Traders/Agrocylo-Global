@@ -258,6 +258,11 @@ export async function createOrJoinGroupOrder(input: GroupOrderIntentInput): Prom
   const windowEndsAt = new Date(now.getTime() + windowMinutes * 60_000);
 
   const result = await prisma.$transaction(async (tx) => {
+    // security-guardrails-allow: $queryRaw
+    // Approved mechanism: pg_advisory_xact_lock serializes concurrent joins for the
+    // same product so we never create duplicate active pools. This is a parameterized
+    // Prisma.sql call (no string interpolation of user input) and is explicitly
+    // allowlisted via the pragma above rather than broadening the guardrail regex.
     await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${product.id})::bigint)`);
     const activePool = await tx.groupOrder.findFirst({
       where: {

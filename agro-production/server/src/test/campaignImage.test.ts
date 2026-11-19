@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 
-vi.mock('sharp', () => {
+const { mockSharp, mockSharpInstance } = vi.hoisted(() => {
   const mockSharpInstance = {
     rotate: vi.fn().mockReturnThis(),
     resize: vi.fn().mockReturnThis(),
@@ -9,9 +9,10 @@ vi.mock('sharp', () => {
     toBuffer: vi.fn().mockResolvedValue(Buffer.from('fake-thumbnail')),
     metadata: vi.fn().mockResolvedValue({ width: 800, height: 600 }),
   };
-  const sharp = vi.fn(() => mockSharpInstance);
-  return { default: sharp };
+  return { mockSharp: vi.fn(() => mockSharpInstance), mockSharpInstance };
 });
+
+vi.mock('sharp', () => ({ default: mockSharp }));
 
 const {
   mockStorageFrom,
@@ -23,11 +24,18 @@ const {
     upload: vi.fn().mockResolvedValue({ error: null }),
     list: vi.fn().mockResolvedValue({ data: [], error: null }),
     remove: vi.fn().mockResolvedValue({ error: null }),
-    getPublicUrl: vi.fn(() => ({ data: { publicUrl: 'https://supabase.co/storage/v1/object/public/campaign-images/farmer/campaign/thumbnail_800x800.webp' } })),
+    getPublicUrl: vi.fn(() => ({
+      data: {
+        publicUrl:
+          'https://supabase.co/storage/v1/object/public/campaign-images/farmer/campaign/thumbnail_800x800.webp',
+      },
+    })),
   },
   mockCampaignFindUnique: vi.fn(),
   mockCampaignUpdate: vi.fn(),
-  mockVerifySession: vi.fn().mockResolvedValue({ walletAddress: '', sessionToken: 'test-token' }),
+  mockVerifySession: vi
+    .fn()
+    .mockResolvedValue({ walletAddress: '', sessionToken: 'test-token' }),
 }));
 
 vi.mock('../services/walletAuthService.js', () => ({
@@ -35,19 +43,8 @@ vi.mock('../services/walletAuthService.js', () => ({
 }));
 
 vi.mock('../config/supabase.js', () => {
-  let cached: ReturnType<ReturnType<typeof vi.fn>> | null = null;
-  return {
-    getSupabaseAdmin: vi.fn(() => {
-      if (!cached) {
-        cached = {
-          storage: {
-            from: vi.fn(() => mockStorageFrom),
-          },
-        };
-      }
-      return cached;
-    }),
-  };
+  const admin = { storage: { from: vi.fn(() => mockStorageFrom) } };
+  return { getSupabaseAdmin: vi.fn(() => admin) };
 });
 
 vi.mock('../db/client.js', () => ({
@@ -63,10 +60,10 @@ const SESSION_TOKEN = 'test-session-token';
 
 import app from '../app.js';
 import { getSupabaseAdmin } from '../config/supabase.js';
-import sharp from 'sharp';
 
 const VALID_UUID = '00000000-0000-0000-0000-000000000001';
-const WALLET_ADDRESS = 'GBP7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7X';
+const WALLET_ADDRESS =
+  'GBP7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7X';
 
 function fakeImageBuffer(): Buffer {
   return Buffer.from('fake-image-data');
@@ -75,13 +72,20 @@ function fakeImageBuffer(): Buffer {
 describe('Campaign Image Upload', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (sharp as unknown as ReturnType<typeof vi.fn>)().metadata.mockResolvedValue({ width: 800, height: 600 });
-    (sharp as unknown as ReturnType<typeof vi.fn>)().toBuffer.mockResolvedValue(Buffer.from('fake-thumbnail'));
+    mockSharpInstance.metadata.mockResolvedValue({ width: 800, height: 600 });
+    mockSharpInstance.toBuffer.mockResolvedValue(Buffer.from('fake-thumbnail'));
     mockStorageFrom.upload.mockResolvedValue({ error: null });
     mockStorageFrom.list.mockResolvedValue({ data: [], error: null });
     mockStorageFrom.remove.mockResolvedValue({ error: null });
-    mockStorageFrom.getPublicUrl.mockReturnValue({ data: { publicUrl: 'https://supabase.co/storage/v1/object/public/campaign-images/farmer/campaign/thumbnail_800x800.webp' } });
-    (getSupabaseAdmin().storage.from as ReturnType<typeof vi.fn>).mockReturnValue(mockStorageFrom);
+    mockStorageFrom.getPublicUrl.mockReturnValue({
+      data: {
+        publicUrl:
+          'https://supabase.co/storage/v1/object/public/campaign-images/farmer/campaign/thumbnail_800x800.webp',
+      },
+    });
+    (
+      getSupabaseAdmin().storage.from as ReturnType<typeof vi.fn>
+    ).mockReturnValue(mockStorageFrom);
   });
 
   describe('POST /campaigns/:campaign_id/image', () => {
@@ -163,9 +167,7 @@ describe('Campaign Image Upload', () => {
     });
 
     it('should return 422 if image dimensions are too small', async () => {
-      const sharpModule = await import('sharp');
-      const mockSharp = sharpModule.default as unknown as ReturnType<typeof vi.fn>;
-      const mockInstance = mockSharp();
+      const mockInstance = mockSharpInstance;
       mockInstance.metadata.mockResolvedValue({ width: 50, height: 50 });
 
       mockCampaignFindUnique.mockResolvedValue({
@@ -197,7 +199,9 @@ describe('Campaign Image Upload', () => {
         upload: vi.fn().mockResolvedValue({ error: null }),
         list: vi.fn().mockResolvedValue({ data: [], error: null }),
         remove: storageRemove,
-        getPublicUrl: vi.fn(() => ({ data: { publicUrl: 'https://supabase.co/image.webp' } })),
+        getPublicUrl: vi.fn(() => ({
+          data: { publicUrl: 'https://supabase.co/image.webp' },
+        })),
       });
 
       const res = await request(app)
@@ -234,8 +238,7 @@ describe('Campaign Image Upload', () => {
     });
 
     it('should return 401 if no auth header', async () => {
-      const res = await request(app)
-        .delete(`/campaigns/${VALID_UUID}/image`);
+      const res = await request(app).delete(`/campaigns/${VALID_UUID}/image`);
 
       expect(res.status).toBe(401);
     });

@@ -1,30 +1,32 @@
-FROM node:20-alpine AS base
+FROM node:22.13.0-slim AS base
 
 WORKDIR /app
 
 COPY package*.json ./
 COPY prisma ./prisma/
+COPY prisma.config.ts ./
 
-RUN npm ci
+RUN PRISMA_GENERATE_DATABASE_URL=postgresql://prisma-generate:unused@localhost:5432/prisma_generate npm ci
 
-RUN npx prisma generate
+RUN PRISMA_GENERATE_DATABASE_URL=postgresql://prisma-generate:unused@localhost:5432/prisma_generate npx prisma generate
 
 COPY tsconfig.json ./
 COPY src ./src/
 
 RUN npm run build
 
-FROM node:20-alpine AS runner
+FROM node:22.13.0-slim AS runner
 
 WORKDIR /app
 
 ENV NODE_ENV=production
 
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 appuser
+RUN groupadd --system --gid 1001 nodejs
+RUN useradd --system --uid 1001 --gid nodejs appuser
 
 COPY --from=base /app/node_modules ./node_modules
 COPY --from=base /app/prisma ./prisma
+COPY --from=base /app/prisma.config.ts ./prisma.config.ts
 COPY --from=base /app/dist ./dist
 COPY --from=base /app/package.json ./
 

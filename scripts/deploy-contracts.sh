@@ -5,7 +5,7 @@
 #   1. governance          — standalone; every other contract verifies it before
 #                            accepting a governance address, so it goes first.
 #   2. escrow              — marketplace escrow (contracts/escrow)
-#      production_escrow   — campaign escrow (agro-production/contract/production_escrow)
+#      production_escrow   — campaign escrow (contracts/production_escrow)
 #      registry           — order / reputation registry
 #      investment_basket  — batched campaign investments
 #   3. cross-wiring, in this order (matters — see below):
@@ -148,11 +148,11 @@ NET_ARGS=(--rpc-url "$RPC_URL" --network-passphrase "$NETWORK_PASSPHRASE")
 # ---------------------------------------------------------------------------
 CONTRACTS=(governance escrow production_escrow registry investment_basket)
 declare -A DIR=(
-    [governance]="agro-production/contract/governance"
+    [governance]="contracts/governance"
     [escrow]="contracts/escrow"
-    [production_escrow]="agro-production/contract/production_escrow"
-    [registry]="agro-production/contract/registry"
-    [investment_basket]="agro-production/contract/investment_basket"
+    [production_escrow]="contracts/production_escrow"
+    [registry]="contracts/registry"
+    [investment_basket]="contracts/investment_basket"
 )
 declare -A WASM=(
     [governance]="governance.wasm"
@@ -239,6 +239,12 @@ if [[ "$VERIFY_ONLY" == "false" && "$SKIP_BUILD" == "false" ]]; then
     for c in "${CONTRACTS[@]}"; do
         echo "  - $c"
         ( cd "${DIR[$c]}" && cargo build --release --target wasm32v1-none -q )
+        # Optimize with wasm-opt: the raw cargo output can exceed the
+        # network's maxContractSizeBytes (128 KiB on testnet/mainnet), which
+        # makes `contract upload` fail with TxSorobanInvalid.
+        _wasm="$WASM_DIR/${WASM[$c]}"
+        "$CLI" contract optimize --wasm "$_wasm" --wasm-out "$_wasm.opt" >/dev/null 2>&1
+        if [[ -f "$_wasm.opt" ]]; then mv "$_wasm.opt" "$_wasm"; fi
     done
     echo ""
 fi
@@ -283,7 +289,8 @@ init_args_for() {
 }
 
 deploy_one() {
-    local c="$1" wasm="$WASM_DIR/${WASM[$c]}" existing salt hash id \
+    local c="$1"
+    local wasm="$WASM_DIR/${WASM[$c]}" existing salt hash id \
           init_fn="" init_args="" deployed_init=false
     existing="$(cid "$c")"
     if [[ -n "$existing" && "$FORCE" == "false" ]]; then

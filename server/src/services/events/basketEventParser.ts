@@ -1,11 +1,8 @@
-import { scValToNative } from "@stellar/stellar-sdk";
-import type { IndexedEvent, IndexedEventType } from "../../types/indexedEvent.js";
-import type { RawRpcEvent } from "../../types/rawRpcEvent.js";
+import { scValToNative } from '@stellar/stellar-sdk';
+import type { IndexedEvent, IndexedEventType } from '../../types/indexedEvent.js';
+import type { RawRpcEvent } from '../../types/rawRpcEvent.js';
 
-const SUPPORTED_EVENT_TYPES = new Set<IndexedEventType>([
-  "basket.funded",
-  "basket.skipped",
-]);
+const SUPPORTED_EVENT_TYPES = new Set<IndexedEventType>(['basket.funded', 'basket.skipped']);
 
 function toStringValue(value: unknown): string | undefined {
   if (value === null || value === undefined) return undefined;
@@ -14,10 +11,10 @@ function toStringValue(value: unknown): string | undefined {
 
 function toDateValue(value: unknown): Date {
   if (value instanceof Date) return value;
-  if (typeof value === "number") {
+  if (typeof value === 'number') {
     return new Date(value > 1_000_000_000_000 ? value : value * 1000);
   }
-  if (typeof value === "string") {
+  if (typeof value === 'string') {
     const d = new Date(value);
     if (!Number.isNaN(d.getTime())) return d;
     const parsed = Number.parseInt(value, 10);
@@ -29,7 +26,7 @@ function toDateValue(value: unknown): Date {
 }
 
 function getEventIndex(eventId: string): number {
-  const parsed = Number.parseInt(eventId.split("-")[1] ?? "", 10);
+  const parsed = Number.parseInt(eventId.split('-')[1] ?? '', 10);
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
@@ -43,7 +40,7 @@ export class BasketEventParser {
   static parseDecoded(
     topics: unknown[],
     value: unknown,
-    meta: { id: string; ledger: number; txHash?: string; ledgerClosedAt?: string | number },
+    meta: { id: string; ledger: number; txHash?: string; ledgerClosedAt?: string | number }
   ): IndexedEvent | null {
     const entity = toStringValue(topics[0])?.toLowerCase();
     const action = toStringValue(topics[1])?.toLowerCase();
@@ -57,8 +54,8 @@ export class BasketEventParser {
     const common = {
       sourceEventId: meta.id,
       eventType,
-      entity: entity as IndexedEvent["entity"],
-      action: action as IndexedEvent["action"],
+      entity: entity as IndexedEvent['entity'],
+      action: action as IndexedEvent['action'],
       ledger: meta.ledger,
       eventIndex: getEventIndex(meta.id),
       timestamp,
@@ -68,7 +65,7 @@ export class BasketEventParser {
 
     switch (eventType) {
       // Contract: publish((basket, funded), (schema_version, basket_id, total_deposit, total_invested, total_skipped))
-      case "basket.funded":
+      case 'basket.funded':
         return {
           ...common,
           schemaVersion: toStringValue(data[0]),
@@ -79,7 +76,7 @@ export class BasketEventParser {
         };
 
       // Contract: publish((basket, skipped), (schema_version, basket_id, campaign_id, share))
-      case "basket.skipped":
+      case 'basket.skipped':
         return {
           ...common,
           schemaVersion: toStringValue(data[0]),

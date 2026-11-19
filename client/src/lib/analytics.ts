@@ -102,6 +102,12 @@ const trackedScrollThresholds = new Set<number>();
 const trackedHoverTargets = new WeakSet<Element>();
 const trackedFeatureAdoption = new Set<string>();
 
+// Cached snapshot so `getAnalyticsSnapshot()` returns a referentially stable
+// value between mutations. This is required by `useSyncExternalStore` and
+// prevents redundant re-renders when nothing has actually changed.
+let snapshotCache: AnalyticsSnapshot | null = null;
+let notificationScheduled = false;
+
 function generateId() {
   if (isBrowser && "randomUUID" in crypto) {
     return crypto.randomUUID();
@@ -111,16 +117,24 @@ function generateId() {
 
 function loadConsent(): AnalyticsConsentState {
   if (!isBrowser) return "unknown";
-  const stored = window.localStorage.getItem(STORAGE_KEYS.consent);
-  if (stored === "granted" || stored === "denied" || stored === "unknown") {
-    return stored;
+  try {
+    const stored = window.localStorage.getItem(STORAGE_KEYS.consent);
+    if (stored === "granted" || stored === "denied" || stored === "unknown") {
+      return stored;
+    }
+  } catch {
+    // Privacy mode or disabled storage should not make the banner inert.
   }
   return "unknown";
 }
 
 function persistConsent(next: AnalyticsConsentState) {
   if (!isBrowser) return;
-  window.localStorage.setItem(STORAGE_KEYS.consent, next);
+  try {
+    window.localStorage.setItem(STORAGE_KEYS.consent, next);
+  } catch {
+    // Consent still updates in memory when storage is unavailable.
+  }
 }
 
 function loadSessionId(): string {
@@ -159,10 +173,36 @@ function persistEvents(events: AnalyticsEvent[]) {
   window.localStorage.setItem(STORAGE_KEYS.events, JSON.stringify(events.slice(-MAX_STORED_EVENTS)));
 }
 
-function emit() {
+function invalidateSnapshot() {
+  snapshotCache = null;
+}
+
+function flushNotification() {
+  notificationScheduled = false;
   for (const subscriber of subscribers) {
     subscriber();
   }
+}
+
+/**
+ * Notify subscribers on a microtask rather than synchronously.
+ *
+ * Event tracking can run while React is committing (e.g. a listener or effect
+ * fires during an insertion effect). Invoking the subscribed store listener
+ * synchronously there makes React throw
+ * "useInsertionEffect must not schedule updates". Deferring the notification
+ * (and coalescing bursts within the same tick) keeps listener work out of the
+ * commit phase while still recording every event exactly once.
+ */
+function emit() {
+  invalidateSnapshot();
+  if (notificationScheduled) return;
+  notificationScheduled = true;
+  queueMicrotask(flushNotification);
+}
+
+export function refreshAnalytics() {
+  emit();
 }
 
 function scheduleFlush() {
@@ -388,24 +428,15 @@ function ensureWindowTracking() {
     });
   };
 
-  const handlePopState = () => {
-    trackPageView(window.location.pathname + window.location.search);
-  };
-
-  const originalPushState = history.pushState.bind(history);
-  const originalReplaceState = history.replaceState.bind(history);
-  history.pushState = function pushState(...args) {
-    originalPushState(...args);
-    handlePopState();
-  };
-  history.replaceState = function replaceState(...args) {
-    originalReplaceState(...args);
-    handlePopState();
-  };
-
+  // NOTE: history.pushState/replaceState are intentionally NOT monkey-patched.
+  // Next.js App Router invokes them inside an insertion effect, and a patched
+  // synchronous `trackPageView` there used to trigger
+  // "useInsertionEffect must not schedule updates". Route changes are tracked
+  // exactly once via the `usePathname` effect in AnalyticsInit.tsx, and the
+  // initial page view is recorded below. This also avoids double-counting a
+  // navigation that both updates history and the pathname.
   window.addEventListener("beforeunload", flushTransport);
   window.addEventListener("pagehide", flushTransport);
-  window.addEventListener("popstate", handlePopState);
   window.addEventListener("scroll", handleScroll, { passive: true });
   window.addEventListener("click", handleClick, true);
   window.addEventListener("pointerover", handleHover, true);
@@ -415,6 +446,7 @@ function ensureWindowTracking() {
   window.addEventListener("storage", handleStorage);
 
   trackPageView(currentPath, { referrer: document.referrer || undefined });
+  emit();
 }
 
 export function initAnalytics() {
@@ -422,6 +454,7 @@ export function initAnalytics() {
 }
 
 export function setAnalyticsConsent(next: AnalyticsConsentState) {
+  if (!initialized) ensureWindowTracking();
   consentState = next;
   persistConsent(next);
 
@@ -454,7 +487,7 @@ export function getAnalyticsEvents() {
   return loadEvents();
 }
 
-export function getAnalyticsSnapshot(): AnalyticsSnapshot {
+function buildSnapshot(): AnalyticsSnapshot {
   const events = getAnalyticsEvents();
   const consent = getAnalyticsConsent();
   const metrics = buildMetrics(events);
@@ -467,6 +500,13 @@ export function getAnalyticsSnapshot(): AnalyticsSnapshot {
     events,
     metrics,
   };
+}
+
+export function getAnalyticsSnapshot(): AnalyticsSnapshot {
+  if (!snapshotCache) {
+    snapshotCache = buildSnapshot();
+  }
+  return snapshotCache;
 }
 
 export function subscribeAnalytics(listener: EventListener) {
@@ -769,4 +809,6 @@ export function resetAnalyticsForTests() {
   transportQueue.length = 0;
   trackedFeatureAdoption.clear();
   trackedScrollThresholds.clear();
+  snapshotCache = null;
+  notificationScheduled = false;
 }

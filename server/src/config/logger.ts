@@ -1,6 +1,6 @@
 import winston from 'winston';
-import { getLogContext } from "./logContext.js";
-import type { LogContext } from "./logContext.js";
+import { getLogContext } from './logContext.js';
+import type { LogContext } from './logContext.js';
 
 // log levels
 const levels = {
@@ -33,32 +33,30 @@ const injectContext = winston.format((info) => {
   return info;
 });
 
-const isDev = (process.env["NODE_ENV"] ?? "development") === "development";
+const isDev = (process.env['NODE_ENV'] ?? 'development') === 'development';
 
 const format = isDev
   ? winston.format.combine(
       injectContext(),
-      winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss:ms" }),
+      winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss:ms' }),
       winston.format.colorize({ all: true }),
       winston.format.printf((info) => {
         const requestId = info['requestId'] as string | undefined;
         const job = info['job'] as LogContext['job'] | undefined;
-        const rid = requestId ? ` rid=${requestId}` : "";
-        const jobStr = job ? ` job=${job.queue}:${job.jobId}` : "";
+        const rid = requestId ? ` rid=${requestId}` : '';
+        const jobStr = job ? ` job=${job.queue}:${job.jobId}` : '';
         const meta = `${rid}${jobStr}`;
         return `${info['timestamp'] as string} ${info.level}: ${info.message}${meta}`;
-      }),
+      })
     )
   : winston.format.combine(
       injectContext(),
       winston.format.timestamp(),
       winston.format.errors({ stack: true }),
-      winston.format.json(),
+      winston.format.json()
     );
 
-const transports = [
-  new winston.transports.Console(),
-];
+const transports = [new winston.transports.Console()];
 
 const logger = winston.createLogger({
   level: level(),

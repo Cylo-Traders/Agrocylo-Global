@@ -246,7 +246,7 @@ export default function EquipmentPage() {
                 <label className="block font-medium mb-1">Category / Listing Type</label>
                 <select
                   value={listingType}
-                  onChange={(e) => setListingType(e.target.value as any)}
+                  onChange={(e) => setListingType(e.target.value as "SEED" | "TOOL" | "EQUIPMENT_RENTAL")}
                   className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm"
                 >
                   <option value="EQUIPMENT_RENTAL">Equipment Rental</option>

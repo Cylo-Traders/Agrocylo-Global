@@ -2,6 +2,10 @@ import { TransactionBuilder, rpc } from "@stellar/stellar-sdk";
 import { getWalletAdapter, DEFAULT_WALLET_ID } from "@/lib/wallets/registry";
 import { loadWalletSession } from "@/lib/walletSession";
 import {
+  EXPECTED_NETWORK_PASSPHRASE,
+  networkName,
+} from "@/lib/stellarNetwork";
+import {
   getInFlightForIntent,
   recordSubmittedTransaction,
   updatePendingTransaction,
@@ -42,16 +46,32 @@ export interface SignAndSubmitOptions {
 export class NetworkMismatchError extends Error {
   constructor(expected: string, actual: string, walletName: string) {
     super(
-      `Network mismatch: expected "${expected}" but ${walletName} is connected to "${actual}"`
+      `Network mismatch: expected "${networkName(expected)}" (${expected}) but ${walletName} is connected to "${networkName(actual)}" (${actual})`
     );
     this.name = "NetworkMismatchError";
   }
 }
 
+/**
+ * Raised when the wallet cannot say which network it is on (#1087).
+ *
+ * This used to be silently replaced by the configured passphrase, which
+ * treated an unreadable network as a match and let the user start a
+ * transaction that could not be signed correctly. An unknown network now
+ * fails closed, exactly like a mismatch.
+ */
+export class NetworkUnknownError extends Error {
+  constructor(walletName: string) {
+    super(
+      `Cannot verify the wallet network: ${walletName} did not report a network passphrase. Refusing to sign until the wallet network can be confirmed.`,
+    );
+    this.name = "NetworkUnknownError";
+  }
+}
+
 const RPC_URL =
   process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
-const NETWORK_PASSPHRASE =
-  process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? "Test SDF Network ; September 2015";
+const NETWORK_PASSPHRASE = EXPECTED_NETWORK_PASSPHRASE;
 
 /** Matches the `.setTimeout(30)` bound every builder applies. */
 const TX_TIME_BOUND_SECONDS = 30;
@@ -63,11 +83,20 @@ function activeAdapter() {
   return getWalletAdapter(session?.walletId ?? DEFAULT_WALLET_ID);
 }
 
+/**
+ * The passphrase the wallet reports for its current network, or `null` when it
+ * cannot be determined. Never substitutes the configured passphrase: an
+ * unverifiable network must surface as unknown, not as a match (#1087).
+ */
 async function resolveNetworkPassphrase(
   adapter: ReturnType<typeof activeAdapter>,
-): Promise<string> {
-  const details = await adapter.getNetwork();
-  return details?.networkPassphrase ?? NETWORK_PASSPHRASE;
+): Promise<string | null> {
+  try {
+    const details = await adapter.getNetwork();
+    return details?.networkPassphrase ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function signAndSubmitTransaction(
@@ -98,6 +127,13 @@ export async function signAndSubmitTransaction(
 
     const adapter = activeAdapter();
     const networkPassphrase = await resolveNetworkPassphrase(adapter);
+
+    // Defense in depth (#1087): WalletContext already surfaces a mismatch or
+    // unknown network and blocks the UI, but the signing path re-verifies so a
+    // stale UI state can never sign a wrong-network transaction.
+    if (!networkPassphrase) {
+      throw new NetworkUnknownError(adapter.name);
+    }
 
     if (networkPassphrase !== NETWORK_PASSPHRASE) {
       throw new NetworkMismatchError(NETWORK_PASSPHRASE, networkPassphrase, adapter.name);

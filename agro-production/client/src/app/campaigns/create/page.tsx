@@ -84,6 +84,11 @@ export default function CreateCampaignPage() {
   }
 
   const fundingGoalResult = parseXlmToStroops(fundingGoal);
+  // Exact stroops as a decimal string — the CreateCampaignRequest contract
+  // takes an i128 string, not a bigint.
+  const targetAmountStroops = fundingGoalResult.valid
+    ? fundingGoalResult.stroops.toString()
+    : "";
   const isStep1Valid = tokenAddress && fundingGoalResult.valid && !fundingGoalError;
   const isStep2Valid = deadline && !deadlineError;
   const isStep3Valid = imageFile !== null;
@@ -104,7 +109,7 @@ export default function CreateCampaignPage() {
       const request: CreateCampaignRequest = {
         farmerAddress: address,
         tokenAddress,
-        targetAmount: fundingGoalResult.stroops,
+        targetAmount: targetAmountStroops,
         deadline,
       };
 
@@ -158,7 +163,7 @@ export default function CreateCampaignPage() {
     } finally {
       setLoading(false);
     }
-  }, [address, isStep1Valid, isStep2Valid, isStep3Valid, tokenAddress, fundingGoalResult.stroops, deadline, imageFile, router]);
+  }, [address, isStep1Valid, isStep2Valid, isStep3Valid, tokenAddress, targetAmountStroops, deadline, imageFile, router]);
 
   const handleRetryImageUpload = useCallback(async () => {
     if (!createdCampaignId || !imageFile) return;
@@ -467,12 +472,12 @@ export default function CreateCampaignPage() {
                   Skip for now
                 </button>
               </div>
-              {imageUpload.kind === "skipped" && (
-                <p className="text-amber-700 text-xs mt-2">
-                  You can add an image to the campaign later.
-                </p>
-              )}
             </div>
+          )}
+          {imageUpload && imageUpload.kind === "skipped" && (
+            <p className="text-amber-700 text-xs mt-2">
+              You can add an image to the campaign later.
+            </p>
           )}
 
           <div className="flex gap-3">

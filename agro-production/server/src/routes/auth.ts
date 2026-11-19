@@ -1,13 +1,19 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import { jsonValidated, validateBody, validateQuery } from '../middleware/validate.js';
+import {
+  jsonValidated,
+  validateBody,
+  validateQuery,
+} from '../middleware/validate.js';
 import { authLimiter } from '../middleware/rateLimit.js';
 import { problemDetail } from '../middleware/errors.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 import {
   createChallenge,
   verifySignatureAndCreateSession,
   verifyHandoffAndCreateSession,
   revokeSession,
+  refreshAccessToken,
   AuthError,
 } from '../services/walletAuthService.js';
 
@@ -31,12 +37,22 @@ const SessionRequestSchema = z.object({
 const SessionResponseSchema = z.object({
   accessToken: z.string(),
   sessionToken: z.string(),
+  refreshToken: z.string(),
   walletAddress: z.string(),
   expiresAt: z.string(),
 });
 
+const RefreshResponseSchema = z.object({
+  accessToken: z.string(),
+  refreshToken: z.string(),
+});
+
 const RevokeSessionBodySchema = z.object({
   sessionToken: z.string(),
+});
+
+const RefreshTokenBodySchema = z.object({
+  refreshToken: z.string().min(1, 'Refresh token is required'),
 });
 
 const HandoffRequestSchema = z.object({
@@ -48,9 +64,11 @@ router.get(
   '/auth/nonce',
   authLimiter,
   validateQuery(ChallengeRequestSchema),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     try {
-      const { walletAddress } = req.query as unknown as { walletAddress: string };
+      const { walletAddress } = req.query as unknown as {
+        walletAddress: string;
+      };
       const result = await createChallenge(walletAddress);
       jsonValidated(res, ChallengeResponseSchema, 200, result);
     } catch (err) {
@@ -58,9 +76,15 @@ router.get(
         problemDetail(res, req, err.status, err.message);
         return;
       }
-      problemDetail(res, req, 500, 'Internal Server Error', 'Failed to create challenge');
+      problemDetail(
+        res,
+        req,
+        500,
+        'Internal Server Error',
+        'Failed to create challenge',
+      );
     }
-  },
+  }),
 );
 
 // POST /auth/session — verify signed nonce and issue session token
@@ -68,23 +92,33 @@ router.post(
   '/auth/session',
   authLimiter,
   validateBody(SessionRequestSchema),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     try {
       const { walletAddress, nonce, signature } = req.body as {
         walletAddress: string;
         nonce: string;
         signature: string;
       };
-      const result = await verifySignatureAndCreateSession(walletAddress, nonce, signature);
+      const result = await verifySignatureAndCreateSession(
+        walletAddress,
+        nonce,
+        signature,
+      );
       jsonValidated(res, SessionResponseSchema, 200, result);
     } catch (err) {
       if (err instanceof AuthError) {
         problemDetail(res, req, err.status, err.message);
         return;
       }
-      problemDetail(res, req, 500, 'Internal Server Error', 'Failed to create session');
+      problemDetail(
+        res,
+        req,
+        500,
+        'Internal Server Error',
+        'Failed to create session',
+      );
     }
-  },
+  }),
 );
 
 // POST /auth/handoff — verify a cross-app SSO handoff token minted by the
@@ -93,7 +127,7 @@ router.post(
   '/auth/handoff',
   authLimiter,
   validateBody(HandoffRequestSchema),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     try {
       const { token } = req.body as { token: string };
       const result = await verifyHandoffAndCreateSession(token);
@@ -103,9 +137,15 @@ router.post(
         problemDetail(res, req, err.status, err.message);
         return;
       }
-      problemDetail(res, req, 500, 'Internal Server Error', 'Failed to verify handoff token');
+      problemDetail(
+        res,
+        req,
+        500,
+        'Internal Server Error',
+        'Failed to verify handoff token',
+      );
     }
-  },
+  }),
 );
 
 // POST /auth/revoke — revoke a session token
@@ -113,15 +153,47 @@ router.post(
   '/auth/revoke',
   authLimiter,
   validateBody(RevokeSessionBodySchema),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     try {
       const { sessionToken } = req.body as { sessionToken: string };
       await revokeSession(sessionToken);
       res.status(204).send();
-    } catch (err) {
-      problemDetail(res, req, 500, 'Internal Server Error', 'Failed to revoke session');
+    } catch {
+      problemDetail(
+        res,
+        req,
+        500,
+        'Internal Server Error',
+        'Failed to revoke session',
+      );
     }
-  },
+  }),
+);
+
+// POST /auth/refresh — refresh access token using refresh token
+router.post(
+  '/auth/refresh',
+  authLimiter,
+  validateBody(RefreshTokenBodySchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    try {
+      const { refreshToken } = req.body as { refreshToken: string };
+      const result = await refreshAccessToken(refreshToken);
+      jsonValidated(res, RefreshResponseSchema, 200, result);
+    } catch (err) {
+      if (err instanceof AuthError) {
+        problemDetail(res, req, err.status, err.message);
+        return;
+      }
+      problemDetail(
+        res,
+        req,
+        500,
+        'Internal Server Error',
+        'Failed to refresh token',
+      );
+    }
+  }),
 );
 
 export default router;

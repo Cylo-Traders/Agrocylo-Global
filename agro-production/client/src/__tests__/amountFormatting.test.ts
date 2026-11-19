@@ -35,6 +35,7 @@ describe("formatStroops — exact i128 formatting", () => {
     expect(formatStroops(stroops)).toBe("1000000000.0000001");
 
     // The old float path silently rounds the last stroop away.
+    // eslint-disable-next-line no-restricted-syntax
     const viaFloat = (Number(stroops) / 1e7).toString();
     expect(viaFloat).toBe("1000000000");
     expect(viaFloat).not.toBe("1000000000.0000001");

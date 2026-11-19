@@ -54,3 +54,21 @@ opt-in, the test suites, and the testnet smoke test are documented in
 Notes for developers
 - API calls are centralized in `src/lib/apiClient.ts` and wrapped by the service modules in `src/services/*`.
 - Wallet context is in `src/context/WalletContext.tsx`; everything wallet-specific lives in `src/lib/wallets/`. No feature code should branch on a provider name.
+
+## Privacy and offline support
+
+Behavioral analytics stays disabled until a visitor accepts it. The choice is
+stored as `ap_analytics_consent`; visitors can change it at any time using the
+Analytics preferences control. Declining or revoking consent clears queued
+behavioral events. If browser storage is unavailable, the client fails closed
+and does not send analytics. Operational error tracking remains separately
+controlled by `NEXT_PUBLIC_TELEMETRY_ENABLED` and `NEXT_PUBLIC_TELEMETRY_URL`;
+it reports redacted error details and does not include behavioral events.
+
+The production service worker precaches only the offline page and app icon,
+and may cache immutable `/_next/static/` assets. It never caches HTML, API
+responses, authenticated pages, wallet/RPC requests, or mutations. PWA behavior
+is enabled only for production builds served over HTTPS (or localhost for
+browser testing). To verify offline fallback, load a page online, install or
+register the worker, then use browser DevTools to switch to Offline and
+navigate to a route.

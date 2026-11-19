@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from 'express';
+import { Router, type Response } from 'express';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../db/client.js';
 import {
@@ -16,9 +16,14 @@ import {
   TransactionStatusUpdateSchema,
   TransactionReconciliationResponseSchema,
 } from '../schemas/transaction.js';
-import type { TransactionStatus } from '../schemas/transaction.js';
+import type {
+  TransactionIntentCreate,
+  TransactionStatus,
+  TransactionStatusUpdate,
+} from '../schemas/transaction.js';
 import { broadcastTo } from '../services/wsServer.js';
 import { reconcileTransaction } from '../services/transactionReconciler.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 
 const router = Router();
 
@@ -64,9 +69,9 @@ router.post(
   requireWallet,
   writeLimiter,
   validateBody(TransactionIntentCreateSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const { requestId, txHash, walletAddress, eventType, campaignId } =
-      req.body;
+      req.body as TransactionIntentCreate;
 
     if (req.walletAddress !== walletAddress) {
       problemDetail(res, req, 403, 'Forbidden', 'Wallet address mismatch');
@@ -111,14 +116,14 @@ router.post(
     });
 
     jsonValidated(res, TransactionStatusResponseSchema, 201, response);
-  },
+  }),
 );
 
 router.get(
   '/transactions/:requestId',
   requireWallet,
   validateParams(TransactionRequestIdParamSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const tx = await prisma.transaction.findUnique({
       where: { id: req.params.requestId },
     });
@@ -138,13 +143,13 @@ router.get(
     }
 
     jsonValidated(res, TransactionStatusResponseSchema, 200, txToResponse(tx));
-  },
+  }),
 );
 
 router.get(
   '/transactions',
   requireWallet,
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
 
     const transactions = await prisma.transaction.findMany({
@@ -155,7 +160,7 @@ router.get(
 
     const results = transactions.map((tx) => txToResponse(tx, walletAddress));
     jsonValidated(res, TransactionStatusResponseSchema.array(), 200, results);
-  },
+  }),
 );
 
 router.patch(
@@ -164,8 +169,8 @@ router.patch(
   writeLimiter,
   validateParams(TransactionRequestIdParamSchema),
   validateBody(TransactionStatusUpdateSchema),
-  async (req: WalletRequest, res: Response) => {
-    const { status: newStatus, message } = req.body;
+  asyncHandler(async (req: WalletRequest, res: Response) => {
+    const { status: newStatus, message } = req.body as TransactionStatusUpdate;
 
     const tx = await prisma.transaction.findUnique({
       where: { id: req.params.requestId },
@@ -237,14 +242,14 @@ router.patch(
     });
 
     jsonValidated(res, TransactionStatusResponseSchema, 200, response);
-  },
+  }),
 );
 
 router.get(
   '/transactions/:requestId/reconcile',
   requireWallet,
   validateParams(TransactionRequestIdParamSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     const tx = await prisma.transaction.findUnique({
       where: { id: req.params.requestId },
     });
@@ -275,7 +280,7 @@ router.get(
       createdAt: tx.processedAt.toISOString(),
       updatedAt: tx.processedAt.toISOString(),
     });
-  },
+  }),
 );
 
 export default router;

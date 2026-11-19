@@ -1,6 +1,6 @@
-import type { NextFunction, Request, Response } from "express";
-import { z, type ZodError, type ZodTypeAny } from "zod";
-import logger from "../config/logger.js";
+import type { NextFunction, Request, Response } from 'express';
+import type { ZodError, ZodTypeAny } from 'zod';
+import logger from '../config/logger.js';
 
 export interface ValidationIssue {
   field: string;
@@ -10,7 +10,7 @@ export interface ValidationIssue {
 
 export interface ValidationProblemDetail {
   type: string;
-  title: "Validation Failed";
+  title: 'Validation Failed';
   status: 400;
   instance: string;
   errors: ValidationIssue[];
@@ -26,7 +26,7 @@ export function validateBody<T extends ZodTypeAny>(schema: T) {
     if (!result.success) {
       res
         .status(400)
-        .type("application/problem+json")
+        .type('application/problem+json')
         .json(formatZodError(result.error, req.path));
       return;
     }
@@ -44,7 +44,7 @@ export function validateQuery<T extends ZodTypeAny>(schema: T) {
     if (!result.success) {
       res
         .status(400)
-        .type("application/problem+json")
+        .type('application/problem+json')
         .json(formatZodError(result.error, req.path));
       return;
     }
@@ -62,7 +62,7 @@ export function validateParams<T extends ZodTypeAny>(schema: T) {
     if (!result.success) {
       res
         .status(400)
-        .type("application/problem+json")
+        .type('application/problem+json')
         .json(formatZodError(result.error, req.path));
       return;
     }
@@ -81,7 +81,7 @@ export function validateResponse<T extends ZodTypeAny>(schema: T) {
     res.json = (body: unknown) => {
       const result = schema.safeParse(body);
       if (!result.success) {
-        logger.warn("Response failed schema validation", {
+        logger.warn('Response failed schema validation', {
           path: res.req?.path,
           issues: result.error.issues,
         });
@@ -92,14 +92,17 @@ export function validateResponse<T extends ZodTypeAny>(schema: T) {
   };
 }
 
-export function formatZodError(error: ZodError, instance: string): ValidationProblemDetail {
+export function formatZodError(
+  error: ZodError,
+  instance: string,
+): ValidationProblemDetail {
   return {
-    type: "https://agrocylo.io/errors/validation-failed",
-    title: "Validation Failed",
+    type: 'https://agrocylo.io/errors/validation-failed',
+    title: 'Validation Failed',
     status: 400,
     instance,
     errors: error.issues.map((issue) => ({
-      field: issue.path.join(".") || "(root)",
+      field: issue.path.join('.') || '(root)',
       message: issue.message,
       code: issue.code,
     })),
@@ -115,7 +118,7 @@ export function jsonValidated<T extends ZodTypeAny>(
 ): void {
   const result = schema.safeParse(payload);
   if (!result.success) {
-    logger.warn("Handler returned data that failed response schema", {
+    logger.warn('Handler returned data that failed response schema', {
       issues: result.error.issues,
     });
     res.status(statusCode).json(payload);

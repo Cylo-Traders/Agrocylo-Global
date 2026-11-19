@@ -11,6 +11,7 @@ vi.mock('../config/database.js', () => ({
       update: vi.fn(),
     },
     priceHistory: { findMany: vi.fn() },
+    profile: { findUnique: vi.fn() },
   },
 }));
 
@@ -36,6 +37,7 @@ const mockTransaction = vi.mocked(prisma.$transaction);
 const mockCreate = vi.mocked(prisma.product.create);
 const mockUpdate = vi.mocked(prisma.product.update);
 const mockPriceHistoryFindMany = vi.mocked(prisma.priceHistory.findMany);
+const mockProfileFindUnique = vi.mocked(prisma.profile.findUnique);
 
 const SAMPLE_PRODUCT = {
   id: 'prod-1',
@@ -56,6 +58,7 @@ const SAMPLE_PRODUCT = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockProfileFindUnique.mockResolvedValue({ role: 'FARMER' } as any);
 });
 
 describe('listProducts', () => {
@@ -339,7 +342,7 @@ describe('getSuggestedPrice', () => {
 // produces, so a renamed or dropped parameter fails here instead of silently
 // returning an unfiltered list.
 describe('listProducts query contract (#1145)', () => {
-  const whereOf = () => mockFindMany.mock.calls[0]![0]!.where;
+  const whereOf = () => mockFindMany.mock.calls[0]![0]!.where as any;
   const queryOf = () => mockFindMany.mock.calls[0]![0]!;
 
   beforeEach(() => {

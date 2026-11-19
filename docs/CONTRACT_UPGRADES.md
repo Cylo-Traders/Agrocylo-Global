@@ -1,7 +1,7 @@
 # Contract upgrade strategy
 
 Issue #757. Applies to all 5 Rust/Soroban contracts: `contracts/escrow`,
-`agro-production/contract/registry`, `.../production_escrow`,
+`contracts/registry`, `.../production_escrow`,
 `.../investment_basket`, `.../governance`.
 
 ## Why this exists
@@ -206,3 +206,27 @@ equivalent completeness marker) gating the version flip.
   update_current_contract_wasm` call itself, which is Soroban's own
   documented primitive. Exercising a genuine WASM swap belongs in a
   testnet/integration deployment step.
+
+## 5. Bounded buyer-volume backfill (Issue #1279)
+
+Milestone authorization now reads `BuyerConfirmedVolume(campaign_id, buyer)`
+instead of scanning every ordinary order. For deployments upgraded from an
+older binary, confirmed contributions created before the new counters existed
+must be backfilled before their buyers can advance milestones:
+
+1. While paused (after step 4 above), the admin calls
+   `migrate_buyer_volume_batch(caller, limit)` repeatedly until it returns 0.
+   Each call inspects at most `min(limit, MAX_VOLUME_MIGRATION_BATCH)` ordinary
+   orders, starting from a persisted cursor. Only `Confirmed` orders are
+   counted, using their gross `amount`; a per-order marker makes replays
+   no-ops.
+2. The admin likewise calls `migrate_split_volume_batch(caller, limit)` until
+   it returns 0. For a confirmed split order, each participant's own
+   confirmed share is credited to that participant; unconfirmed/withdrawn
+   shares are ignored. A per-split-order marker makes replays no-ops.
+3. Governance verifies the counters with `get_buyer_confirmed_volume`, then
+   calls `unpause`. No arbitrary scan cap is used in authorization: the
+   cursors are explicit, resumable and cover the full legacy history.
+
+New confirmations update the counter exactly once at confirmation time, so
+backfill and live updates cannot double-count the same order or share.

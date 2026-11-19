@@ -87,6 +87,6 @@ async function main() {
 
 main().catch(async (err) => {
   console.error("grant-admin failed:", err);
-  try { await prisma.$disconnect(); } catch {}
+  try { await prisma.$disconnect(); } catch { /* ignore */ }
   process.exit(1);
 });

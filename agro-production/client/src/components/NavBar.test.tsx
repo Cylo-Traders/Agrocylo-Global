@@ -12,6 +12,11 @@ vi.mock("@/components/LanguageSwitcher", () => ({
   default: () => <label>Language</label>,
 }));
 
+vi.mock("@/components/NetworkBadge", () => {
+  const Badge = () => <span data-testid="network-badge" />;
+  return { default: Badge, NetworkBadge: Badge };
+});
+
 vi.mock("@/context/ThemeContext", () => ({
   useTheme: () => ({ resolvedTheme: "light", toggleTheme: vi.fn() }),
 }));

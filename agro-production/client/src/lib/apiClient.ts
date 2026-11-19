@@ -5,7 +5,8 @@
    - Retries use exponential backoff and only apply to network errors and 5xx responses on safe methods
 */
 
-import { getAccessToken } from "./authToken";
+import { getAccessToken, setAccessToken } from "./authToken";
+import { apiBaseUrl } from "./apiConfig";
 
 /** Thrown when no response is received (DNS failure, timeout, offline, etc.) */
 export class NetworkError extends Error {
@@ -81,7 +82,7 @@ export class ApiClient {
   private defaultRetries: number;
 
   constructor(opts: ApiClientOptions = {}) {
-    this.baseUrl = opts.baseUrl ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api/v1";
+    this.baseUrl = opts.baseUrl ?? apiBaseUrl(process.env.NEXT_PUBLIC_API_URL);
     this.fetchImpl = opts.fetchImpl;
     this.defaultTimeoutMs = opts.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.defaultRetries = opts.defaultRetries ?? DEFAULT_RETRIES;
@@ -142,6 +143,10 @@ export class ApiClient {
             res.statusText ??
             `HTTP ${res.status}`;
           const err = new ApiError(res.status, message, body);
+          if (res.status === 401 && typeof window !== "undefined") {
+            setAccessToken(null);
+            window.dispatchEvent(new CustomEvent("agrocylo:session-expired"));
+          }
           console.error("[api][error]", { status: res.status, url, body });
           // Only retry 5xx on safe methods
           if (isRetryable(err, method) && attempt < retries) {
@@ -199,6 +204,11 @@ export class ApiClient {
   put<T = unknown>(path: string, data?: unknown, options?: RequestOptions) {
     const headers = { "Content-Type": "application/json", ...(options?.headers as Record<string, string>) };
     return this.request<T>(path, { ...options, method: "PUT", headers, body: JSON.stringify(data) });
+  }
+
+  patch<T = unknown>(path: string, data?: unknown, options?: RequestOptions) {
+    const headers = { "Content-Type": "application/json", ...(options?.headers as Record<string, string>) };
+    return this.request<T>(path, { ...options, method: "PATCH", headers, body: JSON.stringify(data) });
   }
 
   delete<T = unknown>(path: string, options?: RequestOptions) {

@@ -15,20 +15,25 @@ import {
 const router = Router();
 
 // POST /auth/nonce
-router.post('/nonce', authRateLimiter, nonceWalletRateLimiter, async (req: Request, res: Response) => {
-  try {
-    const { walletAddress } = req.body as { walletAddress?: string };
-    if (!walletAddress) {
-      return sendProblem(res, req, new ApiError(400, 'Bad Request', 'walletAddress is required'));
+router.post(
+  '/nonce',
+  authRateLimiter,
+  nonceWalletRateLimiter,
+  async (req: Request, res: Response) => {
+    try {
+      const { walletAddress } = req.body as { walletAddress?: string };
+      if (!walletAddress) {
+        return sendProblem(res, req, new ApiError(400, 'Bad Request', 'walletAddress is required'));
+      }
+      const data = await generateNonce(walletAddress);
+      return res.status(200).json(data);
+    } catch (err) {
+      if (err instanceof ApiError) return sendProblem(res, req, err);
+      logger.error('Nonce generation failed', err);
+      return sendProblem(res, req, new ApiError(500, 'Internal Server Error', 'Unexpected error'));
     }
-    const data = await generateNonce(walletAddress);
-    return res.status(200).json(data);
-  } catch (err) {
-    if (err instanceof ApiError) return sendProblem(res, req, err);
-    logger.error('Nonce generation failed', err);
-    return sendProblem(res, req, new ApiError(500, 'Internal Server Error', 'Unexpected error'));
   }
-});
+);
 
 // POST /auth/verify
 router.post('/verify', authRateLimiter, async (req: Request, res: Response) => {
@@ -39,7 +44,11 @@ router.post('/verify', authRateLimiter, async (req: Request, res: Response) => {
       message?: string;
     };
     if (!walletAddress || !signature || !message) {
-      return sendProblem(res, req, new ApiError(400, 'Bad Request', 'walletAddress, signature, and message are required'));
+      return sendProblem(
+        res,
+        req,
+        new ApiError(400, 'Bad Request', 'walletAddress, signature, and message are required')
+      );
     }
     logger.info('Signature verification requested', { walletAddress });
     const tokens = await verifySignature(walletAddress, signature, message);

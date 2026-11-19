@@ -60,7 +60,7 @@ Validated by a Zod schema in [`server/src/config/index.ts`](../../server/src/con
 | `PRISMA_GENERATE_DATABASE_URL` | generate only | — | Nonsecret, non-routable placeholder accepted only while generating Prisma artifacts. Do not set at runtime or for migrations. |
 | `SUPABASE_URL` | ✅ | — | Supabase project URL |
 | `SUPABASE_ANON_KEY` | ✅ | — | Supabase anon key |
-| `SUPABASE_SERVICE_ROLE_KEY` | ✅ prod | `""` | Server-side Supabase key (image uploads) |
+| `SUPABASE_SERVICE_ROLE_KEY` | ✅ prod | `""` | Server-side Supabase key for image uploads (see [`STORAGE.md`](./STORAGE.md)) |
 | `SUPABASE_PRODUCT_IMAGES_BUCKET` | | `product-images` | |
 | `PRODUCT_IMAGE_PLACEHOLDER_URL` | | placehold.co URL | |
 | `JWT_SECRET` | ✅ | — | API JWT signing key, HS256, ≥ 32 bytes. See rotation below. |
@@ -74,6 +74,7 @@ Validated by a Zod schema in [`server/src/config/index.ts`](../../server/src/con
 | `METRICS_API_KEY` | ✅ prod | `""` | Bearer token for `/metrics`; blank denies access |
 | `INTEGRATOR_API_KEY_PEPPER` | ✅ prod | development-only value | HMAC secret for integrator API-key digests |
 | `INTEGRATOR_MONTHLY_QUOTA` | | `10000` | Maximum requests per integrator key per UTC month |
+| `USSD_PROVIDER_SECRET` | ✅ to enable `/ussd` | `""` | Shared secret for USSD provider callbacks; blank fails closed with 503 |
 | `SENTRY_DSN` | | `""` | Error reporting (blank = disabled) |
 | `SENTRY_TRACES_SAMPLE_RATE` | | `0.1` | |
 | `ALLOWED_ORIGINS` | ✅ prod | `http://localhost:3000` | Comma-separated CORS origins; HTTPS only in production |
@@ -103,6 +104,7 @@ guidance and no secret echo (see `client/.env.example`).
 | `NEXT_PUBLIC_MAX_FEE_STROOPS` | | tx fee ceiling |
 | `NEXT_PUBLIC_AGRO_PRODUCTION_URL` | | nav link to sub-app |
 | `NEXT_PUBLIC_APP_URL` | | canonical app URL |
+| `NEXT_PUBLIC_MAP_TILE_URL`, `NEXT_PUBLIC_MAP_TILE_ATTRIBUTION` | | Leaflet tile URL/attribution (defaults to OpenStreetMap) |
 | `NEXT_PUBLIC_ANALYTICS_ENABLED`, `NEXT_PUBLIC_ANALYTICS_ENDPOINT` | | first-party analytics |
 | `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_DSN` | | error reporting |
 | `NEXT_PUBLIC_DEMO_MODE` | | deterministic dummy data (E2E/dev only) |
@@ -131,7 +133,8 @@ Validated in [`agro-production/server/src/config/index.ts`](../../agro-productio
 | `CORS_ORIGINS` | | `""` (all in dev) | Comma-separated origins |
 | `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX_REQUESTS` / `RATE_LIMIT_WRITE_MAX_REQUESTS` | | `60000` / `100` / `10` | |
 | `SHUTDOWN_TIMEOUT_MS` | | `15000` | Graceful shutdown |
-| `EVENT_POLL_INTERVAL_MS` / `CONFIRMATION_DEPTH` | | — | On-chain event watcher tuning |
+| `EVENT_POLL_INTERVAL_MS` / `CONFIRMATION_DEPTH` | | `5000` / `10` | On-chain event watcher tuning |
+| `VITEST_FAIL_ON_LEAKS` | test only | — | Set to `1` in CI to fail tests on leaked handles |
 | `RUN_RECONCILIATION_SWEEP` / `RECONCILIATION_SWEEP_INTERVAL_MS` | | `false` / — | Ledger reconciliation job |
 | `SENTRY_DSN` / `SENTRY_TRACES_SAMPLE_RATE` | | `""` / `0.1` | |
 | `PORT`, `NODE_ENV`, `LOG_LEVEL` | | `5001` / `development` / `debug` | |
@@ -148,10 +151,14 @@ URLs fail fast with variable-named guidance, no secret echo; see
 | `NEXT_PUBLIC_API_URL` | ✅ | agro backend base URL |
 | `NEXT_PUBLIC_WS_URL` | | WebSocket URL (auto-derived if omitted) |
 | `NEXT_PUBLIC_SOROBAN_RPC_URL` | ✅ prod / optional dev (falls back to `https://soroban-testnet.stellar.org`) | Soroban RPC (must match passphrase). Same `https://` (local `http://`) scheme rules as root client. |
+| `NEXT_PUBLIC_STELLAR_ENV` | | `testnet` / `mainnet` selector; unset falls back to testnet for local dev |
 | `NEXT_PUBLIC_NETWORK_PASSPHRASE` | ✅ prod / optional dev (defaults to `Test SDF Network ; September 2015`) | Stellar passphrase; in `mainnet` mode an unset value is a hard error — no silent fallback. |
 | `NEXT_PUBLIC_HORIZON_URL` | optional (validated if set) | Horizon endpoint; same scheme rules as RPC. |
 | `NEXT_PUBLIC_PRODUCTION_CONTRACT_ID` | ✅ | production escrow contract |
 | `NEXT_PUBLIC_MAIN_CLIENT_URL` | | nav back to marketplace app |
+| `NEXT_PUBLIC_APP_URL` | | canonical agro app URL (WalletConnect metadata) |
+| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | | WalletConnect project ID; blank disables the WalletConnect signer |
+| `NEXT_PUBLIC_PRODUCT_IMAGE_ORIGINS` | | comma-separated exact origins allowed for product images |
 | `NEXT_PUBLIC_FEE_PERCENTILE` / `NEXT_PUBLIC_FEE_HEADROOM` / `NEXT_PUBLIC_MAX_INCLUSION_FEE` | | dynamic tx-fee estimation |
 | `NEXT_PUBLIC_TELEMETRY_ENABLED` / `NEXT_PUBLIC_TELEMETRY_URL` | | client telemetry |
 | `NEXT_PUBLIC_SENTRY_DSN` / `SENTRY_DSN` | | error reporting |
@@ -245,3 +252,20 @@ separate user sessions.
 
 Genuinely platform-injected variables (`NODE_ENV`, `VERCEL_*`, test-only
 toggles) are listed in `ALLOWLIST` at the top of the script.
+
+### Production client build configuration
+
+The canonical local API example is [agro-production/client/.env.example](../../agro-production/client/.env.example).
+The API base must end in `/api/v1`; services append paths such as `/campaigns`.
+Copy it to `agro-production/client/.env.local` for development. Docker Compose
+passes the same local values as build arguments; set a real deployed
+`NEXT_PUBLIC_PRODUCTION_CONTRACT_ID` before building the stack.
+
+In each GitHub deployment environment (staging and production), set
+`AGRO_NEXT_PUBLIC_API_URL` (HTTPS, including `/api/v1`), `AGRO_NEXT_PUBLIC_WS_URL`
+(WSS), `NEXT_PUBLIC_SOROBAN_RPC_URL`, `NEXT_PUBLIC_HORIZON_URL`,
+`NEXT_PUBLIC_NETWORK_PASSPHRASE`, `NEXT_PUBLIC_STELLAR_ENV`,
+`NEXT_PUBLIC_PRODUCTION_CONTRACT_ID`, and `NEXT_PUBLIC_AGRO_PRODUCTION_ENABLED`.
+The deployment workflow passes these explicitly into the image build. Public
+values are compiled into JavaScript; Fly runtime variables cannot replace them.
+An absent API URL, wrong API path or absent contract address aborts the build.

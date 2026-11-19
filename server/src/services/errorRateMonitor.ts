@@ -1,4 +1,4 @@
-import { captureAlert } from "../config/sentry.js";
+import { captureAlert } from '../config/sentry.js';
 
 /**
  * Rolling-window 5xx rate monitor (Issue #756). A single slow endpoint or a
@@ -25,9 +25,9 @@ export function recordResponseStatus(status: number): void {
   if (timestamps.length >= THRESHOLD_COUNT && now - lastAlertAt >= COOLDOWN_MS) {
     lastAlertAt = now;
     captureAlert(
-      "elevated_5xx_rate",
+      'elevated_5xx_rate',
       `${timestamps.length} 5xx responses in the last ${WINDOW_MS / 1000}s`,
-      { count: timestamps.length, windowMs: WINDOW_MS },
+      { count: timestamps.length, windowMs: WINDOW_MS }
     );
   }
 }

@@ -83,7 +83,7 @@ jobs:
       - name: Install system dependencies for stellar-cli
         run: |
           sudo apt-get update
-          sudo apt-get install -y libdbus-1-dev pkg-config
+          sudo apt-get install -y libdbus-1-dev libudev-dev pkg-config
 
       - name: Install Rust 1.89.0 + wasm target
         run: |
@@ -129,6 +129,7 @@ jobs:
 
   # ── Build & push Docker images ──────────────────────────────────────────────
   build-images:
+    environment: ${{ needs.resolve-env.outputs.environment }}
     name: Build · ${{ matrix.app }}
     needs: resolve-env
     runs-on: ubuntu-latest
@@ -138,18 +139,22 @@ jobs:
         include:
           - app: server
             context: ./server
+            file: ./server/Dockerfile
             image: agrocylo-server
             port: "5000"
           - app: client
-            context: ./client
+            context: .
+            file: ./client/Dockerfile
             image: agrocylo-client
             port: "3000"
           - app: agro-server
             context: ./agro-production/server
+            file: ./agro-production/server/Dockerfile
             image: agrocylo-agro-server
             port: "5001"
           - app: agro-client
-            context: ./agro-production/client
+            context: .
+            file: ./agro-production/client/Dockerfile
             image: agrocylo-agro-client
             port: "3001"
 
@@ -182,9 +187,20 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            NEXT_PUBLIC_SOROBAN_RPC_URL=${{ vars.NEXT_PUBLIC_SOROBAN_RPC_URL }}
+            NEXT_PUBLIC_HORIZON_URL=${{ vars.NEXT_PUBLIC_HORIZON_URL }}
+            NEXT_PUBLIC_NETWORK_PASSPHRASE=${{ vars.NEXT_PUBLIC_NETWORK_PASSPHRASE }}
+            NEXT_PUBLIC_STELLAR_ENV=${{ vars.NEXT_PUBLIC_STELLAR_ENV }}
+            NEXT_PUBLIC_API_URL=${{ vars.AGRO_NEXT_PUBLIC_API_URL }}
+            NEXT_PUBLIC_WS_URL=${{ vars.AGRO_NEXT_PUBLIC_WS_URL }}
+            NEXT_PUBLIC_PRODUCTION_CONTRACT_ID=${{ vars.NEXT_PUBLIC_PRODUCTION_CONTRACT_ID }}
+            NEXT_PUBLIC_AGRO_PRODUCTION_ENABLED=${{ vars.NEXT_PUBLIC_AGRO_PRODUCTION_ENABLED }}
+            NEXT_PUBLIC_BASE_PATH=${{ vars.NEXT_PUBLIC_BASE_PATH }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

@@ -1,5 +1,31 @@
+// @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as StellarSdk from "@stellar/stellar-sdk";
+
+const rpcDoubles = vi.hoisted(() => ({
+  getFeeStats: vi.fn(async () => ({ sorobanInclusionFee: { p70: "150" } })),
+  simulateTransaction: vi.fn(async () => ({
+    transactionData: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    minResourceFee: "0",
+    latestLedger: 100,
+    events: [],
+  })),
+  getAccount: vi.fn(),
+}));
+
+vi.mock("../lib/rpcClient", () => ({
+  createSorobanRpcServer: () => new (class MockRpcServer {
+    getFeeStats = rpcDoubles.getFeeStats;
+    simulateTransaction = rpcDoubles.simulateTransaction;
+    getAccount = rpcDoubles.getAccount;
+  })(),
+}));
+
+vi.mock("../lib/transactionAssembler", () => ({
+  assembleSorobanTransaction: (transaction: { operations: unknown[] }) => ({
+    build: () => transaction,
+  }),
+}));
 
 // Deterministic valid strkeys (Keypair.random() is broken under jsdom).
 const CONTRACT_ID = StellarSdk.StrKey.encodeContract(Buffer.alloc(32, 1));
@@ -8,36 +34,18 @@ const INVESTOR = StellarSdk.StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 3));
 const ATTESTER = StellarSdk.StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 4));
 const ADMIN = StellarSdk.StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 5));
 const OTHER = StellarSdk.StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 6));
-const TOKEN = StellarSdk.StrKey.encodeContract(Buffer.alloc(32, 7));
-
 process.env.NEXT_PUBLIC_PRODUCTION_CONTRACT_ID = CONTRACT_ID;
-
-const getFeeStats = vi.fn(async () => ({ sorobanInclusionFee: { p70: "150" } }));
-const simulateTransaction = vi.fn(async () => ({ ok: true }));
-const getAccount = vi.fn(async () => new StellarSdk.Account(FARMER, "1"));
-
-vi.mock("@stellar/stellar-sdk", async (importActual) => {
-  const actual = await importActual<typeof import("@stellar/stellar-sdk")>();
-  return {
-    ...actual,
-    rpc: {
-      ...actual.rpc,
-      Server: vi.fn(() => ({ getFeeStats, simulateTransaction, getAccount })),
-      assembleTransaction: (tx: unknown) => ({ build: () => tx }),
-      Api: { ...actual.rpc.Api, isSimulationError: () => false },
-    },
-  };
-});
 
 import * as builders from "../lib/contractService";
 
 /** Capture the (method, ...args) passed to `Contract.prototype.call`. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let callSpy: any;
+let callSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  getAccount.mockImplementation(async () => new StellarSdk.Account(FARMER, "1"));
+  rpcDoubles.getAccount.mockImplementation(async () => new StellarSdk.Account(FARMER, "1"));
+  // Keep the real SDK operation so XDR serialization exercises the same
+  // wallet-adapter boundary the app uses. The spy only records the args.
   callSpy = vi.spyOn(StellarSdk.Contract.prototype, "call");
 });
 
@@ -50,7 +58,7 @@ function invocation() {
 describe("contractService builders — XDR contents", () => {
   it("buildStartProduction encodes start_production(farmer, campaign_id)", async () => {
     const res = await builders.buildStartProduction(FARMER, "42");
-    expect(res.success).toBe(true);
+    expect(res.success, res.error).toBe(true);
     expect(typeof res.data).toBe("string");
     const { method, args } = invocation();
     expect(method).toBe("start_production");
@@ -153,7 +161,7 @@ describe("contractService builders — XDR contents", () => {
     ];
     for (const step of steps) {
       const res = await step();
-      expect(res.success).toBe(true);
+      expect(res.success, res.error).toBe(true);
       expect(typeof res.data).toBe("string");
     }
   });

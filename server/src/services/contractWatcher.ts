@@ -1,20 +1,20 @@
-import { rpc, scValToNative } from "@stellar/stellar-sdk";
-import logger from "../config/logger.js";
-import { config } from "../config/index.js";
-import { prisma } from "../config/database.js";
-import { NotificationService } from "./notificationService.js";
-import { wsManager } from "./wsManager.js";
-import type { RawRpcEvent } from "../types/rawRpcEvent.js";
-import { BlockchainEventIngestionService } from "./events/blockchainEventIngestionService.js";
-import { EscrowEventIngestionService } from "./events/escrowEventIngestionService.js";
-import { indexGovernanceEvent } from "./governanceService.js";
-import { captureAlert } from "../config/sentry.js";
-import { OrderStatus } from "../constants/status.js";
+import { rpc, scValToNative } from '@stellar/stellar-sdk';
+import logger from '../config/logger.js';
+import { config } from '../config/index.js';
+import { prisma } from '../config/database.js';
+import { NotificationService } from './notificationService.js';
+import { wsManager } from './wsManager.js';
+import type { RawRpcEvent } from '../types/rawRpcEvent.js';
+import { BlockchainEventIngestionService } from './events/blockchainEventIngestionService.js';
+import { EscrowEventIngestionService } from './events/escrowEventIngestionService.js';
+import { indexGovernanceEvent } from './governanceService.js';
+import { captureAlert } from '../config/sentry.js';
+import { OrderStatus } from '../constants/status.js';
 import {
   contractWatcherEventsPerPoll,
   contractWatcherPagesPerPoll,
   contractWatcherUnhandledTotal,
-} from "./promMetrics.js";
+} from './promMetrics.js';
 
 /**
  * Canonical ingestion pipeline: BlockchainTransaction (transactions table) is
@@ -25,7 +25,7 @@ import {
  */
 
 const POLL_INTERVAL_MS = 5_000;
-const CHECKPOINT_SERVICE_NAME = "contract-watcher";
+const CHECKPOINT_SERVICE_NAME = 'contract-watcher';
 /** Upper bound on ledgers scanned per poll, so catch-up after downtime is incremental. */
 export const MAX_LEDGER_SPAN = 100;
 /** Upper bound on getEvents pages per poll; checkpoint only advances once drained. */
@@ -35,16 +35,18 @@ export const MAX_PAGES_PER_POLL = 50;
  * Extracts the entity, action and decoded data array from a raw RPC event.
  * Topics layout: [entity, action, ...] where entity is e.g. "order"/"split"/"campaign"/"basket"/"governance"
  */
-function decodeEvent(event: RawRpcEvent): { entity: string; action: string; data: unknown[] } | null {
+function decodeEvent(
+  event: RawRpcEvent
+): { entity: string; action: string; data: unknown[] } | null {
   try {
     const topics = (event as any).topic.map((t: unknown) => scValToNative(t as any));
-    const entity = String(topics[0] ?? "").toLowerCase();
-    const action = String(topics[1] ?? "").toLowerCase();
+    const entity = String(topics[0] ?? '').toLowerCase();
+    const action = String(topics[1] ?? '').toLowerCase();
     const raw = scValToNative((event as any).value as any);
     const data = Array.isArray(raw) ? raw : [raw];
     return { entity, action, data };
   } catch (err) {
-    logger.error("Failed to decode contract event", err);
+    logger.error('Failed to decode contract event', err);
     return null;
   }
 }
@@ -58,7 +60,11 @@ function handleEvent(event: RawRpcEvent): void {
   const contractId = (event as any).contractId as string | undefined;
   // Governance contract events are routed to governance indexer but also
   // want broadcasting — handled via dedicated dispatch
-  if (contractId && config.governanceContractId && String(contractId) === config.governanceContractId) {
+  if (
+    contractId &&
+    config.governanceContractId &&
+    String(contractId) === config.governanceContractId
+  ) {
     dispatchGovernanceEvent(decoded.action, decoded.data, event.ledger, decoded.entity, contractId);
     return;
   }
@@ -74,45 +80,45 @@ function dispatchGovernanceEvent(
   data: unknown[],
   ledger?: number,
   entity?: string,
-  contractId?: string,
+  contractId?: string
 ): void {
-  const fullTopic = `${entity ?? "governance"}.${action}`.toLowerCase();
+  const fullTopic = `${entity ?? 'governance'}.${action}`.toLowerCase();
   // Governance events are already indexed via indexGovernanceEvent in the poll loop,
   // this dispatcher ensures WS push / notifications and indexed-only ack for non-proposal topics.
   switch (fullTopic) {
     // Proposal lifecycle — already indexed, now also broadcast
-    case "governance.proposed":
-    case "governnc.proposed": {
-      const proposalId = String(data[0] ?? "");
-      wsManager.broadcastAuthenticated("governance:proposed", { proposalId, ledger, contractId });
+    case 'governance.proposed':
+    case 'governnc.proposed': {
+      const proposalId = String(data[0] ?? '');
+      wsManager.broadcastAuthenticated('governance:proposed', { proposalId, ledger, contractId });
       logger.info(`[ContractWatcher] Governance proposed ${proposalId}`);
       break;
     }
-    case "governance.voted":
-    case "governnc.voted": {
-      const proposalId = String(data[0] ?? "");
-      wsManager.broadcastAuthenticated("governance:voted", { proposalId, ledger });
+    case 'governance.voted':
+    case 'governnc.voted': {
+      const proposalId = String(data[0] ?? '');
+      wsManager.broadcastAuthenticated('governance:voted', { proposalId, ledger });
       break;
     }
-    case "governance.queued":
-    case "governnc.queued":
-    case "governance.executed":
-    case "governnc.executed":
-    case "governance.rejected":
-    case "governnc.rejected":
-    case "governance.cancelled":
-    case "governnc.cancelled": {
-      const proposalId = String(data[0] ?? "");
-      const evt = fullTopic.split(".")[1];
+    case 'governance.queued':
+    case 'governnc.queued':
+    case 'governance.executed':
+    case 'governnc.executed':
+    case 'governance.rejected':
+    case 'governnc.rejected':
+    case 'governance.cancelled':
+    case 'governnc.cancelled': {
+      const proposalId = String(data[0] ?? '');
+      const evt = fullTopic.split('.')[1];
       wsManager.broadcastAuthenticated(`governance:${evt}`, { proposalId, ledger });
       break;
     }
-    case "governance.upgraded":
-    case "governnc.upgraded":
-    case "governance.paused":
-    case "governnc.paused":
-    case "governance.unpausd":
-    case "governnc.unpausd": {
+    case 'governance.upgraded':
+    case 'governnc.upgraded':
+    case 'governance.paused':
+    case 'governnc.paused':
+    case 'governance.unpausd':
+    case 'governnc.unpausd': {
       logger.info(`[ContractWatcher] Governance indexed-only event ${fullTopic} ledger ${ledger}`);
       break;
     }
@@ -128,58 +134,63 @@ function dispatchProductionEscrowEvent(
   entity: string,
   action: string,
   data: unknown[],
-  ledger?: number,
+  ledger?: number
 ): boolean {
   const fullTopic = `${entity}.${action}`.toLowerCase();
   switch (fullTopic) {
-    case "campaign.created": {
-      const campaignId = String(data[0] ?? "");
-      const farmer = String(data[1] ?? "");
-      wsManager.broadcastAuthenticated("campaign:created", { campaignId, farmer, ledger });
+    case 'campaign.created': {
+      const campaignId = String(data[0] ?? '');
+      const farmer = String(data[1] ?? '');
+      wsManager.broadcastAuthenticated('campaign:created', { campaignId, farmer, ledger });
       logger.info(`[ContractWatcher] Campaign created ${campaignId} ledger ${ledger}`);
       // Index-only, no per-user notification for now (campaign notifications are via separate service)
       return true;
     }
-    case "campaign.invested": {
-      const campaignId = String(data[0] ?? "");
-      const investor = String(data[1] ?? "");
-      const amount = String(data[2] ?? "");
-      wsManager.broadcastAuthenticated("campaign:invested", { campaignId, investor, amount, ledger });
+    case 'campaign.invested': {
+      const campaignId = String(data[0] ?? '');
+      const investor = String(data[1] ?? '');
+      const amount = String(data[2] ?? '');
+      wsManager.broadcastAuthenticated('campaign:invested', {
+        campaignId,
+        investor,
+        amount,
+        ledger,
+      });
       return true;
     }
-    case "campaign.produce":
-    case "campaign.harvest":
-    case "campaign.milestone":
-    case "campaign.tranche":
-    case "campaign.settled":
-    case "campaign.claimed":
-    case "campaign.failed":
-    case "campaign.refunded":
-    case "campaign.disputed":
-    case "campaign.batch_ref": {
-      const campaignId = String(data[0] ?? "");
+    case 'campaign.produce':
+    case 'campaign.harvest':
+    case 'campaign.milestone':
+    case 'campaign.tranche':
+    case 'campaign.settled':
+    case 'campaign.claimed':
+    case 'campaign.failed':
+    case 'campaign.refunded':
+    case 'campaign.disputed':
+    case 'campaign.batch_ref': {
+      const campaignId = String(data[0] ?? '');
       wsManager.broadcastAuthenticated(`campaign:${action}`, { campaignId, ledger });
       logger.info(`[ContractWatcher] Campaign indexed-only ${fullTopic} ${campaignId}`);
       return true;
     }
-    case "campaign.paused":
-    case "campaign.unpausd":
-    case "campaign.upgraded": {
+    case 'campaign.paused':
+    case 'campaign.unpausd':
+    case 'campaign.upgraded': {
       logger.info(`[ContractWatcher] Campaign indexed-only ${fullTopic} ledger ${ledger}`);
       return true;
     }
-    case "order.created":
-    case "order.cancelled":
-    case "order.confirmed":
-    case "order.splitnew":
-    case "order.splitact":
-    case "order.splitfnd":
-    case "order.splitcnf":
-    case "order.splitdsp":
-    case "order.splitres":
-    case "order.fee_col":
-    case "order.fee_ref":
-    case "order.batch_ref": {
+    case 'order.created':
+    case 'order.cancelled':
+    case 'order.confirmed':
+    case 'order.splitnew':
+    case 'order.splitact':
+    case 'order.splitfnd':
+    case 'order.splitcnf':
+    case 'order.splitdsp':
+    case 'order.splitres':
+    case 'order.fee_col':
+    case 'order.fee_ref':
+    case 'order.batch_ref': {
       // Production escrow order family — reuse escrow handling where applicable
       // For cancelled/confirmed etc delegate to escrow dispatcher with production flag
       return false; // let main dispatcher handle
@@ -193,25 +204,27 @@ function dispatchBasketEvent(
   entity: string,
   action: string,
   data: unknown[],
-  ledger?: number,
+  ledger?: number
 ): boolean {
   const fullTopic = `${entity}.${action}`.toLowerCase();
   switch (fullTopic) {
-    case "basket.created":
-    case "basket.fw_close":
-    case "basket.deposit":
-    case "basket.skipped":
-    case "basket.funded":
-    case "basket.withdrawn":
-    case "basket.claimed": {
-      const basketId = String(data[1] ?? data[0] ?? "");
+    case 'basket.created':
+    case 'basket.fw_close':
+    case 'basket.deposit':
+    case 'basket.skipped':
+    case 'basket.funded':
+    case 'basket.withdrawn':
+    case 'basket.claimed': {
+      const basketId = String(data[1] ?? data[0] ?? '');
       wsManager.broadcastAuthenticated(`basket:${action}`, { basketId, ledger, data });
-      logger.info(`[ContractWatcher] Basket event ${fullTopic} basket ${basketId} ledger ${ledger}`);
+      logger.info(
+        `[ContractWatcher] Basket event ${fullTopic} basket ${basketId} ledger ${ledger}`
+      );
       return true;
     }
-    case "basket.upgraded":
-    case "basket.paused":
-    case "basket.unpausd": {
+    case 'basket.upgraded':
+    case 'basket.paused':
+    case 'basket.unpausd': {
       logger.info(`[ContractWatcher] Basket indexed-only ${fullTopic} ledger ${ledger}`);
       return true;
     }
@@ -224,19 +237,19 @@ function dispatchRegistryEvent(
   entity: string,
   action: string,
   data: unknown[],
-  ledger?: number,
+  ledger?: number
 ): boolean {
   const fullTopic = `${entity}.${action}`.toLowerCase();
   switch (fullTopic) {
-    case "registry.updated":
-    case "registry.upgraded":
-    case "registry.paused":
-    case "registry.unpausd":
-    case "farmer.farm_reg":
-    case "campaign.camp_reg":
-    case "reput.updated":
-    case "batch.minted":
-    case "batch.linked": {
+    case 'registry.updated':
+    case 'registry.upgraded':
+    case 'registry.paused':
+    case 'registry.unpausd':
+    case 'farmer.farm_reg':
+    case 'campaign.camp_reg':
+    case 'reput.updated':
+    case 'batch.minted':
+    case 'batch.linked': {
       logger.info(`[ContractWatcher] Registry indexed-only ${fullTopic} ledger ${ledger}`);
       return true;
     }
@@ -266,25 +279,29 @@ export function dispatchEvent(
   data: unknown[],
   ledger?: number,
   entityHint?: string,
-  contractIdHint?: string,
+  contractIdHint?: string
 ): void {
   // Normalize to entity + action
-  let entity = (entityHint ?? "").toLowerCase();
+  let entity = (entityHint ?? '').toLowerCase();
   let evtAction = action.toLowerCase();
 
   // Support legacy callers that pass "order.created" as single action string
-  if (!entity && evtAction.includes(".")) {
-    const parts = evtAction.split(".");
-    entity = parts[0] ?? "";
+  if (!entity && evtAction.includes('.')) {
+    const parts = evtAction.split('.');
+    entity = parts[0] ?? '';
     evtAction = parts[1] ?? evtAction;
   }
-  if (!entity) entity = "order"; // backward compat: escrow order events
+  if (!entity) entity = 'order'; // backward compat: escrow order events
 
   const fullTopic = `${entity}.${evtAction}`;
 
   // Route production/basket/registry topics to dedicated dispatchers first
   // Governance already handled via handleEvent check, but also handle here if hint present
-  if (contractIdHint && config.governanceContractId && String(contractIdHint) === config.governanceContractId) {
+  if (
+    contractIdHint &&
+    config.governanceContractId &&
+    String(contractIdHint) === config.governanceContractId
+  ) {
     dispatchGovernanceEvent(evtAction, data, ledger, entity, contractIdHint);
     return;
   }
@@ -295,31 +312,40 @@ export function dispatchEvent(
   if (dispatchRegistryEvent(entity, evtAction, data, ledger)) return;
 
   // Governance bare (if entity is governnc/governance but not via contractId route)
-  if (entity === "governance" || entity === "governnc") {
+  if (entity === 'governance' || entity === 'governnc') {
     dispatchGovernanceEvent(evtAction, data, ledger, entity, contractIdHint);
     return;
   }
 
   // Explicit indexed-only for order paused/upgraded/unpausd
-  if (fullTopic === "order.paused" || fullTopic === "order.unpausd" || fullTopic === "order.upgraded" || fullTopic === "order.upgrade") {
-    logger.info(`[ContractWatcher] Indexed, no notification: ${fullTopic} | order: ${String(data[0] ?? "")} | ledger: ${ledger ?? "?"}`);
+  if (
+    fullTopic === 'order.paused' ||
+    fullTopic === 'order.unpausd' ||
+    fullTopic === 'order.upgraded' ||
+    fullTopic === 'order.upgrade'
+  ) {
+    logger.info(
+      `[ContractWatcher] Indexed, no notification: ${fullTopic} | order: ${String(data[0] ?? '')} | ledger: ${ledger ?? '?'}`
+    );
     return;
   }
 
   // Escrow + generic order/split handling
-  const orderId = String(data[0] ?? "");
+  const orderId = String(data[0] ?? '');
 
-  logger.info(`[ContractWatcher] Event received: ${fullTopic} | order: ${orderId} | ledger: ${ledger ?? "?"}`);
+  logger.info(
+    `[ContractWatcher] Event received: ${fullTopic} | order: ${orderId} | ledger: ${ledger ?? '?'}`
+  );
 
   switch (fullTopic) {
-    case "order.created": {
-      const buyer = String(data[1] ?? "");
-      const farmer = String(data[2] ?? "");
-      const amount = String(data[3] ?? "");
-      const token = String(data[4] ?? "");
+    case 'order.created': {
+      const buyer = String(data[1] ?? '');
+      const farmer = String(data[2] ?? '');
+      const amount = String(data[3] ?? '');
+      const token = String(data[4] ?? '');
 
       void NotificationService.notifyFromEscrowEvent({
-        action: "created",
+        action: 'created',
         buyerAddress: buyer,
         farmerAddress: farmer,
         orderId,
@@ -327,51 +353,51 @@ export function dispatchEvent(
         token,
       });
 
-      wsManager.broadcastAuthenticated("order:created", { orderId, buyer, farmer, amount, token });
+      wsManager.broadcastAuthenticated('order:created', { orderId, buyer, farmer, amount, token });
       break;
     }
 
-    case "order.delivered": {
-      const farmer = String(data[1] ?? "");
-      const buyer = String(data[2] ?? "");
+    case 'order.delivered': {
+      const farmer = String(data[1] ?? '');
+      const buyer = String(data[2] ?? '');
 
-      wsManager.broadcastAuthenticated("order:delivered", { orderId, farmer, buyer });
+      wsManager.broadcastAuthenticated('order:delivered', { orderId, farmer, buyer });
       break;
     }
 
-    case "order.confirmed": {
-      const buyer = String(data[1] ?? "");
-      const farmer = String(data[2] ?? "");
+    case 'order.confirmed': {
+      const buyer = String(data[1] ?? '');
+      const farmer = String(data[2] ?? '');
 
       void NotificationService.notifyFromEscrowEvent({
-        action: "confirmed",
+        action: 'confirmed',
         buyerAddress: buyer,
         farmerAddress: farmer,
         orderId,
       });
 
-      wsManager.broadcastAuthenticated("order:confirmed", { orderId, buyer, farmer });
+      wsManager.broadcastAuthenticated('order:confirmed', { orderId, buyer, farmer });
       break;
     }
 
-    case "order.refunded": {
-      const buyer = String(data[1] ?? "");
+    case 'order.refunded': {
+      const buyer = String(data[1] ?? '');
 
       void NotificationService.notifyFromEscrowEvent({
-        action: "refunded",
+        action: 'refunded',
         buyerAddress: buyer,
         orderId,
       });
 
-      wsManager.broadcastAuthenticated("order:refunded", { orderId, buyer });
+      wsManager.broadcastAuthenticated('order:refunded', { orderId, buyer });
       break;
     }
 
-    case "order.cancelled": {
-      const buyer = String(data[1] ?? "");
+    case 'order.cancelled': {
+      const buyer = String(data[1] ?? '');
       // Use REFUNDED notification as closest; template exists, but also emit WS
       void NotificationService.notifyFromEscrowEvent({
-        action: "refunded",
+        action: 'refunded',
         buyerAddress: buyer,
         orderId,
       });
@@ -379,139 +405,229 @@ export function dispatchEvent(
       try {
         void (NotificationService as any).notify?.({
           walletAddress: buyer,
-          type: "order_cancelled",
+          type: 'order_cancelled',
           orderId,
         });
-      } catch {}
-      wsManager.broadcastAuthenticated("order:cancelled", { orderId, buyer });
-      wsManager.broadcastAuthenticated("order:status_changed", { orderId, status: OrderStatus.CANCELLED, buyer });
+      } catch {
+        /* ignore */
+      }
+      wsManager.broadcastAuthenticated('order:cancelled', { orderId, buyer });
+      wsManager.broadcastAuthenticated('order:status_changed', {
+        orderId,
+        status: OrderStatus.CANCELLED,
+        buyer,
+      });
       break;
     }
 
-    case "order.disputed": {
+    case 'order.disputed': {
       // data: [order_id, opened_by, ...]
-      const openedBy = String(data[1] ?? "");
-      const farmer = String(data[2] ?? "");
-      const buyer = openedBy || String(data[0] ?? "");
+      const openedBy = String(data[1] ?? '');
+      const farmer = String(data[2] ?? '');
+      const buyer = openedBy || String(data[0] ?? '');
       // Notify both participants
-      if (buyer) void NotificationService.notify({ walletAddress: buyer, type: "order_disputed" as any, orderId }).catch(() => {});
-      if (farmer && farmer !== buyer) void NotificationService.notify({ walletAddress: farmer, type: "order_disputed" as any, orderId }).catch(() => {});
-      void NotificationService.notifyFromEscrowEvent({ action: "disputed" as any, buyerAddress: buyer, farmerAddress: farmer, orderId }).catch(() => {});
-      wsManager.broadcastAuthenticated("order:disputed", { orderId, openedBy, farmer, ledger });
-      wsManager.broadcastAuthenticated("order:status_changed", { orderId, status: OrderStatus.DISPUTED, openedBy });
+      if (buyer)
+        void NotificationService.notify({
+          walletAddress: buyer,
+          type: 'order_disputed' as any,
+          orderId,
+        }).catch(() => {});
+      if (farmer && farmer !== buyer)
+        void NotificationService.notify({
+          walletAddress: farmer,
+          type: 'order_disputed' as any,
+          orderId,
+        }).catch(() => {});
+      void NotificationService.notifyFromEscrowEvent({
+        action: 'disputed' as any,
+        buyerAddress: buyer,
+        farmerAddress: farmer,
+        orderId,
+      }).catch(() => {});
+      wsManager.broadcastAuthenticated('order:disputed', { orderId, openedBy, farmer, ledger });
+      wsManager.broadcastAuthenticated('order:status_changed', {
+        orderId,
+        status: OrderStatus.DISPUTED,
+        openedBy,
+      });
       break;
     }
 
-    case "order.resolved": {
-      const resolution = String(data[1] ?? "");
-      const buyer = String(data[2] ?? "");
+    case 'order.resolved': {
+      const resolution = String(data[1] ?? '');
+      const buyer = String(data[2] ?? '');
       const farmer = String(data[3] ?? buyer);
       // Notify both
-      if (buyer) void NotificationService.notify({ walletAddress: buyer, type: "dispute_resolved" as any, orderId }).catch(() => {});
-      if (farmer && farmer !== buyer) void NotificationService.notify({ walletAddress: farmer, type: "dispute_resolved" as any, orderId }).catch(() => {});
-      wsManager.broadcastAuthenticated("order:resolved", { orderId, resolution, buyer, farmer, ledger });
-      wsManager.broadcastAuthenticated("order:status_changed", { orderId, status: resolution.toUpperCase().includes("REFUND") ? OrderStatus.REFUNDED : OrderStatus.COMPLETED, resolution });
+      if (buyer)
+        void NotificationService.notify({
+          walletAddress: buyer,
+          type: 'dispute_resolved' as any,
+          orderId,
+        }).catch(() => {});
+      if (farmer && farmer !== buyer)
+        void NotificationService.notify({
+          walletAddress: farmer,
+          type: 'dispute_resolved' as any,
+          orderId,
+        }).catch(() => {});
+      wsManager.broadcastAuthenticated('order:resolved', {
+        orderId,
+        resolution,
+        buyer,
+        farmer,
+        ledger,
+      });
+      wsManager.broadcastAuthenticated('order:status_changed', {
+        orderId,
+        status: resolution.toUpperCase().includes('REFUND')
+          ? OrderStatus.REFUNDED
+          : OrderStatus.COMPLETED,
+        resolution,
+      });
       break;
     }
 
     // ---- Split order family (escrow) ----
-    case "split.created": {
-      const farmer = String(data[1] ?? "");
-      const token = String(data[2] ?? "");
-      const totalAmount = String(data[3] ?? "");
-      wsManager.broadcastAuthenticated("split:created", { orderId, farmer, token, totalAmount, ledger });
-      if (farmer) void NotificationService.notify({ walletAddress: farmer, type: "split_created" as any, orderId, amount: totalAmount, token }).catch(() => {});
+    case 'split.created': {
+      const farmer = String(data[1] ?? '');
+      const token = String(data[2] ?? '');
+      const totalAmount = String(data[3] ?? '');
+      wsManager.broadcastAuthenticated('split:created', {
+        orderId,
+        farmer,
+        token,
+        totalAmount,
+        ledger,
+      });
+      if (farmer)
+        void NotificationService.notify({
+          walletAddress: farmer,
+          type: 'split_created' as any,
+          orderId,
+          amount: totalAmount,
+          token,
+        }).catch(() => {});
       break;
     }
-    case "split.active": {
-      const netAmount = String(data[1] ?? "");
-      wsManager.broadcastAuthenticated("split:active", { orderId, netAmount, ledger });
+    case 'split.active': {
+      const netAmount = String(data[1] ?? '');
+      wsManager.broadcastAuthenticated('split:active', { orderId, netAmount, ledger });
       break;
     }
-    case "split.funded": {
-      const amount = String(data[1] ?? "");
-      wsManager.broadcastAuthenticated("split:funded", { orderId, amount, ledger });
+    case 'split.funded': {
+      const amount = String(data[1] ?? '');
+      wsManager.broadcastAuthenticated('split:funded', { orderId, amount, ledger });
       // Also broadcast as order:status for generic listeners
-      wsManager.broadcastAuthenticated("order:split_funded", { orderId, amount, ledger });
+      wsManager.broadcastAuthenticated('order:split_funded', { orderId, amount, ledger });
       break;
     }
-    case "split.delivrd":
-    case "split.delivered": {
-      const farmer = String(data[1] ?? "");
-      const buyer = String(data[2] ?? "");
-      wsManager.broadcastAuthenticated("split:delivered", { orderId, farmer, buyer, ledger });
+    case 'split.delivrd':
+    case 'split.delivered': {
+      const farmer = String(data[1] ?? '');
+      const buyer = String(data[2] ?? '');
+      wsManager.broadcastAuthenticated('split:delivered', { orderId, farmer, buyer, ledger });
       break;
     }
-    case "split.complete": {
-      wsManager.broadcastAuthenticated("split:complete", { orderId, ledger });
+    case 'split.complete': {
+      wsManager.broadcastAuthenticated('split:complete', { orderId, ledger });
       break;
     }
-    case "split.confirm": {
-      const confirmer = String(data[1] ?? "");
-      wsManager.broadcastAuthenticated("split:confirm", { orderId, confirmer, ledger });
+    case 'split.confirm': {
+      const confirmer = String(data[1] ?? '');
+      wsManager.broadcastAuthenticated('split:confirm', { orderId, confirmer, ledger });
       break;
     }
-    case "split.disputed": {
-      const caller = String(data[1] ?? "");
-      wsManager.broadcastAuthenticated("split:disputed", { orderId, caller, ledger });
-      if (caller) void NotificationService.notify({ walletAddress: caller, type: "order_disputed" as any, orderId }).catch(() => {});
+    case 'split.disputed': {
+      const caller = String(data[1] ?? '');
+      wsManager.broadcastAuthenticated('split:disputed', { orderId, caller, ledger });
+      if (caller)
+        void NotificationService.notify({
+          walletAddress: caller,
+          type: 'order_disputed' as any,
+          orderId,
+        }).catch(() => {});
       break;
     }
-    case "split.resolved": {
-      const resolution = String(data[1] ?? "");
-      wsManager.broadcastAuthenticated("split:resolved", { orderId, resolution, ledger });
+    case 'split.resolved': {
+      const resolution = String(data[1] ?? '');
+      wsManager.broadcastAuthenticated('split:resolved', { orderId, resolution, ledger });
       if (resolution) {
-        const buyer = String(data[2] ?? "");
-        const farmer = String(data[3] ?? "");
-        if (buyer) void NotificationService.notify({ walletAddress: buyer, type: "dispute_resolved" as any, orderId }).catch(() => {});
-        if (farmer) void NotificationService.notify({ walletAddress: farmer, type: "dispute_resolved" as any, orderId }).catch(() => {});
+        const buyer = String(data[2] ?? '');
+        const farmer = String(data[3] ?? '');
+        if (buyer)
+          void NotificationService.notify({
+            walletAddress: buyer,
+            type: 'dispute_resolved' as any,
+            orderId,
+          }).catch(() => {});
+        if (farmer)
+          void NotificationService.notify({
+            walletAddress: farmer,
+            type: 'dispute_resolved' as any,
+            orderId,
+          }).catch(() => {});
       }
       break;
     }
 
     // ---- Production escrow split variants (order.split*) ----
-    case "order.splitnew": {
-      const campaignId = String(data[1] ?? "");
-      const totalAmount = String(data[2] ?? "");
-      wsManager.broadcastAuthenticated("order:splitnew", { orderId, campaignId, totalAmount, ledger });
-      wsManager.broadcastAuthenticated("split:created", { orderId, campaignId, totalAmount, ledger });
+    case 'order.splitnew': {
+      const campaignId = String(data[1] ?? '');
+      const totalAmount = String(data[2] ?? '');
+      wsManager.broadcastAuthenticated('order:splitnew', {
+        orderId,
+        campaignId,
+        totalAmount,
+        ledger,
+      });
+      wsManager.broadcastAuthenticated('split:created', {
+        orderId,
+        campaignId,
+        totalAmount,
+        ledger,
+      });
       break;
     }
-    case "order.splitact": {
-      wsManager.broadcastAuthenticated("order:splitact", { orderId, ledger });
-      wsManager.broadcastAuthenticated("split:active", { orderId, ledger });
+    case 'order.splitact': {
+      wsManager.broadcastAuthenticated('order:splitact', { orderId, ledger });
+      wsManager.broadcastAuthenticated('split:active', { orderId, ledger });
       break;
     }
-    case "order.splitfnd": {
-      wsManager.broadcastAuthenticated("order:splitfnd", { orderId, ledger });
-      wsManager.broadcastAuthenticated("split:funded", { orderId, ledger });
+    case 'order.splitfnd': {
+      wsManager.broadcastAuthenticated('order:splitfnd', { orderId, ledger });
+      wsManager.broadcastAuthenticated('split:funded', { orderId, ledger });
       break;
     }
-    case "order.splitcnf": {
-      const confirmer = String(data[1] ?? "");
-      wsManager.broadcastAuthenticated("order:splitcnf", { orderId, confirmer, ledger });
-      wsManager.broadcastAuthenticated("split:confirm", { orderId, confirmer, ledger });
+    case 'order.splitcnf': {
+      const confirmer = String(data[1] ?? '');
+      wsManager.broadcastAuthenticated('order:splitcnf', { orderId, confirmer, ledger });
+      wsManager.broadcastAuthenticated('split:confirm', { orderId, confirmer, ledger });
       break;
     }
-    case "order.splitdsp": {
-      const caller = String(data[1] ?? "");
-      wsManager.broadcastAuthenticated("order:splitdsp", { orderId, caller, ledger });
-      wsManager.broadcastAuthenticated("split:disputed", { orderId, caller, ledger });
-      if (caller) void NotificationService.notify({ walletAddress: caller, type: "order_disputed" as any, orderId }).catch(() => {});
+    case 'order.splitdsp': {
+      const caller = String(data[1] ?? '');
+      wsManager.broadcastAuthenticated('order:splitdsp', { orderId, caller, ledger });
+      wsManager.broadcastAuthenticated('split:disputed', { orderId, caller, ledger });
+      if (caller)
+        void NotificationService.notify({
+          walletAddress: caller,
+          type: 'order_disputed' as any,
+          orderId,
+        }).catch(() => {});
       break;
     }
-    case "order.splitres": {
-      const resolution = String(data[1] ?? "");
-      wsManager.broadcastAuthenticated("order:splitres", { orderId, resolution, ledger });
-      wsManager.broadcastAuthenticated("split:resolved", { orderId, resolution, ledger });
+    case 'order.splitres': {
+      const resolution = String(data[1] ?? '');
+      wsManager.broadcastAuthenticated('order:splitres', { orderId, resolution, ledger });
+      wsManager.broadcastAuthenticated('split:resolved', { orderId, resolution, ledger });
       break;
     }
 
     // ---- Group order explicit ack (if any on-chain, treat as indexed+broadcast) ----
-    case "group.created":
-    case "group.funded":
-    case "group.expired":
-    case "group.progress": {
+    case 'group.created':
+    case 'group.funded':
+    case 'group.expired':
+    case 'group.progress': {
       wsManager.broadcastAuthenticated(`group:${evtAction}`, { orderId, ledger, data });
       logger.info(`[ContractWatcher] Group order event ${fullTopic} ledger ${ledger}`);
       break;
@@ -521,11 +637,13 @@ export function dispatchEvent(
       // Unknown action — metric + alert, not just warn
       contractWatcherUnhandledTotal.inc({ action: evtAction, entity });
       captureAlert(
-        "contract_watcher_unhandled_event",
+        'contract_watcher_unhandled_event',
         `Unhandled contract event ${fullTopic} at ledger ${ledger}`,
-        { action: evtAction, entity, fullTopic, ledger, contractId: contractIdHint },
+        { action: evtAction, entity, fullTopic, ledger, contractId: contractIdHint }
       );
-      logger.warn(`[ContractWatcher] Unhandled event action: "${fullTopic}" ledger ${ledger ?? "?"} contract ${contractIdHint ?? "?"}`);
+      logger.warn(
+        `[ContractWatcher] Unhandled event action: "${fullTopic}" ledger ${ledger ?? '?'} contract ${contractIdHint ?? '?'}`
+      );
     }
   }
 }
@@ -539,10 +657,10 @@ export async function loadCheckpoint(): Promise<number | null> {
       logger.info(`[ContractWatcher] Loaded checkpoint: ledger ${row.lastLedger}`);
       return row.lastLedger;
     }
-    logger.info("[ContractWatcher] No existing checkpoint found");
+    logger.info('[ContractWatcher] No existing checkpoint found');
     return null;
   } catch (err) {
-    logger.error("[ContractWatcher] Failed to load checkpoint", err);
+    logger.error('[ContractWatcher] Failed to load checkpoint', err);
     return null;
   }
 }
@@ -556,7 +674,7 @@ export async function persistCheckpoint(ledger: number): Promise<void> {
     });
     logger.debug(`[ContractWatcher] Persisted checkpoint: ledger ${ledger}`);
   } catch (err) {
-    logger.error("[ContractWatcher] Failed to persist checkpoint", err);
+    logger.error('[ContractWatcher] Failed to persist checkpoint', err);
   }
 }
 
@@ -570,14 +688,16 @@ export function detectRecoveryGap(checkpointLedger: number | null, latestLedger:
 
   const gap = latestLedger - checkpointLedger;
   if (gap <= 0) {
-    logger.info(`[ContractWatcher] Checkpoint is ahead of or at latest ledger (checkpoint: ${checkpointLedger}, latest: ${latestLedger})`);
+    logger.info(
+      `[ContractWatcher] Checkpoint is ahead of or at latest ledger (checkpoint: ${checkpointLedger}, latest: ${latestLedger})`
+    );
     return;
   }
 
   if (gap >= RECOVERY_GAP_WARNING_THRESHOLD) {
     logger.warn(
       `[ContractWatcher] Recovery gap detected: ${gap} ledgers behind. Resuming from ledger ${checkpointLedger}. ` +
-      `${gap} ledgers of events will be replayed to catch up.`,
+        `${gap} ledgers of events will be replayed to catch up.`
     );
   }
 }
@@ -590,7 +710,7 @@ export async function fetchEventsPaginated(
   server: rpc.Server,
   startLedger: number,
   endLedger: number,
-  contractIds: string[],
+  contractIds: string[]
 ): Promise<{ events: RawRpcEvent[]; pages: number; drained: boolean }> {
   const allEvents: RawRpcEvent[] = [];
   let cursor: string | undefined = undefined;
@@ -600,7 +720,7 @@ export async function fetchEventsPaginated(
   while (true) {
     const response: any = await (server as any).getEvents({
       startLedger,
-      filters: [{ type: "contract", contractIds }],
+      filters: [{ type: 'contract', contractIds }],
       cursor,
       limit: 100,
     });
@@ -616,7 +736,9 @@ export async function fetchEventsPaginated(
       cursor = response.cursor;
       if (pages >= MAX_PAGES_PER_POLL) {
         drained = false;
-        logger.warn("[ContractWatcher] Pagination hit max pages with empty events, marking not drained");
+        logger.warn(
+          '[ContractWatcher] Pagination hit max pages with empty events, marking not drained'
+        );
         break;
       }
       continue;
@@ -639,7 +761,11 @@ export async function fetchEventsPaginated(
       cursor = response.cursor;
       if (pages >= MAX_PAGES_PER_POLL) {
         drained = false;
-        logger.warn("[ContractWatcher] Pagination hit max pages limit, marking not drained", { pages, startLedger, endLedger });
+        logger.warn('[ContractWatcher] Pagination hit max pages limit, marking not drained', {
+          pages,
+          startLedger,
+          endLedger,
+        });
         break;
       }
       // Continue to next page
@@ -658,7 +784,7 @@ export async function startContractWatcher(): Promise<void> {
   const { contractId, governanceContractId, rpcUrl } = config;
 
   if (!contractId && !governanceContractId) {
-    logger.warn("[ContractWatcher] No contract IDs set — skipping event listener.");
+    logger.warn('[ContractWatcher] No contract IDs set — skipping event listener.');
     return;
   }
 
@@ -676,13 +802,15 @@ export async function startContractWatcher(): Promise<void> {
   detectRecoveryGap(checkpointLedger, latestLedger);
 
   const contractIds = [contractId, governanceContractId].filter(Boolean) as string[];
-  logger.info(`[ContractWatcher] Listening for events on contracts ${contractIds.join(", ")} from ledger ${lastLedger} (max span ${MAX_LEDGER_SPAN}, max pages ${MAX_PAGES_PER_POLL})`);
+  logger.info(
+    `[ContractWatcher] Listening for events on contracts ${contractIds.join(', ')} from ledger ${lastLedger} (max span ${MAX_LEDGER_SPAN}, max pages ${MAX_PAGES_PER_POLL})`
+  );
 
   let running = false;
 
   async function poll() {
     if (running) {
-      logger.debug("[ContractWatcher] Previous poll still running, skipping this tick");
+      logger.debug('[ContractWatcher] Previous poll still running, skipping this tick');
       scheduleNext();
       return;
     }
@@ -692,21 +820,34 @@ export async function startContractWatcher(): Promise<void> {
       const endLedger = Math.min(lastLedger + MAX_LEDGER_SPAN, latestSeq);
 
       // Fetch with pagination — fully drain range before advancing checkpoint
-      const { events, pages, drained } = await fetchEventsPaginated(server as any, lastLedger, endLedger, contractIds);
+      const { events, pages, drained } = await fetchEventsPaginated(
+        server as any,
+        lastLedger,
+        endLedger,
+        contractIds
+      );
 
       // Metrics per poll
       contractWatcherPagesPerPoll.observe(pages);
       contractWatcherEventsPerPoll.observe(events.length);
 
-      logger.debug(`[ContractWatcher] Poll fetched ${events.length} events across ${pages} page(s) drained=${drained} range [${lastLedger}, ${endLedger}]`);
+      logger.debug(
+        `[ContractWatcher] Poll fetched ${events.length} events across ${pages} page(s) drained=${drained} range [${lastLedger}, ${endLedger}]`
+      );
 
       if (!drained) {
-        logger.warn(`[ContractWatcher] Pagination not drained for range [${lastLedger}, ${endLedger}] pages=${pages} — will retry without advancing checkpoint`);
-        captureAlert("contract_watcher_pagination_not_drained", `Contract watcher pagination not drained for range [${lastLedger}, ${endLedger}]`, {
-          startLedger: lastLedger,
-          endLedger,
-          pages,
-        });
+        logger.warn(
+          `[ContractWatcher] Pagination not drained for range [${lastLedger}, ${endLedger}] pages=${pages} — will retry without advancing checkpoint`
+        );
+        captureAlert(
+          'contract_watcher_pagination_not_drained',
+          `Contract watcher pagination not drained for range [${lastLedger}, ${endLedger}]`,
+          {
+            startLedger: lastLedger,
+            endLedger,
+            pages,
+          }
+        );
         return;
       }
 
@@ -718,7 +859,9 @@ export async function startContractWatcher(): Promise<void> {
           if (newCheckpoint > lastLedger) {
             lastLedger = newCheckpoint;
             await persistCheckpoint(lastLedger);
-            logger.debug(`[ContractWatcher] No events in span, advanced checkpoint to ${lastLedger}`);
+            logger.debug(
+              `[ContractWatcher] No events in span, advanced checkpoint to ${lastLedger}`
+            );
           }
         }
         return;
@@ -729,7 +872,9 @@ export async function startContractWatcher(): Promise<void> {
 
       for (const event of events) {
         if ((event as any).ledger < lastLedger) {
-          logger.debug(`[ContractWatcher] Skipping duplicate event at ledger ${(event as any).ledger} (already processed)`);
+          logger.debug(
+            `[ContractWatcher] Skipping duplicate event at ledger ${(event as any).ledger} (already processed)`
+          );
           continue;
         }
 
@@ -743,17 +888,17 @@ export async function startContractWatcher(): Promise<void> {
               decoded.action,
               decoded.data,
               event.ledger,
-              event.transactionIndex,
+              event.transactionIndex
             );
           } catch (err) {
-            logger.error("[ContractWatcher] Governance ingestion failed", {
+            logger.error('[ContractWatcher] Governance ingestion failed', {
               error: err instanceof Error ? err.message : String(err),
               ledger: event.ledger,
             });
             captureAlert(
-              "contract_watcher_ingestion_failure",
+              'contract_watcher_ingestion_failure',
               `Governance ingestion failed at ledger ${event.ledger}, checkpoint advance halted`,
-              { ledger: event.ledger },
+              { ledger: event.ledger }
             );
             return;
           }
@@ -768,17 +913,17 @@ export async function startContractWatcher(): Promise<void> {
         } catch (err) {
           // Transient failures (DB, RPC) — halt checkpoint and retry next poll
           // Validation/dead-letter failures are already handled inside persist() and would not throw
-          logger.error("[ContractWatcher] Ingestion failed for event", {
+          logger.error('[ContractWatcher] Ingestion failed for event', {
             error: err instanceof Error ? err.message : String(err),
             ledger: event.ledger,
           });
           logger.error(
-            `[ContractWatcher] Halting checkpoint advance at ledger ${(event as any).ledger} due to ingestion failure. Will retry on next poll.`,
+            `[ContractWatcher] Halting checkpoint advance at ledger ${(event as any).ledger} due to ingestion failure. Will retry on next poll.`
           );
           captureAlert(
-            "contract_watcher_ingestion_failure",
+            'contract_watcher_ingestion_failure',
             `Contract watcher ingestion failed at ledger ${event.ledger}, checkpoint advance halted`,
-            { ledger: event.ledger },
+            { ledger: event.ledger }
           );
           return;
         }
@@ -786,7 +931,7 @@ export async function startContractWatcher(): Promise<void> {
         // Best-effort derived projection (does not block checkpoint). Failures are logged only.
         // EscrowEvent/EscrowTransaction are rebuildable from canonical BlockchainTransaction.
         void EscrowEventIngestionService.ingestEvent(event).catch((err) => {
-          logger.warn("[ContractWatcher] Derived Escrow projection failed (non-blocking)", {
+          logger.warn('[ContractWatcher] Derived Escrow projection failed (non-blocking)', {
             error: err instanceof Error ? err.message : String(err),
             ledger: event.ledger,
           });
@@ -806,32 +951,39 @@ export async function startContractWatcher(): Promise<void> {
       if (newCheckpoint > lastLedger) {
         lastLedger = newCheckpoint;
         await persistCheckpoint(lastLedger);
-        logger.info(`[ContractWatcher] Advanced checkpoint to ${lastLedger} after processing ${processedCount} events in ${pages} page(s)`);
+        logger.info(
+          `[ContractWatcher] Advanced checkpoint to ${lastLedger} after processing ${processedCount} events in ${pages} page(s)`
+        );
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("startLedger must be within the retention window")) {
-        logger.warn(`[ContractWatcher] Retention window exceeded — resetting checkpoint to latest ledger`);
+      if (msg.includes('startLedger must be within the retention window')) {
+        logger.warn(
+          `[ContractWatcher] Retention window exceeded — resetting checkpoint to latest ledger`
+        );
         try {
           const latest = (await server.getLatestLedger()).sequence;
           lastLedger = latest;
           await persistCheckpoint(lastLedger);
           captureAlert(
-            "contract_watcher_retention_window_reset",
+            'contract_watcher_retention_window_reset',
             `Contract watcher checkpoint reset to ledger ${lastLedger} after retention window error`,
-            { checkpoint: lastLedger },
+            { checkpoint: lastLedger }
           );
         } catch (resetErr) {
-          logger.error("[ContractWatcher] Failed to reset checkpoint after retention error", resetErr);
+          logger.error(
+            '[ContractWatcher] Failed to reset checkpoint after retention error',
+            resetErr
+          );
         }
         return;
       }
-      logger.error("[ContractWatcher] Poll error", err);
+      logger.error('[ContractWatcher] Poll error', err);
       // Sentry groups identical errors into one issue, so a sustained RPC
       // outage polling every 5s doesn't need its own cooldown logic here —
       // configure the alert rule to notify on new/regressed issues, not
       // every event (see docs/OBSERVABILITY.md).
-      captureAlert("contract_watcher_poll_error", "Contract watcher poll iteration failed", {
+      captureAlert('contract_watcher_poll_error', 'Contract watcher poll iteration failed', {
         error: err instanceof Error ? err.message : String(err),
       });
     } finally {

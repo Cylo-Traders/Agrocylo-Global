@@ -8,14 +8,14 @@ on:
   pull_request:
     paths:
       - "agro-production/server/**"
-      - "agro-production/contract/**"
+      - "contracts/**"
       - "agro-production/client/src/lib/contractService.ts"
       - ".github/workflows/server-e2e.yml"
   push:
     branches: [main]
     paths:
       - "agro-production/server/**"
-      - "agro-production/contract/**"
+      - "contracts/**"
       - "agro-production/client/src/lib/contractService.ts"
       - ".github/workflows/server-e2e.yml"
   workflow_dispatch: {}
@@ -79,6 +79,8 @@ jobs:
         run: npm ci --legacy-peer-deps
 
       - name: Generate Prisma client
+        env:
+          PRISMA_GENERATE_DATABASE_URL: postgresql://prisma-generate:unused@localhost:5432/prisma_generate
         run: npx prisma generate
 
       - name: Run E2E tests

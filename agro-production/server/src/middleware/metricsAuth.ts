@@ -10,7 +10,9 @@ export function requireMetricsAuth(
 
   if (!config.metricsApiKey) {
     if (isProduction) {
-      res.status(401).json({ message: 'Unauthorized: metrics API key not configured' });
+      res
+        .status(401)
+        .json({ message: 'Unauthorized: metrics API key not configured' });
       return;
     }
     next();
@@ -19,7 +21,9 @@ export function requireMetricsAuth(
 
   const header = req.header('x-metrics-api-key');
   if (header !== config.metricsApiKey) {
-    res.status(401).json({ message: 'Unauthorized: invalid or missing x-metrics-api-key header' });
+    res.status(401).json({
+      message: 'Unauthorized: invalid or missing x-metrics-api-key header',
+    });
     return;
   }
   next();

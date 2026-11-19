@@ -25,14 +25,14 @@ import type {
 } from "@/types/product";
 import {
   normalizeProductWriteInput,
-  createProduct,
-  updateProduct,
   uploadProductImage,
 } from "@/services/productService";
+import { useCreateProduct, useUpdateProduct } from "@/hooks/queries/useProducts";
 import { isTestMode } from "@/lib/testMode";
 import { productFormSchema } from "@/lib/validation";
 import { FormError } from "@/components/FormError";
 import { logger } from "@/lib/logger";
+import { useWallet } from "@/hooks/useWallet";
 
 type Mode = "add" | "edit";
 
@@ -68,7 +68,6 @@ const SELECT_CLASSES =
 interface ProductFormModalProps {
   open: boolean;
   mode: Mode;
-  walletAddress: string;
   initialProduct?: Product | null;
   onClose: () => void;
   onSuccess: () => Promise<void> | void;
@@ -77,11 +76,11 @@ interface ProductFormModalProps {
 export default function ProductFormModal({
   open,
   mode,
-  walletAddress,
   initialProduct,
   onClose,
   onSuccess,
 }: ProductFormModalProps) {
+  const { authenticated, reauthenticate } = useWallet();
   const [name, setName] = useState("");
   const [category, setCategory] = useState<ProductCategory | null>(null);
   const [pricePerUnit, setPricePerUnit] = useState("");
@@ -95,8 +94,11 @@ export default function ProductFormModal({
 
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [errors, setErrors] = useState<FormErrors>({});
-  const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  const createProductMutation = useCreateProduct();
+  const updateProductMutation = useUpdateProduct();
+  const saving = createProductMutation.isPending || updateProductMutation.isPending;
 
   useEffect(() => {
     if (!open) return;
@@ -172,9 +174,14 @@ export default function ProductFormModal({
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!validate()) return;
-    setSaving(true);
     setSaveError(null);
     try {
+      // Product writes and image uploads require the API session. The wallet
+      // can still be connected after a reload while its short-lived JWT has
+      // expired, so restore it before starting the multi-request save flow.
+      if (!authenticated) {
+        await reauthenticate();
+      }
       const payload = normalizeProductWriteInput({
         name: name.trim(),
         category,
@@ -190,14 +197,15 @@ export default function ProductFormModal({
 
       const product =
         mode === "add"
-          ? await createProduct(walletAddress, payload)
-          : await updateProduct(walletAddress, initialProduct!.id, payload);
+          ? await createProductMutation.mutateAsync(payload)
+          : await updateProductMutation.mutateAsync({
+              id: initialProduct!.id,
+              input: payload,
+            });
 
       if (imageFiles.length > 0) {
         await Promise.all(
-          imageFiles.map((file) =>
-            uploadProductImage(walletAddress, product.id, file),
-          ),
+          imageFiles.map((file) => uploadProductImage(product.id, file)),
         );
       }
 
@@ -206,15 +214,17 @@ export default function ProductFormModal({
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to save.";
       setSaveError(msg);
-      logger?.error("Product form save failed", { error: msg, mode });
-    } finally {
-      setSaving(false);
+      logger?.error("Product form save failed", {
+        error: msg,
+        mode,
+        stack: err instanceof Error ? err.stack : undefined,
+      });
     }
   }
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden rounded-none p-4 sm:h-auto sm:max-h-[90vh] sm:max-w-2xl sm:rounded-3xl sm:p-6">
         <DialogHeader>
           <DialogTitle>
             {mode === "add" ? "Add Product" : "Edit Listing"}
@@ -225,7 +235,11 @@ export default function ProductFormModal({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={onSubmit} className="space-y-6">
+        <form
+          noValidate
+          onSubmit={onSubmit}
+          className="min-h-0 flex-1 space-y-6 overflow-y-auto pr-1"
+        >
           <div className="grid gap-4 sm:grid-cols-2">
             <Input
               label="Product Name"
@@ -386,12 +400,12 @@ export default function ProductFormModal({
                 {imageFiles.map((f, i) => (
                   <span
                     key={i}
-                    className="bg-secondary inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs"
+                    className="bg-secondary inline-flex min-w-0 max-w-full items-center gap-2 rounded-full border px-3 py-1 text-xs"
                   >
-                    {f.name}
+                    <span className="truncate">{f.name}</span>
                     <button
                       type="button"
-                      className="text-muted-foreground hover:text-foreground"
+                      className="text-muted-foreground hover:text-foreground grid size-11 shrink-0 place-content-center"
                       onClick={() =>
                         setImageFiles((prev) =>
                           prev.filter((_, idx) => idx !== i),
@@ -411,7 +425,7 @@ export default function ProductFormModal({
 
           <Separator />
 
-          <DialogFooter className="flex-row justify-end gap-2">
+          <DialogFooter className="sticky bottom-0 flex-row justify-end gap-2 bg-background pt-4">
             <Button
               type="button"
               variant="outline"

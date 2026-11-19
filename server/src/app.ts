@@ -1,5 +1,6 @@
 import express from 'express';
 import type { Request, Response } from 'express';
+import path from 'node:path';
 import cors from 'cors';
 import { corsOptions } from './config/cors.js';
 import helmet from 'helmet';
@@ -27,6 +28,7 @@ import locationRoutes, { locationErrorHandler } from './routes/locationRoutes.js
 import notificationRoutes, { notificationErrorHandler } from './routes/notificationRoutes.js';
 import jobRoutes from './routes/jobRoutes.js';
 import demandSupplyRoutes from './routes/demandSupplyRoutes.js';
+import marketRoutes from './routes/marketRoutes.js';
 import metricsRoutes from './routes/metricsRoutes.js';
 import adminRoutes, { adminErrorHandler } from './routes/adminRoutes.js';
 import adminReconciliationRoutes from './routes/adminReconciliationRoutes.js';
@@ -80,6 +82,7 @@ app.use(
 
 app.use(cors(corsOptions));
 app.use(express.json());
+app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
 app.use(requestContext);
 app.use(requestLogger);
 
@@ -107,6 +110,7 @@ app.use('/disputes', disputeRoutes);
 app.use(groupOrderRoutes);
 app.use('/graphql', graphqlRoutes);
 app.use(demandSupplyRoutes);
+app.use(marketRoutes);
 app.use(analyticsRoutes);
 app.use(jobRoutes);
 app.use(cropPlanRoutes);

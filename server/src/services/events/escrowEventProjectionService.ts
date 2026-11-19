@@ -1,8 +1,8 @@
-import { prisma } from "../../config/database.js";
-import type { MappedEscrowEvent } from "../../types/escrowEvent.js";
-import logger from "../../config/logger.js";
-import { wsManager } from "../wsManager.js";
-import { OrderStatus } from "../../constants/status.js";
+import { prisma } from '../../config/database.js';
+import type { MappedEscrowEvent } from '../../types/escrowEvent.js';
+import logger from '../../config/logger.js';
+import { wsManager } from '../wsManager.js';
+import { OrderStatus } from '../../constants/status.js';
 
 /**
  * @deprecated — Derived projection from canonical BlockchainTransaction.
@@ -30,26 +30,26 @@ export class EscrowEventProjectionService {
       if (canonicalBuyer) {
         await prisma.user.upsert({
           where: { walletAddress: canonicalBuyer },
-          update: { role: "BUYER" },
-          create: { walletAddress: canonicalBuyer, role: "BUYER" },
+          update: { role: 'BUYER' },
+          create: { walletAddress: canonicalBuyer, role: 'BUYER' },
         });
         await prisma.profile.upsert({
           where: { walletAddress: canonicalBuyer },
           update: {},
-          create: { walletAddress: canonicalBuyer, role: "BUYER" },
+          create: { walletAddress: canonicalBuyer, role: 'BUYER' },
         });
       }
 
       if (canonicalSeller) {
         await prisma.user.upsert({
           where: { walletAddress: canonicalSeller },
-          update: { role: "SELLER" },
-          create: { walletAddress: canonicalSeller, role: "SELLER" },
+          update: { role: 'SELLER' },
+          create: { walletAddress: canonicalSeller, role: 'SELLER' },
         });
         await prisma.profile.upsert({
           where: { walletAddress: canonicalSeller },
           update: {},
-          create: { walletAddress: canonicalSeller, role: "SELLER" },
+          create: { walletAddress: canonicalSeller, role: 'SELLER' },
         });
       }
 
@@ -73,23 +73,23 @@ export class EscrowEventProjectionService {
 
       // 3. Map Actions to Domain States
       switch (action) {
-        case "created":
+        case 'created':
           await this.handleOrderCreated(parsed, eventDate);
           break;
-        case "delivered":
+        case 'delivered':
           await this.handleOrderDelivered(orderId);
           break;
-        case "confirmed":
+        case 'confirmed':
           await this.handleOrderConfirmed(orderId);
           break;
-        case "refunded":
+        case 'refunded':
           await this.handleOrderRefunded(orderId);
           break;
-        case "dispute":
+        case 'dispute':
           await this.handleOrderDisputed(orderId, parsed.buyer, eventDate);
           break;
-        case "resolved":
-          await this.handleOrderResolved(orderId, parsed.buyer === "REFUNDED", eventDate);
+        case 'resolved':
+          await this.handleOrderResolved(orderId, parsed.buyer === 'REFUNDED', eventDate);
           break;
       }
     } catch (error) {
@@ -120,7 +120,7 @@ export class EscrowEventProjectionService {
       } as any,
     });
 
-    wsManager.broadcast("order:status_changed", {
+    wsManager.broadcast('order:status_changed', {
       orderId: parsed.orderId,
       status: OrderStatus.PENDING,
       buyer: parsed.buyer,
@@ -146,12 +146,14 @@ export class EscrowEventProjectionService {
     try {
       await prisma.order.update({
         where: { orderIdOnChain: orderId },
-        data: { status: "DELIVERED" },
+        data: { status: 'DELIVERED' },
       });
     } catch (e) {
       // Idempotent: if order not yet created (out-of-order projection), ignore — canonical pipeline handles placeholder
-      if ((e as any)?.code !== "P2025") throw e;
-      logger.warn(`[EscrowProjection] Delivered for missing order ${orderId} — ignored (canonical handles placeholder)`);
+      if ((e as any)?.code !== 'P2025') throw e;
+      logger.warn(
+        `[EscrowProjection] Delivered for missing order ${orderId} — ignored (canonical handles placeholder)`
+      );
     }
   }
 
@@ -159,13 +161,13 @@ export class EscrowEventProjectionService {
     try {
       await prisma.order.update({
         where: { orderIdOnChain: orderId },
-        data: { status: "COMPLETED" },
+        data: { status: 'COMPLETED' },
       });
     } catch (e) {
-      if ((e as any)?.code !== "P2025") throw e;
+      if ((e as any)?.code !== 'P2025') throw e;
       logger.warn(`[EscrowProjection] Confirmed for missing order ${orderId} — ignored`);
     }
-    wsManager.broadcast("order:status_changed", {
+    wsManager.broadcast('order:status_changed', {
       orderId,
       status: OrderStatus.COMPLETED,
     });
@@ -175,13 +177,13 @@ export class EscrowEventProjectionService {
     try {
       await prisma.order.update({
         where: { orderIdOnChain: orderId },
-        data: { status: "REFUNDED" },
+        data: { status: 'REFUNDED' },
       });
     } catch (e) {
-      if ((e as any)?.code !== "P2025") throw e;
+      if ((e as any)?.code !== 'P2025') throw e;
       logger.warn(`[EscrowProjection] Refunded for missing order ${orderId} — ignored`);
     }
-    wsManager.broadcast("order:status_changed", {
+    wsManager.broadcast('order:status_changed', {
       orderId,
       status: OrderStatus.REFUNDED,
     });
@@ -198,11 +200,11 @@ export class EscrowEventProjectionService {
       create: {
         orderIdOnChain: orderId,
         raisedBy,
-        status: "OPEN",
+        status: 'OPEN',
         createdAt: eventDate,
       },
       update: {
-        status: "OPEN",
+        status: 'OPEN',
         raisedBy,
       },
     });
@@ -217,7 +219,7 @@ export class EscrowEventProjectionService {
     await prisma.dispute.update({
       where: { orderIdOnChain: orderId },
       data: {
-        status: "RESOLVED",
+        status: 'RESOLVED',
         outcome: isRefund ? OrderStatus.REFUNDED : OrderStatus.COMPLETED,
         resolvedAt: eventDate,
       },

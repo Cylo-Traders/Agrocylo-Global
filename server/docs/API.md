@@ -79,10 +79,11 @@ GET /products query params:
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | /orders | — | List all orders |
-| GET | /orders/:id | — | Get by on-chain ID |
-| GET | /orders/buyer/:address | — | Orders by buyer |
-| GET | /orders/seller/:address | — | Orders by seller |
+| GET | /orders | protected | List all orders for the session wallet |
+| GET | /orders/:id | protected | Get by on-chain ID |
+| GET | /orders/buyer/:address | protected | Orders by buyer (own address only) |
+| GET | /orders/seller/:address | protected | Orders by seller (own address only) |
+| GET | /orders/stats/:sellerAddress | protected | Seller order statistics (own address only) |
 | POST | /orders/metadata | protected | Create order metadata |
 | GET | /orders/metadata/:id | protected | Get order metadata |
 

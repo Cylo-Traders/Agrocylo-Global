@@ -143,4 +143,4 @@ Now toasts will automatically show transaction status!
 
 ## Done! 🎉
 
-Your transaction feedback UI is ready. See [TRANSACTION_FEEDBACK_GUIDE.md](TRANSACTION_FEEDBACK_GUIDE.md) for advanced usage.
+Your transaction feedback UI is ready. See [implementation guide](IMPLEMENTATION_GUIDE.md) for advanced usage.

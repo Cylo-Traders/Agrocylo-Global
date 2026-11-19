@@ -28,6 +28,20 @@ Object.defineProperty(window, 'getComputedStyle', {
   value: (element: Element) => originalGetComputedStyle(element),
 });
 
+// jsdom does not implement ResizeObserver, which Radix UI primitives (tooltip,
+// popover, ...) instantiate on mount.
+if (!('ResizeObserver' in globalThis)) {
+  class ResizeObserverMock {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  Object.defineProperty(globalThis, 'ResizeObserver', {
+    writable: true,
+    value: ResizeObserverMock,
+  });
+}
+
 Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
   writable: true,
   value: vi.fn(() => ({

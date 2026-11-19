@@ -1,8 +1,8 @@
-import crypto from "node:crypto";
-import type { NextFunction, Request, Response } from "express";
-import { prisma } from "../config/database.js";
-import logger from "../config/logger.js";
-import { config } from "../config/index.js";
+import crypto from 'node:crypto';
+import type { NextFunction, Request, Response } from 'express';
+import { prisma } from '../config/database.js';
+import logger from '../config/logger.js';
+import { config } from '../config/index.js';
 
 export interface IntegratorRequest extends Request {
   integratorApiKeyId?: string;
@@ -14,7 +14,7 @@ export interface IntegratorRequest extends Request {
 }
 
 export function hashApiKey(rawKey: string): string {
-  return crypto.createHmac("sha256", config.integratorApiKeyPepper).update(rawKey).digest("hex");
+  return crypto.createHmac('sha256', config.integratorApiKeyPepper).update(rawKey).digest('hex');
 }
 
 /**
@@ -27,11 +27,11 @@ export function hashApiKey(rawKey: string): string {
 export async function requireIntegratorApiKey(
   req: IntegratorRequest,
   res: Response,
-  next: NextFunction,
+  next: NextFunction
 ): Promise<void> {
-  const rawKey = req.header("x-api-key");
+  const rawKey = req.header('x-api-key');
   if (!rawKey) {
-    res.status(401).json({ message: "Missing x-api-key header." });
+    res.status(401).json({ message: 'Missing x-api-key header.' });
     return;
   }
 
@@ -39,12 +39,12 @@ export async function requireIntegratorApiKey(
     const keyHash = hashApiKey(rawKey);
     const record = await prisma.integratorApiKey.findUnique({ where: { keyHash } });
     if (!record || record.revokedAt || record.expiresAt <= new Date()) {
-      res.status(401).json({ message: "Invalid, revoked, or expired API key." });
+      res.status(401).json({ message: 'Invalid, revoked, or expired API key.' });
       return;
     }
 
     req.integratorApiKeyId = record.id;
-    res.once("finish", () => recordIntegratorUsage(req, res));
+    res.once('finish', () => recordIntegratorUsage(req, res));
 
     const now = new Date();
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -53,8 +53,8 @@ export async function requireIntegratorApiKey(
     });
     if (usedThisMonth >= config.integratorMonthlyQuota) {
       const nextMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-      res.setHeader("Retry-After", Math.ceil((nextMonth.getTime() - now.getTime()) / 1000));
-      res.status(429).json({ message: "Monthly integrator API quota exceeded." });
+      res.setHeader('Retry-After', Math.ceil((nextMonth.getTime() - now.getTime()) / 1000));
+      res.status(429).json({ message: 'Monthly integrator API quota exceeded.' });
       return;
     }
     req.integratorScope = {
@@ -66,12 +66,12 @@ export async function requireIntegratorApiKey(
     // Best-effort last-used tracking; never blocks the request.
     prisma.integratorApiKey
       .update({ where: { id: record.id }, data: { lastUsedAt: new Date() } })
-      .catch((err) => logger.error("[integratorAuth] Failed to update lastUsedAt", { err }));
+      .catch((err) => logger.error('[integratorAuth] Failed to update lastUsedAt', { err }));
 
     next();
   } catch (err) {
-    logger.error("[integratorAuth] Failed to authenticate integrator API key", { err });
-    res.status(500).json({ message: "Internal Server Error: could not verify API key." });
+    logger.error('[integratorAuth] Failed to authenticate integrator API key', { err });
+    res.status(500).json({ message: 'Internal Server Error: could not verify API key.' });
   }
 }
 
@@ -79,7 +79,7 @@ export async function requireIntegratorApiKey(
 export function recordIntegratorUsage(
   req: IntegratorRequest,
   res: Response,
-  endpoint = `${req.baseUrl}${req.path}`,
+  endpoint = `${req.baseUrl}${req.path}`
 ): void {
   if (!req.integratorApiKeyId) return;
   prisma.integratorApiKeyUsage
@@ -91,5 +91,5 @@ export function recordIntegratorUsage(
         ipAddress: req.ip ?? null,
       },
     })
-    .catch((err) => logger.error("[integratorAuth] Failed to record usage audit log", { err }));
+    .catch((err) => logger.error('[integratorAuth] Failed to record usage audit log', { err }));
 }

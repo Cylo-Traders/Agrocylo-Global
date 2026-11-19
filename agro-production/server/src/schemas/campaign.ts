@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from 'zod';
 import {
   campaignStatusEnum,
   isoDateTime,
@@ -6,7 +6,7 @@ import {
   positiveInt128,
   stellarAddress,
   uuidParam,
-} from "./common.js";
+} from './common.js';
 
 export const CreateCampaignSchema = z.object({
   farmerAddress: stellarAddress,
@@ -14,15 +14,15 @@ export const CreateCampaignSchema = z.object({
   targetAmount: positiveInt128,
   deadline: isoDateTime.refine(
     (d) => new Date(d).getTime() > Date.now(),
-    "Deadline must be in the future",
+    'Deadline must be in the future',
   ),
-  transactionHash: z.string().min(1, "Transaction hash is required"),
+  transactionHash: z.string().min(1, 'Transaction hash is required'),
 });
 
 export const InvestSchema = z.object({
   investorAddress: stellarAddress,
   amount: positiveInt128,
-  transactionHash: z.string().min(1, "Transaction hash is required"),
+  transactionHash: z.string().min(1, 'Transaction hash is required'),
 });
 
 export const CampaignIdParamSchema = z.object({

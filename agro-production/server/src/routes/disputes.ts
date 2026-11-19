@@ -1,16 +1,18 @@
-import { Router, type Request, type Response } from "express";
-import { z } from "zod";
-import { prisma } from "../db/client.js";
+import { Router, type Request, type Response } from 'express';
+import type { Prisma } from '@prisma/client';
+import { z } from 'zod';
+import { prisma } from '../db/client.js';
 import {
   jsonValidated,
   validateBody,
   validateParams,
   validateQuery,
   validateResponse,
-} from "../middleware/validate.js";
-import { problemDetail } from "../middleware/errors.js";
-import { writeLimiter } from "../middleware/rateLimit.js";
-import { requireWallet, type WalletRequest } from "../middleware/walletAuth.js";
+} from '../middleware/validate.js';
+import { problemDetail } from '../middleware/errors.js';
+import { writeLimiter } from '../middleware/rateLimit.js';
+import { requireWallet, type WalletRequest } from '../middleware/walletAuth.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 
 const router = Router();
 
@@ -48,7 +50,7 @@ const DisputeResponseSchema = z.object({
   orderId: z.string().uuid().nullable(),
   initiatorAddress: z.string(),
   respondentAddress: z.string(),
-  status: z.enum(["Open", "EvidenceSubmitted", "Resolved", "Dismissed"]),
+  status: z.enum(['Open', 'EvidenceSubmitted', 'Resolved', 'Dismissed']),
   resolutionOutcome: z.string().nullable(),
   transactionHash: z.string(),
   ledgerSequence: z.number(),
@@ -71,27 +73,29 @@ const DisputeListResponseSchema = z.object({
 
 // GET /disputes — paginated list with optional campaign filter
 router.get(
-  "/disputes",
+  '/disputes',
   requireWallet,
   validateQuery(ListDisputesQuerySchema),
   validateResponse(DisputeListResponseSchema),
-  async (req: Request, res: Response) => {
-    const { campaignId, page, limit } = req.query as unknown as z.infer<typeof ListDisputesQuerySchema>;
+  asyncHandler(async (req: Request, res: Response) => {
+    const { campaignId, page, limit } = req.query as unknown as z.infer<
+      typeof ListDisputesQuerySchema
+    >;
     const walletReq = req as WalletRequest;
     const userWalletAddress = walletReq.walletAddress;
 
     // Get user role for authorization
     const user = await prisma.user.findUnique({
-      where: { walletAddress: userWalletAddress || "UNKNOWN" },
+      where: { walletAddress: userWalletAddress || 'UNKNOWN' },
     });
 
-    const where: any = {};
+    const where: Prisma.DisputeWhereInput = {};
     if (campaignId) {
       where.campaignId = campaignId;
     }
 
     // Non-admin participants can only see disputes they're involved in
-    if (user?.role !== "ADMIN" && userWalletAddress) {
+    if (user?.role !== 'ADMIN' && userWalletAddress) {
       where.OR = [
         { initiatorAddress: userWalletAddress },
         { respondentAddress: userWalletAddress },
@@ -103,7 +107,7 @@ router.get(
         where,
         skip: (page - 1) * limit,
         take: limit,
-        orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: 'desc' },
       }),
       prisma.dispute.count({ where }),
     ]);
@@ -112,16 +116,16 @@ router.get(
       data: items,
       meta: { total, page, limit },
     });
-  },
+  }),
 );
 
 // GET /disputes/:id — dispute detail with evidence list
 router.get(
-  "/disputes/:id",
+  '/disputes/:id',
   requireWallet,
   validateParams(DisputeIdParamSchema),
   validateResponse(DisputeDetailResponseSchema),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const walletReq = req as WalletRequest;
     const userWalletAddress = walletReq.walletAddress;
 
@@ -134,69 +138,97 @@ router.get(
             submitterAddress: true,
             submittedAt: true,
           },
-          orderBy: { submittedAt: "desc" },
+          orderBy: { submittedAt: 'desc' },
         },
       },
     });
 
     if (!dispute) {
-      problemDetail(res, req, 404, "Dispute Not Found", `No dispute with id ${req.params.id}`);
+      problemDetail(
+        res,
+        req,
+        404,
+        'Dispute Not Found',
+        `No dispute with id ${req.params.id}`,
+      );
       return;
     }
 
     // Check authorization: only participants and admin can view
     const user = await prisma.user.findUnique({
-      where: { walletAddress: userWalletAddress || "UNKNOWN" },
+      where: { walletAddress: userWalletAddress || 'UNKNOWN' },
     });
 
     const isParticipant =
-      userWalletAddress === dispute.initiatorAddress || userWalletAddress === dispute.respondentAddress;
+      userWalletAddress === dispute.initiatorAddress ||
+      userWalletAddress === dispute.respondentAddress;
 
-    if (user?.role !== "ADMIN" && !isParticipant) {
-      problemDetail(res, req, 403, "Forbidden", "You do not have access to this dispute");
+    if (user?.role !== 'ADMIN' && !isParticipant) {
+      problemDetail(
+        res,
+        req,
+        403,
+        'Forbidden',
+        'You do not have access to this dispute',
+      );
       return;
     }
 
     jsonValidated(res, DisputeDetailResponseSchema, 200, dispute);
-  },
+  }),
 );
 
 // POST /disputes/:id/evidence — submit evidence (dispute participants only)
 router.post(
-  "/disputes/:id/evidence",
+  '/disputes/:id/evidence',
   writeLimiter,
   requireWallet,
   validateParams(DisputeIdParamSchema),
   validateBody(SubmitEvidenceSchema),
   validateResponse(DisputeEvidenceResponseSchema),
-  async (req: WalletRequest, res: Response) => {
-    const { evidenceUrl, evidenceHash } = req.body as z.infer<typeof SubmitEvidenceSchema>;
+  asyncHandler(async (req: WalletRequest, res: Response) => {
+    const { evidenceUrl, evidenceHash } = req.body as z.infer<
+      typeof SubmitEvidenceSchema
+    >;
 
     const dispute = await prisma.dispute.findUnique({
       where: { id: req.params.id },
     });
 
     if (!dispute) {
-      problemDetail(res, req, 404, "Dispute Not Found", `No dispute with id ${req.params.id}`);
+      problemDetail(
+        res,
+        req,
+        404,
+        'Dispute Not Found',
+        `No dispute with id ${req.params.id}`,
+      );
       return;
     }
 
     // Check if requester is a participant
     const isParticipant =
-      req.walletAddress === dispute.initiatorAddress || req.walletAddress === dispute.respondentAddress;
+      req.walletAddress === dispute.initiatorAddress ||
+      req.walletAddress === dispute.respondentAddress;
 
     if (!isParticipant) {
-      problemDetail(res, req, 403, "Forbidden", "Only dispute participants can submit evidence");
+      problemDetail(
+        res,
+        req,
+        403,
+        'Forbidden',
+        'Only dispute participants can submit evidence',
+      );
       return;
     }
 
     // Ensure dispute is still in a state accepting evidence
-    if (dispute.status === "Resolved" || dispute.status === "Dismissed") {
+    if (dispute.status === 'Resolved' || dispute.status === 'Dismissed') {
       problemDetail(
         res,
         req,
         409,
-        "Dispute Closed",
+        'Dispute Closed',
         `Cannot submit evidence to a ${dispute.status} dispute`,
       );
       return;
@@ -212,48 +244,68 @@ router.post(
     });
 
     jsonValidated(res, DisputeEvidenceResponseSchema, 201, evidence);
-  },
+  }),
 );
 
 // PATCH /disputes/:id/resolve — resolve dispute (admin only)
 router.patch(
-  "/disputes/:id/resolve",
+  '/disputes/:id/resolve',
   writeLimiter,
   requireWallet,
   validateParams(DisputeIdParamSchema),
   validateBody(ResolveDisputeSchema),
   validateResponse(DisputeResponseSchema),
-  async (req: WalletRequest, res: Response) => {
+  asyncHandler(async (req: WalletRequest, res: Response) => {
     // Check admin role
     const user = await prisma.user.findUnique({
-      where: { walletAddress: req.walletAddress || "UNKNOWN" },
+      where: { walletAddress: req.walletAddress || 'UNKNOWN' },
     });
 
-    if (user?.role !== "ADMIN") {
-      problemDetail(res, req, 403, "Forbidden", "Only admins can resolve disputes");
+    if (user?.role !== 'ADMIN') {
+      problemDetail(
+        res,
+        req,
+        403,
+        'Forbidden',
+        'Only admins can resolve disputes',
+      );
       return;
     }
 
-    const { resolutionOutcome, resolutionNotes } = req.body as z.infer<typeof ResolveDisputeSchema>;
+    const { resolutionOutcome, resolutionNotes } = req.body as z.infer<
+      typeof ResolveDisputeSchema
+    >;
 
     const dispute = await prisma.dispute.findUnique({
       where: { id: req.params.id },
     });
 
     if (!dispute) {
-      problemDetail(res, req, 404, "Dispute Not Found", `No dispute with id ${req.params.id}`);
+      problemDetail(
+        res,
+        req,
+        404,
+        'Dispute Not Found',
+        `No dispute with id ${req.params.id}`,
+      );
       return;
     }
 
-    if (dispute.status === "Resolved" || dispute.status === "Dismissed") {
-      problemDetail(res, req, 409, "Dispute Already Closed", "Cannot resolve an already closed dispute");
+    if (dispute.status === 'Resolved' || dispute.status === 'Dismissed') {
+      problemDetail(
+        res,
+        req,
+        409,
+        'Dispute Already Closed',
+        'Cannot resolve an already closed dispute',
+      );
       return;
     }
 
     const updated = await prisma.dispute.update({
       where: { id: dispute.id },
       data: {
-        status: "Resolved",
+        status: 'Resolved',
         resolutionOutcome,
         resolutionNotes,
       },
@@ -263,14 +315,14 @@ router.patch(
     await prisma.disputeAuditEntry.create({
       data: {
         disputeId: dispute.id,
-        action: "resolved",
+        action: 'resolved',
         actorAddress: req.walletAddress!,
         details: { outcome: resolutionOutcome },
       },
     });
 
     jsonValidated(res, DisputeResponseSchema, 200, updated);
-  },
+  }),
 );
 
 export default router;

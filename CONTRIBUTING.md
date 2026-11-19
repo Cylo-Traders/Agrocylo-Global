@@ -8,7 +8,7 @@ Agrocylo-Global is an Agro-DeFi platform built on Stellar/Soroban. The repositor
 
 - **Production focus:** `agro-production/` — campaign-based crowdfunding (current Stellar Wave program)
 - **Marketplace:** Root `client/` and `server/` — peer-to-peer trade (mature, lower priority)
-- **Smart contracts:** `contracts/` and `agro-production/contract/` (Rust/Soroban)
+- **Smart contracts:** `contracts/` (Rust/Soroban)
 
 **New to the repo?** Start with [ARCHITECTURE.md](ARCHITECTURE.md) to understand the structure.
 
@@ -171,8 +171,7 @@ missing `PrismaClient` export.
 rustup target add wasm32v1-none
 cargo install stellar-cli --version "22.8.1" --locked
 
-# Build & test all contracts
-cd agro-production/contract
+# Build & test all contracts from the repository root
 cargo fmt --all                      # Format code
 cargo clippy --workspace --all-targets -- -D warnings  # Lint (fail on warnings)
 cargo test --workspace              # Run all tests
@@ -180,7 +179,7 @@ cargo check --workspace             # Pre-commit check
 cargo build --workspace --target wasm32v1-none --release  # Release build
 
 # For individual contract (e.g., production_escrow)
-cd agro-production/contract/production_escrow
+cd contracts/production_escrow
 cargo test
 ```
 
@@ -346,10 +345,9 @@ See [BACKLOG_TRIAGE.md](BACKLOG_TRIAGE.md) for details on which items from the o
 |-----------|---------|
 | `agro-production/client/` | Campaign marketplace frontend (Next.js) |
 | `agro-production/server/` | Campaign API & event indexer (Express) |
-| `agro-production/contract/` | Soroban contracts (Rust) — production_escrow, registry, investment_basket, governance |
+| `contracts/` | Soroban contracts (Rust) — escrow, production_escrow, registry, investment_basket, governance |
 | `client/` | Root marketplace frontend (Next.js) |
 | `server/` | Root marketplace API (Express) |
-| `contracts/` | Other contracts (Rust) — escrow, weather-insurance |
 | `ARCHITECTURE.md` | Detailed repo map and data flows |
 | `.github/workflows/` | CI/CD pipelines |
 
@@ -378,7 +376,7 @@ Agrocylo Global participates in the **Stellar Wave issue-claim bounty program** 
 
 - **Repo structure:** See [ARCHITECTURE.md](ARCHITECTURE.md)
 - **API endpoints:** See `server/API.md` or `agro-production/server/API.md`
-- **Smart contracts:** See `contract/` or `agro-production/contract/` README files
+- **Smart contracts:** See `contracts/` and `docs/contracts/` README files
 - **Toolchain & versions:** See [docs/TOOLCHAIN.md](docs/TOOLCHAIN.md)
 - **Security & audit notes:** See [contracts/SECURITY_AUDIT.md](contracts/SECURITY_AUDIT.md)
 - **Issues:** Browse [GitHub Issues](https://github.com/Cylo-Traders/Agrocylo-Global/issues)

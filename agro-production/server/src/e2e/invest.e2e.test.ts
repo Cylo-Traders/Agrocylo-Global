@@ -18,6 +18,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import WebSocket from 'ws';
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 
 import app from '../app.js';
 import {
@@ -32,6 +33,7 @@ import {
   makeCampaignCreatedRawEvent,
   makeCampaignInvestedRawEvent,
 } from './helpers/xdrBuilder.js';
+import { EVENT_SCHEMA_VERSION } from '../events/schema.js';
 
 /**
  * Races `promise` against a timeout, always clearing the timer so a fast
@@ -89,7 +91,9 @@ function runE2ESuite() {
   // Setup / teardown
   // ---------------------------------------------------------------------------
   beforeAll(async () => {
-    prisma = new PrismaClient({ datasources: { db: { url: E2E_DB_URL } } });
+    prisma = new PrismaClient({
+      adapter: new PrismaPg({ connectionString: E2E_DB_URL }),
+    });
     await prisma.$connect();
 
     // Wipe slate for this test run.
@@ -134,6 +138,7 @@ function runE2ESuite() {
     it('indexes a campaign.created event and exposes it via REST', async () => {
       await EventPersister.persist({
         action: 'campaign.created',
+        schemaVersion: EVENT_SCHEMA_VERSION,
         ledger: 200,
         eventIndex: 0,
         timestamp: new Date(),
@@ -168,6 +173,7 @@ function runE2ESuite() {
       // Persist the investment event.
       await EventPersister.persist({
         action: 'campaign.invested',
+        schemaVersion: EVENT_SCHEMA_VERSION,
         ledger: 201,
         eventIndex: 0,
         timestamp: new Date(),
@@ -312,8 +318,10 @@ function runE2ESuite() {
       // own dependencies) in this package's compilation/rootDir checks.
       // Vitest transforms .ts on the fly at runtime, so this imports the
       // real source directly instead of a committed build artifact.
-      const contractServiceModulePath: string =
-        '../../../client/src/lib/contractService.ts';
+      const contractServiceModulePath = new URL(
+        '../../../client/src/lib/contractService.ts',
+        import.meta.url,
+      ).href;
       const { buildInvest } = await import(contractServiceModulePath);
 
       const result = await buildInvest(INVESTOR, '1', BigInt(100_000));
@@ -342,6 +350,7 @@ function runE2ESuite() {
       // Passing an invalid event type should reject, not silently swallow.
       const badEvent = {
         action: 'campaign.created' as const,
+        schemaVersion: EVENT_SCHEMA_VERSION,
         ledger: 9999,
         eventIndex: 999,
         timestamp: new Date(),

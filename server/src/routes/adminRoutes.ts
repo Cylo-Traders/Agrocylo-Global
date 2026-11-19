@@ -12,7 +12,12 @@ router.use(requireAdmin);
 router.get('/disputes', AdminDisputeController.getDisputes);
 router.post('/resolve', AdminDisputeController.resolveDispute);
 
-export function adminErrorHandler(err: unknown, req: Request, res: Response, _next: NextFunction): void {
+export function adminErrorHandler(
+  err: unknown,
+  req: Request,
+  res: Response,
+  _next: NextFunction
+): void {
   if (err instanceof ApiError) {
     sendProblem(res, req, err);
     return;

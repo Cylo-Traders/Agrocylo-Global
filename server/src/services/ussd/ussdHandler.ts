@@ -3,14 +3,13 @@ import {
   createSession,
   updateSession,
   deleteSession,
-  getWalletByPhone,
   getPhoneByWallet,
   linkPhoneToWallet,
-} from "./sessionStore.js";
-import { sendSms } from "./smsAdapter.js";
-import { listFarmerSupplies } from "../supplyService.js";
-import { OrderService } from "../orderService.js";
-import { prisma } from "../../config/database.js";
+} from './sessionStore.js';
+import { sendSms } from './smsAdapter.js';
+import { listFarmerSupplies } from '../supplyService.js';
+import { OrderService } from '../orderService.js';
+import { prisma } from '../../config/database.js';
 
 const MAX_TEXT_LENGTH = 182;
 
@@ -22,28 +21,54 @@ export function isStellarPublicKey(address: string): boolean {
   return /^G[A-Z2-7]{55}$/.test(address);
 }
 
-
-
 function truncate(text: string): string {
   if (text.length <= MAX_TEXT_LENGTH) return text;
-  return text.slice(0, MAX_TEXT_LENGTH - 3) + "...";
+  return text.slice(0, MAX_TEXT_LENGTH - 3) + '...';
 }
 
 function mainMenu(): string {
   return (
-    "CON Welcome to Agrocylo\n" +
-    "1. List farm supply\n" +
-    "2. Check order status\n" +
-    "3. Confirm receipt\n" +
-    "4. Link wallet\n" +
-    "0. Exit"
+    'CON Welcome to Agrocylo\n' +
+    '1. List farm supply\n' +
+    '2. Check order status\n' +
+    '3. Confirm receipt\n' +
+    '4. Link wallet\n' +
+    '0. Exit'
   );
+}
+
+type LinkedWallet = { ok: true; wallet: string } | { ok: false; message: string };
+
+/**
+ * Resolves the caller's linked wallet, distinguishing "no link at all" from
+ * "linked but not yet verified" so the USSD menu can explain the next step.
+ */
+async function resolveVerifiedWallet(phoneNumber: string): Promise<LinkedWallet> {
+  const link = await prisma.phoneLink.findUnique({ where: { phoneNumber } });
+  if (!link) {
+    return {
+      ok: false,
+      message: truncate(
+        'END No wallet linked to this number. Use option 4 to link first.\n' + mainMenu()
+      ),
+    };
+  }
+  if (!link.verifiedAt) {
+    return {
+      ok: false,
+      message: truncate(
+        'END No verified wallet linked to this number. Please verify your wallet first.\n' +
+          mainMenu()
+      ),
+    };
+  }
+  return { ok: true, wallet: link.walletAddress };
 }
 
 export async function handleUssdRequest(
   sessionId: string,
   phoneNumber: string,
-  input: string,
+  input: string
 ): Promise<string> {
   let session = await getSession(sessionId);
 
@@ -53,176 +78,190 @@ export async function handleUssdRequest(
   }
 
   if (session.phoneNumber !== phoneNumber) {
-    throw new Error("Session phone number mismatch");
+    throw new Error('Session phone number mismatch');
   }
 
   await updateSession(sessionId, {});
 
   switch (session.step) {
-    case "main_menu":
+    case 'main_menu':
       return handleMainMenu(sessionId, input);
-    case "link_wallet":
+    case 'link_wallet':
       return handleLinkWallet(sessionId, phoneNumber, input);
-    case "list_supply_crop":
+    case 'list_supply_crop':
       return handleListSupplyCrop(sessionId, input);
-    case "order_status_id":
+    case 'order_status_id':
       return handleOrderStatusId(sessionId, phoneNumber, input);
-    case "confirm_receipt_id":
+    case 'confirm_receipt_id':
       return handleConfirmReceiptId(sessionId, phoneNumber, input);
     default:
-      await updateSession(sessionId, { step: "main_menu" });
+      await updateSession(sessionId, { step: 'main_menu' });
       return mainMenu();
   }
 }
 
 async function handleMainMenu(sessionId: string, input: string): Promise<string> {
   switch (input.trim()) {
-    case "0":
+    case '0':
       await deleteSession(sessionId);
-      return "END Thank you for using Agrocylo.";
-    case "1":
-      await updateSession(sessionId, { step: "list_supply_crop", state: {} });
-      return "CON Enter crop name (e.g., maize, rice):";
-    case "2":
-      await updateSession(sessionId, { step: "order_status_id", state: {} });
-      return "CON Enter your Order ID:";
-    case "3":
-      await updateSession(sessionId, { step: "confirm_receipt_id", state: {} });
-      return "CON Enter the Order ID to confirm receipt:";
-    case "4":
-      await updateSession(sessionId, { step: "link_wallet", state: {} });
-      return "CON Enter your Stellar wallet address (G...):";
+      return 'END Thank you for using Agrocylo.';
+    case '1':
+      await updateSession(sessionId, { step: 'list_supply_crop', state: {} });
+      return 'CON Enter crop name (e.g., maize, rice):';
+    case '2':
+      await updateSession(sessionId, { step: 'order_status_id', state: {} });
+      return 'CON Enter your Order ID:';
+    case '3':
+      await updateSession(sessionId, { step: 'confirm_receipt_id', state: {} });
+      return 'CON Enter the Order ID to confirm receipt:';
+    case '4':
+      await updateSession(sessionId, { step: 'link_wallet', state: {} });
+      return 'CON Enter your Stellar wallet address (G...):';
     default:
-      return "CON Invalid choice.\n" + mainMenu();
+      return 'CON Invalid choice.\n' + mainMenu();
   }
 }
 
 async function handleLinkWallet(
   sessionId: string,
   phoneNumber: string,
-  input: string,
+  input: string
 ): Promise<string> {
   const wallet = input.trim();
   if (!isStellarPublicKey(wallet)) {
-    return "CON Invalid Stellar address. Enter a valid G... Stellar public key:";
+    return 'CON Invalid Stellar address. Enter a valid G... Stellar public key:';
   }
   await linkPhoneToWallet(phoneNumber, wallet, false);
-  await updateSession(sessionId, { step: "main_menu", walletAddress: wallet });
-  return truncate("END Wallet link requested! Verification required before completing transactions.\n" + mainMenu());
+  await updateSession(sessionId, { step: 'main_menu', walletAddress: wallet });
+  return truncate(
+    'END Wallet link requested! Verification required before completing transactions.\n' +
+      mainMenu()
+  );
 }
 
-async function handleListSupplyCrop(
-  sessionId: string,
-  input: string,
-): Promise<string> {
+async function handleListSupplyCrop(sessionId: string, input: string): Promise<string> {
   const crop = input.trim();
   if (!crop) {
-    return "CON Please enter a valid crop name:";
+    return 'CON Please enter a valid crop name:';
   }
 
   try {
-    const result = await listFarmerSupplies({ cropName: crop, page: "1", pageSize: "5" });
+    const result = await listFarmerSupplies({ cropName: crop, page: '1', pageSize: '5' });
 
     if (result.items.length === 0) {
-      await updateSession(sessionId, { step: "main_menu" });
-      return truncate("END No supplies found for " + crop + ".\n" + mainMenu());
+      await updateSession(sessionId, { step: 'main_menu' });
+      return truncate('END No supplies found for ' + crop + '.\n' + mainMenu());
     }
 
-    let response = "END Supplies for " + crop + ":\n";
+    let response = 'END Supplies for ' + crop + ':\n';
     for (const s of result.items) {
-      const fs = s as { farmerWallet: string; quantityAvailable: string; unit?: string | null; pricePerUnit?: string | null };
+      const fs = s as {
+        farmerWallet: string;
+        quantityAvailable: string;
+        unit?: string | null;
+        pricePerUnit?: string | null;
+      };
       response +=
         `- ${fs.farmerWallet.slice(0, 6)}...${fs.farmerWallet.slice(-4)}: ` +
-        `${fs.quantityAvailable} ${fs.unit ?? ""} @ ${fs.pricePerUnit ?? "N/A"}\n`;
+        `${fs.quantityAvailable} ${fs.unit ?? ''} @ ${fs.pricePerUnit ?? 'N/A'}\n`;
     }
-    await updateSession(sessionId, { step: "main_menu" });
+    await updateSession(sessionId, { step: 'main_menu' });
     return truncate(response);
-  } catch (error) {
-    await updateSession(sessionId, { step: "main_menu" });
-    return truncate("END Error fetching supplies. Please try again.\n" + mainMenu());
+  } catch {
+    await updateSession(sessionId, { step: 'main_menu' });
+    return truncate('END Error fetching supplies. Please try again.\n' + mainMenu());
   }
 }
 
 async function handleOrderStatusId(
   sessionId: string,
   phoneNumber: string,
-  input: string,
+  input: string
 ): Promise<string> {
   const orderId = input.trim();
   if (!orderId) {
-    return "CON Please enter a valid Order ID:";
+    return 'CON Please enter a valid Order ID:';
   }
 
-  const wallet = await getWalletByPhone(phoneNumber, true);
-  if (!wallet) {
-    await updateSession(sessionId, { step: "main_menu" });
-    return truncate("END No wallet linked to this number. Use option 4 to link first.\n" + mainMenu());
+  const linked = await resolveVerifiedWallet(phoneNumber);
+  if (!linked.ok) {
+    await updateSession(sessionId, { step: 'main_menu' });
+    return linked.message;
   }
+  const wallet = linked.wallet;
 
   try {
     const order = await OrderService.getByOrderId(orderId);
     if (!order || (order.buyerAddress !== wallet && order.sellerAddress !== wallet)) {
-      await updateSession(sessionId, { step: "main_menu" });
-      return truncate("END Order not found or not associated with your wallet.\n" + mainMenu());
+      await updateSession(sessionId, { step: 'main_menu' });
+      return truncate('END Order not found or not associated with your wallet.\n' + mainMenu());
     }
 
     const response =
-      "END Order " + orderId + "\n" +
+      'END Order ' +
+      orderId +
+      '\n' +
       `Status: ${order.status}\n` +
       `Amount: ${order.amount} ${order.token}\n` +
-      `Buyer: ${order.buyerAddress.slice(0, 6)}...\n` +
-      `Seller: ${order.sellerAddress.slice(0, 6)}...`;
+      `Buyer: ${(order.buyerAddress ?? '').slice(0, 6)}...\n` +
+      `Seller: ${(order.sellerAddress ?? '').slice(0, 6)}...`;
 
-    await updateSession(sessionId, { step: "main_menu" });
+    await updateSession(sessionId, { step: 'main_menu' });
     return response;
-  } catch (err) {
-    await updateSession(sessionId, { step: "main_menu" });
-    return truncate("END Error fetching order.\n" + mainMenu());
+  } catch {
+    await updateSession(sessionId, { step: 'main_menu' });
+    return truncate('END Error fetching order.\n' + mainMenu());
   }
 }
 
 async function handleConfirmReceiptId(
   sessionId: string,
   phoneNumber: string,
-  input: string,
+  input: string
 ): Promise<string> {
   const orderId = input.trim();
   if (!orderId) {
-    return "CON Please enter a valid Order ID:";
+    return 'CON Please enter a valid Order ID:';
   }
 
-  const wallet = await getWalletByPhone(phoneNumber, true);
-  if (!wallet) {
-    await updateSession(sessionId, { step: "main_menu" });
-    return truncate("END No wallet linked to this number. Use option 4 to link first.\n" + mainMenu());
+  const linked = await resolveVerifiedWallet(phoneNumber);
+  if (!linked.ok) {
+    await updateSession(sessionId, { step: 'main_menu' });
+    return linked.message;
   }
+  const wallet = linked.wallet;
 
   try {
     const order = await OrderService.getByOrderId(orderId);
     if (!order || order.buyerAddress !== wallet) {
-      await updateSession(sessionId, { step: "main_menu" });
-      return truncate("END Order not found or you are not the buyer.\n" + mainMenu());
+      await updateSession(sessionId, { step: 'main_menu' });
+      return truncate('END Order not found or you are not the buyer.\n' + mainMenu());
     }
 
     await prisma.order.update({
       where: { orderIdOnChain: orderId },
-      data: { status: "COMPLETED" },
+      data: { status: 'COMPLETED' },
     });
 
-    const buyerPhone = await getPhoneByWallet(order.buyerAddress, true);
-    const sellerPhone = await getPhoneByWallet(order.sellerAddress, true);
+    const buyerPhone = order.buyerAddress ? await getPhoneByWallet(order.buyerAddress, true) : null;
+    const sellerPhone = order.sellerAddress
+      ? await getPhoneByWallet(order.sellerAddress, true)
+      : null;
 
     if (buyerPhone) {
       await sendSms(buyerPhone, `Receipt confirmed for Order ${orderId}. Thank you!`);
     }
     if (sellerPhone) {
-      await sendSms(sellerPhone, `Buyer confirmed receipt for Order ${orderId}. Funds will be released.`);
+      await sendSms(
+        sellerPhone,
+        `Buyer confirmed receipt for Order ${orderId}. Funds will be released.`
+      );
     }
 
-    await updateSession(sessionId, { step: "main_menu" });
-    return truncate("END Receipt confirmed for Order " + orderId + ". SMS sent to both parties.");
-  } catch (err) {
-    await updateSession(sessionId, { step: "main_menu" });
-    return truncate("END Error confirming receipt.\n" + mainMenu());
+    await updateSession(sessionId, { step: 'main_menu' });
+    return truncate('END Receipt confirmed for Order ' + orderId + '. SMS sent to both parties.');
+  } catch {
+    await updateSession(sessionId, { step: 'main_menu' });
+    return truncate('END Error confirming receipt.\n' + mainMenu());
   }
 }

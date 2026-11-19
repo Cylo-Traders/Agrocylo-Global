@@ -1,6 +1,6 @@
-import { prisma } from "../config/database.js";
-import { ApiError } from "../http/errors.js";
-import logger from "../config/logger.js";
+import { prisma } from '../config/database.js';
+import { ApiError } from '../http/errors.js';
+import logger from '../config/logger.js';
 
 // Request counter for metrics
 let requestCount = 0;
@@ -52,8 +52,8 @@ function utcCalendarDayBounds(reference = new Date()): {
       0,
       0,
       0,
-      0,
-    ),
+      0
+    )
   );
   const end = new Date(start);
   end.setUTCDate(end.getUTCDate() + 1);
@@ -86,27 +86,26 @@ export async function getPlatformMetrics() {
     const { start, end, day } = utcCalendarDayBounds();
     const activeSince = new Date(Date.now() - ACTIVE_USER_WINDOW_MS);
 
-    const [ordersPerDay, campaignsCreated, orderAmounts, recentOrders] =
-      await Promise.all([
-        prisma.order.count({
-          where: { createdAt: { gte: start, lt: end } },
-        }),
-        prisma.product.count({
-          where: { createdAt: { gte: start, lt: end } },
-        }),
-        prisma.order.findMany({ select: { amount: true } }),
-        prisma.order.findMany({
-          where: { createdAt: { gte: activeSince } },
-          select: { buyerAddress: true, sellerAddress: true },
-        }),
-      ]);
+    const [ordersPerDay, campaignsCreated, orderAmounts, recentOrders] = await Promise.all([
+      prisma.order.count({
+        where: { createdAt: { gte: start, lt: end } },
+      }),
+      prisma.product.count({
+        where: { createdAt: { gte: start, lt: end } },
+      }),
+      prisma.order.findMany({ select: { amount: true } }),
+      prisma.order.findMany({
+        where: { createdAt: { gte: activeSince } },
+        select: { buyerAddress: true, sellerAddress: true },
+      }),
+    ]);
 
     const totalVolume = sumNumericAmounts(orderAmounts.map((o) => o.amount));
 
     const wallets = new Set<string>();
     for (const o of recentOrders) {
-      wallets.add(o.buyerAddress);
-      wallets.add(o.sellerAddress);
+      if (o.buyerAddress) wallets.add(o.buyerAddress);
+      if (o.sellerAddress) wallets.add(o.sellerAddress);
     }
 
     return {
@@ -121,7 +120,7 @@ export async function getPlatformMetrics() {
       error_rate: requestCount > 0 ? (errorCount / requestCount) * 100 : 0,
     };
   } catch (error) {
-    logger.error("Failed to fetch platform metrics", { error });
-    throw new ApiError(500, "Internal Server Error", "Failed to fetch platform metrics");
+    logger.error('Failed to fetch platform metrics', { error });
+    throw new ApiError(500, 'Internal Server Error', 'Failed to fetch platform metrics');
   }
 }

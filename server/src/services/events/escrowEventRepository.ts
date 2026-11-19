@@ -1,6 +1,6 @@
-import { prisma } from "../../config/database.js";
-import type { MappedEscrowEvent } from "../../types/escrowEvent.js";
-import logger from "../../config/logger.js";
+import { prisma } from '../../config/database.js';
+import type { MappedEscrowEvent } from '../../types/escrowEvent.js';
+import logger from '../../config/logger.js';
 
 /**
  * EscrowEventRepository: DB persistence logic.
@@ -33,7 +33,7 @@ export class EscrowEventRepository {
         },
       });
     } catch (error) {
-      logger.error("Database Create Error (EscrowEvent):", error);
+      logger.error('Database Create Error (EscrowEvent):', error);
       throw error;
     }
   }

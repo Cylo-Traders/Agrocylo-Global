@@ -37,10 +37,17 @@ export default function OrderDetailPage() {
   const params = useParams()
   const router = useRouter()
   const { address, connected } = useWallet()
-  const [state, setState] = useState<OrderDetailState>({ kind: 'loading' })
+  const [reloadKey, setReloadKey] = useState(0)
 
   const orderId = params?.orderId as string
-  const [reloadKey, setReloadKey] = useState(0)
+  // Everything that changes the request is folded into one key, including the
+  // manual retry counter, so "loading" can be derived instead of being written
+  // synchronously from an effect (#1084).
+  const requestKey = `${orderId}:${address ?? ''}:${reloadKey}`
+  const [snapshot, setSnapshot] = useState<{
+    key: string
+    result: Exclude<OrderDetailState, { kind: 'loading' }> | null
+  }>({ key: requestKey, result: null })
 
   useEffect(() => {
     if (!connected || !address) {
@@ -51,25 +58,37 @@ export default function OrderDetailPage() {
     // Abort on id/wallet change or unmount so a stale response can never
     // overwrite fresh state.
     const controller = new AbortController()
-    setState({ kind: 'loading' })
 
     fetchOrderById(orderId, { signal: controller.signal })
-      .then((order) => setState({ kind: 'ready', order }))
+      .then((order) => {
+        if (!controller.signal.aborted)
+          setSnapshot({ key: requestKey, result: { kind: 'ready', order } })
+      })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return // stale request — ignore
-        if (err instanceof ApiError && err.status === 401) setState({ kind: 'unauthorized' })
-        else if (err instanceof ApiError && err.status === 403) setState({ kind: 'forbidden' })
-        else if (err instanceof ApiError && err.status === 404) setState({ kind: 'not_found' })
-        else if (err instanceof NetworkError) setState({ kind: 'offline' })
-        else
-          setState({
-            kind: 'error',
-            message: err instanceof Error ? err.message : 'Failed to load order',
-          })
+        const result: Exclude<OrderDetailState, { kind: 'loading' }> =
+          err instanceof ApiError && err.status === 401
+            ? { kind: 'unauthorized' }
+            : err instanceof ApiError && err.status === 403
+              ? { kind: 'forbidden' }
+              : err instanceof ApiError && err.status === 404
+                ? { kind: 'not_found' }
+                : err instanceof NetworkError
+                  ? { kind: 'offline' }
+                  : {
+                      kind: 'error',
+                      message: err instanceof Error ? err.message : 'Failed to load order',
+                    }
+        setSnapshot({ key: requestKey, result })
       })
 
     return () => controller.abort()
-  }, [orderId, connected, address, router, reloadKey])
+  }, [requestKey, orderId, connected, address, router])
+
+  // A snapshot from a previous key is a previous request's answer — treat the
+  // current one as still loading rather than showing stale data as fresh.
+  const state: OrderDetailState =
+    snapshot.key === requestKey && snapshot.result ? snapshot.result : { kind: 'loading' }
 
   if (state.kind === 'loading') {
     return (

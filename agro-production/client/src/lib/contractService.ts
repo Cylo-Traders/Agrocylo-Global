@@ -13,6 +13,8 @@
 
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { estimateInclusionFee } from "./feeStrategy";
+import { createSorobanRpcServer } from "./rpcClient";
+import { assembleSorobanTransaction } from "./transactionAssembler";
 
 const rpcUrl = () =>
   process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
@@ -29,7 +31,7 @@ export interface ContractResult<T> {
 }
 
 function server(): StellarSdk.rpc.Server {
-  return new StellarSdk.rpc.Server(rpcUrl());
+  return createSorobanRpcServer(rpcUrl());
 }
 
 function contract(): StellarSdk.Contract {
@@ -108,12 +110,10 @@ export async function buildContractTx(
       );
     }
 
-    const prepared = StellarSdk.rpc
-      .assembleTransaction(
-        tx,
-        simulated as StellarSdk.rpc.Api.SimulateTransactionSuccessResponse,
-      )
-      .build();
+    const prepared = assembleSorobanTransaction(
+      tx,
+      simulated as StellarSdk.rpc.Api.SimulateTransactionSuccessResponse,
+    ).build();
 
     return { success: true, data: prepared.toXDR() };
   } catch (err) {

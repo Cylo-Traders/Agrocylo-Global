@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
 import { fetchCampaigns, fundingProgress, formatAmount } from "@/services/campaignService";
 import { classifyError, logErrorWithContext } from "@/lib/errorHandling";
 import { CampaignCardSkeleton } from "@/components/Skeletons";
+import { useAsyncResource } from "@/hooks/useAsyncResource";
+import { useNow } from "@/hooks/useNow";
 import type { Campaign, CampaignStatus } from "@/types";
 
 const STATUS_COLORS: Record<CampaignStatus, string> = {
@@ -33,10 +35,12 @@ function FundingBar({ campaign }: { campaign: Campaign }) {
   );
 }
 
-function CampaignCard({ campaign }: { campaign: Campaign }) {
+function CampaignCard({ campaign, now }: { campaign: Campaign; now: number }) {
   const deadline = new Date(campaign.deadline);
-  const isExpired = deadline < new Date();
-  const daysLeft = Math.max(0, Math.ceil((deadline.getTime() - Date.now()) / 86_400_000));
+  // `now` is passed in (never read from the clock during render) so the
+  // countdown is stable between renders and deterministic under fake timers.
+  const isExpired = deadline.getTime() < now;
+  const daysLeft = Math.max(0, Math.ceil((deadline.getTime() - now) / 86_400_000));
   return (
     <Link href={`/campaigns/${campaign.id}`} className="block border border-border rounded-xl p-5 bg-surface hover:shadow-md transition-shadow" aria-label={`Campaign ${campaign.id.slice(0, 8)}… - ${campaign.status.replace("_", " ")}`}>
       <div className="flex items-start justify-between gap-2 mb-3">
@@ -64,21 +68,22 @@ const STATUS_FILTERS = [
   { label: "Settled", value: "SETTLED" },
 ];
 
+const PAGE_SIZE = 12;
+
 export default function CampaignsPage() {
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const limit = 12;
+  const now = useNow();
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true); setError(null);
-    fetchCampaigns({ status: status || undefined, page, limit })
-      .then((res) => { if (!cancelled) { setCampaigns(res.data); setTotal(res.meta.total); } })
-      .catch((err: unknown) => {
+  // Defined before the resource that consumes it, and stable per (status,
+  // page) pair, so the effect behind useAsyncResource runs exactly when the
+  // inputs change (#1084).
+  const loadCampaigns = useCallback(
+    async (signal: AbortSignal) => {
+      try {
+        return await fetchCampaigns({ status: status || undefined, page, limit: PAGE_SIZE });
+      } catch (err) {
+        if (signal.aborted) throw err;
         const classified = classifyError(err, "loadCampaigns");
         logErrorWithContext(err, {
           feature: "campaign-list",
@@ -87,13 +92,22 @@ export default function CampaignsPage() {
           statusFilter: status || "all",
           category: classified.category,
         });
-        if (!cancelled) setError(classified.actionableMessage);
-      })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [status, page]);
+        throw new Error(classified.actionableMessage);
+      }
+    },
+    [status, page],
+  );
 
-  const totalPages = Math.ceil(total / limit);
+  const {
+    data,
+    error,
+    loading,
+    reload,
+  } = useAsyncResource(`campaigns:${status || "all"}:${page}`, loadCampaigns);
+
+  const campaigns = data?.data ?? [];
+  const total = data?.meta.total ?? 0;
+  const totalPages = Math.ceil(total / PAGE_SIZE);
 
   return (
     <div>
@@ -117,11 +131,16 @@ export default function CampaignsPage() {
         ))}
       </nav>
       {loading && (<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" aria-label="Loading campaigns" aria-busy="true">{Array.from({ length: 6 }).map((_, i) => (<CampaignCardSkeleton key={i} />))}</div>)}
-      {!loading && error && (<div className="border border-red-200 bg-red-50 rounded-xl p-6 text-red-700 text-sm" role="alert">{error}</div>)}
+      {!loading && error && (
+        <div className="border border-red-200 bg-red-50 rounded-xl p-6 text-red-700 text-sm space-y-3" role="alert">
+          <p>{error}</p>
+          <button onClick={reload} className="underline text-red-700 hover:text-red-900">Try again</button>
+        </div>
+      )}
       {!loading && !error && campaigns.length === 0 && (<div className="border border-border rounded-xl p-10 text-center text-muted">No campaigns found.</div>)}
       {!loading && !error && campaigns.length > 0 && (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" aria-label="Campaigns list">{campaigns.map((c) => (<CampaignCard key={c.id} campaign={c} />))}</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" aria-label="Campaigns list">{campaigns.map((c) => (<CampaignCard key={c.id} campaign={c} now={now} />))}</div>
           {totalPages > 1 && (
             <nav aria-label="Pagination" className="flex justify-center items-center gap-3 mt-8">
               <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} aria-label="Previous page" className="px-3 py-1.5 border border-border rounded-lg text-sm disabled:opacity-40 hover:bg-surface">← Previous</button>

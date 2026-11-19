@@ -8,9 +8,12 @@ Resolved: Issue #1 - Smart contract repository set-up.
 | Contract | Path | Purpose |
 |---|---|---|
 | escrow | contracts/escrow | Buyer-seller escrow with dispute resolution and arbitrator pool |
-| weather-insurance | contracts/weather-insurance | Parametric crop-insurance with oracle-reported thresholds |
+| production_escrow | contracts/production_escrow | Campaign funding and settlement |
+| registry | contracts/registry | Cross-contract order and reputation registry |
+| investment_basket | contracts/investment_basket | Batched campaign investments |
+| governance | contracts/governance | Timelocked governance |
 
-Production contracts in agro-production/contract/ include:
+Production contracts in contracts/ include:
 - production_escrow
 - investment_basket
 - governance
@@ -128,3 +131,7 @@ Quality:
 - Follow Soroban SDK standards: https://developers.stellar.org/docs/build/smart-contracts/
 - Run cargo fmt --all and cargo clippy before every PR.
 
+
+## Contract documentation
+
+All deployable crates live in this directory. See the [contract documentation index](../docs/contracts/README.md) for specifications and the archived prototype.

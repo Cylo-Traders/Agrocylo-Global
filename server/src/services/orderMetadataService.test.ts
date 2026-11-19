@@ -47,7 +47,7 @@ describe('createOrderMetadata', () => {
 
     const result = await createOrderMetadata(
       { on_chain_order_id: 'chain-1', description: 'Fresh tomatoes' },
-      'GBUYER',
+      'GBUYER'
     );
 
     expect(result).toEqual(SAMPLE_METADATA);
@@ -65,10 +65,7 @@ describe('createOrderMetadata', () => {
     mockOrder.findUnique.mockResolvedValueOnce(SAMPLE_ORDER as any);
     mockMetadata.create.mockResolvedValueOnce(SAMPLE_METADATA as any);
 
-    await createOrderMetadata(
-      { on_chain_order_id: 'chain-1', description: 'Ok' },
-      'GFARMER',
-    );
+    await createOrderMetadata({ on_chain_order_id: 'chain-1', description: 'Ok' }, 'GFARMER');
 
     expect(mockMetadata.create).toHaveBeenCalled();
   });
@@ -84,8 +81,8 @@ describe('createOrderMetadata', () => {
           farmer_address: 'GFARMER',
           buyer_address: 'GBUYER',
         },
-        'GATTACKER',
-      ),
+        'GATTACKER'
+      )
     ).rejects.toMatchObject({ status: 403 });
 
     expect(mockMetadata.create).not.toHaveBeenCalled();
@@ -102,7 +99,7 @@ describe('createOrderMetadata', () => {
         farmer_address: 'GFAKE',
         buyer_address: 'GFAKE2',
       },
-      'GBUYER',
+      'GBUYER'
     );
 
     expect(mockMetadata.create).toHaveBeenCalledWith({
@@ -117,19 +114,16 @@ describe('createOrderMetadata', () => {
     mockOrder.findUnique.mockResolvedValueOnce(null);
 
     await expect(
-      createOrderMetadata(
-        { on_chain_order_id: 'missing', description: 'x' },
-        'GBUYER',
-      ),
+      createOrderMetadata({ on_chain_order_id: 'missing', description: 'x' }, 'GBUYER')
     ).rejects.toBeInstanceOf(ApiError);
 
     expect(mockMetadata.create).not.toHaveBeenCalled();
   });
 
   it('validates required fields', async () => {
-    await expect(
-      createOrderMetadata({ description: 'no id' }, 'GBUYER'),
-    ).rejects.toMatchObject({ status: 400 });
+    await expect(createOrderMetadata({ description: 'no id' }, 'GBUYER')).rejects.toMatchObject({
+      status: 400,
+    });
   });
 });
 

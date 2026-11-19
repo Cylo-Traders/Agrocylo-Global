@@ -1,8 +1,8 @@
-import crypto from "node:crypto";
-import { prisma } from "../config/database.js";
-import { ApiError, NotFoundError, ValidationError } from "../http/errors.js";
-import { hashApiKey } from "../middleware/integratorAuth.js";
-import { CampaignStatus, OrderStatus } from "../constants/status.js";
+import crypto from 'node:crypto';
+import { prisma } from '../config/database.js';
+import { ApiError, NotFoundError, ValidationError } from '../http/errors.js';
+import { hashApiKey } from '../middleware/integratorAuth.js';
+import { CampaignStatus, OrderStatus } from '../constants/status.js';
 
 export interface IntegratorScope {
   organizationName: string;
@@ -27,7 +27,7 @@ const DEFAULT_KEY_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000;
 
 function generateRawKey(): string {
   // 32 bytes of entropy, hex-encoded; only ever returned once at creation.
-  return `agc_${crypto.randomBytes(32).toString("hex")}`;
+  return `agc_${crypto.randomBytes(32).toString('hex')}`;
 }
 
 export class IntegratorService {
@@ -40,10 +40,10 @@ export class IntegratorService {
   }) {
     const { organizationName, scopedFarmerWallets, scopedRegion, createdByAdmin } = params;
     if (!organizationName) {
-      throw new ValidationError("organizationName is required");
+      throw new ValidationError('organizationName is required');
     }
     if ((!scopedFarmerWallets || scopedFarmerWallets.length === 0) && !scopedRegion) {
-      throw new ValidationError("Either scopedFarmerWallets or scopedRegion must be provided");
+      throw new ValidationError('Either scopedFarmerWallets or scopedRegion must be provided');
     }
 
     const rawKey = generateRawKey();
@@ -81,7 +81,7 @@ export class IntegratorService {
         lastUsedAt: true,
         createdAt: true,
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
     });
   }
 
@@ -89,7 +89,7 @@ export class IntegratorService {
   static async revokeKey(keyId: string) {
     const record = await prisma.integratorApiKey.findUnique({ where: { id: keyId } });
     if (!record) {
-      throw new NotFoundError("Integrator API key", keyId);
+      throw new NotFoundError('Integrator API key', keyId);
     }
     if (record.revokedAt) {
       return record;
@@ -104,7 +104,7 @@ export class IntegratorService {
     const validated = ensureNotOverPageLimit(limit);
     return prisma.integratorApiKeyUsage.findMany({
       where: { apiKeyId: keyId },
-      orderBy: { requestedAt: "desc" },
+      orderBy: { requestedAt: 'desc' },
       take: validated,
     });
   }
@@ -118,7 +118,10 @@ export class IntegratorService {
    * page of profiles is loaded and campaign counts are fetched for that page's
    * wallets alone, so a small page never streams the whole org into memory.
    */
-  static async getFarmerReport(scope: IntegratorScope, query: ReportQuery = {}): Promise<ReportResult> {
+  static async getFarmerReport(
+    scope: IntegratorScope,
+    query: ReportQuery = {}
+  ): Promise<ReportResult> {
     const limit = ensureNotOverPageLimit(query.limit ?? DEFAULT_REPORT_LIMIT);
     const cursor = query.cursor;
     const wallets = await resolveScopedWallets(scope);
@@ -127,17 +130,19 @@ export class IntegratorService {
     const profiles = await prisma.profile.findMany({
       where: {
         walletAddress: { in: wallets, ...(cursor ? { gt: cursor } : {}) },
-        role: "FARMER",
+        role: 'FARMER',
       },
       include: { location: true },
-      orderBy: { walletAddress: "asc" },
+      orderBy: { walletAddress: 'asc' },
       take: limit + 1,
     });
 
     const hasMore = profiles.length > limit;
     const pageProfiles = profiles.slice(0, limit);
 
-    const pageWallets = pageProfiles.map((p) => (p as any).walletAddress ?? (p as any).wallet_address);
+    const pageWallets = pageProfiles.map(
+      (p) => (p as any).walletAddress ?? (p as any).wallet_address
+    );
 
     let campaigns: Awaited<ReturnType<typeof prisma.campaign.findMany>> = [];
     if (pageWallets.length > 0) {
@@ -159,7 +164,9 @@ export class IntegratorService {
       return {
         farmerWallet,
         displayName: p.name ?? null,
-        region: p.location ? [p.location.city, p.location.country].filter(Boolean).join(", ") : null,
+        region: p.location
+          ? [p.location.city, p.location.country].filter(Boolean).join(', ')
+          : null,
         totalCampaigns: farmerCampaigns.length,
         settledCampaigns: farmerCampaigns.filter((c) => c.status === CampaignStatus.SETTLED).length,
         activeCampaigns: farmerCampaigns.filter((c) => c.status === CampaignStatus.ACTIVE).length,
@@ -182,7 +189,10 @@ export class IntegratorService {
    * stable keyset cursor in the database and status counts are aggregated
    * server-side via groupBy (Issue #969).
    */
-  static async getOrderReport(scope: IntegratorScope, query: ReportQuery = {}): Promise<ReportResult> {
+  static async getOrderReport(
+    scope: IntegratorScope,
+    query: ReportQuery = {}
+  ): Promise<ReportResult> {
     const limit = ensureNotOverPageLimit(query.limit ?? DEFAULT_REPORT_LIMIT);
     const cursor = query.cursor;
     const wallets = await resolveScopedWallets(scope);
@@ -192,33 +202,43 @@ export class IntegratorService {
       where: {
         sellerAddress: { in: wallets, ...(cursor ? { gt: cursor } : {}) },
       },
-      distinct: ["sellerAddress"],
-      orderBy: { sellerAddress: "asc" },
+      distinct: ['sellerAddress'],
+      orderBy: { sellerAddress: 'asc' },
       take: limit + 1,
     });
 
     const hasMore = sellers.length > limit;
     const pageSellers = sellers.slice(0, limit);
-    const sellerAddresses = pageSellers.map((o) => o.sellerAddress);
+    const sellerAddresses = pageSellers
+      .map((o) => o.sellerAddress)
+      .filter((address): address is string => address !== null);
 
     type StatusCount = { sellerAddress: string; status: string; count: number };
     let counts: StatusCount[] = [];
     if (sellerAddresses.length > 0) {
       const grouped = await prisma.order.groupBy({
-        by: ["sellerAddress", "status"],
+        by: ['sellerAddress', 'status'],
         where: { sellerAddress: { in: sellerAddresses } },
         _count: { _all: true },
       });
       counts = grouped.map((g) => ({
-        sellerAddress: g.sellerAddress,
+        sellerAddress: g.sellerAddress ?? '',
         status: g.status,
-        count: g._count._all,
+        count: typeof g._count === 'object' && g._count !== null ? (g._count._all ?? 0) : 0,
       }));
     }
 
-    const bySeller = new Map<string, { total: number; completed: number; refunded: number; pending: number }>();
+    const bySeller = new Map<
+      string,
+      { total: number; completed: number; refunded: number; pending: number }
+    >();
     for (const c of counts) {
-      const entry = bySeller.get(c.sellerAddress) ?? { total: 0, completed: 0, refunded: 0, pending: 0 };
+      const entry = bySeller.get(c.sellerAddress) ?? {
+        total: 0,
+        completed: 0,
+        refunded: 0,
+        pending: 0,
+      };
       entry.total += c.count;
       if (c.status === OrderStatus.COMPLETED) entry.completed += c.count;
       else if (c.status === OrderStatus.REFUNDED) entry.refunded += c.count;
@@ -256,8 +276,8 @@ async function resolveScopedWallets(scope: IntegratorScope): Promise<string[]> {
   const locations = await prisma.location.findMany({
     where: {
       OR: [
-        { city: { equals: scope.scopedRegion, mode: "insensitive" } },
-        { country: { equals: scope.scopedRegion, mode: "insensitive" } },
+        { city: { equals: scope.scopedRegion, mode: 'insensitive' } },
+        { country: { equals: scope.scopedRegion, mode: 'insensitive' } },
       ],
     },
     select: { walletAddress: true, city: true, country: true },
@@ -265,7 +285,7 @@ async function resolveScopedWallets(scope: IntegratorScope): Promise<string[]> {
   return locations
     .filter(
       (l) =>
-        (l as any).city?.toLowerCase() === region || (l as any).country?.toLowerCase() === region,
+        (l as any).city?.toLowerCase() === region || (l as any).country?.toLowerCase() === region
     )
     .map((l) => (l as any).walletAddress ?? (l as any).wallet_address);
 }
@@ -280,31 +300,31 @@ const SPREADSHEET_FORMULA_PREFIX = /^[=+\-@\t\r]/;
 
 /** Serializes a list of flat records to CSV (Issue #662: CSV + JSON output). */
 export function toCsv(rows: Array<Record<string, unknown>>): string {
-  if (rows.length === 0) return "";
+  if (rows.length === 0) return '';
   const headers = Object.keys(rows[0] as Record<string, unknown>);
   const escape = (value: unknown): string => {
     // Legitimate numeric report fields keep their numeric meaning.
-    if (typeof value === "number") return String(value);
-    const str = value === null || value === undefined ? "" : String(value);
+    if (typeof value === 'number') return String(value);
+    const str = value === null || value === undefined ? '' : String(value);
     const sanitized = SPREADSHEET_FORMULA_PREFIX.test(str) ? `'${str}` : str;
     if (/[",\n]/.test(sanitized)) {
       return `"${sanitized.replace(/"/g, '""')}"`;
     }
     return sanitized;
   };
-  const lines = [headers.join(",")];
+  const lines = [headers.join(',')];
   for (const row of rows) {
-    lines.push(headers.map((h) => escape(row[h])).join(","));
+    lines.push(headers.map((h) => escape(row[h])).join(','));
   }
-  return lines.join("\n");
+  return lines.join('\n');
 }
 
 export function ensureNotOverPageLimit(limit: number): number {
   if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit <= 0) {
-    throw new ApiError(400, "Bad Request", "limit must be a positive integer");
+    throw new ApiError(400, 'Bad Request', 'limit must be a positive integer');
   }
   if (limit > MAX_PAGE_SIZE) {
-    throw new ApiError(400, "Bad Request", `limit cannot exceed ${MAX_PAGE_SIZE}`);
+    throw new ApiError(400, 'Bad Request', `limit cannot exceed ${MAX_PAGE_SIZE}`);
   }
   return limit;
 }

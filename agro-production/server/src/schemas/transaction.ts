@@ -13,7 +13,9 @@ export const TransactionIntentCreateSchema = z.object({
   campaignId: uuidParam.optional(),
 });
 
-export type TransactionIntentCreate = z.infer<typeof TransactionIntentCreateSchema>;
+export type TransactionIntentCreate = z.infer<
+  typeof TransactionIntentCreateSchema
+>;
 
 export const TransactionStatusEnum = z.enum([
   'awaiting_signature',
@@ -38,14 +40,18 @@ export const TransactionStatusResponseSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 
-export type TransactionStatusResponse = z.infer<typeof TransactionStatusResponseSchema>;
+export type TransactionStatusResponse = z.infer<
+  typeof TransactionStatusResponseSchema
+>;
 
 export const TransactionStatusUpdateSchema = z.object({
   status: z.enum(['submitted', 'confirmed', 'failed']),
   message: z.string().max(256).optional(),
 });
 
-export type TransactionStatusUpdate = z.infer<typeof TransactionStatusUpdateSchema>;
+export type TransactionStatusUpdate = z.infer<
+  typeof TransactionStatusUpdateSchema
+>;
 
 export const TransactionReconciliationResponseSchema = z.object({
   requestId: uuidParam,
@@ -59,4 +65,6 @@ export const TransactionReconciliationResponseSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 
-export type TransactionReconciliationResponse = z.infer<typeof TransactionReconciliationResponseSchema>;
+export type TransactionReconciliationResponse = z.infer<
+  typeof TransactionReconciliationResponseSchema
+>;

@@ -13,6 +13,12 @@ interface AuthGuardProps {
   requiredRole?: UserRole;
 }
 
+// Single, documented destination for users whose profile role does not match
+// the route's requiredRole. /market is deliberately not wrapped in AuthGuard
+// (see client/src/app/(root)/market), so the fallback can never bounce a
+// mismatched user back into a guarded route and create a redirect loop.
+const ROLE_MISMATCH_FALLBACK = "/market";
+
 export default function AuthGuard({ children, requiredRole }: AuthGuardProps) {
   const router = useRouter();
   const { connected, restoring } = useWallet();
@@ -31,9 +37,7 @@ export default function AuthGuard({ children, requiredRole }: AuthGuardProps) {
     }
 
     if (requiredRole && profile.role !== requiredRole) {
-      router.replace(
-        profile.role === "farmer" ? "/dashboard/products" : "/market",
-      );
+      router.replace(ROLE_MISMATCH_FALLBACK);
     }
   }, [connected, profile, isLoaded, restoring, requiredRole, router]);
 

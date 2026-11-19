@@ -1,10 +1,11 @@
+import type { ReactNode } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { WeatherAdvisoryWidget } from "../WeatherAdvisoryWidget";
 import userEvent from "@testing-library/user-event";
 
 vi.mock("next/dynamic", () => ({
-  default: (fn: any) => {
+  default: () => {
     const Component = () => <div data-testid="farmer-map">Map</div>;
     Component.displayName = "DynamicFarmerMap";
     return Component;
@@ -12,10 +13,13 @@ vi.mock("next/dynamic", () => ({
 }));
 
 vi.mock("next/link", () => ({
-  default: ({ children, href }: any) => <a href={href}>{children}</a>,
+  default: ({ children, href }: { children: ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
 }));
 
 global.fetch = vi.fn();
+const fetchMock = vi.mocked(global.fetch);
 
 describe("WeatherAdvisoryWidget", () => {
   beforeEach(() => {
@@ -27,13 +31,13 @@ describe("WeatherAdvisoryWidget", () => {
   });
 
   it("renders loading state", () => {
-    (global.fetch as any).mockImplementation(() => new Promise(() => {}));
+    fetchMock.mockImplementation(() => new Promise(() => {}));
     render(<WeatherAdvisoryWidget />);
     expect(screen.getByText(/weather advisories/i)).toBeInTheDocument();
   });
 
   it("renders error state", async () => {
-    (global.fetch as any).mockRejectedValue(new Error("Failed to fetch"));
+    fetchMock.mockRejectedValue(new Error("Failed to fetch"));
 
     render(<WeatherAdvisoryWidget />);
     await waitFor(() => {
@@ -42,7 +46,7 @@ describe("WeatherAdvisoryWidget", () => {
   });
 
   it("renders no advisory state", async () => {
-    (global.fetch as any).mockResolvedValue({
+    fetchMock.mockResolvedValue({
       ok: true,
       json: async () => [],
     });
@@ -67,7 +71,7 @@ describe("WeatherAdvisoryWidget", () => {
       },
     ];
 
-    (global.fetch as any).mockResolvedValue({
+    fetchMock.mockResolvedValue({
       ok: true,
       json: async () => mockAdvisories,
     });
@@ -92,7 +96,7 @@ describe("WeatherAdvisoryWidget", () => {
       },
     ];
 
-    (global.fetch as any).mockResolvedValue({
+    fetchMock.mockResolvedValue({
       ok: true,
       json: async () => mockAdvisories,
     });
@@ -107,14 +111,14 @@ describe("WeatherAdvisoryWidget", () => {
   it("retries on button click after failure", async () => {
     const user = userEvent.setup();
 
-    (global.fetch as any).mockResolvedValueOnce({ ok: false });
+    fetchMock.mockResolvedValueOnce({ ok: false });
     render(<WeatherAdvisoryWidget />);
 
     await waitFor(() => {
       expect(screen.getByText("Retry")).toBeInTheDocument();
     });
 
-    (global.fetch as any).mockResolvedValueOnce({
+    fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => [
         {
@@ -137,7 +141,7 @@ describe("WeatherAdvisoryWidget", () => {
   });
 
   it("calls the correct API endpoint", async () => {
-    (global.fetch as any).mockResolvedValue({
+    fetchMock.mockResolvedValue({
       ok: true,
       json: async () => [],
     });
@@ -148,7 +152,7 @@ describe("WeatherAdvisoryWidget", () => {
       expect(global.fetch).toHaveBeenCalled();
     });
 
-    const calledUrl = (global.fetch as any).mock.calls[0][0] as string;
+    const calledUrl = fetchMock.mock.calls[0][0] as string;
     expect(calledUrl).toContain("/api/v1/weather/advisories");
     expect(calledUrl).toContain("farmerId=farmer-1");
     expect(calledUrl).toContain("lat=6.5");
@@ -156,7 +160,7 @@ describe("WeatherAdvisoryWidget", () => {
   });
 
   it("View All link points to /notifications", async () => {
-    (global.fetch as any).mockResolvedValue({
+    fetchMock.mockResolvedValue({
       ok: true,
       json: async () => [],
     });
@@ -174,7 +178,7 @@ describe("WeatherAdvisoryWidget", () => {
   it("cancels the fetch on unmount", () => {
     const abortSpy = vi.spyOn(AbortController.prototype, "abort");
 
-    (global.fetch as any).mockImplementation(() => new Promise(() => {}));
+    fetchMock.mockImplementation(() => new Promise(() => {}));
     const { unmount } = render(<WeatherAdvisoryWidget />);
     unmount();
 

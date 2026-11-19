@@ -12,7 +12,6 @@ vi.mock('../../services/notificationService.js', () => ({
 
 import { processNotifications } from './notifications.js';
 import { publishWsEvent } from '../../services/wsEventBus.js';
-import { NotificationService } from '../../services/notificationService.js';
 import logger from '../../config/logger.js';
 
 function makeJob(name: string, data: unknown, overrides: Partial<Record<string, unknown>> = {}) {
@@ -255,11 +254,11 @@ describe('processNotifications', () => {
     });
   });
 
-  describe("unknown job name", () => {
-    it("should reject unrecognized job names", async () => {
-      const job = makeJob("unknown-notification", { some: "data" });
+  describe('unknown job name', () => {
+    it('should reject unrecognized job names', async () => {
+      const job = makeJob('unknown-notification', { some: 'data' });
 
-      await expect(processNotifications(job)).rejects.toThrow("Unknown notification job name");
+      await expect(processNotifications(job)).rejects.toThrow('Unknown notification job name');
     });
   });
 });

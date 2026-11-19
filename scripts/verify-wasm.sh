@@ -77,7 +77,7 @@ fi
 DOCKER_IMAGE="${DOCKER_IMAGE:-rust:1.89.0}"
 BUILDER_TAG="${BUILDER_TAG:-agrocylo-builder-${CONTRACT_NAME}-$(date +%s)}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONTRACT_DIR="${REPO_ROOT}/agro-production/contract/${CONTRACT_NAME}"
+CONTRACT_DIR="${REPO_ROOT}/contracts/${CONTRACT_NAME}"
 
 if [[ ! -d "$CONTRACT_DIR" ]]; then
     echo "Error: Contract directory not found: $CONTRACT_DIR" >&2
@@ -100,7 +100,7 @@ echo ""
 
 # Create a Dockerfile that installs Rust 1.89.0 and builds the contract
 BUILD_DOCKERFILE=$(mktemp)
-trap "rm -f $BUILD_DOCKERFILE" EXIT
+trap 'rm -f "$BUILD_DOCKERFILE"' EXIT
 
 cat > "$BUILD_DOCKERFILE" << 'DOCKERFILE_END'
 ARG BASE_IMAGE

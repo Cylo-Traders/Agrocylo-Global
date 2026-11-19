@@ -82,8 +82,10 @@ export function DashboardSidebar() {
       </nav>
 
       <div className="border-t p-4">
+        {/* #1168/#1169/#1170: this previously linked to "/" (the landing
+            page), not the marketplace it claimed to go to. */}
         <Link
-          href="/"
+          href="/market"
           className="text-sidebar-foreground/70 hover:text-sidebar-foreground flex min-h-11 items-center gap-2 rounded-xl px-3 text-sm transition-colors"
         >
           <ArrowLeft className="size-4" />

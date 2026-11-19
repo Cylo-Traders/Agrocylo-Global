@@ -3,28 +3,26 @@
  * Central place for status enum, allowed transitions, and display metadata.
  */
 
-import type { CampaignStatus as PrismaCampaignStatus } from "@prisma/client";
-
 export const CAMPAIGN_STATUSES = {
-  FUNDING: "FUNDING",
-  FUNDED: "FUNDED",
-  IN_PRODUCTION: "IN_PRODUCTION",
-  HARVESTED: "HARVESTED",
-  SETTLED: "SETTLED",
-  FAILED: "FAILED",
-  DISPUTED: "DISPUTED",
+  FUNDING: 'FUNDING',
+  FUNDED: 'FUNDED',
+  IN_PRODUCTION: 'IN_PRODUCTION',
+  HARVESTED: 'HARVESTED',
+  SETTLED: 'SETTLED',
+  FAILED: 'FAILED',
+  DISPUTED: 'DISPUTED',
 } as const;
 
 type CampaignStatusKey = keyof typeof CAMPAIGN_STATUSES;
 export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[CampaignStatusKey];
 
-export const TERMINAL_STATUSES = new Set(["SETTLED", "FAILED", "DISPUTED"]);
+export const TERMINAL_STATUSES = new Set(['SETTLED', 'FAILED', 'DISPUTED']);
 
 const ALLOWED_TRANSITIONS: Record<CampaignStatus, CampaignStatus[]> = {
-  FUNDING: ["FUNDED", "FAILED", "DISPUTED"],
-  FUNDED: ["IN_PRODUCTION", "FAILED", "DISPUTED"],
-  IN_PRODUCTION: ["HARVESTED", "FAILED", "DISPUTED"],
-  HARVESTED: ["SETTLED", "FAILED", "DISPUTED"],
+  FUNDING: ['FUNDED', 'FAILED', 'DISPUTED'],
+  FUNDED: ['IN_PRODUCTION', 'FAILED', 'DISPUTED'],
+  IN_PRODUCTION: ['HARVESTED', 'FAILED', 'DISPUTED'],
+  HARVESTED: ['SETTLED', 'FAILED', 'DISPUTED'],
   SETTLED: [],
   FAILED: [],
   DISPUTED: [],
@@ -50,18 +48,18 @@ export function getStatusFromEventAction(
   action: string,
 ): CampaignStatus | null {
   switch (action) {
-    case "campaign.invested":
-      return "FUNDED"; // Caller checks if totalRaised === target
-    case "campaign.produce":
-      return "IN_PRODUCTION";
-    case "campaign.harvest":
-      return "HARVESTED";
-    case "campaign.settled":
-      return "SETTLED";
-    case "campaign.failed":
-      return "FAILED";
-    case "campaign.disputed":
-      return "DISPUTED";
+    case 'campaign.invested':
+      return 'FUNDED'; // Caller checks if totalRaised === target
+    case 'campaign.produce':
+      return 'IN_PRODUCTION';
+    case 'campaign.harvest':
+      return 'HARVESTED';
+    case 'campaign.settled':
+      return 'SETTLED';
+    case 'campaign.failed':
+      return 'FAILED';
+    case 'campaign.disputed':
+      return 'DISPUTED';
     default:
       return null;
   }
@@ -69,13 +67,13 @@ export function getStatusFromEventAction(
 
 /** Localized display labels for status values. */
 export const LOCALIZED_STATUS_LABELS: Record<CampaignStatus, string> = {
-  FUNDING: "Raising Funds",
-  FUNDED: "Funded",
-  IN_PRODUCTION: "In Production",
-  HARVESTED: "Harvested",
-  SETTLED: "Settled",
-  FAILED: "Failed",
-  DISPUTED: "Disputed",
+  FUNDING: 'Raising Funds',
+  FUNDED: 'Funded',
+  IN_PRODUCTION: 'In Production',
+  HARVESTED: 'Harvested',
+  SETTLED: 'Settled',
+  FAILED: 'Failed',
+  DISPUTED: 'Disputed',
 };
 
 /** Get both machine status and localized display metadata. */

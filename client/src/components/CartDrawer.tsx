@@ -108,6 +108,19 @@ export default function CartDrawer() {
     return { gross, fee, net };
   }, [cart.groups]);
 
+  // Per-currency subtotal/fee/net breakdown for the review and confirm steps.
+  const totalsPerCurrency = useMemo(() => {
+    const byCurrency = new Map<string, bigint>();
+    for (const g of cart.groups) {
+      const prev = byCurrency.get(g.currency) ?? BigInt(0);
+      byCurrency.set(g.currency, prev + (BigInt(g.subtotal) || BigInt(0)));
+    }
+    return Array.from(byCurrency.entries()).map(([currency, gross]) => {
+      const fee = feeFromGrossStroops(gross);
+      return { currency, gross, fee, net: gross - fee };
+    });
+  }, [cart.groups]);
+
   const closeAndReset = useCallback(() => {
     if (running) return;
     setStep(1);
@@ -907,7 +920,7 @@ function SubtotalRow({
   const fee = feeFromGrossStroops(gross);
   const net = gross - fee;
   return (
-    <div className="space-y-1 text-xs">
+    <div className="space-y-1 text-xs" data-testid="group-totals">
       <div className="flex justify-between">
         <span className="text-muted-foreground">Subtotal</span>
         <span>

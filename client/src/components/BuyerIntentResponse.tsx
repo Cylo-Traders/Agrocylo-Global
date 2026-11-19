@@ -307,10 +307,11 @@ export default function BuyerIntentResponse({
                     
                     {/* Unit Price */}
                     <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-zinc-700 dark:text-zinc-350">
+                      <label htmlFor="proposed-price-per-unit" className="text-xs font-bold text-zinc-700 dark:text-zinc-350">
                         Proposed Price per Unit (XLM)
                       </label>
                       <input
+                        id="proposed-price-per-unit"
                         type="number"
                         step="0.01"
                         min="0.01"
@@ -323,10 +324,11 @@ export default function BuyerIntentResponse({
 
                     {/* Quantity Available */}
                     <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-zinc-700 dark:text-zinc-350">
+                      <label htmlFor="propose-quantity" className="text-xs font-bold text-zinc-700 dark:text-zinc-350">
                         Propose Quantity ({intent.unit})
                       </label>
                       <input
+                        id="propose-quantity"
                         type="number"
                         step="1"
                         min="1"

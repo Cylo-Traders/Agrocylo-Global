@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useWebSocket, type WsMessage } from "@/hooks/useWebSocket";
-import type { Conversation, Message } from "@/services/conversationService";
-import { sendMessage as sendMessageApi } from "@/services/conversationService";
+import { sendMessage as sendMessageApi, type Conversation, type Message } from "@/services/conversationService";
 
 interface MessageThreadProps {
   conversation: Conversation;
@@ -33,11 +32,8 @@ export default function MessageThread({
   const handleWebSocketMessage = useCallback((msg: WsMessage) => {
     if (msg.type === "message.received") {
       const newMessage = msg.payload as Message;
-      if (newMessage && typeof newMessage === "object" && "conversationId" in newMessage) {
-        // Add message if it's for this conversation
-        if ((newMessage as any).conversationId === conversation.id) {
-          setMessages((prev) => [...prev, newMessage]);
-        }
+      if (newMessage && typeof newMessage === "object" && "conversationId" in newMessage && newMessage.conversationId === conversation.id) {
+        setMessages((prev) => [...prev, newMessage]);
       }
     }
   }, [conversation.id]);

@@ -1,9 +1,9 @@
-import { Router } from "express";
-import { z } from "zod";
-import logger from "../config/logger.js";
-import { requireAdmin } from "../middleware/adminAuth.js";
-import { writeLimiter } from "../middleware/rateLimiter.js";
-import { getAnalyticsQueue, getIndexingQueue, getNotificationsQueue } from "../queues/queues.js";
+import { Router } from 'express';
+import { z } from 'zod';
+import logger from '../config/logger.js';
+import { requireAdmin } from '../middleware/adminAuth.js';
+import { writeLimiter } from '../middleware/rateLimiter.js';
+import { getAnalyticsQueue, getIndexingQueue, getNotificationsQueue } from '../queues/queues.js';
 import type {
   AggregateMetricsJobData,
   AggregatePriceIndexJobData,
@@ -13,7 +13,7 @@ import type {
   SendEmailJobData,
   SendPushJobData,
   SendWebSocketJobData,
-} from "../queues/job-types.js";
+} from '../queues/job-types.js';
 
 const router = Router();
 
@@ -21,9 +21,9 @@ const record = z.record(z.string(), z.unknown());
 
 // Allowlist of { name, data } per queue; names match the processor switch cases.
 const jobSchemasByQueue = {
-  indexing: z.discriminatedUnion("name", [
+  indexing: z.discriminatedUnion('name', [
     z.object({
-      name: z.literal("index-contract-events"),
+      name: z.literal('index-contract-events'),
       data: z.object({
         eventType: z.string().min(1),
         eventData: z.unknown(),
@@ -33,39 +33,39 @@ const jobSchemasByQueue = {
       }) satisfies z.ZodType<IndexContractEventsJobData>,
     }),
     z.object({
-      name: z.literal("index-product-data"),
+      name: z.literal('index-product-data'),
       data: z.object({
         productId: z.string().min(1),
-        action: z.enum(["create", "update", "delete"]),
+        action: z.enum(['create', 'update', 'delete']),
         data: record.optional(),
       }) satisfies z.ZodType<IndexProductDataJobData>,
     }),
   ]),
-  analytics: z.discriminatedUnion("name", [
+  analytics: z.discriminatedUnion('name', [
     z.object({
-      name: z.literal("aggregate-metrics"),
+      name: z.literal('aggregate-metrics'),
       data: z.object({
         metricName: z.string().min(1),
-        granularity: z.enum(["hourly", "daily", "weekly"]),
+        granularity: z.enum(['hourly', 'daily', 'weekly']),
         startDate: z.string().min(1),
         endDate: z.string().min(1),
       }) satisfies z.ZodType<AggregateMetricsJobData>,
     }),
     z.object({
-      name: z.literal("generate-report"),
+      name: z.literal('generate-report'),
       data: z.object({
-        reportType: z.enum(["sales", "inventory", "demand", "supply"]),
+        reportType: z.enum(['sales', 'inventory', 'demand', 'supply']),
         parameters: record,
       }) satisfies z.ZodType<GenerateReportJobData>,
     }),
     z.object({
-      name: z.literal("aggregate-price-index"),
+      name: z.literal('aggregate-price-index'),
       data: z.object({}).strict() satisfies z.ZodType<AggregatePriceIndexJobData>,
     }),
   ]),
-  notifications: z.discriminatedUnion("name", [
+  notifications: z.discriminatedUnion('name', [
     z.object({
-      name: z.literal("send-email"),
+      name: z.literal('send-email'),
       data: z.object({
         to: z.string().email(),
         subject: z.string().min(1),
@@ -74,7 +74,7 @@ const jobSchemasByQueue = {
       }) satisfies z.ZodType<SendEmailJobData>,
     }),
     z.object({
-      name: z.literal("send-push"),
+      name: z.literal('send-push'),
       data: z.object({
         walletAddress: z.string().min(1),
         title: z.string().min(1),
@@ -83,7 +83,7 @@ const jobSchemasByQueue = {
       }) satisfies z.ZodType<SendPushJobData>,
     }),
     z.object({
-      name: z.literal("send-websocket"),
+      name: z.literal('send-websocket'),
       data: z.object({
         event: z.string().min(1),
         data: z.unknown(),
@@ -99,17 +99,17 @@ const queuesByName = {
   notifications: getNotificationsQueue,
 } as const;
 
-router.post("/jobs/:queue", writeLimiter, requireAdmin, async (req, res) => {
+router.post('/jobs/:queue', writeLimiter, requireAdmin, async (req, res) => {
   const queueName = req.params.queue as keyof typeof queuesByName;
   const getQueue = queuesByName[queueName];
   if (!getQueue) {
-    res.status(404).json({ message: "Unknown queue", allowed: Object.keys(queuesByName) });
+    res.status(404).json({ message: 'Unknown queue', allowed: Object.keys(queuesByName) });
     return;
   }
 
   const parsed = jobSchemasByQueue[queueName].safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({ message: "Invalid job", issues: parsed.error.issues });
+    res.status(400).json({ message: 'Invalid job', issues: parsed.error.issues });
     return;
   }
 
@@ -117,16 +117,16 @@ router.post("/jobs/:queue", writeLimiter, requireAdmin, async (req, res) => {
     const queue = getQueue();
     const job = await queue.add(parsed.data.name, parsed.data.data, {
       attempts: 5,
-      backoff: { type: "exponential", delay: 1000 },
+      backoff: { type: 'exponential', delay: 1000 },
       removeOnComplete: 1000,
       removeOnFail: 1000,
     });
 
-    logger.info("Job enqueued", { queue: queueName, name: parsed.data.name, jobId: job.id });
+    logger.info('Job enqueued', { queue: queueName, name: parsed.data.name, jobId: job.id });
     res.status(202).json({ queue: queueName, name: parsed.data.name, jobId: job.id });
   } catch (err) {
-    logger.error("Failed to enqueue job", err);
-    res.status(503).json({ message: "Queue unavailable" });
+    logger.error('Failed to enqueue job', err);
+    res.status(503).json({ message: 'Queue unavailable' });
   }
 });
 

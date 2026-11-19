@@ -63,6 +63,7 @@ export function buildContentSecurityPolicy({
     websocketOriginOf(apiUrl),
     originOf(rpcUrl),
     originOf(horizonUrl),
+    "https://nominatim.openstreetmap.org", // Reverse geocoding for location consent
     originOf(env.NEXT_PUBLIC_ANALYTICS_ENDPOINT),
     originOf(env.NEXT_PUBLIC_SENTRY_DSN),
     isDevelopment ? websocketOriginOf(requestOrigin) : undefined,

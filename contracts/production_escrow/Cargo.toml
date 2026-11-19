@@ -1,0 +1,20 @@
+[package]
+name = "production-escrow-v2"
+version = "0.1.0"
+edition = "2021"
+description = "Canonical Soroban production escrow contract for Agrocylo"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+testutils = ["soroban-sdk/testutils"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+registry = { path = "../registry" }
+proptest = "1.4.0"

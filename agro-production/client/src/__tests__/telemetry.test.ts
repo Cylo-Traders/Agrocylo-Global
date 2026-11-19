@@ -1,23 +1,29 @@
 import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 
 describe("Telemetry opt-in behavior", () => {
-  let originalEnv: Record<string, string | undefined>;
+  let originalEnv: NodeJS.ProcessEnv;
   let fetchSpy: ReturnType<typeof vi.spyOn>;
-  let sendBeaconSpy: ReturnType<typeof vi.spyOn>;
+  let sendBeaconSpy: ReturnType<typeof vi.fn>;
+  let originalSendBeacon: PropertyDescriptor | undefined;
 
   beforeEach(() => {
     originalEnv = { ...process.env };
     vi.resetModules();
+    localStorage.removeItem("ap_analytics_consent");
 
     // Mock fetch and sendBeacon
-    fetchSpy = vi.spyOn(global, "fetch" as any).mockResolvedValue(new Response());
-    sendBeaconSpy = vi.spyOn(Navigator.prototype, "sendBeacon").mockReturnValue(true);
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response());
+    originalSendBeacon = Object.getOwnPropertyDescriptor(navigator, "sendBeacon");
+    sendBeaconSpy = vi.fn().mockReturnValue(true);
+    Object.defineProperty(navigator, "sendBeacon", { configurable: true, value: sendBeaconSpy });
   });
 
   afterEach(() => {
     process.env = originalEnv;
     fetchSpy.mockRestore();
     sendBeaconSpy.mockRestore();
+    if (originalSendBeacon) Object.defineProperty(navigator, "sendBeacon", originalSendBeacon);
+    else Reflect.deleteProperty(navigator, "sendBeacon");
   });
 
   it("does not send analytics when NEXT_PUBLIC_TELEMETRY_ENABLED is unset", async () => {
@@ -43,9 +49,52 @@ describe("Telemetry opt-in behavior", () => {
     expect(sendBeaconSpy).not.toHaveBeenCalled();
   });
 
+  it("does not queue events while consent is unknown", async () => {
+    process.env.NEXT_PUBLIC_TELEMETRY_ENABLED = "true";
+    process.env.NEXT_PUBLIC_TELEMETRY_URL = "https://telemetry.example.com/events";
+    vi.resetModules();
+
+    const { trackPageView } = await import("@/lib/analytics");
+    trackPageView("/private");
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(sendBeaconSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not send after a visitor declines analytics", async () => {
+    process.env.NEXT_PUBLIC_TELEMETRY_ENABLED = "true";
+    process.env.NEXT_PUBLIC_TELEMETRY_URL = "https://telemetry.example.com/events";
+    vi.resetModules();
+
+    const { setAnalyticsConsent, trackPageView } = await import("@/lib/analytics");
+    setAnalyticsConsent("denied");
+    trackPageView("/home");
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(sendBeaconSpy).not.toHaveBeenCalled();
+  });
+
+  it("clears queued events when consent is revoked", async () => {
+    process.env.NEXT_PUBLIC_TELEMETRY_ENABLED = "true";
+    process.env.NEXT_PUBLIC_TELEMETRY_URL = "https://telemetry.example.com/events";
+    localStorage.setItem("ap_analytics_consent", "granted");
+    vi.resetModules();
+
+    const { setAnalyticsConsent, trackPageView } = await import("@/lib/analytics");
+    trackPageView("/before-revocation");
+    setAnalyticsConsent("denied");
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(sendBeaconSpy).not.toHaveBeenCalled();
+  });
+
   it("sends analytics when NEXT_PUBLIC_TELEMETRY_ENABLED is true and URL is set", async () => {
     process.env.NEXT_PUBLIC_TELEMETRY_ENABLED = "true";
     process.env.NEXT_PUBLIC_TELEMETRY_URL = "https://telemetry.example.com/events";
+    localStorage.setItem("ap_analytics_consent", "granted");
     vi.resetModules();
 
     const { trackPageView, initAnalytics } = await import("@/lib/analytics");
@@ -56,7 +105,7 @@ describe("Telemetry opt-in behavior", () => {
         href: "http://localhost:3000/home",
         pathname: "/home",
         protocol: "http:",
-      } as any);
+      } as unknown as Location);
     }
 
     trackPageView("/home");
@@ -65,14 +114,15 @@ describe("Telemetry opt-in behavior", () => {
     // Wait for the flush timeout
     await new Promise((resolve) => setTimeout(resolve, 2100));
 
-    expect(fetchSpy).toHaveBeenCalledWith(
+    expect(sendBeaconSpy).toHaveBeenCalledWith(
       "https://telemetry.example.com/events",
-      expect.any(Object)
+      expect.any(String),
     );
   });
 
   it("logs warning when telemetry is enabled but URL is not set", async () => {
     process.env.NEXT_PUBLIC_TELEMETRY_ENABLED = "true";
+    localStorage.setItem("ap_analytics_consent", "granted");
     delete process.env.NEXT_PUBLIC_TELEMETRY_URL;
     vi.resetModules();
 
@@ -121,11 +171,11 @@ describe("Telemetry opt-in behavior", () => {
 
     expect(fetchSpy).toHaveBeenCalledWith(
       "https://telemetry.example.com/errors",
-      expect.objectContaining({
-        body: expect.stringContaining('"context":') &&
-          !expect.stringContaining("sk_live_very_secret_key_123") &&
-          expect.stringContaining("[redacted]"),
-      })
+      expect.objectContaining({ body: expect.stringContaining('"context":') }),
     );
+    const payload = String(fetchSpy.mock.calls[0][1]?.body);
+    expect(payload).not.toContain("sk_live_very_secret_key_123");
+    expect(payload).toContain('"walletAddress":"[redacted]"');
+    expect(payload).toContain("[redacted]");
   });
 });

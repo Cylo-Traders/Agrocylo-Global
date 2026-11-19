@@ -121,6 +121,20 @@ export function validateEndpointUrl(
     };
   }
 
+  // Reject query strings — they frequently carry API tokens and would otherwise
+  // be embedded in the client bundle / echoed in diagnostics.
+  if (url.search) {
+    return {
+      varName,
+      hostname: null,
+      fallbackUsed: false,
+      error:
+        `${varName} must not include a query string. ` +
+        `Remove query parameters (they can leak API tokens) and use a plain https:// URL. ` +
+        `See docs/deployment/environment.md.`,
+    };
+  }
+
   // hostname is safe to expose; full URL / query / port is not echoed
   return { varName, hostname: url.hostname, error: null, fallbackUsed: false };
 }

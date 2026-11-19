@@ -1,4 +1,4 @@
-import { prisma } from "../../config/database.js";
+import { prisma } from '../../config/database.js';
 
 export interface UssdSessionData {
   id: string;
@@ -27,7 +27,7 @@ export async function getSession(sessionId: string): Promise<UssdSessionData | n
 export async function createSession(
   sessionId: string,
   phoneNumber: string,
-  initialStep = "main_menu",
+  initialStep = 'main_menu'
 ): Promise<UssdSessionData> {
   const session = await prisma.ussdSession.create({
     data: {
@@ -43,7 +43,7 @@ export async function createSession(
 
 export async function updateSession(
   sessionId: string,
-  data: { step?: string; state?: Record<string, unknown>; walletAddress?: string | null },
+  data: { step?: string; state?: Record<string, unknown>; walletAddress?: string | null }
 ): Promise<UssdSessionData> {
   const updateData: Record<string, unknown> = {};
   if (data.step !== undefined) updateData.step = data.step;
@@ -64,7 +64,7 @@ export async function deleteSession(sessionId: string): Promise<void> {
 
 export async function getWalletByPhone(
   phoneNumber: string,
-  requireVerified = true,
+  requireVerified = true
 ): Promise<string | null> {
   const link = await prisma.phoneLink.findUnique({ where: { phoneNumber } });
   if (!link) return null;
@@ -74,7 +74,7 @@ export async function getWalletByPhone(
 
 export async function getPhoneByWallet(
   walletAddress: string,
-  requireVerified = true,
+  requireVerified = true
 ): Promise<string | null> {
   const link = await prisma.phoneLink.findFirst({ where: { walletAddress } });
   if (!link) return null;
@@ -85,7 +85,7 @@ export async function getPhoneByWallet(
 export async function linkPhoneToWallet(
   phoneNumber: string,
   walletAddress: string,
-  isVerified = false,
+  isVerified = false
 ): Promise<void> {
   const verifiedAt = isVerified ? new Date() : null;
   await prisma.phoneLink.upsert({

@@ -16,7 +16,7 @@ export default defineConfig({
     // the root package.json `overrides` are the half that actually collapses
     // the tree. `react/jsx-runtime` is included because the automatic JSX
     // runtime is a separate module that would otherwise resolve separately.
-    dedupe: ['react', 'react-dom', 'react/jsx-runtime'],
+    dedupe: ['react', 'react-dom', 'react/jsx-runtime', '@stellar/stellar-sdk'],
   },
   test: {
     environment: 'jsdom',

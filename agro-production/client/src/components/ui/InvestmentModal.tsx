@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useInvest } from "@/hooks/useInvest";
 import { useNetworkFee } from "@/hooks/useNetworkFee";
+import { useWalletNetworkGuard } from "@/hooks/useWalletNetworkGuard";
 import { parseXlmToStroops } from "@/lib/validation";
 import { ButtonSpinner } from "@/components/Skeletons";
 
@@ -25,6 +26,10 @@ export default function InvestmentModal({
   const [amountError, setAmountError] = useState<string | null>(null);
   const { invest, retryIndexing, loading, error, success, phase, txHash } = useInvest();
   const { estimate: feeEstimate, displayXlm: feeDisplay } = useNetworkFee();
+  // Defense in depth (#1087): the shell banner already blocks the entry point,
+  // and the signing layer refuses a mismatched wallet — this keeps the modal's
+  // own submit button from ever starting a wrong-network investment.
+  const networkGuard = useWalletNetworkGuard();
   const modalRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const amountResult = parseXlmToStroops(amount);
@@ -43,6 +48,7 @@ export default function InvestmentModal({
   const isFormValid = amountResult.valid && !amountError;
 
   const handleInvest = async () => {
+    if (networkGuard.blocked) return;
     const result = parseXlmToStroops(amount);
     if (!result.valid) {
       setAmountError(result.error);
@@ -146,10 +152,23 @@ export default function InvestmentModal({
           {feeEstimate?.fromNetwork &&
             ` (${feeEstimate.percentile} of recent fees — adjusts with congestion)`}
         </p>
+        {networkGuard.blocked && networkGuard.reason && (
+          <p className="mt-2 mb-1 text-xs text-error" role="alert" data-testid="invest-network-guard">
+            {networkGuard.reason}
+          </p>
+        )}
         <button
           onClick={handleInvest}
-          disabled={loading || awaitingIndex || !isFormValid}
-          aria-label={loading ? "Processing investment" : !isFormValid ? "Enter a valid amount to invest" : "Invest in campaign"}
+          disabled={loading || awaitingIndex || !isFormValid || networkGuard.blocked}
+          aria-label={
+            networkGuard.blocked
+              ? "Investment blocked: switch your wallet network"
+              : loading
+                ? "Processing investment"
+                : !isFormValid
+                  ? "Enter a valid amount to invest"
+                  : "Invest in campaign"
+          }
           className="w-full py-2 bg-primary-600 text-white rounded hover:bg-primary-700 disabled:opacity-50 inline-flex items-center justify-center gap-2"
         >
           {loading && <ButtonSpinner />}

@@ -217,6 +217,12 @@ function main(argv) {
     return 0;
   }
 
+  const serverFailures = require("./lib/server-dependency-policy").checkRepository(layout.REPO_ROOT);
+  if (serverFailures.length) {
+    for (const failure of serverFailures) console.error(failure);
+    return 1;
+  }
+
   const apps = loadApps(layout.REPO_ROOT);
   const result = checkSharedVersions({ apps, rootDir: layout.REPO_ROOT, ...args });
 

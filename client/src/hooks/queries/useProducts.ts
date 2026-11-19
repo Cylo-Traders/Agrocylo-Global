@@ -49,10 +49,9 @@ export function useProduct(id: string) {
 
 /** Create product (farmer only). Invalidates related lists on success. */
 export function useCreateProduct() {
-  const { address } = useWallet();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: ProductWriteInput) => createProduct(address!, input),
+    mutationFn: (input: ProductWriteInput) => createProduct(input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.products.all() });
     },
@@ -61,11 +60,10 @@ export function useCreateProduct() {
 
 /** Update product. Invalidates lists and the specific detail. */
 export function useUpdateProduct() {
-  const { address } = useWallet();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, input }: { id: string; input: ProductWriteInput }) =>
-      updateProduct(address!, id, input),
+      updateProduct(id, input),
     onSuccess: (updated) => {
       qc.setQueryData(queryKeys.products.detail(updated.id), updated);
       qc.invalidateQueries({ queryKey: queryKeys.products.all() });
@@ -99,10 +97,9 @@ export function useAdminDelistProduct() {
 
 /** Soft-delete product. */
 export function useDeleteProduct() {
-  const { address } = useWallet();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => softDeleteProduct(address!, id),
+    mutationFn: (id: string) => softDeleteProduct(id),
     onSuccess: (_, id) => {
       qc.removeQueries({ queryKey: queryKeys.products.detail(id) });
       qc.invalidateQueries({ queryKey: queryKeys.products.all() });

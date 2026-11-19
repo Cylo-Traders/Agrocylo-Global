@@ -35,6 +35,7 @@ const DEFAULT_LOG_DIR = ".smoke-logs";
 
 /** Deterministic, non-production configuration for the smoke run. */
 const SMOKE_ENV = {
+  NEXT_PUBLIC_API_URL: "http://localhost:5001/api/v1",
   NODE_ENV: "development",
   NEXT_TELEMETRY_DISABLED: "1",
   NEXT_PUBLIC_DEMO_MODE: "true",

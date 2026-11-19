@@ -1,6 +1,6 @@
-import { scValToNative } from "@stellar/stellar-sdk";
-import type { ParsedEscrowEvent } from "../../types/escrowEvent.js";
-import type { RawRpcEvent } from "../../types/rawRpcEvent.js";
+import { scValToNative } from '@stellar/stellar-sdk';
+import type { ParsedEscrowEvent } from '../../types/escrowEvent.js';
+import type { RawRpcEvent } from '../../types/rawRpcEvent.js';
 
 /**
  * EscrowEventParser: Pure utilities to extract data from raw Soroban events.
@@ -26,12 +26,12 @@ export class EscrowEventParser {
     const base = {
       action,
       ledger: event.ledger,
-      eventIndex: parseInt(event.id.split('-')[1] ?? "") || 0,
+      eventIndex: parseInt(event.id.split('-')[1] ?? '') || 0,
       timestamp,
     };
 
     switch (action) {
-      case "created":
+      case 'created':
         return {
           ...base,
           orderId: data[0].toString(),
@@ -40,46 +40,46 @@ export class EscrowEventParser {
           amount: data[3].toString(),
           token: data[4],
         };
-      case "delivered":
+      case 'delivered':
         // Event: (order_id, farmer, buyer, delivery_timestamp)
         return {
           ...base,
           orderId: data[0].toString(),
           buyer: data[2],
           seller: data[1], // farmer is seller
-          amount: "0", // Not in event
+          amount: '0', // Not in event
         };
-      case "confirmed":
+      case 'confirmed':
         return {
           ...base,
           orderId: data[0].toString(),
           buyer: data[1],
           seller: data[2],
-          amount: "0", // Not in event
+          amount: '0', // Not in event
         };
-      case "refunded":
+      case 'refunded':
         return {
           ...base,
           orderId: data[0].toString(),
           buyer: data[1],
-          seller: "", // Not in event
-          amount: "0", // Not in event
+          seller: '', // Not in event
+          amount: '0', // Not in event
         };
-      case "dispute":
+      case 'dispute':
         return {
           ...base,
           orderId: data[0].toString(),
           buyer: data[1], // Assuming caller is relevant
-          seller: "",
-          amount: "0",
+          seller: '',
+          amount: '0',
         };
-      case "resolved":
+      case 'resolved':
         return {
           ...base,
           orderId: data[0].toString(),
-          buyer: data[1] ? "REFUNDED" : "COMPLETED", // Using buyer field to indicate outcome
-          seller: "",
-          amount: "0",
+          buyer: data[1] ? 'REFUNDED' : 'COMPLETED', // Using buyer field to indicate outcome
+          seller: '',
+          amount: '0',
         };
       default:
         throw new Error(`Unknown action: ${action}`);

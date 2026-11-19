@@ -98,7 +98,12 @@ export class WsServer {
   private handleClientMessage(socket: WebSocket, data: RawData): void {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(data.toString());
+      const raw = Array.isArray(data)
+        ? Buffer.concat(data)
+        : Buffer.isBuffer(data)
+          ? data
+          : Buffer.from(new Uint8Array(data));
+      parsed = JSON.parse(raw.toString());
     } catch {
       logger.warn('WebSocket received non-JSON message; closing connection');
       socket.close(4001, 'Bad Request');

@@ -16,9 +16,8 @@
  *     total allocation this position represents.
  */
 
-import api from "../lib/apiClient";
+import api, { isApiError, isNetworkError } from "../lib/apiClient";
 import { formatStroopsForDisplay } from "../lib/validation";
-import { isApiError, isNetworkError } from "../lib/apiClient";
 
 /** Server shape — mirrors InvestorBasketSummarySchema (stroops, i128 strings). */
 export interface InvestorBasketPositionDTO {
@@ -105,7 +104,7 @@ export function mapInvestorBasket(dto: InvestorBasketSummaryDTO): BasketSummary 
       currentValue:
         position.claimed && position.payoutAmount
           ? formatStroopsForDisplay(position.payoutAmount, 7)
-          : position.allocatedAmount,
+          : formatStroopsForDisplay(position.amount, 7),
       weight: Number((positionAllocated * 100n) / safeAllocated), // amount-exact-ok
       claimed: position.claimed,
     };

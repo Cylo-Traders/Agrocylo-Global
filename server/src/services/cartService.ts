@@ -20,16 +20,24 @@ function validateQuantity(input: unknown): string {
   if (!/^\d+(\.\d+)?$/.test(value)) {
     throw new ApiError(400, 'Bad Request', 'quantity must be a positive decimal number');
   }
-  const [intPart, fracPart = ''] = value.split('.');
+  const [intPart = '', fracPart = ''] = value.split('.');
   const significant = intPart.replace(/^0+/, '');
   if (!significant || significant === '0') {
     throw new ApiError(400, 'Bad Request', 'quantity must be greater than zero');
   }
   if (significant.length > QUANTITY_MAX_INT_DIGITS) {
-    throw new ApiError(400, 'Bad Request', `quantity is out of range (max ${QUANTITY_MAX_INT_DIGITS} integer digits)`);
+    throw new ApiError(
+      400,
+      'Bad Request',
+      `quantity is out of range (max ${QUANTITY_MAX_INT_DIGITS} integer digits)`
+    );
   }
   if (fracPart.length > QUANTITY_MAX_SCALE) {
-    throw new ApiError(400, 'Bad Request', `quantity supports at most ${QUANTITY_MAX_SCALE} decimal places`);
+    throw new ApiError(
+      400,
+      'Bad Request',
+      `quantity supports at most ${QUANTITY_MAX_SCALE} decimal places`
+    );
   }
   return value;
 }
@@ -96,7 +104,8 @@ async function ensureCartActive(tx: Tx, cartId: string, buyerWallet: string): Pr
     select: { status: true },
   });
   if (!cart) throw new ApiError(404, 'Not Found', 'Active cart not found');
-  if (cart.status !== 'active') throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
+  if (cart.status !== 'active')
+    throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
 }
 
 /**
@@ -112,7 +121,16 @@ function toMinorUnits(value: string): bigint {
 }
 
 function groupRows(rows: CartItemRow[]) {
-  const groups = new Map<string, { farmer_wallet: string; farmer_name: string; currency: string; subtotal: bigint; items: unknown[] }>();
+  const groups = new Map<
+    string,
+    {
+      farmer_wallet: string;
+      farmer_name: string;
+      currency: string;
+      subtotal: bigint;
+      items: unknown[];
+    }
+  >();
   for (const row of rows) {
     const key = `${row.farmer_wallet}|${row.currency}`;
     const qtyMinor = toMinorUnits(row.quantity);
@@ -126,14 +144,16 @@ function groupRows(rows: CartItemRow[]) {
         farmer_name: row.farmer_name,
         currency: row.currency,
         subtotal: lineAmount,
-        items: [{
-          id: row.item_id,
-          product_id: row.product_id,
-          name: row.product_name,
-          quantity: row.quantity,
-          unit: row.unit,
-          unit_price: row.unit_price,
-        }],
+        items: [
+          {
+            id: row.item_id,
+            product_id: row.product_id,
+            name: row.product_name,
+            quantity: row.quantity,
+            unit: row.unit,
+            unit_price: row.unit_price,
+          },
+        ],
       });
       continue;
     }
@@ -150,7 +170,10 @@ function groupRows(rows: CartItemRow[]) {
   return Array.from(groups.values()).map((g) => ({ ...g, subtotal: g.subtotal.toString() }));
 }
 
-async function fetchCartRows(cartId: string, tx: Tx | typeof prisma = prisma): Promise<CartItemRow[]> {
+async function fetchCartRows(
+  cartId: string,
+  tx: Tx | typeof prisma = prisma
+): Promise<CartItemRow[]> {
   const items = await tx.cartItem.findMany({
     where: { cartId },
     orderBy: { createdAt: 'asc' },
@@ -190,7 +213,10 @@ function emitCartEvent(buyerWallet: string, cartData: unknown) {
   wsManager.broadcastTo(buyerWallet, 'cart:updated', cartData);
 }
 
-export async function addItem(buyerWallet: string, payload: { product_id?: string; quantity?: string }) {
+export async function addItem(
+  buyerWallet: string,
+  payload: { product_id?: string; quantity?: string }
+) {
   if (!payload.product_id || !payload.quantity) {
     throw new ApiError(400, 'Bad Request', 'product_id and quantity are required');
   }
@@ -268,11 +294,13 @@ export async function removeItem(buyerWallet: string, itemId: string) {
       select: { cartId: true, cart: { select: { status: true } } },
     });
     if (!owner) throw new ApiError(404, 'Not Found', 'Cart item not found');
-    if (owner.cart.status !== 'active') throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
+    if (owner.cart.status !== 'active')
+      throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
     const removed = await tx.cartItem.deleteMany({
       where: { id: itemId, cart: { buyerWallet, status: 'active' } },
     });
-    if (removed.count === 0) throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
+    if (removed.count === 0)
+      throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
     const rows = await fetchCartRows(owner.cartId, tx);
     const result = { cart_id: owner.cartId, groups: groupRows(rows) };
     emitCartEvent(buyerWallet, result);
@@ -291,7 +319,8 @@ export async function clearCart(buyerWallet: string) {
       where: { id: cart.id, buyerWallet, status: 'active' },
       data: { updatedAt: new Date() },
     });
-    if (claimed.count === 0) throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
+    if (claimed.count === 0)
+      throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
     await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
     const result = { cart_id: cart.id, groups: [] };
     emitCartEvent(buyerWallet, result);
@@ -311,7 +340,11 @@ export async function checkout(buyerWallet: string) {
     const rows = await fetchCartRows(cartId, tx);
     const unavailable = rows.filter((r) => !r.is_available);
     if (unavailable.length > 0) {
-      throw new ApiError(409, 'Conflict', `Unavailable items in cart: ${unavailable.map((x) => x.product_name).join(', ')}`);
+      throw new ApiError(
+        409,
+        'Conflict',
+        `Unavailable items in cart: ${unavailable.map((x) => x.product_name).join(', ')}`
+      );
     }
 
     const grouped = groupRows(rows);
@@ -337,7 +370,13 @@ export async function checkout(buyerWallet: string) {
       where: { id: cartId, buyerWallet, status: 'active' },
       data: { status: 'checked_out' },
     });
-    if (updated.count === 0) throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
-    return { orders, total_gross: totalGross.toString(), total_fee: totalFee.toString(), total_net: totalNet.toString() };
+    if (updated.count === 0)
+      throw new ApiError(409, 'Conflict', 'Cart is checked out and read-only');
+    return {
+      orders,
+      total_gross: totalGross.toString(),
+      total_fee: totalFee.toString(),
+      total_net: totalNet.toString(),
+    };
   });
 }

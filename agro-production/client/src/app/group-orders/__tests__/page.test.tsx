@@ -7,6 +7,7 @@ vi.mock("@/hooks/useWebSocket", () => ({
 }));
 
 global.fetch = vi.fn();
+const fetchMock = vi.mocked(global.fetch);
 
 describe("GroupOrdersPage", () => {
   beforeEach(() => {
@@ -14,16 +15,16 @@ describe("GroupOrdersPage", () => {
   });
 
   it("renders loading state", () => {
-    (global.fetch as any).mockImplementation(() => new Promise(() => {}));
+    fetchMock.mockImplementation(() => new Promise(() => {}) as Promise<Response>);
     render(<GroupOrdersPage />);
     expect(screen.getByText(/loading group orders/i)).toBeInTheDocument();
   });
 
   it("renders empty state when no orders", async () => {
-    (global.fetch as any).mockResolvedValue({
+    fetchMock.mockResolvedValue({
       ok: true,
       json: async () => [],
-    });
+    } as unknown as Response);
 
     render(<GroupOrdersPage />);
     await waitFor(() => {
@@ -44,10 +45,10 @@ describe("GroupOrdersPage", () => {
       },
     ];
 
-    (global.fetch as any).mockResolvedValue({
+    fetchMock.mockResolvedValue({
       ok: true,
       json: async () => mockOrders,
-    });
+    } as unknown as Response);
 
     render(<GroupOrdersPage />);
     await waitFor(() => {
@@ -69,10 +70,10 @@ describe("GroupOrdersPage", () => {
       },
     ];
 
-    (global.fetch as any).mockResolvedValue({
+    fetchMock.mockResolvedValue({
       ok: true,
       json: async () => mockOrders,
-    });
+    } as unknown as Response);
 
     render(<GroupOrdersPage />);
     await waitFor(() => {

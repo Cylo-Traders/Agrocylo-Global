@@ -29,9 +29,47 @@ export interface AnalyticsPayload {
 }
 
 const TELEMETRY_ENABLED = process.env.NEXT_PUBLIC_TELEMETRY_ENABLED === "true";
+const CONSENT_KEY = "ap_analytics_consent";
 
 const eventQueue: Array<{ name: EventName; properties?: EventProperties }> = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
+let initialized = false;
+
+function hasAnalyticsConsent() {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(CONSENT_KEY) === "granted";
+  } catch {
+    return false;
+  }
+}
+
+export type AnalyticsConsentState = "unknown" | "granted" | "denied";
+
+export function getAnalyticsConsent(): AnalyticsConsentState {
+  if (typeof window === "undefined") return "unknown";
+  try {
+    const value = window.localStorage.getItem(CONSENT_KEY);
+    return value === "granted" || value === "denied" ? value : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+export function setAnalyticsConsent(consent: "granted" | "denied") {
+  try {
+    window.localStorage.setItem(CONSENT_KEY, consent);
+  } catch {
+    // Fail closed when consent cannot be persisted.
+    consent = "denied";
+  }
+  if (consent === "denied") {
+    eventQueue.length = 0;
+    if (flushTimer) clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  window.dispatchEvent(new CustomEvent("agrocylo:analytics-consent", { detail: consent }));
+}
 
 function sendToTelemetryEndpoint(payload: AnalyticsPayload) {
   if (!TELEMETRY_ENABLED) return;
@@ -58,7 +96,10 @@ function sendToTelemetryEndpoint(payload: AnalyticsPayload) {
 }
 
 function flush() {
-  if (!TELEMETRY_ENABLED) return;
+  if (!TELEMETRY_ENABLED || !hasAnalyticsConsent()) {
+    eventQueue.length = 0;
+    return;
+  }
 
   if (flushTimer) {
     clearTimeout(flushTimer);
@@ -78,7 +119,7 @@ function flush() {
 }
 
 function enqueue(name: EventName, properties?: EventProperties) {
-  if (!TELEMETRY_ENABLED) return;
+  if (!TELEMETRY_ENABLED || !hasAnalyticsConsent()) return;
   eventQueue.push({ name, properties });
   if (!flushTimer) {
     flushTimer = setTimeout(flush, 2000);
@@ -122,21 +163,12 @@ export function trackError(errorType: string, message: string) {
 }
 
 export function initAnalytics() {
-  if (typeof window === "undefined" || !TELEMETRY_ENABLED) return;
+  if (typeof window === "undefined" || !TELEMETRY_ENABLED || !hasAnalyticsConsent() || initialized) return;
+  initialized = true;
 
   window.addEventListener("beforeunload", () => flush());
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") flush();
   });
 
-  trackPageView(window.location.pathname);
-
-  const originalPushState = history.pushState;
-  history.pushState = function (...args) {
-    originalPushState.apply(this, args);
-    trackPageView(window.location.pathname);
-  };
-  window.addEventListener("popstate", () => {
-    trackPageView(window.location.pathname);
-  });
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ProductionEventParser } from './parser.js';
-import type { RawSorobanEvent } from './types.js';
+import type { EventAction, RawSorobanEvent } from './types.js';
 
 // Helpers — build minimal fake raw events with pre-encoded topics/values.
 // Rather than calling the real stellar-sdk encoder, we test the parser against
@@ -117,7 +117,13 @@ describe('ProductionEventParser', () => {
 
   describe('basket.created', () => {
     it('parses correctly', () => {
-      const raw = makeRaw('basket', 'created', [1, 1n, 3, 1_700_001_000n, 1000n]);
+      const raw = makeRaw('basket', 'created', [
+        1,
+        1n,
+        3,
+        1_700_001_000n,
+        1000n,
+      ]);
       const event = ProductionEventParser.parse(raw);
       expect(event.action).toBe('basket.created');
       if (event.action === 'basket.created') {
@@ -198,6 +204,106 @@ describe('ProductionEventParser', () => {
         expect(event.depositor).toBe('GDEPOSITOR');
         expect(event.payout).toBe('620');
       }
+    });
+  });
+
+  describe('dispute.opened', () => {
+    it('parses correctly', () => {
+      const raw = makeRaw('dispute', 'opened', [
+        1n,
+        3n,
+        'GINITIATOR',
+        'GRESPONDENT',
+      ]);
+      const event = ProductionEventParser.parse(raw);
+      expect(event.action).toBe('dispute.opened');
+      if (event.action === 'dispute.opened') {
+        expect(event.disputeId).toBe('1');
+        expect(event.campaignId).toBe('3');
+        expect(event.initiatorAddress).toBe('GINITIATOR');
+        expect(event.respondentAddress).toBe('GRESPONDENT');
+      }
+    });
+  });
+
+  describe('dispute.evidence_submitted', () => {
+    it('parses correctly', () => {
+      const raw = makeRaw('dispute', 'evidence_submitted', [
+        1n,
+        'GSUBMITTER',
+        'https://example.com/evidence.pdf',
+        'HASH123',
+      ]);
+      const event = ProductionEventParser.parse(raw);
+      expect(event.action).toBe('dispute.evidence_submitted');
+      if (event.action === 'dispute.evidence_submitted') {
+        expect(event.disputeId).toBe('1');
+        expect(event.submitterAddress).toBe('GSUBMITTER');
+        expect(event.evidenceUrl).toBe('https://example.com/evidence.pdf');
+        expect(event.evidenceHash).toBe('HASH123');
+      }
+    });
+  });
+
+  describe('dispute.resolved', () => {
+    it('parses correctly', () => {
+      const raw = makeRaw('dispute', 'resolved', [1n, 'FAVOR_BUYER']);
+      const event = ProductionEventParser.parse(raw);
+      expect(event.action).toBe('dispute.resolved');
+      if (event.action === 'dispute.resolved') {
+        expect(event.disputeId).toBe('1');
+        expect(event.resolutionOutcome).toBe('FAVOR_BUYER');
+      }
+    });
+  });
+
+  describe('dispute.dismissed', () => {
+    it('parses correctly', () => {
+      const raw = makeRaw('dispute', 'dismissed', [1n]);
+      const event = ProductionEventParser.parse(raw);
+      expect(event.action).toBe('dispute.dismissed');
+      if (event.action === 'dispute.dismissed') {
+        expect(event.disputeId).toBe('1');
+      }
+    });
+  });
+
+  describe('EventAction coverage', () => {
+    const allActions: EventAction[] = [
+      'campaign.created',
+      'campaign.invested',
+      'campaign.settled',
+      'campaign.produce',
+      'campaign.harvest',
+      'campaign.failed',
+      'campaign.disputed',
+      'campaign.claimed',
+      'campaign.refunded',
+      'campaign.tranche',
+      'order.created',
+      'order.confirmed',
+      'dispute.opened',
+      'dispute.evidence_submitted',
+      'dispute.resolved',
+      'dispute.dismissed',
+      'basket.created',
+      'basket.deposit',
+      'basket.funded',
+      'basket.fw_close',
+      'basket.withdrawn',
+      'basket.claimed',
+    ];
+
+    // A generous tuple of filler values — enough positional args to satisfy
+    // every event type's field count, regardless of expected type.
+    const filler = [1n, 'GADDR1', 'GADDR2', 1n, 1n, 1n];
+
+    it.each(allActions)('parses %s without throwing', (action) => {
+      const [namespace, verb] = action.split('.') as [string, string];
+      const raw = makeRaw(namespace, verb, filler);
+      expect(() => ProductionEventParser.parse(raw)).not.toThrow();
+      const event = ProductionEventParser.parse(raw);
+      expect(event.action).toBe(action);
     });
   });
 
@@ -310,7 +416,12 @@ describe('ProductionEventParser', () => {
 
     it('throws for order namespace with unknown verb', () => {
       const raw = makeRaw('order', 'cancelled', []);
-      expect(() => ProductionEventParser.parse(raw)).toThrow(/unknown action/);
+      // "order.cancelled" isn't a registered EventAction, so this now fails
+      // canonical schema validation rather than reaching the switch's default
+      // case — either way the parser must reject it.
+      expect(() => ProductionEventParser.parse(raw)).toThrow(
+        /unknown (action|event type)/i,
+      );
     });
 
     it('tryParse returns null instead of throwing for order unknown verb', () => {

@@ -17,7 +17,7 @@ describe("MilestoneEscrowProgress", () => {
   it("highlights planted → growing timeline for index 1", () => {
     render(<MilestoneEscrowProgress currentMilestoneIndex={1} />);
 
-    expect(screen.getByText("Growing")).toBeInTheDocument();
+    expect(screen.getByTestId("milestone-current-status")).toHaveTextContent("Growing");
     expect(
       screen.getByText("Crop is actively growing in the field."),
     ).toBeInTheDocument();
@@ -62,7 +62,7 @@ describe("MilestoneEscrowProgress", () => {
   it("shows complete state at delivered", () => {
     render(<MilestoneEscrowProgress currentMilestoneIndex={4} canAdvance />);
 
-    expect(screen.getByText("Delivered")).toBeInTheDocument();
+    expect(screen.getByTestId("milestone-current-status")).toHaveTextContent("Delivered");
     expect(
       screen.queryByRole("button", { name: /Advance/i }),
     ).not.toBeInTheDocument();

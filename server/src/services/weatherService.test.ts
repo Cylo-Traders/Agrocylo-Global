@@ -1,21 +1,21 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.mock("../config/logger.js", () => ({
+vi.mock('../config/logger.js', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-vi.mock("../config/database.js", () => ({
+vi.mock('../config/database.js', () => ({
   prisma: {
     location: { findUnique: vi.fn(), findMany: vi.fn() },
     weatherReading: { create: vi.fn() },
   },
 }));
 
-vi.mock("./notificationService.js", () => ({
+vi.mock('./notificationService.js', () => ({
   NotificationService: { notify: vi.fn() },
 }));
 
-vi.mock("./notificationPreferenceService.js", () => ({
+vi.mock('./notificationPreferenceService.js', () => ({
   getNotificationPreferences: vi.fn(),
   DEFAULT_NOTIFICATION_PREFS: {
     types: {
@@ -29,8 +29,8 @@ vi.mock("./notificationPreferenceService.js", () => ({
     delivery: { toast: true, email: false, push: false },
     sound: true,
     quietHoursEnabled: false,
-    quietStart: "22:00",
-    quietEnd: "08:00",
+    quietStart: '22:00',
+    quietEnd: '08:00',
   },
 }));
 
@@ -40,12 +40,12 @@ import {
   pollAllFarmerLocations,
   WEATHER_THRESHOLDS,
   type WeatherReading,
-} from "./weatherService.js";
-import { prisma } from "../config/database.js";
-import { NotificationService } from "./notificationService.js";
-import { getNotificationPreferences } from "./notificationPreferenceService.js";
-import { NotificationEventType } from "../enums/notificationEventType.js";
-import { DEFAULT_NOTIFICATION_PREFS } from "./notificationPreferenceService.js";
+} from './weatherService.js';
+import { prisma } from '../config/database.js';
+import { NotificationService } from './notificationService.js';
+import { getNotificationPreferences } from './notificationPreferenceService.js';
+import { NotificationEventType } from '../enums/notificationEventType.js';
+import { DEFAULT_NOTIFICATION_PREFS } from './notificationPreferenceService.js';
 
 const notify = vi.mocked(NotificationService.notify);
 const findUnique = vi.mocked(prisma.location.findUnique);
@@ -59,70 +59,70 @@ function calmReading(overrides: Partial<WeatherReading> = {}): WeatherReading {
     precipitationMm: 0,
     windSpeedKph: 10,
     conditionCode: 1,
-    recordedAt: new Date("2026-07-27T00:00:00Z"),
+    recordedAt: new Date('2026-07-27T00:00:00Z'),
     ...overrides,
   };
 }
 
-describe("weatherService.evaluateThresholds", () => {
-  it("returns no alerts for calm conditions", () => {
+describe('weatherService.evaluateThresholds', () => {
+  it('returns no alerts for calm conditions', () => {
     expect(evaluateThresholds(calmReading())).toEqual([]);
   });
 
-  it("flags heavy rain as a watch", () => {
+  it('flags heavy rain as a watch', () => {
     const alerts = evaluateThresholds(
-      calmReading({ precipitationMm: WEATHER_THRESHOLDS.heavyRainMm }),
+      calmReading({ precipitationMm: WEATHER_THRESHOLDS.heavyRainMm })
     );
-    expect(alerts).toEqual([{ severity: "watch", condition: "Heavy rainfall" }]);
+    expect(alerts).toEqual([{ severity: 'watch', condition: 'Heavy rainfall' }]);
   });
 
-  it("flags extreme rain as a warning instead of a watch", () => {
+  it('flags extreme rain as a warning instead of a watch', () => {
     const alerts = evaluateThresholds(
-      calmReading({ precipitationMm: WEATHER_THRESHOLDS.extremeRainMm }),
+      calmReading({ precipitationMm: WEATHER_THRESHOLDS.extremeRainMm })
     );
-    expect(alerts).toEqual([{ severity: "warning", condition: "Extreme rainfall" }]);
+    expect(alerts).toEqual([{ severity: 'warning', condition: 'Extreme rainfall' }]);
   });
 
-  it("flags high and extreme wind", () => {
+  it('flags high and extreme wind', () => {
     expect(
-      evaluateThresholds(calmReading({ windSpeedKph: WEATHER_THRESHOLDS.highWindKph })),
-    ).toEqual([{ severity: "watch", condition: "High wind" }]);
+      evaluateThresholds(calmReading({ windSpeedKph: WEATHER_THRESHOLDS.highWindKph }))
+    ).toEqual([{ severity: 'watch', condition: 'High wind' }]);
     expect(
-      evaluateThresholds(calmReading({ windSpeedKph: WEATHER_THRESHOLDS.extremeWindKph })),
-    ).toEqual([{ severity: "warning", condition: "Extreme wind" }]);
+      evaluateThresholds(calmReading({ windSpeedKph: WEATHER_THRESHOLDS.extremeWindKph }))
+    ).toEqual([{ severity: 'warning', condition: 'Extreme wind' }]);
   });
 
-  it("flags frost risk and extreme heat", () => {
+  it('flags frost risk and extreme heat', () => {
+    expect(evaluateThresholds(calmReading({ temperatureC: WEATHER_THRESHOLDS.frostC }))).toEqual([
+      { severity: 'warning', condition: 'Frost risk' },
+    ]);
     expect(
-      evaluateThresholds(calmReading({ temperatureC: WEATHER_THRESHOLDS.frostC })),
-    ).toEqual([{ severity: "warning", condition: "Frost risk" }]);
-    expect(
-      evaluateThresholds(calmReading({ temperatureC: WEATHER_THRESHOLDS.extremeHeatC })),
-    ).toEqual([{ severity: "warning", condition: "Extreme heat" }]);
+      evaluateThresholds(calmReading({ temperatureC: WEATHER_THRESHOLDS.extremeHeatC }))
+    ).toEqual([{ severity: 'warning', condition: 'Extreme heat' }]);
   });
 
-  it("combines multiple simultaneous alerts", () => {
+  it('combines multiple simultaneous alerts', () => {
     const alerts = evaluateThresholds(
       calmReading({
         precipitationMm: WEATHER_THRESHOLDS.extremeRainMm,
         windSpeedKph: WEATHER_THRESHOLDS.highWindKph,
-      }),
+      })
     );
     expect(alerts).toHaveLength(2);
     expect(alerts).toEqual(
       expect.arrayContaining([
-        { severity: "warning", condition: "Extreme rainfall" },
-        { severity: "watch", condition: "High wind" },
-      ]),
+        { severity: 'warning', condition: 'Extreme rainfall' },
+        { severity: 'watch', condition: 'High wind' },
+      ])
     );
   });
 });
 
-const DEFAULT_MOCK_TIME = "2026-07-27T00:00";
+const DEFAULT_MOCK_TIME = '2026-07-27T00:00';
 
 function mockFetchResponse(
   current: Record<string, number | string>,
-  time: string = DEFAULT_MOCK_TIME,
+  time: string = DEFAULT_MOCK_TIME
 ) {
   return {
     ok: true,
@@ -139,8 +139,8 @@ function mockMalformedPayload(payload: unknown) {
   };
 }
 
-describe("weatherService.pollFarmerWeather", () => {
-  const wallet = "GFARMER123";
+describe('weatherService.pollFarmerWeather', () => {
+  const wallet = 'GFARMER123';
 
   beforeEach(() => {
     vi.resetAllMocks();
@@ -160,18 +160,18 @@ describe("weatherService.pollFarmerWeather", () => {
     vi.unstubAllGlobals();
   });
 
-  it("persists the raw reading for later oracle-attestation submission", async () => {
+  it('persists the raw reading for later oracle-attestation submission', async () => {
     vi.stubGlobal(
-      "fetch",
+      'fetch',
       vi.fn().mockResolvedValue(
         mockFetchResponse({
           temperature_2m: 21,
           precipitation: 0,
           wind_speed_10m: 8,
           weather_code: 1,
-          time: "2026-07-27T00:00",
-        }),
-      ),
+          time: '2026-07-27T00:00',
+        })
+      )
     );
 
     await pollFarmerWeather(wallet);
@@ -185,24 +185,24 @@ describe("weatherService.pollFarmerWeather", () => {
           temperatureC: 21,
           precipitationMm: 0,
           windSpeedKph: 8,
-          source: "open-meteo",
+          source: 'open-meteo',
         }),
-      }),
+      })
     );
     expect(notify).not.toHaveBeenCalled();
   });
 
-  it("dispatches a notification when a threshold is exceeded and the farmer opted in", async () => {
+  it('dispatches a notification when a threshold is exceeded and the farmer opted in', async () => {
     vi.stubGlobal(
-      "fetch",
+      'fetch',
       vi.fn().mockResolvedValue(
         mockFetchResponse({
           temperature_2m: 25,
           precipitation: WEATHER_THRESHOLDS.extremeRainMm,
           wind_speed_10m: 5,
           weather_code: 65,
-        }),
-      ),
+        })
+      )
     );
 
     await pollFarmerWeather(wallet);
@@ -211,27 +211,27 @@ describe("weatherService.pollFarmerWeather", () => {
       expect.objectContaining({
         walletAddress: wallet,
         type: NotificationEventType.WEATHER_ALERT,
-        condition: "Extreme rainfall",
-        severity: "warning",
-      }),
+        condition: 'Extreme rainfall',
+        severity: 'warning',
+      })
     );
   });
 
-  it("does not dispatch when the farmer has disabled weather alerts", async () => {
+  it('does not dispatch when the farmer has disabled weather alerts', async () => {
     getPrefs.mockResolvedValue({
       ...DEFAULT_NOTIFICATION_PREFS,
       types: { ...DEFAULT_NOTIFICATION_PREFS.types, weatherAlerts: false },
     });
     vi.stubGlobal(
-      "fetch",
+      'fetch',
       vi.fn().mockResolvedValue(
         mockFetchResponse({
           temperature_2m: 25,
           precipitation: WEATHER_THRESHOLDS.extremeRainMm,
           wind_speed_10m: 5,
           weather_code: 65,
-        }),
-      ),
+        })
+      )
     );
 
     await pollFarmerWeather(wallet);
@@ -239,9 +239,9 @@ describe("weatherService.pollFarmerWeather", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
-  it("is a no-op when the farmer has no registered location", async () => {
+  it('is a no-op when the farmer has no registered location', async () => {
     findUnique.mockResolvedValue(null as never);
-    vi.stubGlobal("fetch", vi.fn());
+    vi.stubGlobal('fetch', vi.fn());
 
     await pollFarmerWeather(wallet);
 
@@ -249,18 +249,18 @@ describe("weatherService.pollFarmerWeather", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
-  it("rejects an empty current-weather payload without persisting a zero-value reading", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockMalformedPayload({})));
+  it('rejects an empty current-weather payload without persisting a zero-value reading', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockMalformedPayload({})));
 
     await expect(pollFarmerWeather(wallet)).rejects.toThrow(/unusable data/);
     expect(create).not.toHaveBeenCalled();
     expect(notify).not.toHaveBeenCalled();
   });
 
-  it("rejects a payload with partial/missing fields without fabricating alerts", async () => {
+  it('rejects a payload with partial/missing fields without fabricating alerts', async () => {
     vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(mockMalformedPayload({ current: { temperature_2m: 21 } })),
+      'fetch',
+      vi.fn().mockResolvedValue(mockMalformedPayload({ current: { temperature_2m: 21 } }))
     );
 
     await expect(pollFarmerWeather(wallet)).rejects.toThrow(/unusable data/);
@@ -268,14 +268,19 @@ describe("weatherService.pollFarmerWeather", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
-  it("rejects nonfinite numeric fields", async () => {
+  it('rejects nonfinite numeric fields', async () => {
     vi.stubGlobal(
-      "fetch",
+      'fetch',
       vi.fn().mockResolvedValue(
         mockMalformedPayload({
-          current: { temperature_2m: "not-a-number", precipitation: 0, wind_speed_10m: 5, weather_code: 1 },
-        }),
-      ),
+          current: {
+            temperature_2m: 'not-a-number',
+            precipitation: 0,
+            wind_speed_10m: 5,
+            weather_code: 1,
+          },
+        })
+      )
     );
 
     await expect(pollFarmerWeather(wallet)).rejects.toThrow(/nonfinite value/);
@@ -283,22 +288,34 @@ describe("weatherService.pollFarmerWeather", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
-  it("rejects a malformed timestamp", async () => {
+  it('rejects a malformed timestamp', async () => {
     vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(mockFetchResponse({ temperature_2m: 21, precipitation: 0, wind_speed_10m: 5, weather_code: 1 }, "not-a-date")),
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          mockFetchResponse(
+            { temperature_2m: 21, precipitation: 0, wind_speed_10m: 5, weather_code: 1 },
+            'not-a-date'
+          )
+        )
     );
 
     await expect(pollFarmerWeather(wallet)).rejects.toThrow(/malformed reading timestamp/);
     expect(create).not.toHaveBeenCalled();
   });
 
-  it("treats an explicitly supplied zero as a valid observation", async () => {
+  it('treats an explicitly supplied zero as a valid observation', async () => {
     vi.stubGlobal(
-      "fetch",
+      'fetch',
       vi.fn().mockResolvedValue(
-        mockFetchResponse({ temperature_2m: 0, precipitation: 0, wind_speed_10m: 0, weather_code: 0 }),
-      ),
+        mockFetchResponse({
+          temperature_2m: 0,
+          precipitation: 0,
+          wind_speed_10m: 0,
+          weather_code: 0,
+        })
+      )
     );
 
     await pollFarmerWeather(wallet);
@@ -306,20 +323,20 @@ describe("weatherService.pollFarmerWeather", () => {
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ temperatureC: 0, precipitationMm: 0, windSpeedKph: 0 }),
-      }),
+      })
     );
   });
 
-  it("surfaces an upstream timeout/network failure without persisting a reading", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("aborted")));
+  it('surfaces an upstream timeout/network failure without persisting a reading', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('aborted')));
 
-    await expect(pollFarmerWeather(wallet)).rejects.toThrow("aborted");
+    await expect(pollFarmerWeather(wallet)).rejects.toThrow('aborted');
     expect(create).not.toHaveBeenCalled();
     expect(notify).not.toHaveBeenCalled();
   });
 });
 
-describe("weatherService.pollAllFarmerLocations", () => {
+describe('weatherService.pollAllFarmerLocations', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     create.mockResolvedValue({} as never);
@@ -330,25 +347,22 @@ describe("weatherService.pollAllFarmerLocations", () => {
     vi.unstubAllGlobals();
   });
 
-  it("continues polling remaining farmers after one fails", async () => {
-    findMany.mockResolvedValue([
-      { wallet_address: "GBAD" },
-      { wallet_address: "GGOOD" },
-    ] as never);
+  it('continues polling remaining farmers after one fails', async () => {
+    findMany.mockResolvedValue([{ wallet_address: 'GBAD' }, { wallet_address: 'GGOOD' }] as never);
     findUnique.mockImplementation((async ({ where }: any) => {
-      if (where.wallet_address === "GBAD") throw new Error("boom");
-      return { wallet_address: "GGOOD", lat: 1, lng: 2 };
+      if (where.walletAddress === 'GBAD') throw new Error('boom');
+      return { walletAddress: 'GGOOD', lat: 1, lng: 2 };
     }) as any);
     vi.stubGlobal(
-      "fetch",
+      'fetch',
       vi.fn().mockResolvedValue(
         mockFetchResponse({
           temperature_2m: 20,
           precipitation: 0,
           wind_speed_10m: 5,
           weather_code: 1,
-        }),
-      ),
+        })
+      )
     );
 
     await pollAllFarmerLocations();

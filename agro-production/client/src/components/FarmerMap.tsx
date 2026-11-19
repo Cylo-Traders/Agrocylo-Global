@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useMemo, useState } from 'react'
 import { MapPin, Users } from 'lucide-react'
 
 export interface FarmerLocation {
@@ -25,14 +25,15 @@ const FarmerMap: React.FC<FarmerMapProps> = ({
   isLoading = false,
 }) => {
   const [selectedFarmer, setSelectedFarmer] = useState<FarmerLocation | null>(null)
-  const [mapCenter, setMapCenter] = useState({ lat: 0, lng: 0 })
 
-  useEffect(() => {
-    if (farmers.length > 0) {
-      const avgLat = farmers.reduce((sum, f) => sum + f.latitude, 0) / farmers.length
-      const avgLng = farmers.reduce((sum, f) => sum + f.longitude, 0) / farmers.length
-      setMapCenter({ lat: avgLat, lng: avgLng })
-    }
+  // The center is pure display data derived from the `farmers` prop (#1084):
+  // mirroring it into state and re-syncing from an effect produced a cascade
+  // render per update and could go stale relative to its own props.
+  const mapCenter = useMemo(() => {
+    if (farmers.length === 0) return { lat: 0, lng: 0 }
+    const avgLat = farmers.reduce((sum, f) => sum + f.latitude, 0) / farmers.length
+    const avgLng = farmers.reduce((sum, f) => sum + f.longitude, 0) / farmers.length
+    return { lat: avgLat, lng: avgLng }
   }, [farmers])
 
   if (isLoading) {

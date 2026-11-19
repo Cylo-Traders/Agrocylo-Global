@@ -1,4 +1,4 @@
-import { prisma } from "../config/database.js";
+import { prisma } from '../config/database.js';
 
 export interface ReviewResponseDto {
   message: string;
@@ -74,11 +74,11 @@ function toReviewDto(review: {
 
 export async function listReviewsForSubject(
   subjectWallet: string,
-  limit = 20,
+  limit = 20
 ): Promise<ReviewDto[]> {
   const reviews = await prisma.review.findMany({
     where: { subjectWallet },
-    orderBy: { createdAt: "desc" },
+    orderBy: { createdAt: 'desc' },
     take: Math.min(Math.max(Math.trunc(limit), 1), 100),
   });
 
@@ -108,30 +108,27 @@ export async function getReviewSummary(subjectWallet: string): Promise<{
   };
 }
 
-export async function createReview(
-  subjectWallet: string,
-  body: unknown,
-): Promise<ReviewDto> {
-  const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+export async function createReview(subjectWallet: string, body: unknown): Promise<ReviewDto> {
+  const record = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
 
   const requiredFields = [
-    "reviewerWallet",
-    "reviewerName",
-    "reviewerRole",
-    "rating",
-    "title",
-    "body",
-    "transactionHash",
+    'reviewerWallet',
+    'reviewerName',
+    'reviewerRole',
+    'rating',
+    'title',
+    'body',
+    'transactionHash',
   ] as const;
   for (const field of requiredFields) {
-    if (record[field] === undefined || record[field] === null || record[field] === "") {
+    if (record[field] === undefined || record[field] === null || record[field] === '') {
       throw new Error(`${field} is required`);
     }
   }
 
   const rating = Number(record.rating);
   if (!Number.isFinite(rating) || rating < 1 || rating > 5) {
-    throw new Error("rating must be between 1 and 5");
+    throw new Error('rating must be between 1 and 5');
   }
 
   const review = await prisma.review.create({
@@ -145,16 +142,15 @@ export async function createReview(
       body: String(record.body),
       transactionHash: String(record.transactionHash),
       verifiedTransaction:
-        typeof record.verifiedTransaction === "boolean" ? record.verifiedTransaction : true,
+        typeof record.verifiedTransaction === 'boolean' ? record.verifiedTransaction : true,
       helpfulVoteWallets: Array.isArray(record.helpfulVoteWallets)
-        ? record.helpfulVoteWallets.filter((item) => typeof item === "string")
+        ? record.helpfulVoteWallets.filter((item) => typeof item === 'string')
         : [],
       evidence: Array.isArray(record.evidence)
-        ? record.evidence.filter((item) => typeof item === "string")
+        ? record.evidence.filter((item) => typeof item === 'string')
         : [],
     },
   });
 
   return toReviewDto(review);
 }
-

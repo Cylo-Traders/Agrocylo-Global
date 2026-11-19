@@ -236,10 +236,17 @@ export default function BarterOfferForm({
       next.recipientWallet = "You cannot barter with yourself.";
     }
 
-    if (offerItems.length === 0) {
+    const offerFilled = offerItems.filter(
+      (i) => i.product_name.trim() || i.quantity.trim(),
+    );
+    const requestFilled = requestItems.filter(
+      (i) => i.product_name.trim() || i.quantity.trim(),
+    );
+
+    if (offerFilled.length === 0) {
       next.offerItems = "Add at least one item you are offering.";
     } else if (
-      offerItems.some(
+      offerFilled.some(
         (i) =>
           !i.product_name.trim() || !i.quantity || Number(i.quantity) <= 0,
       )
@@ -248,10 +255,10 @@ export default function BarterOfferForm({
         "All offer items must have a name and positive quantity.";
     }
 
-    if (requestItems.length === 0) {
+    if (requestFilled.length === 0) {
       next.requestItems = "Add at least one item you want to receive.";
     } else if (
-      requestItems.some(
+      requestFilled.some(
         (i) =>
           !i.product_name.trim() || !i.quantity || Number(i.quantity) <= 0,
       )
@@ -347,7 +354,7 @@ export default function BarterOfferForm({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={onSubmit} className="space-y-6">
+        <form onSubmit={onSubmit} noValidate className="space-y-6">
           <Input
             label="Recipient Wallet Address"
             value={recipientWallet}

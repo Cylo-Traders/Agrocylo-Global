@@ -1,3 +1,6 @@
+// Test API host; real builds must configure their own endpoint.
+process.env.NEXT_PUBLIC_API_URL ??= "http://localhost:5001/api/v1";
+
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
@@ -50,15 +53,17 @@ globalThis.__setPrefersDark = (matches: boolean) => {
   }
 };
 
-installMatchMedia();
+if (typeof window !== "undefined") installMatchMedia();
 
 afterEach(() => {
   cleanup();
   listeners.clear();
   prefersDark = false;
-  document.documentElement.classList.remove("light", "dark");
+  if (typeof document !== "undefined") {
+    document.documentElement.classList.remove("light", "dark");
+  }
   try {
-    localStorage.clear();
+    globalThis.localStorage?.clear();
   } catch {
     /* ignore */
   }

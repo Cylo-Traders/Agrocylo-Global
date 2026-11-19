@@ -4,9 +4,8 @@ import React, {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
-  useState,
+  useSyncExternalStore,
 } from "react";
 
 import type {
@@ -20,6 +19,7 @@ import type {
 import {
   exportAnalyticsData,
   getAnalyticsSnapshot,
+  refreshAnalytics,
   setAnalyticsConsent,
   subscribeAnalytics,
   trackClick,
@@ -69,25 +69,25 @@ export interface AnalyticsContextValue {
 const AnalyticsContext = createContext<AnalyticsContextValue | null>(null);
 
 export function AnalyticsProvider({ children }: { children: React.ReactNode }) {
-  const [snapshot, setSnapshot] = useState<AnalyticsSnapshot>(() =>
-    getAnalyticsSnapshot(),
+  // Subscribe directly to the external analytics store. `getAnalyticsSnapshot`
+  // returns a cached, referentially stable object, so React only re-renders
+  // when the underlying data actually changes and notifications never run
+  // synchronously inside insertion effects.
+  const snapshot = useSyncExternalStore(
+    subscribeAnalytics,
+    getAnalyticsSnapshot,
+    getAnalyticsSnapshot,
   );
 
   const refresh = useCallback(() => {
-    setSnapshot(getAnalyticsSnapshot());
+    refreshAnalytics();
   }, []);
 
-  useEffect(() => {
-    const unsubscribe = subscribeAnalytics(refresh);
-    return () => {
-      unsubscribe();
-    };
-  }, [refresh]);
-
   const setConsent = useCallback((consent: AnalyticsConsentState) => {
+    // `setAnalyticsConsent` already emits (and therefore refreshes the
+    // snapshot via the subscription); no extra refresh is needed.
     setAnalyticsConsent(consent);
-    refresh();
-  }, [refresh]);
+  }, []);
 
   const value = useMemo<AnalyticsContextValue>(
     () => ({

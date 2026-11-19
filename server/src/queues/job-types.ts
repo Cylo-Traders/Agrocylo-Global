@@ -8,19 +8,19 @@ export interface IndexContractEventsJobData {
 
 export interface IndexProductDataJobData {
   productId: string;
-  action: "create" | "update" | "delete";
+  action: 'create' | 'update' | 'delete';
   data?: Record<string, unknown>;
 }
 
 export interface AggregateMetricsJobData {
   metricName: string;
-  granularity: "hourly" | "daily" | "weekly";
+  granularity: 'hourly' | 'daily' | 'weekly';
   startDate: string;
   endDate: string;
 }
 
 export interface GenerateReportJobData {
-  reportType: "sales" | "inventory" | "demand" | "supply";
+  reportType: 'sales' | 'inventory' | 'demand' | 'supply';
   parameters: Record<string, unknown>;
 }
 

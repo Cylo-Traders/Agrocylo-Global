@@ -41,7 +41,16 @@ export default function WalletConnect({ className = "" }: WalletConnectProps) {
     await disconnect();
   }
 
-  if (walletState === "connected" && address) {
+  // A wallet on the wrong (or an unverifiable) network is still a connected
+  // wallet (#1087): it keeps its address pill and disconnect control, and the
+  // network state is announced by the badge and the shell banner.
+  const isConnectedView =
+    Boolean(address) &&
+    (walletState === "connected" ||
+      walletState === "wrong_network" ||
+      walletState === "unknown_network");
+
+  if (isConnectedView && address) {
     return (
       <div className={`flex items-center gap-2 ${className}`}>
         <span

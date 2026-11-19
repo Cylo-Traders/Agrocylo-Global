@@ -52,7 +52,7 @@ describe("buildContentSecurityPolicy", () => {
     });
 
     it("ignores a malformed nonce rather than emitting it into the header", () => {
-      const policy = buildContentSecurityPolicy({ ...base, nonce: "bad' nonce; script-src *' });
+      const policy = buildContentSecurityPolicy({ ...base, nonce: "bad' nonce; script-src *" });
       expect(policy).not.toContain("script-src *");
       expect(directive(policy, "script-src")).not.toContain("nonce-");
     });
