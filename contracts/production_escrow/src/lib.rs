@@ -710,6 +710,11 @@ impl ProductionEscrowContract {
         env.storage().instance().get(&DataKey::GovernanceContract)
     }
 
+    /// Issue #1287: read-only getter for verifying on-chain registry wiring.
+    pub fn get_registry_contract(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::RegistryContract)
+    }
+
     /// Set the independent attester role. Authorized caller is the governance
     /// contract once configured via `set_governance_contract` (Issue #1297);
     /// falls back to admin-only while governance is unset. The attester is

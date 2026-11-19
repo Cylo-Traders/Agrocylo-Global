@@ -120,14 +120,22 @@ case "$NETWORK" in
         NETWORK_PASSPHRASE="Public Global Stellar Network ; September 2015" ;;
 esac
 
-# Issue #843: initializing in the same transaction as deployment is *mandatory*
-# on mainnet — it removes the front-running window between `contract deploy`
-# and the maintainer's separate `initialize` call. Off-mainnet the classic
-# deploy-then-initialize flow is fine (no funds at stake), but can be opted in
-# with ATOMIC_INIT=true.
-ATOMIC_INIT=false
-[[ "$NETWORK" == "mainnet" || "${ATOMIC_INIT:-false}" == "true" ]] && ATOMIC_INIT=true
-[[ "${ATOMIC_INIT_DISABLE:-false}" == "true" ]] && ATOMIC_INIT=false
+# Issue #1288: honor caller ATOMIC_INIT=true off-mainnet, forbid disabling atomic
+# init on mainnet, and never overwrite caller inputs before reading them.
+CALLER_ATOMIC_INIT="${ATOMIC_INIT:-false}"
+if [[ "$NETWORK" == "mainnet" ]]; then
+    if [[ "${ATOMIC_INIT_DISABLE:-false}" == "true" ]]; then
+        echo "Error: ATOMIC_INIT_DISABLE=true is forbidden on mainnet" >&2
+        exit 1
+    fi
+    ATOMIC_INIT=true
+elif [[ "${ATOMIC_INIT_DISABLE:-false}" == "true" ]]; then
+    ATOMIC_INIT=false
+elif [[ "$CALLER_ATOMIC_INIT" == "true" ]]; then
+    ATOMIC_INIT=true
+else
+    ATOMIC_INIT=false
+fi
 
 # ---------------------------------------------------------------------------
 # CLI detection
@@ -304,11 +312,47 @@ deploy_one() {
     salt="$(printf 'agrocylo:%s:%s' "$NETWORK" "$c" | sha256sum | cut -c1-64)"
     hash="$($CLI contract install "${NET_ARGS[@]}" --source-account "$DEPLOYER" --wasm "$wasm")"
 
-    # Atomic init: only on a fresh instance (no manifest `initialized: true`).
-    # A --force redeploy onto an already-initialized instance must NOT re-run
-    # constructor-init — it would revert the whole deploy with AlreadyInitialized;
-    # that path keeps the separate idempotent initialize() step below.
-    if [[ "$ATOMIC_INIT" == "true" && "$(m_get ".contracts.\"$c\".initialized")" != "true" ]]; then
+    # Issue #1283: verify effective multisig policy for privileged roles before mainnet writes.
+    verify_multisig_role() {
+        local role="$1" addr="$2"
+        local horizon="${HORIZON_URL:-https://horizon.stellar.org}"
+        if [[ -z "$addr" ]]; then
+            echo "Error: $role address is required for mainnet deployment" >&2
+            exit 1
+        fi
+        if [[ "$addr" =~ ^C[A-Z2-7]{55}$ ]]; then
+            if [[ "${ADMIN_IS_MULTISIG_CONTRACT:-false}" != "true" ]]; then
+                echo "Error: contract account $role ($addr) requires explicit ADMIN_IS_MULTISIG_CONTRACT=true verification" >&2
+                exit 1
+            fi
+            return 0
+        fi
+        local acct_json med_threshold signer_count max_single_weight
+        acct_json="$(curl -fsSL "$horizon/accounts/$addr")" || {
+            echo "Error: failed to fetch Horizon account for $role ($addr)" >&2
+            exit 1
+        }
+        med_threshold="$(printf '%s' "$acct_json" | jq -r '.thresholds.med_threshold // 0')"
+        signer_count="$(printf '%s' "$acct_json" | jq -r '[.signers[] | select(.weight > 0)] | length')"
+        max_single_weight="$(printf '%s' "$acct_json" | jq -r '[.signers[].weight] | max // 0')"
+        if (( med_threshold <= 0 || signer_count < 2 || max_single_weight >= med_threshold )); then
+            echo "Error: $role ($addr) fails multisig policy (signers=$signer_count, max_weight=$max_single_weight, med_threshold=$med_threshold)" >&2
+            exit 1
+        fi
+    }
+    if [[ "$NETWORK" == "mainnet" ]]; then
+        verify_multisig_role "ADMIN" "$ADMIN"
+        if [[ -n "${GUARDIAN:-}" ]]; then
+            verify_multisig_role "GUARDIAN" "$GUARDIAN"
+        fi
+    fi
+
+    # Issue #1288: check actual on-chain state rather than trusting manifest initialized boolean.
+    local is_already_initialized=false
+    if [[ -n "$existing" ]] && invoke_read "$existing" get_admin >/dev/null 2>&1; then
+        is_already_initialized=true
+    fi
+    if [[ "$ATOMIC_INIT" == "true" && "$is_already_initialized" != "true" ]]; then
         init_fn="initialize"
         init_args="$(init_args_for "$c")"
         deployed_init=true
@@ -403,13 +447,11 @@ if [[ "$VERIFY_ONLY" == "false" ]]; then
         "$(invoke_read "$ESCROW" get_registry_contract || true)" "$REGISTRY" \
         invoke "$ESCROW" set_registry_contract --admin "$ADMIN" --registry "$REGISTRY"
 
-    # escrow has no getter for the router; skip when the manifest already
-    # records it, otherwise set it (tolerating a governance-gated rejection
-    # on a re-run where governance is already wired).
-    if [[ -n "$PATH_PAYMENT_ROUTER" && "$(m_get '.wiring."escrow.path_payment_router"')" != "$PATH_PAYMENT_ROUTER" ]]; then
-        echo "  + escrow.path_payment_router -> $PATH_PAYMENT_ROUTER"
-        invoke "$ESCROW" set_path_payment_router --admin "$ADMIN" --router "$PATH_PAYMENT_ROUTER" || \
-            echo "  (set_path_payment_router rejected — likely already governance-gated)"
+    # Issue #1287: verify router and production_escrow.registry from chain state without swallowing errors.
+    if [[ -n "$PATH_PAYMENT_ROUTER" ]]; then
+        wire "escrow.path_payment_router" \
+            "$(invoke_read "$ESCROW" get_path_payment_router || true)" "$PATH_PAYMENT_ROUTER" \
+            invoke "$ESCROW" set_path_payment_router --admin "$ADMIN" --router "$PATH_PAYMENT_ROUTER"
     fi
 
     # Issue #1289: always apply and verify fee_rate_bps (including 0) and fee_collector before governance handoff.
@@ -443,15 +485,10 @@ if [[ "$VERIFY_ONLY" == "false" ]]; then
         exit 1
     fi
 
-    # production_escrow has no get_registry_contract getter; guard on the
-    # manifest so a converged re-run doesn't pay for a redundant write.
-    if [[ "$(m_get '.wiring."production_escrow.registry"')" != "$REGISTRY" ]]; then
-        echo "  + production_escrow.registry -> $REGISTRY"
-        invoke "$PROD_ESCROW" set_registry_contract --admin_caller "$ADMIN" --registry "$REGISTRY" || \
-            echo "  (set_registry_contract rejected — likely already governance-gated)"
-    else
-        echo "  = production_escrow.registry already $REGISTRY (per manifest)"
-    fi
+    # Issue #1287: verify production_escrow.registry from chain state instead of local manifest.
+    wire "production_escrow.registry" \
+        "$(invoke_read "$PROD_ESCROW" get_registry_contract || true)" "$REGISTRY" \
+        invoke "$PROD_ESCROW" set_registry_contract --admin_caller "$ADMIN" --registry "$REGISTRY"
 
     echo "[wire] governance wiring (last — locks the other setters)..."
     wire "escrow.governance" \
@@ -527,7 +564,11 @@ check "manifest.wiring.registry.governance"          "$(m_get '.wiring."registry
 check "manifest.wiring.investment_basket.governance" "$(m_get '.wiring."investment_basket.governance"')" "$GOVERNANCE"
 
 check "escrow.registry_contract"      "$(invoke_read "$ESCROW" get_registry_contract || true)"    "$REGISTRY"
+if [[ -n "${PATH_PAYMENT_ROUTER:-}" ]]; then
+    check "escrow.path_payment_router" "$(invoke_read "$ESCROW" get_path_payment_router || true)" "$PATH_PAYMENT_ROUTER"
+fi
 check "escrow.governance_contract"     "$(invoke_read "$ESCROW" get_governance_contract || true)"  "$GOVERNANCE"
+check "production_escrow.registry_contract" "$(invoke_read "$PROD_ESCROW" get_registry_contract || true)" "$REGISTRY"
 check "escrow.fee_rate_bps"            "$(invoke_read "$ESCROW" get_fee_rate_bps || true)"         "$FEE_RATE_BPS"
 check "escrow.fee_collector"           "$(invoke_read "$ESCROW" get_fee_collector || true)"        "$FEE_COLLECTOR"
 check "production_escrow.governance"   "$(invoke_read "$PROD_ESCROW" get_governance_contract || true)" "$GOVERNANCE"
