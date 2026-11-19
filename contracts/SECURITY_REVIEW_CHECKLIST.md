@@ -69,6 +69,12 @@ list:
       that had been left on a plain admin check while every sibling setter
       had already been migrated to the governed pattern; check *all* of
       them, not just the ones a diff happens to touch.
+      - `production_escrow::set_attester` and `set_milestone_configs`
+        (#1297/#1298) now follow this pattern. `set_arbitrators` (which also
+        sets the quorum) is **intentionally admin-only**: arbitrators only
+        resolve disputes within already-defined resolution bounds and cannot
+        move funds directly, so changing its gating is deliberately deferred
+        to a separate governance-design change rather than bundled here.
 - [ ] For a cross-contract call where the callee checks
       `caller_param.require_auth()`: confirm the caller contract is actually
       the one invoking the call (Soroban's contract-issued-auth — the direct

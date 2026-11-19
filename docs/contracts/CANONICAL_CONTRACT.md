@@ -1,5 +1,10 @@
 # Canonical Contract: production_escrow
 
+**Last verified against commit:** `670e7b4` (`upstream/main`). ABI/package names
+below were reconciled against `contracts/production_escrow/Cargo.toml`,
+`contracts/production_escrow/src/lib.rs`, the repository-root `Cargo.toml`, and
+`scripts/deploy-contracts.sh` (not a hand-maintained spec).
+
 ## Selection
 
 The **production_escrow** contract (located at `contracts/production_escrow/`) has been selected as the canonical Soroban contract for the Agrocylo production system.
@@ -18,52 +23,52 @@ The **production_escrow** contract (located at `contracts/production_escrow/`) h
 ### Current Structure
 
 ```
-contracts/
-├── Cargo.toml                    (workspace root)
-├── production_escrow/            (canonical contract)
-│   ├── Cargo.toml               (package name: "production_escrow")
-│   └── src/lib.rs
-├── registry/                     (registry contract)
-│   ├── Cargo.toml               (package name: "registry")
-│   └── src/lib.rs
-└── src/                         (shared utilities)
+Cargo.toml                         (workspace root)
+├── contracts/escrow               (legacy marketplace escrow)
+├── contracts/governance           (package: governance)
+├── contracts/production_escrow    (package: production-escrow-v2)
+├── contracts/registry             (package: registry)
+└── contracts/investment_basket    (package: investment-basket)
 ```
 
-The root `Cargo.toml` workspace members:
-- `contracts/registry` — Registry contract (name: "registry")
-- `contracts/production_escrow` — Canonical escrow contract (name: "production_escrow")
+Workspace members are declared in the repository-root `Cargo.toml` (there is no
+`contracts/Cargo.toml`). The canonical crate lives at
+`contracts/production_escrow/` and its Cargo package name is
+`production-escrow-v2`, not `production_escrow`.
 
 ### Package Naming
 
-- **production_escrow** → Canonical contract WASM output
-- **registry** → Product/marketplace registry contract
-- (Legacy) production-escrow (hyphen) → Deprecated; removed from workspace
+- **production-escrow-v2** → Canonical campaign escrow crate (Rust crate name
+  `production_escrow_v2`, WASM output `production_escrow_v2.wasm`)
+- **registry**, **governance**, **investment-basket** → supporting crates
+- (Legacy) `contracts/escrow` → marketplace escrow, still deployed separately
 
 ## ABI Summary
 
-### production_escrow Public Functions
+Names below are taken from the `#[contractimpl]` block in `src/lib.rs` at the
+verified commit; earlier hand-written names such as `settle_campaign`,
+`harvest`, or `claim_tranche` do not exist in this crate.
 
-**Campaign Management:**
-- `initialize(admin: Address)` — Initialize contract with admin
-- `create_campaign(farmer: Address, token: Address, target: i128, deadline: u64)` → Campaign ID
-- `invest(campaign_id: u64, investor: Address, amount: i128)` → Investment recorded
-- `settle_campaign(campaign_id: u64)` → Revenue distribution
-- `produce(campaign_id: u64)` → Transition to IN_PRODUCTION
-- `harvest(campaign_id: u64)` → Transition to HARVESTED
-- `mark_failed(campaign_id: u64)` → Transition to FAILED
-- `mark_disputed(campaign_id: u64)` → Transition to DISPUTED
-- `claim_tranche(campaign_id: u64, investor: Address)` → Release tranche payment
-- `refund_investment(campaign_id: u64, investor: Address)` → Refund if failed
+**Bootstrap / administration:** `initialize(admin, supported_tokens,
+fee_collector, fee_rate_bps)`, `upgrade`, `set_guardian`, `pause`, `unpause`,
+`is_paused`, `bump_instance_ttl`, `migrate`, `get_schema_version`,
+`get_guardian`, `set_registry_contract`, `set_fee_config`,
+`set_governance_contract`, `update_supported_tokens`, `get_admin`,
+`get_supported_tokens`, `get_governance_contract`, `set_attester`,
+`set_arbitrators`, `get_arbitrators`, `get_quorum`.
 
-**Order Management:**
-- `create_order(campaign_id: u64, buyer: Address, quantity: u64, price_per_unit: i128)` → Order ID
-- `confirm_order(order_id: u64)` → Mark CONFIRMED
+**Campaign lifecycle:** `create_campaign`, `invest`, `start_production`,
+`mark_harvest(farmer, attester, campaign_id)`, `set_milestone_configs`,
+`advance_milestone(caller, attester, campaign_id)`, `settle`, `claim_returns`,
+`finalize_failed`, `mark_campaign_failed`, `refund`, `refundable_amount`,
+`get_campaign`, `get_contribution`, `get_milestone_configs`.
 
-**Dispute Resolution:**
-- `open_dispute(campaign_id: u64, order_id: Option<u64>, initiator: Address, respondent: Address)` → Dispute ID
-- `submit_evidence(dispute_id: u64, submitter: Address, evidence_url: String, evidence_hash: String)` → Recorded
-- `resolve_dispute(dispute_id: u64, outcome: String, notes: Option<String>)` → Marked RESOLVED
-- `dismiss_dispute(dispute_id: u64, reason: Option<String>)` → Marked DISMISSED
+**Orders / disputes:** `create_order`, `cancel_order`, `confirm_order`,
+`create_split_order`, `fund_split_order`, `confirm_split_receipt`,
+`open_split_dispute`, `resolve_split_dispute`, `get_split_order`, `open_dispute`,
+`resolve_dispute`, `vote_to_resolve`, `transfer_investment`,
+`batch_refund_investors`, `batch_refund_orders`, `get_order`,
+`register_campaign`, `verify`.
 
 ### Event Topics
 
@@ -93,9 +98,11 @@ All events use base64-encoded Soroban symbol_short!() topics:
 
 ## Deployed Contract ID
 
-- **Testnet** → (if deployed: provide contract ID)
-- **Futurenet** → (if deployed: provide contract ID)
-- **Mainnet** → (pending deployment)
+The committed manifest is the source of truth for deployed IDs, WASM hashes,
+salts and wiring:
+[`deployments/deployed-addresses.testnet.json`](../../deployments/deployed-addresses.testnet.json).
+Do not copy IDs into this document; verify with
+`scripts/deploy-contracts.sh --network testnet --verify-only`.
 
 ## Migration & Deprecation Plan
 
@@ -140,17 +147,16 @@ const CONTRACT_ID = process.env.REACT_APP_PRODUCTION_ESCROW_CONTRACT_ID;
 ### Build Canonical Contract
 
 ```bash
-cd contracts
-cargo build --target wasm32-unknown-unknown --release -p production_escrow
-# Output: target/wasm32-unknown-unknown/release/production_escrow.wasm
+# From the repository root (workspace root)
+cargo build --target wasm32v1-none --release -p production-escrow-v2
+# Output: target/wasm32v1-none/release/production_escrow_v2.wasm
 ```
 
 ### Run Contract Tests
 
 ```bash
-cd contracts
-cargo test --workspace
-# Runs tests for production_escrow, registry, and any other workspace members
+# From the repository root
+cargo test -p production-escrow-v2
 ```
 
 ## Related Issues
@@ -164,8 +170,8 @@ cargo test --workspace
 ## Naming & Artifacts
 
 The canonical contract's Soroban compiler output is:
-- **WASM file**: `production_escrow.wasm`
-- **Package name**: `production_escrow` (in Cargo.toml)
-- **Crate name**: `production_escrow`
+- **WASM file**: `production_escrow_v2.wasm` (matches `scripts/deploy-contracts.sh`)
+- **Package name**: `production-escrow-v2` (in `Cargo.toml`)
+- **Crate name**: `production_escrow_v2`
 
-This naming is unambiguous and matches the canonical source crate name, avoiding collisions with legacy `production-escrow-hyphen` or placeholder `registry` packages.
+This naming is unambiguous and matches the canonical source crate name, avoiding collisions with the legacy `contracts/escrow` crate.

@@ -3287,8 +3287,8 @@ fn test_advance_milestone_rejects_past_end() {
 
 #[test]
 fn test_advance_milestone_over_release_prevented() {
-    // start_production releases 30%; two 30% milestones would total 90%,
-    // above the 70% cumulative tranche cap, so the second is rejected.
+    // Issue #1298: cumulative release is validated when configs are set, so an
+    // over-cap schedule is rejected before any milestone can advance.
     let t = setup();
     let deadline = future_deadline(&t);
     let id = t
@@ -3310,18 +3310,13 @@ fn test_advance_milestone_over_release_prevented() {
             release_bps: 3_000,
         });
     }
-    t.client.set_milestone_configs(&t.admin, &id, &configs);
-    let order_id = t.client.create_order(&t.buyer, &id, &1_000);
-    t.client.confirm_order(&t.buyer, &order_id);
-
-    t.client.advance_milestone(&t.buyer, &t.attester, &id); // 30 + 30 = 60%
     let err = t
         .client
-        .try_advance_milestone(&t.buyer, &t.attester, &id)
+        .try_set_milestone_configs(&t.admin, &id, &configs)
         .unwrap_err()
         .unwrap();
     assert_eq!(err, EscrowError::InvalidTranche);
-    assert_eq!(t.client.get_campaign(&id).tranche_released, 6_000);
+    assert_eq!(t.client.get_milestone_configs(&id).len(), 0);
 }
 
 #[test]
@@ -3403,6 +3398,124 @@ fn test_update_supported_tokens_governance_gated() {
 
     t.client.update_supported_tokens(&governance, &tokens);
     assert_eq!(t.client.get_supported_tokens().len(), 1);
+}
+
+// Governance gating (Issues #1297, #1298)
+
+fn wire_mock_governance(t: &TestEnv<'_>) -> Address {
+    let governance = t.env.register(MockGovernance, ());
+    t.client.set_governance_contract(&t.admin, &governance);
+    governance
+}
+
+fn campaign_in_production(t: &TestEnv<'_>) -> u64 {
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &future_deadline(t));
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    id
+}
+
+#[test]
+fn test_set_attester_admin_allowed_before_governance() {
+    let t = setup();
+    let new_attester = Address::generate(&t.env);
+    let id = campaign_in_production(&t);
+
+    t.client.set_attester(&t.admin, &new_attester);
+    t.client.mark_harvest(&t.farmer, &new_attester, &id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Harvested);
+}
+
+#[test]
+fn test_set_attester_rejects_admin_after_governance() {
+    let t = setup();
+    let new_attester = Address::generate(&t.env);
+    let id = campaign_in_production(&t);
+    wire_mock_governance(&t);
+
+    let err = t
+        .client
+        .try_set_attester(&t.admin, &new_attester)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::NotGoverned);
+
+    t.client.mark_harvest(&t.farmer, &t.attester, &id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Harvested);
+}
+
+#[test]
+fn test_set_attester_governance_accepted() {
+    let t = setup();
+    let new_attester = Address::generate(&t.env);
+    let id = campaign_in_production(&t);
+    let governance = wire_mock_governance(&t);
+
+    t.client.set_attester(&governance, &new_attester);
+    t.client.mark_harvest(&t.farmer, &new_attester, &id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Harvested);
+}
+
+#[test]
+fn test_set_milestone_configs_admin_allowed_before_governance() {
+    let t = setup();
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &future_deadline(&t));
+    t.client
+        .set_milestone_configs(&t.admin, &id, &milestone_configs_50pct(&t));
+    assert_eq!(t.client.get_milestone_configs(&id).len(), 5);
+}
+
+#[test]
+fn test_set_milestone_configs_rejects_admin_after_governance() {
+    let t = setup();
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &future_deadline(&t));
+    let governance = wire_mock_governance(&t);
+    let configs = milestone_configs_50pct(&t);
+
+    let err = t
+        .client
+        .try_set_milestone_configs(&t.admin, &id, &configs)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::NotGoverned);
+
+    t.client.set_milestone_configs(&governance, &id, &configs);
+    assert_eq!(t.client.get_milestone_configs(&id).len(), 5);
+}
+
+#[test]
+fn test_set_milestone_configs_rejects_cumulative_over_cap() {
+    let t = setup();
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &future_deadline(&t));
+    let mut configs = Vec::new(&t.env);
+    for milestone in [
+        Milestone::Planted,
+        Milestone::Growing,
+        Milestone::Harvested,
+        Milestone::Shipped,
+        Milestone::Delivered,
+    ] {
+        configs.push_back(MilestoneConfig {
+            milestone,
+            release_bps: 3_000,
+        });
+    }
+
+    let err = t
+        .client
+        .try_set_milestone_configs(&t.admin, &id, &configs)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::InvalidTranche);
+    assert_eq!(t.client.get_milestone_configs(&id).len(), 0);
 }
 
 #[test]
