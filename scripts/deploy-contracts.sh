@@ -223,8 +223,8 @@ invoke_read() {  # same, read-only; strips surrounding quotes from scalar JSON
 # tolerate "already done" style contract errors, fail on everything else
 invoke_idempotent() {
     local out rc
-    if out="$("$@" 2>&1)"; then printf '%s\n' "$out"; return 0; fi
-    rc=$?
+    out="$("$@" 2>&1)"; rc=$?
+    if [[ $rc -eq 0 ]]; then printf '%s\n' "$out"; return 0; fi
     if grep -qiE "AlreadyInitialized|already.initialized" <<<"$out"; then
         echo "  (already initialized — skipping)"; return 0
     fi

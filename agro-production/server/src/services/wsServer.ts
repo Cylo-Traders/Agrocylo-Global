@@ -4,6 +4,7 @@ import type { RawData } from 'ws';
 import jwt from 'jsonwebtoken';
 import logger from '../config/logger.js';
 import { config } from '../config/index.js';
+import { HANDOFF_AUDIENCE } from './walletAuthService.js';
 
 /**
  * Versioned WebSocket event types. All emitted events conform to WsEventEnvelope,
@@ -118,8 +119,26 @@ export class WsServer {
 
     try {
       const payload = jwt.verify(msg.token, config.jwtSecret) as {
-        walletAddress: string;
+        walletAddress?: string;
+        aud?: string | string[];
+        type?: string;
       };
+
+      // Reject SSO handoff tokens — they are single-use and must be redeemed
+      // via POST /auth/handoff, never used directly as a session credential.
+      const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+      if (aud.includes(HANDOFF_AUDIENCE)) {
+        logger.warn('WebSocket auth rejected: SSO handoff token cannot be used as a session');
+        socket.close(4001, 'Unauthorized');
+        return;
+      }
+
+      if (!payload.walletAddress) {
+        logger.warn('WebSocket auth rejected: token missing walletAddress');
+        socket.close(4001, 'Unauthorized');
+        return;
+      }
+
       client.walletAddress = payload.walletAddress;
       logger.debug(`WebSocket client authenticated: ${client.walletAddress}`);
     } catch (error) {
