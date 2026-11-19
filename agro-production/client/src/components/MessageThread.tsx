@@ -4,6 +4,13 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useWebSocket, type WsMessage } from "@/hooks/useWebSocket";
 import { sendMessage as sendMessageApi, type Conversation, type Message } from "@/services/conversationService";
 
+// Must mirror SendMessageSchema and EditMessageSchema in
+// agro-production/server/src/routes/conversations.ts, which in turn mirror
+// the Prisma `@db.VarChar(4000)` column on Message.content. Keeping the UI
+// cap equal to the server's prevents the user from typing input that will
+// pass the client but fail server validation.
+const MESSAGE_CONTENT_MAX_LENGTH = 4000;
+
 interface MessageThreadProps {
   conversation: Conversation;
   currentWallet: string;
@@ -125,7 +132,7 @@ export default function MessageThread({
             onChange={(e) => setPendingMessage(e.target.value)}
             placeholder="Type a message..."
             disabled={sending}
-            maxLength={5000}
+            maxLength={MESSAGE_CONTENT_MAX_LENGTH}
             className="flex-1 px-3 py-2 border border-border rounded-lg bg-background text-foreground placeholder-muted disabled:opacity-50"
           />
           <button
@@ -137,7 +144,7 @@ export default function MessageThread({
           </button>
         </div>
         <p className="text-xs text-muted text-right">
-          {pendingMessage.length}/5000
+          {pendingMessage.length}/{MESSAGE_CONTENT_MAX_LENGTH}
         </p>
       </form>
     </div>
