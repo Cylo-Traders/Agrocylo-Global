@@ -175,10 +175,13 @@ GOV_VOTING_PERIOD_SECS="${GOV_VOTING_PERIOD_SECS:-259200}"
 GOV_TIMELOCK_SECS="${GOV_TIMELOCK_SECS:-172800}"
 GOV_UPGRADE_TIMELOCK_SECS="${GOV_UPGRADE_TIMELOCK_SECS:-604800}"
 GOV_QUORUM_WEIGHT="${GOV_QUORUM_WEIGHT:-1}"
+GOV_VOTERS="${GOV_VOTERS:-}"
 
 if [[ "$VERIFY_ONLY" == "false" ]]; then
     [[ -n "$FEE_COLLECTOR" ]] || { echo "Error: FEE_COLLECTOR is required" >&2; exit 1; }
     [[ -n "$SUPPORTED_TOKENS" ]] || { echo "Error: SUPPORTED_TOKENS is required" >&2; exit 1; }
+    [[ -n "$GOV_VOTERS" ]] || { echo "Error: GOV_VOTERS (comma-separated address:weight pairs) is required before governance handoff" >&2; exit 1; }
+    (( GOV_QUORUM_WEIGHT > 0 )) || { echo "Error: GOV_QUORUM_WEIGHT must be > 0" >&2; exit 1; }
 fi
 # comma-separated -> repeated `--supported_tokens` JSON array element args
 tokens_json() { jq -cn --arg s "$SUPPORTED_TOKENS" '$s | split(",") | map(select(length>0))'; }
@@ -409,10 +412,35 @@ if [[ "$VERIFY_ONLY" == "false" ]]; then
             echo "  (set_path_payment_router rejected — likely already governance-gated)"
     fi
 
-    if (( FEE_RATE_BPS > 0 )); then
-        wire "escrow.fee_config" \
-            "$(invoke_read "$ESCROW" get_fee_rate_bps || true)" "$FEE_RATE_BPS" \
-            invoke "$ESCROW" set_fee_config --admin_caller "$ADMIN" --fee_collector "$FEE_COLLECTOR" --fee_rate_bps "$FEE_RATE_BPS"
+    # Issue #1289: always apply and verify fee_rate_bps (including 0) and fee_collector before governance handoff.
+    current_fee_bps="$(invoke_read "$ESCROW" get_fee_rate_bps || true)"
+    current_fee_collector="$(invoke_read "$ESCROW" get_fee_collector || true)"
+    if [[ "$current_fee_bps" != "$FEE_RATE_BPS" || "$current_fee_collector" != "$FEE_COLLECTOR" ]]; then
+        echo "  + escrow.fee_config -> rate=$FEE_RATE_BPS collector=$FEE_COLLECTOR"
+        invoke "$ESCROW" set_fee_config --admin_caller "$ADMIN" --fee_collector "$FEE_COLLECTOR" --fee_rate_bps "$FEE_RATE_BPS"
+    else
+        echo "  = escrow.fee_config already rate=$FEE_RATE_BPS collector=$FEE_COLLECTOR"
+    fi
+
+    # Issue #1285: seed explicit governance voter weights and verify reachable quorum before handoff.
+    total_seeded_weight=0
+    IFS=',' read -ra voter_entries <<< "$GOV_VOTERS"
+    for entry in "${voter_entries[@]}"; do
+        [[ -n "$entry" ]] || continue
+        v_addr="${entry%%:*}"
+        v_weight="${entry##*:}"
+        if [[ -z "$v_addr" || ! "$v_weight" =~ ^[0-9]+$ || "$v_weight" -le 0 ]]; then
+            echo "Error: invalid GOV_VOTERS entry '$entry' (expected address:positive_weight)" >&2
+            exit 1
+        fi
+        total_seeded_weight=$((total_seeded_weight + v_weight))
+        wire "governance.voter[$v_addr]" \
+            "$(invoke_read "$GOVERNANCE" get_voter_weight --voter "$v_addr" || true)" "$v_weight" \
+            invoke "$GOVERNANCE" set_voter_weight --admin_caller "$ADMIN" --voter "$v_addr" --weight "$v_weight"
+    done
+    if (( total_seeded_weight < GOV_QUORUM_WEIGHT )); then
+        echo "Error: total configured voter weight ($total_seeded_weight) is below GOV_QUORUM_WEIGHT ($GOV_QUORUM_WEIGHT)" >&2
+        exit 1
     fi
 
     # production_escrow has no get_registry_contract getter; guard on the
@@ -500,9 +528,19 @@ check "manifest.wiring.investment_basket.governance" "$(m_get '.wiring."investme
 
 check "escrow.registry_contract"      "$(invoke_read "$ESCROW" get_registry_contract || true)"    "$REGISTRY"
 check "escrow.governance_contract"     "$(invoke_read "$ESCROW" get_governance_contract || true)"  "$GOVERNANCE"
+check "escrow.fee_rate_bps"            "$(invoke_read "$ESCROW" get_fee_rate_bps || true)"         "$FEE_RATE_BPS"
+check "escrow.fee_collector"           "$(invoke_read "$ESCROW" get_fee_collector || true)"        "$FEE_COLLECTOR"
 check "production_escrow.governance"   "$(invoke_read "$PROD_ESCROW" get_governance_contract || true)" "$GOVERNANCE"
 check "registry.governance_contract"   "$(invoke_read "$REGISTRY" get_governance_contract || true)" "$GOVERNANCE"
 check "investment_basket.governance"   "$(invoke_read "$BASKET" get_governance_contract || true)"  "$GOVERNANCE"
+check "governance.quorum_weight"       "$(invoke_read "$GOVERNANCE" get_quorum_weight || true)"    "$GOV_QUORUM_WEIGHT"
+gov_total_weight="$(invoke_read "$GOVERNANCE" get_total_weight || echo 0)"
+if [[ "$gov_total_weight" =~ ^[0-9]+$ ]] && (( gov_total_weight >= GOV_QUORUM_WEIGHT )); then
+    echo "  ok   governance.total_weight = $gov_total_weight (>= quorum $GOV_QUORUM_WEIGHT)"
+else
+    echo "  FAIL governance.total_weight ($gov_total_weight) < quorum ($GOV_QUORUM_WEIGHT)" >&2
+    FAILURES=$((FAILURES + 1))
+fi
 
 # ── Issue #843 admin/guardian readback — assert the expected admin owns every
 # newly-deployed contract before any funds move. Registry now exposes get_admin

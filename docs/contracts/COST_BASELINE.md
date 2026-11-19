@@ -45,7 +45,7 @@ Copy these numbers into the appropriate row in the table below.
 
 ## Baseline Measurements
 
-**IMPORTANT:** The numbers below are placeholders. They must be filled in by a maintainer running the actual cost-harness tests via `cargo test`. Do not deploy to mainnet with these placeholder values — they are meaningless and exist only to document the expected table structure.
+**IMPORTANT:** Cost-harness tests in `contracts/production_escrow/src/cost_harness_tests.rs` invoke real contract entrypoints, assert invocation success, and enforce the 30,000,000 CPU instruction budget. Note that `get_campaigns` pagination belongs to `registry`, not `production_escrow`.
 
 ### production_escrow
 

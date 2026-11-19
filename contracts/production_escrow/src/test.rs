@@ -1496,6 +1496,29 @@ fn test_cannot_open_dispute_on_failed_campaign() {
 }
 
 #[test]
+fn test_cannot_open_dispute_during_funding_and_finalize_failed_succeeds() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &5_000);
+    advance_ledger(&t.env, 8 * 24 * 3600);
+
+    // Investor cannot block deadline-driven finalize_failed by opening a dispute during Funding
+    let err = t
+        .client
+        .try_open_dispute(&t.investor1, &id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignNotFundedOrBeyond);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Funding);
+
+    t.client.finalize_failed(&id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+}
+
+#[test]
 fn test_state_persisted_after_start_production() {
     let t = setup();
     let deadline = future_deadline(&t);
