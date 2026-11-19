@@ -194,6 +194,10 @@ echo " Manifest:   $MANIFEST_FILE"
 echo ""
 
 mkdir -p "$MANIFEST_DIR"
+if [[ "$VERIFY_ONLY" == "true" && ! -f "$MANIFEST_FILE" ]]; then
+    echo "Error: manifest $MANIFEST_FILE not found — run without --verify-only first" >&2
+    exit 1
+fi
 [[ -f "$MANIFEST_FILE" ]] || echo '{"network":"","updated":"","contracts":{},"wiring":{}}' > "$MANIFEST_FILE"
 
 # ---------------------------------------------------------------------------
@@ -455,6 +459,45 @@ check() {  # check <label> <actual> <expected>
         FAILURES=$((FAILURES + 1))
     fi
 }
+
+# ── Issue #1302 manifest schema, salt, hash, wiring, and secret-free verification
+check "manifest.network" "$(m_get '.network')" "$NETWORK"
+if grep -qE '"S[A-Z2-7]{55}"|signed_xdr|secret_key|private_key' "$MANIFEST_FILE"; then
+    echo "  FAIL manifest.secrets: committed manifest must never contain secret keys or signed XDR" >&2
+    FAILURES=$((FAILURES + 1))
+else
+    echo "  ok   manifest.secrets = clean"
+fi
+
+for c in "${CONTRACTS[@]}"; do
+    c_id="$(m_get ".contracts.\"$c\".id")"
+    c_wasm="$(m_get ".contracts.\"$c\".wasm")"
+    c_hash="$(m_get ".contracts.\"$c\".wasm_hash")"
+    c_salt="$(m_get ".contracts.\"$c\".salt")"
+    expected_salt="$(printf 'agrocylo:%s:%s' "$NETWORK" "$c" | sha256sum | cut -c1-64)"
+
+    if [[ "$c_id" =~ ^C[A-Z2-7]{55}$ ]]; then
+        echo "  ok   manifest.contracts.$c.id = $c_id"
+    else
+        echo "  FAIL manifest.contracts.$c.id: invalid contract strkey '$c_id'" >&2
+        FAILURES=$((FAILURES + 1))
+    fi
+    check "manifest.contracts.$c.wasm" "$c_wasm" "${WASM[$c]}"
+    if [[ "$c_hash" =~ ^[0-9a-f]{64}$ ]]; then
+        echo "  ok   manifest.contracts.$c.wasm_hash = $c_hash"
+    else
+        echo "  FAIL manifest.contracts.$c.wasm_hash: expected 64-char sha256 hex, got '$c_hash'" >&2
+        FAILURES=$((FAILURES + 1))
+    fi
+    check "manifest.contracts.$c.salt" "$c_salt" "$expected_salt"
+done
+
+check "manifest.wiring.escrow.registry"              "$(m_get '.wiring."escrow.registry"')"              "$REGISTRY"
+check "manifest.wiring.escrow.governance"            "$(m_get '.wiring."escrow.governance"')"            "$GOVERNANCE"
+check "manifest.wiring.production_escrow.registry"   "$(m_get '.wiring."production_escrow.registry"')"   "$REGISTRY"
+check "manifest.wiring.production_escrow.governance" "$(m_get '.wiring."production_escrow.governance"')" "$GOVERNANCE"
+check "manifest.wiring.registry.governance"          "$(m_get '.wiring."registry.governance"')"          "$GOVERNANCE"
+check "manifest.wiring.investment_basket.governance" "$(m_get '.wiring."investment_basket.governance"')" "$GOVERNANCE"
 
 check "escrow.registry_contract"      "$(invoke_read "$ESCROW" get_registry_contract || true)"    "$REGISTRY"
 check "escrow.governance_contract"     "$(invoke_read "$ESCROW" get_governance_contract || true)"  "$GOVERNANCE"
