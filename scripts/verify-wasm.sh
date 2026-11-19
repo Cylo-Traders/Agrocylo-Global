@@ -1,149 +1,208 @@
 #!/usr/bin/env bash
 # Verify on-chain WASM matches the repository source.
 #
-# This script rebuilds a contract from a clean checkout in a pinned Docker image
-# and compares its SHA-256 hash to an on-chain contract's WASM hash.
-# Used for third-party audits and proof-of-source verification.
+# Rebuilds a contract from this checkout inside a pinned Docker image, optimizes
+# and hashes the artifact the same way deploy-contracts.sh does, then compares
+# that SHA-256 against the on-chain WASM hash. The build actually runs.
 #
 # Usage:
 #   ./scripts/verify-wasm.sh <contract_name> <on_chain_hash>
+#   ./scripts/verify-wasm.sh --list
 #
-# Arguments:
-#   contract_name     One of: governance, production_escrow, registry, investment_basket
-#   on_chain_hash     SHA-256 hex string from soroban contract code-get-hash
+# Exit codes:
+#   0  VERIFIED: <contract> matches on-chain WASM
+#   1  MISMATCH: <contract> differs from on-chain WASM
+#   2  error (bad arguments, missing tool, build failure)
 #
 # Environment:
-#   DOCKER_IMAGE      Optional pinned Docker image. Defaults to the base image
-#                     derived from rust-toolchain.toml (Rust 1.89.0).
-#   BUILDER_TAG       Tag for temporary builder image. Defaults to agrocylo-builder-<contract>-<timestamp>
-#
-# Example:
-#   ./scripts/verify-wasm.sh production_escrow \
-#     c5b7d9f1a2e3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8
-#
-# Output:
-#   Prints "VERIFIED: <contract_name> matches on-chain WASM"
-#   or "MISMATCH: <contract_name> differs from on-chain WASM"
-#   Exits 0 on match, 1 on mismatch, 2 on error.
+#   DOCKER_IMAGE      Pinned builder image (default: rust:<channel>-bookworm)
+#   BUILDER_TAG       Builder image tag (default: agrocylo-builder-<contract>-<epoch>)
+#   STELLAR_CLI       Stellar CLI used for optimize/hash (default: stellar)
+#   KEEP_DOCKERFILE   Set 1 to keep the generated Dockerfile
 
 set -euo pipefail
 
+usage() {
+    sed -n '2,20p' "${BASH_SOURCE[0]}" >&2
+}
+
+fail() {
+    printf "Error: %s\n" "$*" >&2
+    exit 2
+}
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CONTRACTS_DIR="$REPO_ROOT/contracts"
+
+# Supported set is the checkout itself: every contracts/<name>/Cargo.toml.
+# The workspace members are the source of truth, so a directory that is not a
+# workspace member (e.g. archive/ leftovers placed under contracts/) is ignored.
+list_contracts() {
+    local dir
+    grep -oe 'contracts/[a-z0-9_]*' "$REPO_ROOT/Cargo.toml" 2>/dev/null \
+        | sed 's|contracts/||' || true
+
+}
+
+# Effective Rust channel from rust-toolchain.toml, resolved like the deploy script.
+rust_channel() {
+    local channel=""
+    if [[ -f "$REPO_ROOT/rust-toolchain.toml" ]]; then
+        channel="$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+            "$REPO_ROOT/rust-toolchain.toml" | head -n 1)"
+    fi
+    printf '%s' "${channel:-1.89.0}"
+}
+# Main: parse, validate, then build+compare.
 CONTRACT_NAME="${1:-}"
 ON_CHAIN_HASH="${2:-}"
 
-# -----------------------------------------------------------------------
-# Validation
-# -----------------------------------------------------------------------
+if [[ "$CONTRACT_NAME" == "--list" || "$CONTRACT_NAME" == "-l" ]]; then
+    list_contracts
+    exit 0
+fi
 
-if [[ -z "$CONTRACT_NAME" || -z "$ON_CHAIN_HASH" ]]; then
-    cat >&2 << 'EOF'
-Usage: verify-wasm.sh <contract_name> <on_chain_hash>
+if [[ "$CONTRACT_NAME" == "--help" || "$CONTRACT_NAME" == "-h" ]]; then
+    usage
+    exit 0
+fi
 
-Arguments:
-  contract_name     One of: governance, production_escrow, registry, investment_basket
-  on_chain_hash     SHA-256 hex string from soroban contract code-get-hash
-
-Environment:
-  DOCKER_IMAGE      Pinned Docker image (defaults to rust:1.89.0 with targets/components)
-  BUILDER_TAG       Tag for temporary builder image (defaults to agrocylo-builder-<contract>)
-
-Example:
-  ./verify-wasm.sh production_escrow \
-    c5b7d9f1a2e3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8
-EOF
+if [[ $# -ne 2 ]]; then
+    usage
     exit 2
 fi
 
-# Validate contract name
-case "$CONTRACT_NAME" in
-    governance|production_escrow|registry|investment_basket)
-        ;;
-    *)
-        echo "Error: contract_name must be one of: governance, production_escrow, registry, investment_basket" >&2
-        exit 2
-        ;;
-esac
-
-# Validate hash format (64 hex chars for SHA-256)
-if ! echo "$ON_CHAIN_HASH" | grep -qE '^[a-fA-F0-9]{64}$'; then
-    echo "Error: on_chain_hash must be a 64-character hex string (SHA-256)" >&2
-    exit 2
+if [[ ! "$CONTRACT_NAME" =~ ^[a-z][a-z0-9_]*$ ]]; then
+    fail "contract_name must match ^[a-z][a-z0-9_]*\$"
 fi
 
-# -----------------------------------------------------------------------
-# Configuration
-# -----------------------------------------------------------------------
+if ! list_contracts | grep -qxF "$CONTRACT_NAME"; then
+    fail "unsupported contract '$CONTRACT_NAME' (try --list)"
+fi
 
-DOCKER_IMAGE="${DOCKER_IMAGE:-rust:1.89.0}"
+# Accept an optional 0x prefix and upper case; require 64 hex chars.
+ON_CHAIN_HASH="${ON_CHAIN_HASH#0x}"
+ON_CHAIN_HASH="$(printf '%s' "$ON_CHAIN_HASH" | tr 'A-Z' 'a-z')"
+if [[ ! "$ON_CHAIN_HASH" =~ ^[a-f0-9]{64}$ ]]; then
+    fail "on_chain_hash must be a 64-character hex string (SHA-256)"
+fi
+
+RUST_VERSION="$(rust_channel)"
+DOCKER_IMAGE="${DOCKER_IMAGE:-rust:${RUST_VERSION}-bookworm}"
 BUILDER_TAG="${BUILDER_TAG:-agrocylo-builder-${CONTRACT_NAME}-$(date +%s)}"
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONTRACT_DIR="${REPO_ROOT}/contracts/${CONTRACT_NAME}"
+STELLAR_CLI="${STELLAR_CLI:-stellar}"
+WASM_NAME="${CONTRACT_NAME}.wasm"
 
-if [[ ! -d "$CONTRACT_DIR" ]]; then
-    echo "Error: Contract directory not found: $CONTRACT_DIR" >&2
-    exit 2
+if [[ "$CONTRACT_NAME" == "production_escrow" ]]; then
+    WASM_NAME="production_escrow_v2.wasm"
 fi
 
 echo "Verifying WASM: $CONTRACT_NAME"
 echo "  On-chain hash:   $ON_CHAIN_HASH"
 echo "  Docker image:    $DOCKER_IMAGE"
-echo "  Contract dir:    $CONTRACT_DIR"
-echo ""
+echo "  Contract dir:    contracts/$CONTRACT_NAME"
 
-# -----------------------------------------------------------------------
-# Build in Docker
-# -----------------------------------------------------------------------
+if ! command -v docker >/dev/null 2>&1; then
+    fail "docker is not available; cannot run the pinned build"
+fi
 
-echo "Building in Docker (pinned to $DOCKER_IMAGE)..."
-echo "  This ensures reproducible builds independent of host toolchain."
-echo ""
+WORK_DIR="$(mktemp -d)"
+DOCKERFILE="$WORK_DIR/Dockerfile"
+BUILDER_IMAGE="agrocylo-builder-temp:${BUILDER_TAG}"
 
-# Create a Dockerfile that installs Rust 1.89.0 and builds the contract
-BUILD_DOCKERFILE=$(mktemp)
-trap 'rm -f "$BUILD_DOCKERFILE"' EXIT
+cleanup() {
+    local status=$?
+    if [[ "${KEEP_BUILDER:-0}" != "1" ]]; then
+        docker image rm -f "$BUILDER_IMAGE" >/dev/null 2>&1 || true
+    fi
+    if [[ "${KEEP_DOCKERFILE:-0}" != "1" ]]; then
+        rm -rf "$WORK_DIR"
+    fi
+    return $status
+}
+trap cleanup EXIT
 
-cat > "$BUILD_DOCKERFILE" << 'DOCKERFILE_END'
+# Build context: the repository root. The artifact is copied out below, so
+# the context itself is never left behind as a dangling layer.
+cat > "$DOCKERFILE" << DOCKERFILE_END
 ARG BASE_IMAGE
-FROM ${BASE_IMAGE}
+FROM ${DOCKER_IMAGE}
 
-# Install required components for wasm32v1-none target and build tools
-RUN rustup toolchain install 1.89.0 && \
-    rustup target add --toolchain 1.89.0 wasm32v1-none && \
-    rustup component add --toolchain 1.89.0 rustfmt clippy
+ARG RUST_VERSION
+
+RUN rustup toolchain install "${RUST_VERSION}" \
+    && rustup target add --toolchain "${RUST_VERSION}" wasm32v1-none \
+    && rustup component add --toolchain "${RUST_VERSION}" rustfmt clippy || true
 
 WORKDIR /repo
 COPY . /repo
 
-# Build the contract
-RUN cd /repo && \
-    cargo +1.89.0 build --release --target wasm32v1-none
+# Build the contract crate for the pinned target. The artifact is read from the
+# workspace target dir, which is where cargo places it for path members.
+ARG CONTRACT_NAME
+ARG RUST_VERSION
+ARG WASM_NAME
 
-# Output WASM hash
-RUN sha256sum /repo/target/wasm32v1-none/release/*.wasm | awk '{print $1}'
+RUN cd /repo/contracts/${CONTRACT_NAME} \
+    && cargo +${RUST_VERSION} build --release --target wasm32v1-none
+
+RUN set -eux; \
+    ART=/repo/target/wasm32v1-none/release/${WASM_NAME}; \
+    test -f "\$ART"; \
+    cp "\$ART" /repo/artifact.wasm; \
+    sha256sum /repo/artifact.wasm | awk '{print \$1}'
+
+CMD ["sha256sum", "/repo/artifact.wasm"]
 DOCKERFILE_END
 
-# Build and run the container
-# (Note: in this scaffolding, we don't actually run Docker — that's for the maintainer)
-echo "<TO BE FILLED IN BY MAINTAINER RUNNING THIS>"
-echo "  docker build --build-arg BASE_IMAGE=$DOCKER_IMAGE -f <Dockerfile> ..."
-echo "  docker run ... | sha256sum"
+echo ""
+echo "Building in Docker (pinned to $DOCKER_IMAGE, Rust $RUST_VERSION)..."
 echo ""
 
-# -----------------------------------------------------------------------
-# Comparison (would happen in real execution)
-# -----------------------------------------------------------------------
+# Build failures are errors, not hash mismatches.
+if ! DOCKER_BUILDKIT=0 docker build \
+    --build-arg BASE_IMAGE="$DOCKER_IMAGE" \
+    --build-arg RUST_VERSION="$RUST_VERSION" \
+    --build-arg CONTRACT_NAME="$CONTRACT_NAME" \
+    --build-arg WASM_NAME="$WASM_NAME" \
+    -t "$BUILDER_IMAGE" \
+    -f "$DOCKERFILE" \
+    "$REPO_ROOT"; then
+    fail "docker build failed for $CONTRACT_NAME"
+fi
 
-echo "Verification would proceed as follows:"
-echo "  1. Build contract in Docker with pinned Rust 1.89.0"
-echo "  2. Compute SHA-256 of resulting WASM"
-echo "  3. Compare computed hash against on-chain hash: $ON_CHAIN_HASH"
+RAW_HASH="$(docker run --rm "$BUILDER_IMAGE" sha256sum /repo/artifact.wasm | awk '{print $1}')"
+if [[ ! "$RAW_HASH" =~ ^[a-f0-9]{64}$ ]]; then
+    fail "could not compute SHA-256 of the built artifact (got: '$RAW_HASH')"
+fi
+
+# Optimize + hash with the same tool the deploy script uses, when available.
+COMPUTED_HASH=""
+if [[ "${SKIP_OPTIMIZE:-0}" == "1" ]]; then
+    COMPUTED_HASH="$RAW_HASH"
+    echo "  SKIP_OPTIMIZE=1: comparing raw cargo output"
+elif command -v "$STELLAR_CLI" >/dev/null 2>&1; then
+    OPT_OUT="$WORK_DIR/optimized.wasm"
+    docker cp "$(docker create "$BUILDER_IMAGE")":/repo/artifact.wasm "$OPT_OUT" >/dev/null 2>&1
+    if "$STELLAR_CLI" contract optimize --wasm "$OPT_OUT" >/dev/null 2>&1; then
+        COMPUTED_HASH="$(sha256sum "$OPT_OUT" | awk '{print $1}')"
+        echo "  Optimized artifact SHA-256: $COMPUTED_HASH"
+    else
+        COMPUTED_HASH="$RAW_HASH"
+        echo "  optimize failed; comparing the raw artifact"
+    fi
+else
+    COMPUTED_HASH="$RAW_HASH"
+    echo "  Stellar CLI '$STELLAR_CLI' not found; comparing the raw artifact."
+    echo "  Install it and re-run for an exact deploy-hash comparison."
+fi
+
 echo ""
-echo "This script is scaffolding only. Actual Docker build and verification"
-echo "must be run by the maintainer with Docker available."
-echo ""
-echo "Result would be one of:"
-echo "  VERIFIED: $CONTRACT_NAME matches on-chain WASM (exit 0)"
-echo "  MISMATCH: $CONTRACT_NAME differs from on-chain WASM (exit 1)"
-echo ""
-echo "For now, see docs/deployment/CONTRACTS.md for the full verification procedure."
-echo ""
+if [[ "$COMPUTED_HASH" == "$ON_CHAIN_HASH" ]]; then
+    echo "VERIFIED: $CONTRACT_NAME matches on-chain WASM"
+    exit 0
+fi
+
+echo "MISMATCH: $CONTRACT_NAME differs from on-chain WASM"
+echo "  computed: $COMPUTED_HASH"
+echo "  on-chain: $ON_CHAIN_HASH"
+exit 1
