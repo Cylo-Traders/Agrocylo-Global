@@ -46,7 +46,20 @@ converges to the same state.
    later audit.
 6. **Write** `deployments/deployed-addresses.<network>.json` — contract IDs,
    WASM hashes, salts, and the wiring map. See
+   [`deployed-addresses.testnet.json`](../../deployments/deployed-addresses.testnet.json) (canonical testnet manifest) and
    [`deployed-addresses.example.json`](../../deployments/deployed-addresses.example.json).
+
+## Committed Testnet Deployment Manifest (Source of Truth)
+
+The canonical testnet deployment record is committed at [`deployments/deployed-addresses.testnet.json`](../../deployments/deployed-addresses.testnet.json) and verified via `scripts/deploy-contracts.sh --network testnet --verify-only`.
+
+| Contract | Contract ID (`testnet`) | WASM Artifact | Deterministic Salt (`sha256`) | Deploy Ledger | Verified Date |
+|---|---|---|---|---|---|
+| `governance` | `CAUYF5C7S2NPEKJRWDVADMWR4BZBY3OQWZJ5S6F2XRJEPFGDRWPJY7RN` | `governance.wasm` | `0e2e0bae…0209c61` | `1482910` | `2026-11-15` |
+| `escrow` | `CBJXHC2CDO7CYJWUWG4S3VCP5S5YBKHNQBHUFLGDEPH72QD5UCXSWJOW` | `escrow.wasm` | `41b8752b…eaf6fef` | `1482910` | `2026-11-15` |
+| `production_escrow` | `CD32EWZUKYGU5LU5AAHM4YEZJVIQ3TBO2YHXGBKPOJVAOJYUWDNVUWU6` | `production_escrow_v2.wasm` | `0f11b93c…c55691e` | `1482910` | `2026-11-15` |
+| `registry` | `CAUCYVBEPUBFCB3LKLXIT6MWUSLRNGYVRRT37QUKAGSN6CCS2GIR5EQG` | `registry.wasm` | `175deebf…2da1ad7` | `1482910` | `2026-11-15` |
+| `investment_basket` | `CDAWHGW4IP24A4ZPJA3BJPJPVW6P74SAGBNG2JPZ6F3LJ5S5CFFQKXRK` | `investment_basket.wasm` | `a39b5042…4b50169` | `1482910` | `2026-11-15` |
 
 ## Prerequisites
 

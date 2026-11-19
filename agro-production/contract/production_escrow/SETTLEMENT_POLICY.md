@@ -1,5 +1,10 @@
 # Settlement Policy for Production Escrow Contract
 
+**Last verified against commit:** `ff4c53b` (source: `src/lib.rs`). This section
+describes behavior that is actually implemented; the "Required Auditable
+Settlement Framework" below is aspirational and is explicitly not yet in the
+contract.
+
 ## Issue #454 - Self-Reported Harvest Fund Release Governance
 
 This document establishes the settlement and fund release policy for the production escrow contract.
@@ -13,11 +18,25 @@ Direct farmer-initiated fund release on harvest claims (via `mark_harvest`) pres
 3. **Investor Vulnerability**: Investors have no mechanism to dispute or verify harvest claims before funds are released.
 4. **Lack of Auditable Trail**: Fund release is directly tied to self-reported status, making post-mortem audits impossible.
 
-### Current Implementation
+### Current Implementation (verified at commit above)
 
-The `mark_harvest()` function is **deprecated and frozen**. It remains in the binary for ABI compatibility but should not be called in new integrations. The function releases a harvest tranche (40% of total raised) automatically upon farmer assertion.
+`mark_harvest` is **live and active**, not deprecated or frozen. It requires
+both `farmer.require_auth()` and an independent attester co-signature
+(`DataKey::Attester`, set via `set_attester`); the farmer cannot self-attest. On
+success it transitions `InProduction -> Harvested` and releases the harvest
+tranche, bringing cumulative tranche releases to 70% of `total_raised`
+(`MAX_TRANCHE_BPS`). The attester may be repointed only by governance once
+`GovernanceContract` is configured (Issue #1297).
 
-### Required Auditable Settlement Framework
+`settle` is likewise live: the farmer **or** the admin may call it on a
+`Harvested` campaign to transition to `Settled`. Investors then call
+`claim_returns` (or `refund` on failed campaigns). There is no on-chain
+multisig or governance vote gating `settle` today.
+
+### Required Auditable Settlement Framework (aspirational — not implemented)
+
+The oracle/dispute-window/multisig steps below are a target design, not the
+behavior of the deployed crate. Do not assume they are enforced on-chain.
 
 All fund release must follow this explicit settlement path, with independent verification at each step:
 
@@ -76,12 +95,12 @@ See **TTL_POLICY.md** for details.
 - **Order Finalization Requirement**: All orders created for a campaign must be finalized (either Confirmed or Refunded) before settlement is allowed (Issue #455). Late confirmations after settlement are rejected.
 - **Arithmetic Overflow Protection**: All monetary operations use checked arithmetic to prevent overflow attacks (Issue #457).
 
-### Parameters (Configurable at Initialization)
+### Parameters
 
-- **DISPUTE_WINDOW_SECS**: Duration (in seconds) for investors to file disputes after harvest claim. Default: **7 days** (604,800 seconds).
-- **PRODUCTION_WAIT_SECS**: Time-lock duration before production can be assumed without explicit attestation. Default: **90 days** (7,776,000 seconds).
-- **TTL_THRESHOLD**: Ledger entry TTL threshold before extension. Default: **1,000 ledgers**.
-- **TTL_EXTENSION**: Amount to extend TTL by upon write. Default: **100,000 ledgers**.
+- **DISPUTE_WINDOW_SECS / PRODUCTION_WAIT_SECS**: aspirational only — no such
+  constants exist in `src/lib.rs` at the verified commit.
+- **TTL_THRESHOLD**: `1,000` ledgers (implemented constant `TTL_THRESHOLD`).
+- **TTL_EXTENSION**: `100,000` ledgers (implemented constant `TTL_EXTEND`).
 
 ### Compliance Checklist
 
@@ -89,7 +108,7 @@ When integrating with this contract:
 
 - [ ] All campaigns go through the full settlement pipeline.
 - [ ] Fund release is only triggered after documented authorization.
-- [ ] Production status is attested by independent verifier or dispute window.
+- [ ] Harvest is co-signed by the configured independent attester (no dispute-window alternative is implemented).
 - [ ] All orders are finalized before settlement.
 - [ ] Investor claims are verified against a proportional payout calculation.
 - [ ] Disputes are resolved by multisig or governance authority.

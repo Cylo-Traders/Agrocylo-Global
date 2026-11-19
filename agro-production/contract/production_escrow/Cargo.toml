@@ -17,3 +17,5 @@ soroban-sdk = { workspace = true }
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
 registry = { path = "../registry" }
+governance = { path = "../governance" }
+proptest = "1.4.0"

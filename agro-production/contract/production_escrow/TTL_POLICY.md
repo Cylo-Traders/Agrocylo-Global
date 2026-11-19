@@ -1,5 +1,7 @@
 # Persistent Storage TTL Extension Policy (Issue #456)
 
+**Last verified against commit:** `ff4c53b` (call sites in `src/lib.rs`).
+
 ## Overview
 
 All data stored in Soroban persistent contract storage must have their Time-To-Live (TTL) explicitly managed to prevent loss. This document specifies when and how TTL is extended for each data key across the production escrow contract.
@@ -39,18 +41,25 @@ These constants ensure:
 
 ### Campaign Contributions
 
-**Key**: `DataKey::Contributions(campaign_id)`
+**Key**: `DataKey::Contribution(campaign_id, investor)` (one indexed entry per
+investor — not a per-campaign map)
 **Storage Type**: Persistent
-**Owner**: Protocol (stores investor → amount map)
+**Owner**: Protocol (stores investor → amount)
 **Lifetime**: Campaign + 3 months (for refund audits after settlement)
 
 | Trigger | TTL Extension Call | Reason |
 |---------|-------------------|--------|
-| Creation (first investment) | ✅ Extended on first `invest()` | Must survive entire funding phase |
+| Creation (first investment) | ✅ Extended in `invest()` | Must survive entire funding phase |
 | Investment added | ✅ Extended in `invest()` | Each new investor access needs refresh |
-| Claim/Refund read | ⚠️ **Currently NOT extended** | **Issue**: Should extend on each claim/refund for access verification |
+| Claim read | ✅ Extended in `claim_returns()` before reading the contribution | Proof of investment is required for the payout |
+| Refund read | ✅ Extended in `refund()` before reading the contribution | Proof of investment is required for the refund |
+| Batch refund | ✅ Extended in `batch_refund_investors()` | Refund records for swept campaigns stay auditable |
 
-**Implementation**: Should extend in `claim_returns()` and `refund()` before reading contributions.
+**Implementation**: `claim_returns` and `refund` call
+`extend_ttl(&contribution_key, TTL_THRESHOLD, TTL_EXTEND)` immediately after
+the `get`; `invest` and `batch_refund_investors` extend on write. The earlier
+note that contribution TTL was "Currently NOT extended" on claim/refund is
+fixed by the verified call sites above.
 
 ---
 
@@ -84,7 +93,10 @@ These constants ensure:
 | Confirmation (`confirm_order`) | ✅ Extended via `write_order()` helper | Confirmed state must persist |
 | Batch refund (`batch_refund_orders`) | ✅ Extended on set after status change | Refund state must persist |
 
-**Implementation**: `write_order()` helper in Contracts/Escrow (not in production_escrow yet, but should adopt if expanded).
+**Implementation**: `create_order`, `confirm_order` and `batch_refund_orders`
+extend the `Order(order_id)` key directly in `production_escrow/src/lib.rs`.
+There is no `write_order()` helper in this crate; the helper reference in
+`contracts/escrow` does not apply here.
 
 ---
 
@@ -94,10 +106,21 @@ These constants ensure:
 
 | Key | Storage Type | TTL Extension Points |
 |-----|--------------|----------------------|
-| `Campaign(id)` | Persistent | create, save (all mutations) |
-| `Contributions(id)` | Persistent | first invest, each invest |
+| `Campaign(id)` | Persistent | create, `save_campaign()` (all mutations) |
+| `Contribution(campaign_id, investor)` | Persistent | invest, claim_returns (read), refund (read), batch_refund_investors |
 | `Claimed(campaign_id, investor)` | Persistent | claim_returns, refund, batch_refund_investors |
 | `Order(id)` | Persistent | create_order, confirm_order, batch_refund_orders |
+| `MilestoneConfigs(campaign_id)` | Persistent | ⚠️ **not extended** (written once in `set_milestone_configs`) — tracked as a follow-up gap |
+
+### Outstanding gaps
+
+- `MilestoneConfigs(campaign_id)` is written without an `extend_ttl` call. A
+  campaign configured long before milestones are advanced could see the config
+  archived; add an extension in `set_milestone_configs` (and on read in
+  `advance_milestone`) in a follow-up.
+- Read-only getters (`get_campaign`, `get_order`, `get_milestone_configs`,
+  `refundable_amount`) do not extend TTL. Only the payout-path reads listed
+  above do.
 
 ---
 
@@ -140,7 +163,7 @@ fn test_ttl_extended_on_claim() {
 ## Best Practices
 
 1. **Always Use Helpers**: Use `save_campaign()` and `write_order()` helpers instead of direct `set()` calls.
-2. **Extend on Read**: Before returning data to users (claim, refund, get_contribution), extend TTL to signal the data is still in use.
+2. **Extend on Read**: Implemented on the payout-path reads (`claim_returns`, `refund`). Generic getters do not extend TTL yet (see gaps above).
 3. **Extend on Write**: Every mutation must extend TTL immediately after the write.
 4. **Document New Keys**: If new persistent keys are added, update this policy immediately.
 5. **Test TTL Scenarios**: Add tests for near-threshold ledger states to catch missed extensions.

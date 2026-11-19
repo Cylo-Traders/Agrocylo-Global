@@ -107,6 +107,20 @@ jobs:
           PATH_PAYMENT_ROUTER: ${{ vars.TESTNET_PATH_PAYMENT_ROUTER }}
         run: scripts/deploy-contracts.sh --network testnet
 
+      - name: Verify committed/deployed testnet manifest (--verify-only)
+        env:
+          DEPLOYER: ci-deployer
+          ADMIN: ${{ vars.TESTNET_CONTRACT_ADMIN }}
+          PATH_PAYMENT_ROUTER: ${{ vars.TESTNET_PATH_PAYMENT_ROUTER }}
+        run: scripts/deploy-contracts.sh --network testnet --verify-only
+
+      - name: Publish manifest summary
+        run: |
+          echo "### Testnet Contract Deployment Manifest" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat deployments/deployed-addresses.testnet.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload address manifest
         uses: actions/upload-artifact@v4
         with:
