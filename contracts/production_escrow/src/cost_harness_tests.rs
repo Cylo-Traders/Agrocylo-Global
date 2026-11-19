@@ -138,24 +138,25 @@ fn cost_harness_batch_refund_investors_50_investors() {
     // Prepare list of all investors for batch refund
     let investor_addrs = test_env.investors.clone();
 
-    // Measure cost of batch_refund_investors
+    // Measure cost of batch_refund_investors (must succeed and stay within Soroban CPU budget)
+    test_env.env.cost_estimate().budget().reset_default();
     let result = test_env
         .client
         .try_batch_refund_investors(&campaign_id, &investor_addrs);
-
-    if let Ok(_) = result {
-        println!("Result: SUCCESS");
-        let budget = test_env.env.cost_estimate().budget();
-        print_cost_result(
-            budget.cpu_instruction_cost(),
-            budget.memory_bytes_cost(),
-            0,
-            0,
-        );
-    } else {
-        println!("Result: ERROR (see details above)");
-        println!("Note: Cost measurement may vary depending on mock setup");
-    }
+    assert!(
+        result.is_ok(),
+        "batch_refund_investors must succeed at 50-investor cap: {:?}",
+        result.err()
+    );
+    let budget = test_env.env.cost_estimate().budget();
+    let cpu = budget.cpu_instruction_cost();
+    let mem = budget.memory_bytes_cost();
+    print_cost_result(cpu, mem, 0, 0);
+    assert!(
+        cpu <= 30_000_000,
+        "batch_refund_investors CPU cost {} exceeded 30M limit",
+        cpu
+    );
 
     println!("Assessment:");
     println!("  This test measures the cost of refunding the maximum batch (50 investors).");
@@ -165,87 +166,67 @@ fn cost_harness_batch_refund_investors_50_investors() {
 }
 
 // -----------------------------------------------------------------------
-// Test 2: fund_basket at MAX_BASKET_SIZE (Issue #781)
+// Test 2: dispute resolution cost measurement (Issue #1291)
 // -----------------------------------------------------------------------
 
 #[test]
-fn cost_harness_fund_basket_max_size() {
-    // Note: This is a placeholder for investment_basket contract costs.
-    // The actual test would be in investment_basket/src/cost_harness_tests.rs
-    // but we document it here for completeness.
+fn cost_harness_dispute_open_and_resolve() {
+    let test_env = setup_cost_test_env(5);
+    print_cost_header("open_dispute + resolve_dispute", 5, "investors");
 
-    println!("\nTODO: fund_basket cost measurement");
-    println!("  Entry point: investment_basket::fund_basket");
-    println!("  Max input: MAX_BASKET_SIZE constituents (typically 20)");
-    println!("  Should measure: CPU, memory, ledger operations at max size");
-    println!("");
-    println!("  When this test is implemented, it should:");
-    println!("  1. Create a basket with 20 constituents");
-    println!("  2. Call fund_basket with all constituents");
-    println!("  3. Record measured resources");
-    println!("  4. Compare against COST_BASELINE.md thresholds");
+    let campaign_id =
+        test_env
+            .client
+            .create_campaign(&test_env.farmer, &test_env.token_id, &5_000, &9999999999);
+    for investor in test_env.investors.iter() {
+        test_env.client.invest(&investor, &campaign_id, &1000);
+    }
+    test_env
+        .client
+        .start_production(&test_env.farmer, &campaign_id);
+
+    test_env.env.cost_estimate().budget().reset_default();
+    let open_res = test_env
+        .client
+        .try_open_dispute(&test_env.investors.get(0).unwrap(), &campaign_id);
+    assert!(open_res.is_ok(), "open_dispute must succeed");
+
+    let resolve_res = test_env.client.try_resolve_dispute(
+        &test_env.admin,
+        &campaign_id,
+        &crate::DisputeResolution::RefundInvestors,
+    );
+    assert!(resolve_res.is_ok(), "resolve_dispute must succeed");
+
+    let budget = test_env.env.cost_estimate().budget();
+    let cpu = budget.cpu_instruction_cost();
+    print_cost_result(cpu, budget.memory_bytes_cost(), 0, 0);
+    assert!(cpu <= 30_000_000, "dispute lifecycle CPU cost {} exceeded 30M limit", cpu);
 }
 
 // -----------------------------------------------------------------------
-// Test 3: vote_to_resolve with full arbitrator list (Issue #781)
+// Test 3: campaign creation and funding cost measurement (Issue #1291)
 // -----------------------------------------------------------------------
 
 #[test]
-fn cost_harness_vote_to_resolve_full_arbitrators() {
-    // Note: This test structure is provided; actual implementation depends on
-    // the governance/arbitrator setup in the production_escrow contract.
+fn cost_harness_create_and_invest() {
+    let test_env = setup_cost_test_env(1);
+    print_cost_header("create_campaign + invest", 1, "investor");
 
-    println!("\nTODO: vote_to_resolve cost measurement");
-    println!("  Entry point: production_escrow::vote_to_resolve");
-    println!("  Max input: iterate over full arbitrator list");
-    println!("  Should measure: CPU, memory, ledger operations");
-    println!("");
-    println!("  When this test is implemented, it should:");
-    println!("  1. Set up a campaign with many arbitrators");
-    println!("  2. Open a dispute");
-    println!("  3. Call vote_to_resolve (arbitrators must iterate full list)");
-    println!("  4. Record measured resources");
-    println!("  5. Confirm it fits within mainnet limits");
-}
+    test_env.env.cost_estimate().budget().reset_default();
+    let campaign_id =
+        test_env
+            .client
+            .create_campaign(&test_env.farmer, &test_env.token_id, &1_000, &9999999999);
+    let invest_res = test_env
+        .client
+        .try_invest(&test_env.investors.get(0).unwrap(), &campaign_id, &1_000);
+    assert!(invest_res.is_ok(), "invest must succeed");
 
-// -----------------------------------------------------------------------
-// Test 4: batch_refund_orders (Issue #781)
-// -----------------------------------------------------------------------
-
-#[test]
-fn cost_harness_batch_refund_orders() {
-    // Similar structure to batch_refund_investors, but for orders
-    println!("\nTODO: batch_refund_orders cost measurement");
-    println!("  Entry point: production_escrow::batch_refund_orders");
-    println!("  Max input: unbounded (no documented cap in current code)");
-    println!("  Should measure: CPU, memory, ledger operations");
-    println!("");
-    println!("  When this test is implemented, it should:");
-    println!("  1. Create multiple orders (e.g., 50-100)");
-    println!("  2. Mark campaign failed");
-    println!("  3. Call batch_refund_orders with all order IDs");
-    println!("  4. Record measured resources");
-    println!("  5. Recommend a reasonable batch cap if unbounded is unsafe");
-}
-
-// -----------------------------------------------------------------------
-// Test 5: get_campaigns with pagination (Issue #781)
-// -----------------------------------------------------------------------
-
-#[test]
-fn cost_harness_get_campaigns_pagination() {
-    // Pagination is bounded by Soroban's result size limits
-    println!("\nTODO: get_campaigns pagination cost measurement");
-    println!("  Entry point: production_escrow::get_campaigns");
-    println!("  Max input: pagination at realistic page size (e.g., 50 campaigns)");
-    println!("  Should measure: CPU, memory for list deserialization");
-    println!("");
-    println!("  When this test is implemented, it should:");
-    println!("  1. Create many campaigns (e.g., 100+)");
-    println!("  2. Call get_campaigns with offset=0, limit=50");
-    println!("  3. Repeat with increasing offsets");
-    println!("  4. Record measured resources for each page");
-    println!("  5. Identify any performance cliffs at certain page sizes");
+    let budget = test_env.env.cost_estimate().budget();
+    let cpu = budget.cpu_instruction_cost();
+    print_cost_result(cpu, budget.memory_bytes_cost(), 0, 0);
+    assert!(cpu <= 30_000_000, "create_campaign + invest CPU cost {} exceeded 30M limit", cpu);
 }
 
 // -----------------------------------------------------------------------

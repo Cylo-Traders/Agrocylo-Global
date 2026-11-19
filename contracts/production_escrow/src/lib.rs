@@ -2123,6 +2123,10 @@ impl ProductionEscrowContract {
         ) {
             return Err(EscrowError::CampaignAlreadyDisputed);
         }
+        // Issue #1299: prevent Funding-state disputes from deadlocking deadline-driven finalize_failed.
+        if campaign.status == CampaignStatus::Funding {
+            return Err(EscrowError::CampaignNotFundedOrBeyond);
+        }
         campaign.status = CampaignStatus::Disputed;
         save_campaign(&env, &campaign);
 

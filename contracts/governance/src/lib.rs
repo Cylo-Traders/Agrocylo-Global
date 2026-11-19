@@ -820,6 +820,13 @@ impl GovernanceContract {
             .ok_or(GovernanceError::NotInitialized)
     }
 
+    pub fn get_total_weight(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalWeight)
+            .unwrap_or(0)
+    }
+
     pub fn get_upgrade_timelock_delay_secs(env: Env) -> Result<u64, GovernanceError> {
         env.storage()
             .instance()
