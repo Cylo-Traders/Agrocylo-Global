@@ -1,6 +1,10 @@
 import { Router, type Response } from 'express';
 import { z } from 'zod';
-import { validateQuery, validateBody } from '../middleware/validate.js';
+import {
+  validateQuery,
+  validateBody,
+  validateParams,
+} from '../middleware/validate.js';
 import { problemDetail } from '../middleware/errors.js';
 import { requireWallet, type WalletRequest } from '../middleware/walletAuth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
@@ -20,6 +24,7 @@ const ListQuerySchema = z.object({
 });
 
 const PreferencesSchema = z.record(z.string(), z.boolean());
+const NotificationIdParamSchema = z.object({ id: z.string().uuid() });
 
 router.get(
   '/notifications',
@@ -42,10 +47,15 @@ router.get(
 router.patch(
   '/notifications/:id/read',
   requireWallet,
+  validateParams(NotificationIdParamSchema),
   asyncHandler(async (req: WalletRequest, res: Response) => {
     try {
       const { id } = req.params;
-      await markAsRead(id);
+      const updated = await markAsRead(id, req.walletAddress!);
+      if (!updated) {
+        problemDetail(res, req, 404, 'Notification Not Found');
+        return;
+      }
       res.status(204).send();
     } catch {
       problemDetail(res, req, 500, 'Failed to mark notification as read');

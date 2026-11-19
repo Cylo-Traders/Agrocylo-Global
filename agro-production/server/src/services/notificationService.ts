@@ -57,11 +57,15 @@ export async function listNotifications(
   return notifications;
 }
 
-export async function markAsRead(notificationId: string): Promise<void> {
-  await prisma.notification.update({
-    where: { id: notificationId },
+export async function markAsRead(
+  notificationId: string,
+  walletAddress: string,
+): Promise<boolean> {
+  const result = await prisma.notification.updateMany({
+    where: { id: notificationId, walletAddress },
     data: { isRead: true },
   });
+  return result.count > 0;
 }
 
 export async function markAllAsRead(walletAddress: string): Promise<void> {
