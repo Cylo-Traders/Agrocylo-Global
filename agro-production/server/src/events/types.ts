@@ -69,6 +69,13 @@ export interface CampaignSettledEvent extends BaseEvent {
   totalRevenue: string;
 }
 
+export interface CampaignClaimedEvent extends BaseEvent {
+  action: 'campaign.claimed';
+  campaignId: string;
+  investor: string;
+  payout: string;
+}
+
 export interface OrderCreatedEvent extends BaseEvent {
   action: 'order.created';
   orderId: string;
@@ -90,6 +97,7 @@ export interface GenericCampaignEvent extends BaseEvent {
     | 'campaign.created'
     | 'campaign.invested'
     | 'campaign.settled'
+    | 'campaign.claimed'
     | 'order.created'
     | 'order.confirmed'
     | 'dispute.opened'
@@ -185,6 +193,7 @@ export type ParsedEvent =
   | CampaignCreatedEvent
   | CampaignInvestedEvent
   | CampaignSettledEvent
+  | CampaignClaimedEvent
   | OrderCreatedEvent
   | OrderConfirmedEvent
   | GenericCampaignEvent

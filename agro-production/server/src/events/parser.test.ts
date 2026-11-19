@@ -193,6 +193,19 @@ describe('ProductionEventParser', () => {
     });
   });
 
+  describe('campaign.claimed', () => {
+    it('parses correctly with campaignId, investor and payout', () => {
+      const raw = makeRaw('campaign', 'claimed', [42n, 'GINVESTOR', 75000000n]);
+      const event = ProductionEventParser.parse(raw);
+      expect(event.action).toBe('campaign.claimed');
+      if (event.action === 'campaign.claimed') {
+        expect(event.campaignId).toBe('42');
+        expect(event.investor).toBe('GINVESTOR');
+        expect(event.payout).toBe('75000000');
+      }
+    });
+  });
+
   describe('basket.claimed', () => {
     it('parses correctly', () => {
       const raw = makeRaw('basket', 'claimed', [1, 1n, 'GDEPOSITOR', 620n]);
