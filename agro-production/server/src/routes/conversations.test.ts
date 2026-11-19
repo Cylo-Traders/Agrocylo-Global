@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { prisma } from '../db/client.js';
 import request from 'supertest';
 import express from 'express';
-import conversationRoutes from './conversations.js';
+import conversationRoutes, {
+  MESSAGE_CONTENT_MAX_LENGTH,
+  SendMessageSchema,
+  EditMessageSchema,
+} from './conversations.js';
 import { verifySession } from '../services/walletAuthService.js';
 
 vi.mock('../services/walletAuthService.js');
@@ -93,8 +97,8 @@ describe('POST /api/v1/conversations/:id/messages', () => {
     expect(response.body.title).toBe('Forbidden');
   });
 
-  it('should reject oversized message content', async () => {
-    const oversizedContent = 'x'.repeat(5001);
+  it('should reject message content over the maximum allowed length', async () => {
+    const oversizedContent = 'x'.repeat(MESSAGE_CONTENT_MAX_LENGTH + 1);
 
     const response = await request(app)
       .post(`/api/v1/conversations/${mockConversationId}/messages`)
@@ -246,5 +250,59 @@ describe('POST /api/v1/conversations/:id/messages/:messageId/report', () => {
       .send({ reason: 'Abusive language' });
 
     expect(response.status).toBe(403);
+  });
+});
+
+describe('Message content length boundary', () => {
+  const atLimit = 'x'.repeat(MESSAGE_CONTENT_MAX_LENGTH);
+  const justUnderLimit = 'x'.repeat(MESSAGE_CONTENT_MAX_LENGTH - 1);
+  const overLimit = 'x'.repeat(MESSAGE_CONTENT_MAX_LENGTH + 1);
+
+  describe('SendMessageSchema', () => {
+    it('accepts content at the maximum allowed length', () => {
+      expect(SendMessageSchema.safeParse({ content: atLimit }).success).toBe(
+        true,
+      );
+    });
+
+    it('accepts content one character under the limit', () => {
+      expect(
+        SendMessageSchema.safeParse({ content: justUnderLimit }).success,
+      ).toBe(true);
+    });
+
+    it('rejects content one character over the limit', () => {
+      expect(SendMessageSchema.safeParse({ content: overLimit }).success).toBe(
+        false,
+      );
+    });
+
+    it('rejects empty content', () => {
+      expect(SendMessageSchema.safeParse({ content: '' }).success).toBe(false);
+    });
+  });
+
+  describe('EditMessageSchema', () => {
+    it('accepts content at the maximum allowed length', () => {
+      expect(EditMessageSchema.safeParse({ content: atLimit }).success).toBe(
+        true,
+      );
+    });
+
+    it('accepts content one character under the limit', () => {
+      expect(
+        EditMessageSchema.safeParse({ content: justUnderLimit }).success,
+      ).toBe(true);
+    });
+
+    it('rejects content one character over the limit', () => {
+      expect(EditMessageSchema.safeParse({ content: overLimit }).success).toBe(
+        false,
+      );
+    });
+
+    it('rejects empty content', () => {
+      expect(EditMessageSchema.safeParse({ content: '' }).success).toBe(false);
+    });
   });
 });
