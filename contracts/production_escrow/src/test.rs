@@ -4303,3 +4303,316 @@ fn test_1274_interleaved_refunds_and_late_confirmations_isolate_campaigns() {
     t.client.confirm_order(&t.buyer, &b_pending);
     assert!(t.client.get_campaign(&id_b).total_revenue > 0);
 }
+
+// ---------------------------------------------------------------------------
+// Issue #1276: fund_split_order must validate actual token receipts.
+//
+// Supported-token policy (also documented on
+// SplitOrderError::UnsupportedToken): a token is "supported" only if every
+// transfer delivers exactly the requested amount into the escrow. Adding a
+// fee-on-transfer token to the whitelist would make the UnsupportedToken
+// path reachable on every invest / create_order / fund_split_order call
+// for that token, which is the intended defensive behaviour.
+//
+// The mock below exists only to exercise the defence: it is a minimal
+// token-like contract whose per-transfer fee is mutable at runtime, so a
+// single contract instance can play both the "well-behaved" (fee=0) and
+// "misbehaving" (fee>0) roles across a single test without re-registering.
+// ---------------------------------------------------------------------------
+
+mod fee_on_transfer_token_1276 {
+    use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
+
+    #[contracttype]
+    pub(super) enum DataKey {
+        Balance(Address),
+        FeeBps,
+    }
+
+    #[contract]
+    pub struct FeeOnTransferToken;
+
+    #[contractimpl]
+    impl FeeOnTransferToken {
+        pub fn init(env: Env, initial_fee_bps: i128) {
+            env.storage().instance().set(&DataKey::FeeBps, &initial_fee_bps);
+        }
+
+        pub fn set_fee_bps(env: Env, new_bps: i128) {
+            env.storage().instance().set(&DataKey::FeeBps, &new_bps);
+        }
+
+        pub fn mint(env: Env, to: Address, amount: i128) {
+            let prev: i128 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Balance(to.clone()))
+                .unwrap_or(0);
+            env.storage()
+                .persistent()
+                .set(&DataKey::Balance(to), &(prev + amount));
+        }
+
+        pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+            from.require_auth();
+            let fee_bps: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::FeeBps)
+                .unwrap_or(0);
+            let fee = amount * fee_bps / 10_000;
+            let delivered = amount - fee;
+
+            let from_bal: i128 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Balance(from.clone()))
+                .unwrap_or(0);
+            if from_bal < amount {
+                panic!("insufficient balance");
+            }
+            env.storage()
+                .persistent()
+                .set(&DataKey::Balance(from), &(from_bal - amount));
+
+            let to_bal: i128 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Balance(to.clone()))
+                .unwrap_or(0);
+            env.storage()
+                .persistent()
+                .set(&DataKey::Balance(to), &(to_bal + delivered));
+        }
+
+        pub fn balance(env: Env, id: Address) -> i128 {
+            env.storage()
+                .persistent()
+                .get(&DataKey::Balance(id))
+                .unwrap_or(0)
+        }
+    }
+}
+
+use fee_on_transfer_token_1276::{FeeOnTransferToken, FeeOnTransferTokenClient};
+
+struct FeeTokenEnv<'a> {
+    env: Env,
+    client: ProductionEscrowContractClient<'a>,
+    sac_token_id: Address,
+    fake_token_id: Address,
+    fake_client: FeeOnTransferTokenClient<'a>,
+    attester: Address,
+    farmer: Address,
+    investor1: Address,
+    buyer: Address,
+}
+
+fn setup_with_fee_token() -> FeeTokenEnv<'static> {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let attester = Address::generate(&env);
+    let farmer = Address::generate(&env);
+    let investor1 = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    // Mock token starts with fee_bps = 0 so invest and ordinary SAC-like
+    // flows succeed; tests flip the fee to a non-zero value to simulate a
+    // fee-on-transfer / short-delivering token before exercising
+    // fund_split_order.
+    let fake_token_id = env.register(FeeOnTransferToken, ());
+    let fake_client = FeeOnTransferTokenClient::new(&env, &fake_token_id);
+    fake_client.init(&0i128);
+    fake_client.mint(&investor1, &1_000_000);
+    fake_client.mint(&buyer, &1_000_000);
+
+    // Also register a standard SAC so cross-token / cross-campaign
+    // isolation tests can run both tokens in the same process.
+    let sac_admin = Address::generate(&env);
+    let sac_token_id = env
+        .register_stellar_asset_contract_v2(sac_admin)
+        .address();
+    let sac = StellarAssetClient::new(&env, &sac_token_id);
+    sac.mint(&investor1, &1_000_000);
+    sac.mint(&buyer, &1_000_000);
+
+    let contract_id = env.register(ProductionEscrowContract, ());
+    let client = ProductionEscrowContractClient::new(&env, &contract_id);
+    let mut tokens = Vec::new(&env);
+    tokens.push_back(sac_token_id.clone());
+    tokens.push_back(fake_token_id.clone());
+    let fee_collector = Address::generate(&env);
+    client.initialize(&admin, &tokens, &fee_collector, &300);
+    client.set_attester(&admin, &attester);
+
+    let client: ProductionEscrowContractClient<'static> = unsafe { std::mem::transmute(client) };
+    let fake_client: FeeOnTransferTokenClient<'static> =
+        unsafe { std::mem::transmute(fake_client) };
+
+    FeeTokenEnv {
+        env,
+        client,
+        sac_token_id,
+        fake_token_id,
+        fake_client,
+        attester,
+        farmer,
+        investor1,
+        buyer,
+    }
+}
+
+fn mk_split_order_on_fake(t: &FeeTokenEnv<'_>, campaign_id: u64, co_buyer: &Address) -> u64 {
+    t.fake_client.mint(co_buyer, &1_000);
+    let mut co_buyers = Vec::new(&t.env);
+    co_buyers.push_back(t.buyer.clone());
+    co_buyers.push_back(co_buyer.clone());
+    let mut shares = Vec::new(&t.env);
+    shares.push_back(500);
+    shares.push_back(500);
+    t.client
+        .create_split_order(&t.buyer, &campaign_id, &co_buyers, &shares)
+}
+
+fn drive_fake_to_in_production(t: &FeeTokenEnv<'_>, target: i128) -> u64 {
+    let deadline = t.env.ledger().timestamp() + 7 * 24 * 3600;
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.fake_token_id, &target, &deadline);
+    t.client.invest(&t.investor1, &id, &target);
+    t.client.start_production(&t.farmer, &id);
+    id
+}
+
+#[test]
+fn test_1276_fund_split_order_rejects_short_delivery() {
+    let t = setup_with_fee_token();
+    let id = drive_fake_to_in_production(&t, 10_000);
+    let co_buyer = Address::generate(&t.env);
+    let order_id = mk_split_order_on_fake(&t, id, &co_buyer);
+
+    // Flip the token into fee-on-transfer mode: 1% skim.
+    t.fake_client.set_fee_bps(&100);
+
+    let err = t
+        .client
+        .try_fund_split_order(&t.buyer, &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::UnsupportedToken);
+}
+
+#[test]
+fn test_1276_rejected_fund_rolls_back_order_and_balances() {
+    let t = setup_with_fee_token();
+    let id = drive_fake_to_in_production(&t, 10_000);
+    let co_buyer = Address::generate(&t.env);
+    let order_id = mk_split_order_on_fake(&t, id, &co_buyer);
+
+    let buyer_before = t.fake_client.balance(&t.buyer);
+    let cob_before = t.fake_client.balance(&co_buyer);
+    let contract_before = t.fake_client.balance(&t.client.address);
+
+    t.fake_client.set_fee_bps(&100);
+    assert!(t.client.try_fund_split_order(&t.buyer, &order_id).is_err());
+
+    // No funded flag set, no count incremented.
+    let order_after = t.client.get_split_order(&order_id);
+    assert_eq!(order_after.funded_count, 0);
+    assert_eq!(order_after.funded.get(t.buyer.clone()).unwrap_or(false), false);
+    assert_eq!(order_after.funded.get(co_buyer.clone()).unwrap_or(false), false);
+
+    // No tokens moved: the Soroban host rolls back the inner fake-token
+    // transfer when the outer entry point returns Err.
+    assert_eq!(t.fake_client.balance(&t.buyer), buyer_before);
+    assert_eq!(t.fake_client.balance(&co_buyer), cob_before);
+    assert_eq!(t.fake_client.balance(&t.client.address), contract_before);
+}
+
+#[test]
+fn test_1276_fund_split_order_succeeds_with_exact_delivery() {
+    // Regression: a well-behaved token (fee_bps = 0) still flows through
+    // fund_split_order after measure_token_transfer is added.
+    let t = setup_with_fee_token();
+    let id = drive_fake_to_in_production(&t, 10_000);
+    let co_buyer = Address::generate(&t.env);
+    let order_id = mk_split_order_on_fake(&t, id, &co_buyer);
+
+    // fee stays at 0: exact-delivery path.
+    t.client.fund_split_order(&t.buyer, &order_id);
+    t.client.fund_split_order(&co_buyer, &order_id);
+    assert_eq!(
+        t.client.get_split_order(&order_id).status,
+        SplitOrderStatus::Active
+    );
+    t.client.confirm_split_receipt(&t.buyer, &order_id);
+    t.client.confirm_split_receipt(&co_buyer, &order_id);
+    assert_eq!(
+        t.client.get_split_order(&order_id).status,
+        SplitOrderStatus::Confirmed
+    );
+}
+
+#[test]
+fn test_1276_standard_sac_split_funding_still_works() {
+    // Regression: the standard SAC path is unchanged. Uses the base `setup`
+    // harness and the existing `split_order_fixture`, which were green
+    // before this patch and should stay green.
+    let t = setup();
+    let (_campaign_id, co_buyers, order_id) = split_order_fixture(&t, &[500, 500]);
+    t.client.fund_split_order(&co_buyers[0], &order_id);
+    t.client.fund_split_order(&co_buyers[1], &order_id);
+    assert_eq!(
+        t.client.get_split_order(&order_id).status,
+        SplitOrderStatus::Active
+    );
+    t.client.confirm_split_receipt(&co_buyers[0], &order_id);
+    t.client.confirm_split_receipt(&co_buyers[1], &order_id);
+    assert_eq!(
+        t.client.get_split_order(&order_id).status,
+        SplitOrderStatus::Confirmed
+    );
+}
+
+#[test]
+fn test_1276_short_delivery_on_fake_token_cannot_subsidise_sac_campaign() {
+    // Multi-token / multi-campaign isolation: a rejection on the fake-token
+    // campaign must not disturb a sibling SAC-backed campaign's state.
+    let t = setup_with_fee_token();
+
+    // Fake-token campaign with a split order queued up.
+    let fake_campaign = drive_fake_to_in_production(&t, 10_000);
+    let fake_co_buyer = Address::generate(&t.env);
+    let fake_order = mk_split_order_on_fake(&t, fake_campaign, &fake_co_buyer);
+
+    // Sibling SAC campaign, independently funded and advanced.
+    let deadline = t.env.ledger().timestamp() + 7 * 24 * 3600;
+    let sac_campaign =
+        t.client
+            .create_campaign(&t.farmer, &t.sac_token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &sac_campaign, &10_000);
+    t.client.start_production(&t.farmer, &sac_campaign);
+    t.client.mark_harvest(&t.farmer, &t.attester, &sac_campaign);
+    let sac_order = t.client.create_order(&t.buyer, &sac_campaign, &500);
+    t.client.confirm_order(&t.buyer, &sac_order);
+
+    let sac_campaign_snapshot = t.client.get_campaign(&sac_campaign);
+    let sac_contract_balance_before =
+        TokenClient::new(&t.env, &t.sac_token_id).balance(&t.client.address);
+
+    // Trigger a rejection on the fake-token campaign.
+    t.fake_client.set_fee_bps(&100);
+    assert!(t.client.try_fund_split_order(&t.buyer, &fake_order).is_err());
+
+    // SAC campaign accounting and the SAC contract balance are untouched.
+    let sac_campaign_after = t.client.get_campaign(&sac_campaign);
+    assert_eq!(sac_campaign_after.total_raised, sac_campaign_snapshot.total_raised);
+    assert_eq!(sac_campaign_after.total_revenue, sac_campaign_snapshot.total_revenue);
+    assert_eq!(sac_campaign_after.status, sac_campaign_snapshot.status);
+    assert_eq!(
+        TokenClient::new(&t.env, &t.sac_token_id).balance(&t.client.address),
+        sac_contract_balance_before
+    );
+}
