@@ -77,6 +77,7 @@ const envSchema = z.object({
   SHUTDOWN_TIMEOUT_MS: z.coerce.number().default(15000),
   RUN_RECONCILIATION_SWEEP: z.string().optional(),
   RECONCILIATION_SWEEP_INTERVAL_MS: z.coerce.number().default(300000),
+  WEATHER_ADVISORY_PROVIDER_URL: z.string().default(''),
 });
 
 const parsed = envSchema.parse(process.env);
@@ -126,6 +127,7 @@ export const config = {
   shutdownTimeoutMs: parsed.SHUTDOWN_TIMEOUT_MS,
   runReconciliationSweep: parsed.RUN_RECONCILIATION_SWEEP !== 'false',
   reconciliationSweepIntervalMs: parsed.RECONCILIATION_SWEEP_INTERVAL_MS,
+  weatherAdvisoryProviderUrl: parsed.WEATHER_ADVISORY_PROVIDER_URL,
 };
 
 export type Config = typeof config;

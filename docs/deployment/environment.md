@@ -133,6 +133,7 @@ Validated in [`agro-production/server/src/config/index.ts`](../../agro-productio
 | `CORS_ORIGINS` | | `""` (all in dev) | Comma-separated origins |
 | `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX_REQUESTS` / `RATE_LIMIT_WRITE_MAX_REQUESTS` | | `60000` / `100` / `10` | |
 | `SHUTDOWN_TIMEOUT_MS` | | `15000` | Graceful shutdown |
+| `WEATHER_ADVISORY_PROVIDER_URL` | | `""` | Upstream weather advisory feed or Open-Meteo endpoint |
 | `EVENT_POLL_INTERVAL_MS` / `CONFIRMATION_DEPTH` | | `5000` / `10` | On-chain event watcher tuning |
 | `VITEST_FAIL_ON_LEAKS` | test only | — | Set to `1` in CI to fail tests on leaked handles |
 | `RUN_RECONCILIATION_SWEEP` / `RECONCILIATION_SWEEP_INTERVAL_MS` | | `false` / — | Ledger reconciliation job |
