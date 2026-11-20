@@ -149,6 +149,14 @@ pub enum SplitOrderError {
     NotAdmin = 25,
     /// Issue #1246: split-order entry points must enforce the pause policy.
     ContractPaused = 26,
+    /// Issue #1276: the campaign token short-delivered on a split funding
+    /// transfer; measure_token_transfer rejected a balance delta different
+    /// from the pledged share. Mirrors EscrowError::UnsupportedToken on the
+    /// invest and create_order paths. A token is only "supported" if every
+    /// transfer moves exactly the requested amount into the escrow; adding
+    /// a fee-on-transfer token to the whitelist would make this error path
+    /// reachable on every funding call for that token.
+    UnsupportedToken = 27,
 }
 
 impl From<EscrowError> for SplitOrderError {
@@ -161,6 +169,10 @@ impl From<EscrowError> for SplitOrderError {
             EscrowError::NotBuyer => SplitOrderError::NotBuyer,
             EscrowError::NotAdmin => SplitOrderError::NotAdmin,
             EscrowError::ContractPaused => SplitOrderError::ContractPaused,
+            // Issue #1276: measure_token_transfer rejections flow through
+            // fund_split_order via `?` and must surface as a distinct
+            // error, not a generic ContractNotInitialized fallback.
+            EscrowError::UnsupportedToken => SplitOrderError::UnsupportedToken,
             // Every other `EscrowError` variant is unreachable from the
             // shared helpers the split-order flow actually calls; map to the
             // closest generic fallback rather than panicking.
@@ -1463,8 +1475,17 @@ impl ProductionEscrowContract {
         }
 
         let campaign = load_campaign(&env, order.campaign_id)?;
-        let token_client = token::Client::new(&env, &campaign.token);
-        token_client.transfer(&co_buyer, &env.current_contract_address(), &share);
+        // Issue #1276: match the exact-receipt policy used by invest and
+        // create_order (both call measure_token_transfer). The old raw
+        // token_client.transfer took the caller-supplied `share` at face
+        // value, so a supported fee-on-transfer or short-delivering token
+        // could record a funded flag and increment the funded count for
+        // tokens the contract never received, letting split liabilities
+        // exceed the actual collateral held by the campaign. Running the
+        // transfer through measure_token_transfer rejects the funding
+        // atomically (no order mutation yet) when the balance delta does
+        // not equal the pledged share.
+        measure_token_transfer(&env, &campaign.token, &co_buyer, share)?;
 
         order.funded.set(co_buyer.clone(), true);
         order.funded_count += 1;
