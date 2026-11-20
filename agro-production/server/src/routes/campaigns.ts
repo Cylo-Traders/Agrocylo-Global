@@ -43,13 +43,12 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 
 const router = Router();
 
-// GET /investor/portfolio — wallet-scoped portfolio summary (Issue #1051)
+// GET /investor/portfolio — wallet-scoped portfolio summary (Issue #1051, #1343)
 //
 // The wallet address is derived from the session, so investors can only ever
 // read their own data. Amounts stay i128 stroop strings end-to-end; totals
-// are summed with BigInt. Realized returns are not indexed per investment
-// (no payout event for direct campaign investments yet), so totalReturned is
-// always "0" for now — the field documents the contract for when that lands.
+// are summed with BigInt. Realized returns are indexed from direct campaign
+// claim events (campaign.claimed) using exact integer arithmetic.
 router.get(
   '/investor/portfolio',
   requireWallet,
@@ -82,11 +81,27 @@ router.get(
       totalInvested += BigInt(investment.amount || '0');
     }
 
+    // Direct campaign claim payouts (Issue #1343)
+    const claims = await prisma.transaction.findMany({
+      where: {
+        walletAddress,
+        eventType: 'campaign.claimed',
+      },
+    });
+
+    let totalReturned = 0n;
+    for (const claim of claims) {
+      const payload = claim.payload as { payout?: string } | null;
+      if (payload?.payout) {
+        totalReturned += BigInt(payload.payout);
+      }
+    }
+
     jsonValidated(res, InvestorPortfolioSummarySchema, 200, {
       investorAddress: walletAddress,
       positions: investments,
       totalInvested: totalInvested.toString(),
-      totalReturned: '0',
+      totalReturned: totalReturned.toString(),
     });
   }),
 );

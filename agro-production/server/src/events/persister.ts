@@ -8,6 +8,7 @@ import type {
   CampaignCreatedEvent,
   CampaignInvestedEvent,
   CampaignSettledEvent,
+  CampaignClaimedEvent,
   DisputeOpenedEvent,
   DisputeEvidenceSubmittedEvent,
   DisputeResolvedEvent,
@@ -67,6 +68,9 @@ export class EventPersister {
         break;
       case 'campaign.settled':
         await handleCampaignSettled(event);
+        break;
+      case 'campaign.claimed':
+        await handleCampaignClaimed(event);
         break;
       case 'order.created':
         await handleOrderCreated(event);
@@ -378,6 +382,34 @@ async function handleCampaignSettled(event: CampaignSettledEvent) {
   if (post) {
     broadcast('campaign.settled', post);
   }
+}
+
+async function handleCampaignClaimed(event: CampaignClaimedEvent) {
+  // Idempotency: skipDuplicateInTransaction prevents duplicate processing.
+  await prisma.$transaction(async (tx) => {
+    if (await skipDuplicateInTransaction(tx, event)) return;
+    await upsertUser(tx, event.investor, 'INVESTOR');
+
+    const campaign = await tx.campaign.findUnique({
+      where: { onChainId: event.campaignId },
+    });
+
+    await tx.transaction.create({
+      data: {
+        campaignId: campaign?.id ?? null,
+        walletAddress: event.investor,
+        eventType: 'campaign.claimed',
+        payload: {
+          campaignId: event.campaignId,
+          investor: event.investor,
+          payout: event.payout,
+        },
+        ledger: event.ledger,
+        eventIndex: event.eventIndex,
+        txHash: event.txHash ?? null,
+      },
+    });
+  });
 }
 
 async function handleOrderCreated(event: OrderCreatedEvent) {
