@@ -1930,6 +1930,11 @@ impl EscrowContract {
         env.storage().instance().get(&DataKey::GovernanceContract)
     }
 
+    /// Issue #1287: read-only getter for verifying on-chain path payment router wiring.
+    pub fn get_path_payment_router(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::PathPaymentRouter)
+    }
+
     pub fn get_orders_by_buyer(env: Env, buyer: Address) -> Vec<u64> {
         env.storage()
             .persistent()

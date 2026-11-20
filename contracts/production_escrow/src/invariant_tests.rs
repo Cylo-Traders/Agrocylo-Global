@@ -798,3 +798,49 @@ fn test_regression_batch_refund_no_double_payout() {
         "REGRESSION: investor was refunded more than once in batch"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Issue #1278: Pooled Solvency Across Multi-Campaign Cycles
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_pooled_solvency_multi_campaign_cycles() {
+    let h = make_harness(3);
+    let mut modeled_unpaid_obligations: i128 = 0;
+
+    // Repeat 100 create/invest/finalize_failed/refund cycles across campaigns sharing the token
+    for cycle in 0..100u64 {
+        let deadline = future_deadline(&h);
+        let cid = h
+            .client
+            .create_campaign(&h.farmer, &h.token_id, &5_000, &deadline);
+        let inv = &h.investors[(cycle as usize) % h.investors.len()];
+        let amount: i128 = 1_000 + ((cycle % 5) as i128) * 100;
+
+        h.client.invest(inv, &cid, &amount);
+        modeled_unpaid_obligations += amount;
+        assert!(
+            token_balance(&h, &h.contract_id) >= modeled_unpaid_obligations,
+            "solvency violated after invest on cycle {}",
+            cycle
+        );
+
+        advance(&h, 8 * 24 * 3600);
+        h.client.finalize_failed(&cid);
+
+        let mut batch = Vec::new(&h.env);
+        batch.push_back(inv.clone());
+        let (count, refunded) = h.client.batch_refund_investors(&cid, &batch);
+        assert_eq!(count, 1);
+        assert_eq!(refunded, amount);
+        modeled_unpaid_obligations -= refunded;
+
+        assert!(
+            token_balance(&h, &h.contract_id) >= modeled_unpaid_obligations,
+            "solvency violated after refund on cycle {}",
+            cycle
+        );
+    }
+
+    assert_eq!(modeled_unpaid_obligations, 0);
+}
