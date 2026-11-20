@@ -33,12 +33,19 @@ const MessagePaginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-const SendMessageSchema = z.object({
-  content: z.string().min(1).max(5000),
+// Must mirror the Prisma `@db.VarChar(4000)` column on Message.content and
+// MarketplaceMessage.content in agro-production/server/prisma/schema.prisma.
+// A higher value here would let oversize rows pass validation only to be
+// rejected by Postgres with an opaque DB error; a lower value would reject
+// content Postgres would accept. Keep aligned with the column constraint.
+export const MESSAGE_CONTENT_MAX_LENGTH = 4000;
+
+export const SendMessageSchema = z.object({
+  content: z.string().min(1).max(MESSAGE_CONTENT_MAX_LENGTH),
 });
 
-const EditMessageSchema = z.object({
-  content: z.string().min(1).max(5000),
+export const EditMessageSchema = z.object({
+  content: z.string().min(1).max(MESSAGE_CONTENT_MAX_LENGTH),
 });
 
 const BlockUserSchema = z.object({
