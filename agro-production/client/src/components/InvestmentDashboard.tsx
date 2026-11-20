@@ -19,10 +19,12 @@ import {
   claimReturns,
   type InvestmentWithCampaign,
 } from "@/services/investmentService";
+import { fetchOrdersByBuyer } from "@/services/orderService";
 import { formatAmount } from "@/services/campaignService";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { useWalletNetworkGuard } from "@/hooks/useWalletNetworkGuard";
 import { useWebSocket, type WsMessage } from "@/hooks/useWebSocket";
+import type { Order } from "@/types";
 
 interface Props {
   investorAddress: string;
@@ -33,20 +35,145 @@ export default function InvestmentDashboard({ investorAddress, role = 'investor'
   // Pure dispatcher, no hooks: mounting or unmounting a branch can never
   // change this component's own hook order (#1085).
   if (role === 'buyer') {
-    return <BuyerDashboardPlaceholder />;
+    return <BuyerDashboard buyerAddress={investorAddress} />;
   }
 
   return <InvestorDashboard investorAddress={investorAddress} />;
 }
 
 /**
- * Buyer mode (#1018): a placeholder that deliberately mounts no investor
- * effects — no investment fetch, no WebSocket subscription.
+ * Buyer mode (#1018, #1345): summarizes the buyer's orders with activity stats
+ * and links, while deliberately mounting no investor effects — no investment
+ * fetch, no WebSocket subscription.
  */
-function BuyerDashboardPlaceholder() {
+function BuyerDashboard({ buyerAddress }: { buyerAddress: string }) {
+  const loadOrders = useCallback(
+    async (signal: AbortSignal) => {
+      try {
+        return await fetchOrdersByBuyer(buyerAddress);
+      } catch (e) {
+        if (signal.aborted) throw e;
+        throw new Error(e instanceof Error ? e.message : "Failed to load orders");
+      }
+    },
+    [buyerAddress],
+  );
+
+  const {
+    data,
+    error,
+    loading,
+    reload,
+  } = useAsyncResource(`orders:${buyerAddress}`, loadOrders);
+
+  const orders = data ?? [];
+
+  const totalSpent = orders.reduce(
+    (sum, ord) => sum + BigInt(ord.amount || "0"),
+    0n,
+  );
+  const pendingOrders = orders.filter((ord) => ord.status === "PENDING").length;
+
+  if (loading) {
+    return (
+      <div className="space-y-3" aria-label="Loading orders">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="bg-surface border border-border rounded-xl p-5 animate-pulse h-24" aria-hidden="true" />
+        ))}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-surface border border-error rounded-xl p-5 text-error text-sm space-y-3" role="alert">
+        <p>{error}</p>
+        <button onClick={reload} className="underline hover:no-underline">Try again</button>
+      </div>
+    );
+  }
+
   return (
-    <div className="bg-surface border border-border rounded-xl p-8 text-center text-muted text-sm">
-      This is the Investment Dashboard. Buyer-specific dashboard features will be integrated here or in a separate component.
+    <div className="space-y-5">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <SummaryCard label="Total Orders" value={String(orders.length)} />
+        <SummaryCard label="Pending Orders" value={String(pendingOrders)} highlight={pendingOrders > 0} />
+        <SummaryCard label="Total Spent" value={`${formatAmount(String(totalSpent))} XLM`} />
+      </div>
+
+      {orders.length === 0 ? (
+        <div className="bg-surface border border-border rounded-xl p-8 text-center text-muted text-sm space-y-3">
+          <p>No orders yet. Browse campaigns to get started.</p>
+          <div>
+            <Link
+              href="/campaigns"
+              className="inline-block text-primary-600 hover:underline font-medium text-sm"
+            >
+              Browse campaigns
+            </Link>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3" aria-label="Orders list">
+          {orders.map((ord) => (
+            <BuyerOrderRow key={ord.id} order={ord} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BuyerOrderRow({ order }: { order: Order }) {
+  const statusColors: Record<string, string> = {
+    PENDING: "text-warning",
+    CONFIRMED: "text-success",
+    CANCELLED: "text-error",
+  };
+
+  const campaignDisplay = order.campaign?.onChainId
+    ? `Campaign ${order.campaign.onChainId}`
+    : `Campaign ${order.campaignId.slice(0, 8)}…`;
+
+  return (
+    <div className="bg-surface border border-border rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-muted font-mono truncate">
+          {campaignDisplay}
+        </p>
+        <p className="text-sm font-semibold text-foreground">
+          Order #{order.id.slice(0, 8)}
+        </p>
+        <p className="text-xs text-muted">
+          Placed on {new Date(order.createdAt).toLocaleDateString()}
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-4 text-sm">
+        <Stat label="Amount" value={`${formatAmount(order.amount)} XLM`} />
+        <span
+          className={`text-xs font-semibold uppercase tracking-wide ${
+            statusColors[order.status] ?? "text-muted"
+          }`}
+        >
+          {order.status}
+        </span>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Link
+          href={`/orders/${order.id}`}
+          className="whitespace-nowrap bg-primary text-primary-foreground px-3 py-1.5 rounded text-xs font-medium hover:opacity-90 transition-opacity"
+        >
+          View Order
+        </Link>
+        <Link
+          href={`/campaigns/${order.campaignId}`}
+          className="whitespace-nowrap bg-surface border border-border text-foreground px-3 py-1.5 rounded text-xs font-medium hover:bg-surface/80 transition-colors"
+        >
+          View Campaign
+        </Link>
+      </div>
     </div>
   );
 }
