@@ -13,11 +13,7 @@ export interface RoleRequest extends WalletRequest {
  * cross-check and must match the authenticated wallet.
  */
 export function requireRole(requiredRole: string) {
-  return async (
-    req: RoleRequest,
-    res: Response,
-    next: NextFunction,
-  ): Promise<void> => {
+  return (req: RoleRequest, res: Response, next: NextFunction): void => {
     const walletAddress = req.walletAddress;
     if (!walletAddress) {
       res.status(401).json({ message: 'Authentication required.' });
@@ -32,21 +28,20 @@ export function requireRole(requiredRole: string) {
       return;
     }
 
-    try {
-      const user = await prisma.user.findUnique({
+    void prisma.user
+      .findUnique({
         where: { walletAddress },
         select: { role: true },
-      });
+      })
+      .then((user) => {
+        if (!user || user.role !== requiredRole) {
+          res.status(403).json({ message: `${requiredRole} access required` });
+          return;
+        }
 
-      if (!user || user.role !== requiredRole) {
-        res.status(403).json({ message: `${requiredRole} access required` });
-        return;
-      }
-
-      req.role = user.role;
-      next();
-    } catch (err) {
-      next(err);
-    }
+        req.role = user.role;
+        next();
+      })
+      .catch(next);
   };
 }

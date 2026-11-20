@@ -16,6 +16,7 @@ import {
   getCachedResponse,
   requireIdempotencyKey,
   setCachedResponse,
+  type IdempotentRequest,
 } from '../middleware/idempotency.js';
 import { problemDetail } from '../middleware/errors.js';
 import {
@@ -37,7 +38,6 @@ import {
   InvestmentSchema,
   InvestorPortfolioSummarySchema,
 } from '../schemas/responses.js';
-import { broadcast } from '../services/wsServer.js';
 import { getStatusMetadata } from '../services/campaignStatusService.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 
@@ -291,7 +291,7 @@ router.post(
   validateResponse(CampaignSchema),
   asyncHandler(async (req: WalletRequest, res: Response) => {
     const farmerAddress = req.walletAddress!;
-    const idempotencyKey = (req as any).idempotencyKey as string;
+    const idempotencyKey = (req as IdempotentRequest).idempotencyKey ?? '';
     const { tokenAddress, targetAmount, deadline } = req.body as Omit<
       CreateCampaignInput,
       'farmerAddress'
@@ -407,7 +407,7 @@ router.post(
   validateResponse(InvestmentSchema),
   asyncHandler(async (req: WalletRequest, res: Response) => {
     const investorAddress = req.walletAddress!;
-    const idempotencyKey = (req as any).idempotencyKey as string;
+    const idempotencyKey = (req as IdempotentRequest).idempotencyKey ?? '';
     const { amount } = req.body as Omit<InvestInput, 'investorAddress'>;
 
     const cacheKey = buildIdempotencyCacheKey(req);

@@ -7,6 +7,7 @@ import {
 } from '../middleware/validate.js';
 import { authLimiter } from '../middleware/rateLimit.js';
 import { problemDetail } from '../middleware/errors.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 import {
   createChallenge,
   verifySignatureAndCreateSession,
@@ -63,7 +64,7 @@ router.get(
   '/auth/nonce',
   authLimiter,
   validateQuery(ChallengeRequestSchema),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     try {
       const { walletAddress } = req.query as unknown as {
         walletAddress: string;
@@ -83,7 +84,7 @@ router.get(
         'Failed to create challenge',
       );
     }
-  },
+  }),
 );
 
 // POST /auth/session — verify signed nonce and issue session token
@@ -91,7 +92,7 @@ router.post(
   '/auth/session',
   authLimiter,
   validateBody(SessionRequestSchema),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     try {
       const { walletAddress, nonce, signature } = req.body as {
         walletAddress: string;
@@ -117,7 +118,7 @@ router.post(
         'Failed to create session',
       );
     }
-  },
+  }),
 );
 
 // POST /auth/handoff — verify a cross-app SSO handoff token minted by the
@@ -126,7 +127,7 @@ router.post(
   '/auth/handoff',
   authLimiter,
   validateBody(HandoffRequestSchema),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     try {
       const { token } = req.body as { token: string };
       const result = await verifyHandoffAndCreateSession(token);
@@ -144,7 +145,7 @@ router.post(
         'Failed to verify handoff token',
       );
     }
-  },
+  }),
 );
 
 // POST /auth/revoke — revoke a session token
@@ -152,12 +153,12 @@ router.post(
   '/auth/revoke',
   authLimiter,
   validateBody(RevokeSessionBodySchema),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     try {
       const { sessionToken } = req.body as { sessionToken: string };
       await revokeSession(sessionToken);
       res.status(204).send();
-    } catch (err) {
+    } catch (_err) {
       problemDetail(
         res,
         req,
@@ -166,7 +167,7 @@ router.post(
         'Failed to revoke session',
       );
     }
-  },
+  }),
 );
 
 // POST /auth/refresh — refresh access token using refresh token
@@ -174,7 +175,7 @@ router.post(
   '/auth/refresh',
   authLimiter,
   validateBody(RefreshTokenBodySchema),
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     try {
       const { refreshToken } = req.body as { refreshToken: string };
       const result = await refreshAccessToken(refreshToken);
@@ -192,7 +193,7 @@ router.post(
         'Failed to refresh token',
       );
     }
-  },
+  }),
 );
 
 export default router;

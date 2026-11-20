@@ -2,7 +2,23 @@ import { scValToNative, xdr } from '@stellar/stellar-sdk';
 import type { EventAction, ParsedEvent, RawSorobanEvent } from './types.js';
 import logger from '../config/logger.js';
 import { recordParseError } from './metrics.js';
-import { validateEventSchema, EVENT_SCHEMA_VERSION } from './schema.js';
+import { validateEventSchema } from './schema.js';
+
+function toStr(val: unknown): string {
+  if (
+    typeof val === 'string' ||
+    typeof val === 'number' ||
+    typeof val === 'bigint' ||
+    typeof val === 'boolean'
+  ) {
+    return String(val);
+  }
+  return JSON.stringify(val ?? '');
+}
+
+function toOptStr(val: unknown): string | undefined {
+  return val === undefined ? undefined : toStr(val);
+}
 
 /**
  * Decodes base64-encoded XDR ScVal topics and value from a raw Soroban event
@@ -11,7 +27,7 @@ import { validateEventSchema, EVENT_SCHEMA_VERSION } from './schema.js';
  */
 export class ProductionEventParser {
   static parse(raw: RawSorobanEvent): ParsedEvent {
-    const topics = raw.topic.map((t) =>
+    const topics: unknown[] = raw.topic.map((t): unknown =>
       scValToNative(xdr.ScVal.fromXDR(t, 'base64')),
     );
 
@@ -21,14 +37,16 @@ export class ProductionEventParser {
       );
     }
 
-    const namespace: string = String(topics[0]);
-    const verb: string = String(topics[1]);
+    const namespace: string = toStr(topics[0]);
+    const verb: string = toStr(topics[1]);
     const action = `${namespace}.${verb}` as EventAction;
 
     let data: unknown[];
     try {
-      const native = scValToNative(xdr.ScVal.fromXDR(raw.value, 'base64'));
-      data = Array.isArray(native) ? native : [native];
+      const native: unknown = scValToNative(
+        xdr.ScVal.fromXDR(raw.value, 'base64'),
+      );
+      data = Array.isArray(native) ? (native as unknown[]) : [native];
     } catch {
       throw new Error(`Event ${raw.id}: malformed value XDR`);
     }
@@ -102,100 +120,100 @@ export class ProductionEventParser {
         return {
           ...base,
           action,
-          disputeId: String(data[0]),
-          campaignId: String(data[1]),
-          initiatorAddress: String(data[2]),
-          respondentAddress: String(data[3]),
-          orderId: data[4] === undefined ? undefined : String(data[4]),
+          disputeId: toStr(data[0]),
+          campaignId: toStr(data[1]),
+          initiatorAddress: toStr(data[2]),
+          respondentAddress: toStr(data[3]),
+          orderId: toOptStr(data[4]),
         };
 
       case 'dispute.evidence_submitted':
         return {
           ...base,
           action,
-          disputeId: String(data[0]),
-          submitterAddress: String(data[1]),
-          evidenceUrl: String(data[2]),
-          evidenceHash: String(data[3]),
+          disputeId: toStr(data[0]),
+          submitterAddress: toStr(data[1]),
+          evidenceUrl: toStr(data[2]),
+          evidenceHash: toStr(data[3]),
         };
 
       case 'dispute.resolved':
         return {
           ...base,
           action,
-          disputeId: String(data[0]),
-          resolutionOutcome: String(data[1]),
-          resolutionNotes: data[2] === undefined ? undefined : String(data[2]),
+          disputeId: toStr(data[0]),
+          resolutionOutcome: toStr(data[1]),
+          resolutionNotes: toOptStr(data[2]),
         };
 
       case 'dispute.dismissed':
         return {
           ...base,
           action,
-          disputeId: String(data[0]),
-          dismissalReason: data[1] === undefined ? undefined : String(data[1]),
+          disputeId: toStr(data[0]),
+          dismissalReason: toOptStr(data[1]),
         };
 
       case 'basket.created':
         return {
           ...base,
           action,
-          schemaVersion: String(data[0]),
-          basketId: String(data[1]),
+          schemaVersion: toStr(data[0]),
+          basketId: toStr(data[1]),
           constituentsCount: Number(data[2]),
-          fundingDeadline: data[3] === undefined ? undefined : String(data[3]),
-          minDeposit: data[4] === undefined ? undefined : String(data[4]),
+          fundingDeadline: toOptStr(data[3]),
+          minDeposit: toOptStr(data[4]),
         };
 
       case 'basket.deposit':
         return {
           ...base,
           action,
-          schemaVersion: String(data[0]),
-          basketId: String(data[1]),
-          depositor: String(data[2]),
-          amount: String(data[3]),
+          schemaVersion: toStr(data[0]),
+          basketId: toStr(data[1]),
+          depositor: toStr(data[2]),
+          amount: toStr(data[3]),
         };
 
       case 'basket.funded':
         return {
           ...base,
           action,
-          schemaVersion: String(data[0]),
-          basketId: String(data[1]),
-          totalDeposit: String(data[2]),
-          totalInvested: data[3] === undefined ? undefined : String(data[3]),
-          totalSkipped: data[4] === undefined ? undefined : String(data[4]),
+          schemaVersion: toStr(data[0]),
+          basketId: toStr(data[1]),
+          totalDeposit: toStr(data[2]),
+          totalInvested: toOptStr(data[3]),
+          totalSkipped: toOptStr(data[4]),
         };
 
       case 'basket.fw_close':
         return {
           ...base,
           action,
-          schemaVersion: String(data[0]),
-          basketId: String(data[1]),
-          fundingDeadline: String(data[2]),
-          minDeposit: String(data[3]),
+          schemaVersion: toStr(data[0]),
+          basketId: toStr(data[1]),
+          fundingDeadline: toStr(data[2]),
+          minDeposit: toStr(data[3]),
         };
 
       case 'basket.withdrawn':
         return {
           ...base,
           action,
-          schemaVersion: String(data[0]),
-          basketId: String(data[1]),
-          depositor: String(data[2]),
-          depositAmount: String(data[3]),
+          schemaVersion: toStr(data[0]),
+          basketId: toStr(data[1]),
+          depositor: toStr(data[2]),
+          depositAmount: toStr(data[3]),
         };
 
       case 'basket.claimed':
         return {
           ...base,
           action,
-          schemaVersion: String(data[0]),
-          basketId: String(data[1]),
-          depositor: String(data[2]),
-          payout: String(data[3]),
+          schemaVersion: toStr(data[0]),
+          basketId: toStr(data[1]),
+          depositor: toStr(data[2]),
+          payout: toStr(data[3]),
         };
 
       case 'campaign.produce':
@@ -208,13 +226,13 @@ export class ProductionEventParser {
         return {
           ...base,
           action,
-          campaignId: String(data[0]),
+          campaignId: toStr(data[0]),
           extra: data.slice(1),
         };
 
       default:
         throw new Error(
-          `ProductionEventParser: unknown action "${action}" in event ${raw.id}`,
+          `ProductionEventParser: unknown action "${String(action)}" in event ${raw.id}`,
         );
     }
   }

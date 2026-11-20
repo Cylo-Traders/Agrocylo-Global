@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from 'express';
+import { Router, type Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { prisma } from '../db/client.js';
@@ -23,6 +23,7 @@ import {
   requireIdempotencyKey,
   getCachedResponse,
   setCachedResponse,
+  type IdempotentRequest,
 } from '../middleware/idempotency.js';
 import logger from '../config/logger.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
@@ -122,8 +123,11 @@ router.post(
   asyncHandler(async (req: WalletRequest, res: Response) => {
     try {
       const buyerAddress = req.walletAddress!;
-      const idempotencyKey = (req as any).idempotencyKey as string;
-      const { campaignId, amount } = req.body;
+      const idempotencyKey = (req as IdempotentRequest).idempotencyKey ?? '';
+      const { campaignId, amount } = req.body as {
+        campaignId: string;
+        amount: string;
+      };
 
       // Namespace the idempotency key by route and authenticated wallet so a
       // second wallet reusing another wallet's key never receives the first
@@ -271,7 +275,7 @@ router.put(
 
     const updated = await prisma.order.update({
       where: { id: order.id },
-      data: { txHash: req.body.txHash },
+      data: { txHash: (req.body as { txHash: string }).txHash },
     });
 
     jsonValidated(res, OrderSchema, 200, updated);

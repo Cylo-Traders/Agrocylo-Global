@@ -3,8 +3,6 @@
  * Central place for status enum, allowed transitions, and display metadata.
  */
 
-import type { CampaignStatus as PrismaCampaignStatus } from '@prisma/client';
-
 export const CAMPAIGN_STATUSES = {
   FUNDING: 'FUNDING',
   FUNDED: 'FUNDED',

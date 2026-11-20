@@ -190,9 +190,18 @@ async function reconcileCampaigns(
       const chainStatus =
         CAMPAIGN_STATUS_MAP[Number(native['status'])] ??
         String(native['status']);
-      const chainTotalRaised = String(native['total_raised'] ?? '');
-      const chainTargetAmount = String(native['target_amount'] ?? '');
-      const chainTrancheReleased = String(native['tranche_released'] ?? '');
+      const chainTotalRaised =
+        typeof native['total_raised'] === 'string' ||
+        typeof native['total_raised'] === 'number' ||
+        typeof native['total_raised'] === 'bigint'
+          ? String(native['total_raised'])
+          : '';
+      const chainTrancheReleased =
+        typeof native['tranche_released'] === 'string' ||
+        typeof native['tranche_released'] === 'number' ||
+        typeof native['tranche_released'] === 'bigint'
+          ? String(native['tranche_released'])
+          : '';
 
       // Status drift
       const expectedChainStatus =
@@ -302,7 +311,12 @@ async function reconcileOrders(
 
       const chainStatus =
         ORDER_STATUS_MAP[Number(native['status'])] ?? String(native['status']);
-      const chainAmount = String(native['amount'] ?? '');
+      const chainAmount =
+        typeof native['amount'] === 'string' ||
+        typeof native['amount'] === 'number' ||
+        typeof native['amount'] === 'bigint'
+          ? String(native['amount'])
+          : '';
 
       // Status drift
       const expectedChainStatus =
@@ -461,7 +475,12 @@ async function reconcileBaskets(
           : chainStatusNum === 1
             ? 'FUNDED'
             : String(chainStatusNum);
-      const chainTotalDeposited = String(native['total_deposited'] ?? '');
+      const chainTotalDeposited =
+        typeof native['total_deposited'] === 'string' ||
+        typeof native['total_deposited'] === 'number' ||
+        typeof native['total_deposited'] === 'bigint'
+          ? String(native['total_deposited'])
+          : '';
 
       if (chainStatus !== basket.status) {
         findings.push({
@@ -684,8 +703,18 @@ export async function reconcileSingleCampaign(
 
   const chainStatus =
     CAMPAIGN_STATUS_MAP[Number(native['status'])] ?? String(native['status']);
-  const chainTotalRaised = String(native['total_raised'] ?? '');
-  const chainTrancheReleased = String(native['tranche_released'] ?? '');
+  const chainTotalRaised =
+    typeof native['total_raised'] === 'string' ||
+    typeof native['total_raised'] === 'number' ||
+    typeof native['total_raised'] === 'bigint'
+      ? String(native['total_raised'])
+      : '';
+  const chainTrancheReleased =
+    typeof native['tranche_released'] === 'string' ||
+    typeof native['tranche_released'] === 'number' ||
+    typeof native['tranche_released'] === 'bigint'
+      ? String(native['tranche_released'])
+      : '';
   const expectedChainStatus =
     DB_TO_CHAIN_CAMPAIGN[campaign.status] ?? campaign.status;
 

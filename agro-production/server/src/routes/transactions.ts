@@ -1,5 +1,6 @@
-import { Router, type Request, type Response } from 'express';
+import { Router, type Response } from 'express';
 import type { Prisma } from '@prisma/client';
+import type { z } from 'zod';
 import { prisma } from '../db/client.js';
 import {
   jsonValidated,
@@ -67,7 +68,7 @@ router.post(
   validateBody(TransactionIntentCreateSchema),
   asyncHandler(async (req: WalletRequest, res: Response) => {
     const { requestId, txHash, walletAddress, eventType, campaignId } =
-      req.body;
+      req.body as z.infer<typeof TransactionIntentCreateSchema>;
 
     if (req.walletAddress !== walletAddress) {
       problemDetail(res, req, 403, 'Forbidden', 'Wallet address mismatch');
@@ -166,7 +167,9 @@ router.patch(
   validateParams(TransactionRequestIdParamSchema),
   validateBody(TransactionStatusUpdateSchema),
   asyncHandler(async (req: WalletRequest, res: Response) => {
-    const { status: newStatus, message } = req.body;
+    const { status: newStatus, message } = req.body as z.infer<
+      typeof TransactionStatusUpdateSchema
+    >;
 
     const tx = await prisma.transaction.findUnique({
       where: { id: req.params.requestId },

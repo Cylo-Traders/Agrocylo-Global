@@ -305,7 +305,11 @@ router.get(
       return;
     }
 
-    const where = {
+    const where: {
+      conversationId: string;
+      deletedAt: null;
+      createdAt?: { lt: Date };
+    } = {
       conversationId: id,
       deletedAt: null,
     };
@@ -319,7 +323,7 @@ router.get(
       });
       if (cursorMessage) {
         skip = 1;
-        (where as any).createdAt = {
+        where.createdAt = {
           lt: cursorMessage.createdAt,
         };
       }

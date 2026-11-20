@@ -240,7 +240,7 @@ export async function uploadCampaignImage(params: {
       where: { id: campaign.id },
       data: { imageUrl },
     });
-  } catch (error) {
+  } catch (_error) {
     const supabaseAdmin = getSupabaseAdmin();
     const rollbackPaths = [originalPath, thumb400Path, thumb800Path];
     const { error: removeError } = await supabaseAdmin.storage

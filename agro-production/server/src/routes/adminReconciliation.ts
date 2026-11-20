@@ -45,14 +45,12 @@ async function logAdminAction(
 router.get(
   '/admin/reconciliation/alerts',
   asyncHandler(async (req: Request, res: Response) => {
-    const adminWallet = (req as RoleRequest).walletAddress!;
-
     try {
-      const page = Math.max(1, parseInt(String(req.query.page ?? '1'), 10));
-      const limit = Math.min(
-        100,
-        Math.max(1, parseInt(String(req.query.limit ?? '20'), 10)),
-      );
+      const pageRaw = typeof req.query.page === 'string' ? req.query.page : '1';
+      const limitRaw =
+        typeof req.query.limit === 'string' ? req.query.limit : '20';
+      const page = Math.max(1, parseInt(pageRaw, 10));
+      const limit = Math.min(100, Math.max(1, parseInt(limitRaw, 10)));
       const resolved = req.query.resolved;
       const entityType = req.query.entityType as string | undefined;
       const driftType = req.query.driftType as string | undefined;
@@ -88,8 +86,6 @@ router.get(
 router.get(
   '/admin/reconciliation/alerts/:id',
   asyncHandler(async (req: Request, res: Response) => {
-    const adminWallet = (req as RoleRequest).walletAddress!;
-
     try {
       const alert = await prisma.reconciliationAlert.findUnique({
         where: { id: req.params.id },
@@ -202,9 +198,7 @@ router.post(
 // GET /api/v1/admin/reconciliation/summary — reconciliation summary stats
 router.get(
   '/admin/reconciliation/summary',
-  asyncHandler(async (req: Request, res: Response) => {
-    const adminWallet = (req as RoleRequest).walletAddress!;
-
+  asyncHandler(async (_req: Request, res: Response) => {
     try {
       const [totalAlerts, unresolvedAlerts, recentAlerts] = await Promise.all([
         prisma.reconciliationAlert.count(),

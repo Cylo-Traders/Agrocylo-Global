@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
-import { z, type ZodError, type ZodTypeAny } from 'zod';
+import type { ZodError, ZodTypeAny } from 'zod';
 import logger from '../config/logger.js';
 
 export interface ValidationIssue {

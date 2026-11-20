@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../db/client.js';
 import {
@@ -88,7 +89,7 @@ router.get(
       where: { walletAddress: userWalletAddress || 'UNKNOWN' },
     });
 
-    const where: any = {};
+    const where: Prisma.DisputeWhereInput = {};
     if (campaignId) {
       where.campaignId = campaignId;
     }

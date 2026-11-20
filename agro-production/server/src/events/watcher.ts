@@ -4,7 +4,7 @@ import { config } from '../config/index.js';
 import logger from '../config/logger.js';
 import { prisma } from '../db/client.js';
 import { ProductionEventParser } from './parser.js';
-import { EventPersister, DependencyMissingError } from './persister.js';
+import { EventPersister } from './persister.js';
 import { recordPersistError } from './metrics.js';
 import type { RawSorobanEvent } from './types.js';
 import { captureAlert } from '../config/sentry.js';
@@ -364,7 +364,7 @@ async function pollEvents(
   // Bounded backfill: never try to fetch more than MAX_BACKFILL_BATCH ledgers
   // at once. If the gap is larger, the operator is alerted and must
   // explicitly decide how to recover (manual cursor reset).
-  const endLedger = Math.min(startLedger + MAX_BACKFILL_BATCH, latestLedger);
+  const _endLedger = Math.min(startLedger + MAX_BACKFILL_BATCH, latestLedger);
 
   const filters: Parameters<typeof server.getEvents>[0]['filters'] = [
     {
@@ -417,156 +417,172 @@ export async function startProductionWatcher(): Promise<
   // Resume reorg detection from the hash persisted alongside the cursor.
   let trackedLedgerHash: string | null = cursor.ledgerHash;
 
-  const interval = setInterval(async () => {
-    try {
-      const { events, latestLedger } = await pollEvents(server, currentLedger);
-      const confirmedTipLedger = Math.max(0, latestLedger - CONFIRMATION_DEPTH);
-
-      // Check for reorg before processing new events
-      const reorgForkPoint = await detectReorg(
-        server,
-        currentLedger,
-        trackedLedgerHash,
-      );
-      if (reorgForkPoint !== null) {
-        await handleReorg(reorgForkPoint);
-        // Reset cursor to before the fork point
-        if (reorgForkPoint > 0) {
-          currentLedger = reorgForkPoint - 1;
-          currentEventIndex = 0;
-          trackedLedgerHash = null;
-        }
-      }
-
-      // If the gap is so large that even MAX_BACKFILL_BATCH doesn't cover it,
-      // alert the operator via a dead_letter record and pause advancement.
-      if (latestLedger - currentLedger > MAX_BACKFILL_BATCH) {
-        logger.error(
-          'Production watcher: large ledger gap detected, backfill may not cover all events',
-          {
-            currentLedger,
-            latestLedger,
-            maxBatch: MAX_BACKFILL_BATCH,
-            gap: latestLedger - currentLedger,
-          },
+  const interval = setInterval(() => {
+    void (async () => {
+      try {
+        const { events, latestLedger } = await pollEvents(
+          server,
+          currentLedger,
         );
-        captureAlert(
-          'contract_watcher_ingestion_failure',
-          `Production watcher ledger gap (${latestLedger - currentLedger}) exceeds backfill batch size — events may be missed`,
-          { currentLedger, latestLedger, maxBatch: MAX_BACKFILL_BATCH },
+        const confirmedTipLedger = Math.max(
+          0,
+          latestLedger - CONFIRMATION_DEPTH,
         );
-      }
 
-      let maxEventLedger = currentLedger;
-      let maxEventIndex = currentEventIndex;
-
-      for (const rawEvent of events) {
-        const eventIndex = parseEventIndex(rawEvent.id);
-
-        // Skip events at or before the current cursor
-        if (
-          rawEvent.ledger < currentLedger ||
-          (rawEvent.ledger === currentLedger && eventIndex <= currentEventIndex)
-        ) {
-          continue;
-        }
-
-        // Do not project events that are not yet confirmed (within CONFIRMATION_DEPTH of tip)
-        if (rawEvent.ledger > confirmedTipLedger) {
-          logger.debug('Skipping unconfirmed event', {
-            ledger: rawEvent.ledger,
-            confirmedTip: confirmedTipLedger,
-          });
-          continue;
-        }
-
-        const event = ProductionEventParser.tryParse(
-          rawEvent as unknown as RawSorobanEvent,
+        // Check for reorg before processing new events
+        const reorgForkPoint = await detectReorg(
+          server,
+          currentLedger,
+          trackedLedgerHash,
         );
-        if (event) {
-          try {
-            await withRetryJitter(
-              () => EventPersister.persist(event),
-              `EventPersister.persist(${event.action})`,
-              3,
-            );
-
-            // Issue #1067: once a parent campaign is indexed, replay any
-            // dead-lettered child events (investments, orders) that arrived
-            // out of order before their campaign.
-            if (event.action === 'campaign.created') {
-              await replayDeadLetterEvents({
-                campaignOnChainId: event.campaignId,
-                limit: 20,
-              });
-            }
-          } catch (persistErr) {
-            recordPersistError();
-            await recordDeadLetter(
-              rawEvent as unknown as RawSorobanEvent,
-              persistErr,
-            );
-            // Do not advance cursor past a failed event — this ensures
-            // no events are skipped and operators can replay after fixing
-            // the issue.
-            continue;
+        if (reorgForkPoint !== null) {
+          await handleReorg(reorgForkPoint);
+          // Reset cursor to before the fork point
+          if (reorgForkPoint > 0) {
+            currentLedger = reorgForkPoint - 1;
+            currentEventIndex = 0;
+            trackedLedgerHash = null;
           }
         }
 
+        // If the gap is so large that even MAX_BACKFILL_BATCH doesn't cover it,
+        // alert the operator via a dead_letter record and pause advancement.
+        if (latestLedger - currentLedger > MAX_BACKFILL_BATCH) {
+          logger.error(
+            'Production watcher: large ledger gap detected, backfill may not cover all events',
+            {
+              currentLedger,
+              latestLedger,
+              maxBatch: MAX_BACKFILL_BATCH,
+              gap: latestLedger - currentLedger,
+            },
+          );
+          captureAlert(
+            'contract_watcher_ingestion_failure',
+            `Production watcher ledger gap (${latestLedger - currentLedger}) exceeds backfill batch size — events may be missed`,
+            { currentLedger, latestLedger, maxBatch: MAX_BACKFILL_BATCH },
+          );
+        }
+
+        let maxEventLedger = currentLedger;
+        let maxEventIndex = currentEventIndex;
+
+        for (const rawEvent of events) {
+          const eventIndex = parseEventIndex(rawEvent.id);
+
+          // Skip events at or before the current cursor
+          if (
+            rawEvent.ledger < currentLedger ||
+            (rawEvent.ledger === currentLedger &&
+              eventIndex <= currentEventIndex)
+          ) {
+            continue;
+          }
+
+          // Do not project events that are not yet confirmed (within CONFIRMATION_DEPTH of tip)
+          if (rawEvent.ledger > confirmedTipLedger) {
+            logger.debug('Skipping unconfirmed event', {
+              ledger: rawEvent.ledger,
+              confirmedTip: confirmedTipLedger,
+            });
+            continue;
+          }
+
+          const event = ProductionEventParser.tryParse(
+            rawEvent as unknown as RawSorobanEvent,
+          );
+          if (event) {
+            try {
+              await withRetryJitter(
+                () => EventPersister.persist(event),
+                `EventPersister.persist(${event.action})`,
+                3,
+              );
+
+              // Issue #1067: once a parent campaign is indexed, replay any
+              // dead-lettered child events (investments, orders) that arrived
+              // out of order before their campaign.
+              if (event.action === 'campaign.created') {
+                await replayDeadLetterEvents({
+                  campaignOnChainId: event.campaignId,
+                  limit: 20,
+                });
+              }
+            } catch (persistErr) {
+              recordPersistError();
+              await recordDeadLetter(
+                rawEvent as unknown as RawSorobanEvent,
+                persistErr,
+              );
+              // Do not advance cursor past a failed event — this ensures
+              // no events are skipped and operators can replay after fixing
+              // the issue.
+              continue;
+            }
+          }
+
+          if (
+            rawEvent.ledger > maxEventLedger ||
+            (rawEvent.ledger === maxEventLedger && eventIndex > maxEventIndex)
+          ) {
+            maxEventLedger = rawEvent.ledger;
+            maxEventIndex = eventIndex;
+          }
+        }
+
+        // Advance cursor only after all events up to maxEventLedger/maxEventIndex
+        // have been durably handled. This cursor is persisted atomically.
         if (
-          rawEvent.ledger > maxEventLedger ||
-          (rawEvent.ledger === maxEventLedger && eventIndex > maxEventIndex)
+          maxEventLedger > currentLedger ||
+          maxEventIndex > currentEventIndex
         ) {
-          maxEventLedger = rawEvent.ledger;
-          maxEventIndex = eventIndex;
-        }
-      }
+          // Fetch the hash of the new cursor ledger for future reorg detection
+          try {
+            trackedLedgerHash = await getLedgerHash(server, maxEventLedger);
+          } catch (err) {
+            logger.warn('Failed to fetch ledger hash for cursor tracking', {
+              ledger: maxEventLedger,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            trackedLedgerHash = null;
+          }
 
-      // Advance cursor only after all events up to maxEventLedger/maxEventIndex
-      // have been durably handled. This cursor is persisted atomically.
-      if (maxEventLedger > currentLedger || maxEventIndex > currentEventIndex) {
-        // Fetch the hash of the new cursor ledger for future reorg detection
-        try {
-          trackedLedgerHash = await getLedgerHash(server, maxEventLedger);
-        } catch (err) {
-          logger.warn('Failed to fetch ledger hash for cursor tracking', {
-            ledger: maxEventLedger,
-            error: err instanceof Error ? err.message : String(err),
+          currentLedger = maxEventLedger;
+          currentEventIndex = maxEventIndex;
+          await advanceCursor(
+            currentLedger,
+            currentEventIndex,
+            trackedLedgerHash ?? undefined,
+          );
+          logger.debug('Production watcher: cursor advanced', {
+            ledger: currentLedger,
+            eventIndex: currentEventIndex,
+            confirmedTip: confirmedTipLedger,
+            ledgerHash: trackedLedgerHash,
           });
-          trackedLedgerHash = null;
         }
-
-        currentLedger = maxEventLedger;
-        currentEventIndex = maxEventIndex;
-        await advanceCursor(
-          currentLedger,
-          currentEventIndex,
-          trackedLedgerHash ?? undefined,
+      } catch (err) {
+        logger.error('Soroban watcher poll error', { error: err });
+        // Sentry groups identical errors into one issue, so a sustained RPC
+        // outage polling every few seconds doesn't need its own cooldown here.
+        captureAlert(
+          'contract_watcher_poll_error',
+          'Production watcher poll iteration failed',
+          { error: err instanceof Error ? err.message : String(err) },
         );
-        logger.debug('Production watcher: cursor advanced', {
-          ledger: currentLedger,
-          eventIndex: currentEventIndex,
-          confirmedTip: confirmedTipLedger,
-          ledgerHash: trackedLedgerHash,
-        });
       }
-    } catch (err) {
-      logger.error('Soroban watcher poll error', { error: err });
-      // Sentry groups identical errors into one issue, so a sustained RPC
-      // outage polling every few seconds doesn't need its own cooldown here.
-      captureAlert(
-        'contract_watcher_poll_error',
-        'Production watcher poll iteration failed',
-        { error: err instanceof Error ? err.message : String(err) },
-      );
-    }
+    })();
   }, POLL_INTERVAL_MS);
 
   return interval;
 }
 
-function buildContractFilters() {
-  const filters: any[] = [];
+function _buildContractFilters(): Parameters<
+  typeof rpc.Server.prototype.getEvents
+>[0]['filters'] {
+  const filters: Parameters<
+    typeof rpc.Server.prototype.getEvents
+  >[0]['filters'] = [];
 
   if (config.escrowContractId) {
     filters.push({

@@ -5,10 +5,10 @@ import { config } from './config/index.js';
 import { defaultLimiter } from './middleware/rateLimit.js';
 import { jsonValidated } from './middleware/validate.js';
 import { requireMetricsAuth } from './middleware/metricsAuth.js';
+import { asyncHandler } from './middleware/asyncHandler.js';
 import {
   isGracefullyShuttingDown,
   getShutdownPhase,
-  getShutdownSignal,
 } from './services/lifecycle.js';
 import authRoutes from './routes/auth.js';
 import campaignImageRoutes from './routes/campaignImageRoutes.js';
@@ -133,7 +133,7 @@ app.get('/health', (_req: Request, res: Response) => {
   });
 });
 
-app.get('/livez', async (_req: Request, res: Response) => {
+app.get('/livez', (_req: Request, res: Response) => {
   jsonValidated(res, LivezResponseSchema, 200, {
     status: 'alive',
     uptime: process.uptime(),
@@ -141,74 +141,79 @@ app.get('/livez', async (_req: Request, res: Response) => {
   });
 });
 
-app.get('/readyz', async (_req: Request, res: Response) => {
-  if (isGracefullyShuttingDown()) {
-    jsonValidated(res, ReadyzResponseSchema, 503, {
-      status: 'not_ready',
-      checks: {
-        shutdown: {
-          status: 'DOWN',
-          message: `Server shutting down: ${getShutdownPhase()}`,
+app.get(
+  '/readyz',
+  asyncHandler(async (_req: Request, res: Response) => {
+    if (isGracefullyShuttingDown()) {
+      jsonValidated(res, ReadyzResponseSchema, 503, {
+        status: 'not_ready',
+        checks: {
+          shutdown: {
+            status: 'DOWN',
+            message: `Server shutting down: ${getShutdownPhase()}`,
+          },
         },
-      },
-      lastLedger: 0,
+        lastLedger: 0,
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
+    const checks: Record<string, { status: string; message?: string }> = {};
+    let lastLedger = 0;
+
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      checks.database = { status: 'UP' };
+    } catch (err) {
+      checks.database = {
+        status: 'DOWN',
+        message:
+          err instanceof Error
+            ? 'database unreachable'
+            : 'database unreachable',
+      };
+    }
+
+    try {
+      const latest = await sorobanRpcServer.getLatestLedger();
+      lastLedger = latest.sequence;
+      checks.rpc = { status: 'UP' };
+    } catch (err) {
+      checks.rpc = {
+        status: 'DOWN',
+        message:
+          err instanceof Error
+            ? 'RPC endpoint unreachable'
+            : 'RPC endpoint unreachable',
+      };
+    }
+
+    if (config.registryContractId) {
+      checks.registry = { status: 'UP' };
+    } else {
+      logger.warn(
+        '[HealthCheck] WARNING: production_escrow has no REGISTRY_CONTRACT_ID configured',
+      );
+      checks.registry = {
+        status: 'WARN',
+        message: 'REGISTRY_CONTRACT_ID not set',
+      };
+    }
+
+    const ready = Object.values(checks).every(
+      (c) => c.status === 'UP' || c.status === 'WARN',
+    );
+    const statusCode = ready ? 200 : 503;
+
+    jsonValidated(res, ReadyzResponseSchema, statusCode, {
+      status: ready ? 'ready' : 'not_ready',
+      checks,
+      lastLedger,
       timestamp: new Date().toISOString(),
     });
-    return;
-  }
-
-  const checks: Record<string, { status: string; message?: string }> = {};
-  let lastLedger = 0;
-
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    checks.database = { status: 'UP' };
-  } catch (err) {
-    checks.database = {
-      status: 'DOWN',
-      message:
-        err instanceof Error ? 'database unreachable' : 'database unreachable',
-    };
-  }
-
-  try {
-    const latest = await sorobanRpcServer.getLatestLedger();
-    lastLedger = latest.sequence;
-    checks.rpc = { status: 'UP' };
-  } catch (err) {
-    checks.rpc = {
-      status: 'DOWN',
-      message:
-        err instanceof Error
-          ? 'RPC endpoint unreachable'
-          : 'RPC endpoint unreachable',
-    };
-  }
-
-  if (config.registryContractId) {
-    checks.registry = { status: 'UP' };
-  } else {
-    logger.warn(
-      '[HealthCheck] WARNING: production_escrow has no REGISTRY_CONTRACT_ID configured',
-    );
-    checks.registry = {
-      status: 'WARN',
-      message: 'REGISTRY_CONTRACT_ID not set',
-    };
-  }
-
-  const ready = Object.values(checks).every(
-    (c) => c.status === 'UP' || c.status === 'WARN',
-  );
-  const statusCode = ready ? 200 : 503;
-
-  jsonValidated(res, ReadyzResponseSchema, statusCode, {
-    status: ready ? 'ready' : 'not_ready',
-    checks,
-    lastLedger,
-    timestamp: new Date().toISOString(),
-  });
-});
+  }),
+);
 
 app.get('/api/docs/openapi.json', serveOpenApiDocument);
 

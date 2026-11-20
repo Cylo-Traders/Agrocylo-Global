@@ -65,12 +65,12 @@ async function bootstrap() {
 
 process.on('SIGTERM', () => {
   stopReconciliationSweep();
-  shutdown('SIGTERM').then(() => process.exit(0));
+  void shutdown('SIGTERM').then(() => process.exit(0));
 });
 
 process.on('SIGINT', () => {
   stopReconciliationSweep();
-  shutdown('SIGINT').then(() => process.exit(0));
+  void shutdown('SIGINT').then(() => process.exit(0));
 });
 
 process.on('unhandledRejection', (reason: unknown) => {
@@ -87,7 +87,7 @@ process.on('uncaughtException', (error: Error) => {
     stack: error.stack,
   });
   Sentry.captureException(error);
-  Sentry.close(2000).finally(() => process.exit(1));
+  void Sentry.close(2000).finally(() => process.exit(1));
 });
 
-bootstrap();
+void bootstrap();

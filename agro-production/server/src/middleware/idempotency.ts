@@ -40,22 +40,24 @@ class MemoryStore implements IdempotencyStore {
     }
   }
 
-  async get(key: string): Promise<CachedResponse | null> {
+  get(key: string): Promise<CachedResponse | null> {
     const cached = this.cache.get(key);
-    if (!cached) return null;
+    if (!cached) return Promise.resolve(null);
     if (Date.now() - cached.timestamp > CACHE_TTL_MS) {
       this.cache.delete(key);
-      return null;
+      return Promise.resolve(null);
     }
-    return cached;
+    return Promise.resolve(cached);
   }
 
-  async set(key: string, value: CachedResponse): Promise<void> {
+  set(key: string, value: CachedResponse): Promise<void> {
     this.cache.set(key, value);
+    return Promise.resolve();
   }
 
-  async delete(key: string): Promise<void> {
+  delete(key: string): Promise<void> {
     this.cache.delete(key);
+    return Promise.resolve();
   }
 }
 
@@ -116,15 +118,20 @@ function hashBody(body: unknown): string {
     .digest('hex');
 }
 
+export interface IdempotentRequest extends Request {
+  idempotencyKey?: string;
+  walletAddress?: string;
+}
+
 /**
  * Build a namespaced cache key tied to the route and authenticated wallet so
  * one wallet can never read another wallet's cached response, and the same key
  * reused across different routes cannot collide.
  */
 export function buildIdempotencyCacheKey(req: Request): string {
-  const rawKey = (req as any).idempotencyKey as string;
-  const wallet =
-    ((req as any).walletAddress as string | undefined) ?? 'anonymous';
+  const idempReq = req as IdempotentRequest;
+  const rawKey = idempReq.idempotencyKey ?? '';
+  const wallet = idempReq.walletAddress ?? 'anonymous';
   const route = `${req.method}:${req.baseUrl || ''}${req.path || ''}`;
   return `${route}:${wallet}:${rawKey}`;
 }
@@ -139,7 +146,7 @@ export function requireIdempotencyKey(
     res.status(400).json({ error: 'X-Idempotency-Key header is required' });
     return;
   }
-  (req as any).idempotencyKey = key;
+  (req as IdempotentRequest).idempotencyKey = key;
   next();
 }
 

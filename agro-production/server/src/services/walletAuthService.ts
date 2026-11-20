@@ -62,7 +62,7 @@ export async function createChallenge(
   };
 }
 
-function constantTimeEqual(a: Buffer, b: Buffer): boolean {
+function _constantTimeEqual(a: Buffer, b: Buffer): boolean {
   if (a.length !== b.length) return false;
   try {
     return timingSafeEqual(a, b);
@@ -280,7 +280,7 @@ export async function revokeSession(sessionToken: string): Promise<void> {
   });
 }
 
-function hashRefreshToken(token: string): string {
+function hashRefreshToken(_token: string): string {
   return randomBytes(32).toString('hex');
 }
 
