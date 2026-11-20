@@ -133,7 +133,7 @@ Validated in [`agro-production/server/src/config/index.ts`](../../agro-productio
 | `CORS_ORIGINS` | | `""` (all in dev) | Comma-separated origins |
 | `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX_REQUESTS` / `RATE_LIMIT_WRITE_MAX_REQUESTS` | | `60000` / `100` / `10` | |
 | `SHUTDOWN_TIMEOUT_MS` | | `15000` | Graceful shutdown |
-| `EVENT_POLL_INTERVAL_MS` / `CONFIRMATION_DEPTH` | | `5000` / `10` | On-chain event watcher tuning |
+| `EVENT_POLL_INTERVAL_MS` / `CONFIRMATION_DEPTH` / `EVENT_START_LEDGER` / `EVENT_FIRST_RUN_POLICY` | | `5000` / `10` / — / `bootstrap` | On-chain event watcher tuning & bootstrap backfill policy |
 | `VITEST_FAIL_ON_LEAKS` | test only | — | Set to `1` in CI to fail tests on leaked handles |
 | `RUN_RECONCILIATION_SWEEP` / `RECONCILIATION_SWEEP_INTERVAL_MS` | | `false` / — | Ledger reconciliation job |
 | `SENTRY_DSN` / `SENTRY_TRACES_SAMPLE_RATE` | | `""` / `0.1` | |

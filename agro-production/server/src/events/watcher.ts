@@ -17,6 +17,14 @@ const CONFIRMATION_DEPTH = parseInt(
   process.env['CONFIRMATION_DEPTH'] ?? '10',
   10,
 );
+const EVENT_START_LEDGER_RAW = process.env['EVENT_START_LEDGER'];
+const EVENT_START_LEDGER = EVENT_START_LEDGER_RAW
+  ? parseInt(EVENT_START_LEDGER_RAW, 10)
+  : undefined;
+const EVENT_FIRST_RUN_POLICY = (
+  process.env['EVENT_FIRST_RUN_POLICY'] ?? 'bootstrap'
+).toLowerCase();
+
 const MAX_BACKFILL_BATCH = 100;
 // base64 encoding of "campaign" and "order" short symbols
 const CAMPAIGN_TOPIC = 'AAAADwAAAAhjYW1wYWlnbg==';
@@ -29,7 +37,7 @@ const BASKET_CONTRACT_ID = config.basketContractId;
 
 /**
  * Loads the last persisted event cursor from the EventCursor table.
- * Falls back to the current on-chain tip when no cursor exists.
+ * Applies first-run bootstrap policy when no cursor exists.
  */
 async function loadCursor(
   server: rpc.Server,
@@ -48,11 +56,50 @@ async function loadCursor(
       ledgerHash: cursor.ledgerHash ?? null,
     };
   }
+
+  const policy = (
+    process.env['EVENT_FIRST_RUN_POLICY'] ?? EVENT_FIRST_RUN_POLICY
+  ).toLowerCase();
+  const rawStartLedger =
+    process.env['EVENT_START_LEDGER'] ?? EVENT_START_LEDGER_RAW;
+  const startLedger = rawStartLedger ? parseInt(rawStartLedger, 10) : undefined;
+
+  // Intentional start at tip without backfill
+  if (policy === 'tip') {
+    const latest = await server.getLatestLedger();
+    logger.info(
+      'Production watcher: no cursor found, intentional start-at-tip policy selected',
+      {
+        ledger: latest.sequence,
+        policy: 'tip',
+      },
+    );
+    return { ledger: latest.sequence, eventIndex: 0, ledgerHash: null };
+  }
+
+  // Explicit configured bootstrap start ledger
+  if (
+    startLedger !== undefined &&
+    Number.isFinite(startLedger) &&
+    startLedger >= 0
+  ) {
+    logger.info(
+      'Production watcher: no cursor found, bootstrapping event backfill from configured start ledger',
+      {
+        ledger: startLedger,
+        policy: 'bootstrap',
+      },
+    );
+    return { ledger: startLedger, eventIndex: 0, ledgerHash: null };
+  }
+
+  // Default fallback when neither specific start ledger nor explicit 'tip' policy is provided
   const latest = await server.getLatestLedger();
   logger.info(
-    'Production watcher: no cursor found, starting from current ledger',
+    'Production watcher: no cursor found and no start ledger configured, defaulting to current ledger',
     {
       ledger: latest.sequence,
+      policy: 'bootstrap-fallback',
     },
   );
   return { ledger: latest.sequence, eventIndex: 0, ledgerHash: null };

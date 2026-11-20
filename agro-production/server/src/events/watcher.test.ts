@@ -128,16 +128,66 @@ describe('startProductionWatcher', () => {
       );
     });
 
-    it('falls back to the current ledger tip when no cursor exists', async () => {
+    it('falls back to the current ledger tip when no cursor exists and no start ledger is set', async () => {
       mockEventCursorFindUnique.mockResolvedValueOnce(null);
       mockGetLatestLedger.mockResolvedValueOnce({ sequence: 500 });
 
       await startProductionWatcher();
 
       expect(logger.info).toHaveBeenCalledWith(
-        'Production watcher: no cursor found, starting from current ledger',
-        expect.objectContaining({ ledger: 500 }),
+        'Production watcher: no cursor found and no start ledger configured, defaulting to current ledger',
+        expect.objectContaining({ ledger: 500, policy: 'bootstrap-fallback' }),
       );
+    });
+
+    it('bootstraps from configured start ledger when EVENT_START_LEDGER is set', async () => {
+      const origStartLedger = process.env['EVENT_START_LEDGER'];
+      process.env['EVENT_START_LEDGER'] = '150';
+      try {
+        mockEventCursorFindUnique.mockResolvedValueOnce(null);
+
+        await startProductionWatcher();
+
+        expect(logger.info).toHaveBeenCalledWith(
+          'Production watcher: no cursor found, bootstrapping event backfill from configured start ledger',
+          expect.objectContaining({ ledger: 150, policy: 'bootstrap' }),
+        );
+      } finally {
+        if (origStartLedger !== undefined) {
+          process.env['EVENT_START_LEDGER'] = origStartLedger;
+        } else {
+          delete process.env['EVENT_START_LEDGER'];
+        }
+      }
+    });
+
+    it('starts intentionally at current ledger tip when EVENT_FIRST_RUN_POLICY=tip is selected', async () => {
+      const origPolicy = process.env['EVENT_FIRST_RUN_POLICY'];
+      const origStartLedger = process.env['EVENT_START_LEDGER'];
+      process.env['EVENT_FIRST_RUN_POLICY'] = 'tip';
+      process.env['EVENT_START_LEDGER'] = '150';
+      try {
+        mockEventCursorFindUnique.mockResolvedValueOnce(null);
+        mockGetLatestLedger.mockResolvedValueOnce({ sequence: 750 });
+
+        await startProductionWatcher();
+
+        expect(logger.info).toHaveBeenCalledWith(
+          'Production watcher: no cursor found, intentional start-at-tip policy selected',
+          expect.objectContaining({ ledger: 750, policy: 'tip' }),
+        );
+      } finally {
+        if (origPolicy !== undefined) {
+          process.env['EVENT_FIRST_RUN_POLICY'] = origPolicy;
+        } else {
+          delete process.env['EVENT_FIRST_RUN_POLICY'];
+        }
+        if (origStartLedger !== undefined) {
+          process.env['EVENT_START_LEDGER'] = origStartLedger;
+        } else {
+          delete process.env['EVENT_START_LEDGER'];
+        }
+      }
     });
   });
 
