@@ -149,6 +149,9 @@ pub enum SplitOrderError {
     NotAdmin = 25,
     /// Issue #1246: split-order entry points must enforce the pause policy.
     ContractPaused = 26,
+    /// Issue #1274: campaign has reached a terminal state (Failed or Settled),
+    /// so no further deposits or revenue confirmations are accepted.
+    CampaignAlreadyTerminal = 27,
 }
 
 impl From<EscrowError> for SplitOrderError {
@@ -156,6 +159,7 @@ impl From<EscrowError> for SplitOrderError {
         match err {
             EscrowError::CampaignNotFound => SplitOrderError::CampaignNotFound,
             EscrowError::CampaignNotHarvested => SplitOrderError::CampaignNotHarvested,
+            EscrowError::CampaignAlreadyTerminal => SplitOrderError::CampaignAlreadyTerminal,
             EscrowError::InvalidAmount => SplitOrderError::InvalidAmount,
             EscrowError::ContractNotInitialized => SplitOrderError::ContractNotInitialized,
             EscrowError::NotBuyer => SplitOrderError::NotBuyer,
@@ -1463,6 +1467,18 @@ impl ProductionEscrowContract {
         }
 
         let campaign = load_campaign(&env, order.campaign_id)?;
+        // Issue #1274: no new money into a terminal campaign. `fund_split_order`
+        // previously had no campaign-state check at all, so a split order
+        // created while the campaign was still live could accept deposits
+        // after it transitioned to Failed or Settled. Buyer refund paths
+        // (cancel_order, batch_refund_orders, exit_unfunded_split_order,
+        // resolve_split_dispute::RefundCoBuyers) stay reachable in terminal
+        // states.
+        if campaign.status == CampaignStatus::Failed
+            || campaign.status == CampaignStatus::Settled
+        {
+            return Err(SplitOrderError::CampaignAlreadyTerminal);
+        }
         let token_client = token::Client::new(&env, &campaign.token);
         token_client.transfer(&co_buyer, &env.current_contract_address(), &share);
 
@@ -1512,6 +1528,19 @@ impl ProductionEscrowContract {
             return Err(SplitOrderError::AlreadyConfirmed);
         }
 
+        // Issue #1274: reject confirmations on a terminal campaign up front.
+        // The previous check only ran once the vote threshold was reached and
+        // only rejected Settled, so late individual confirmations on a Failed
+        // campaign (or any confirmation that did not cross the threshold)
+        // would silently mutate order state. Loading the campaign here also
+        // avoids a second load in the threshold branch below.
+        let mut campaign = load_campaign(&env, order.campaign_id)?;
+        if campaign.status == CampaignStatus::Failed
+            || campaign.status == CampaignStatus::Settled
+        {
+            return Err(SplitOrderError::CampaignAlreadyTerminal);
+        }
+
         order.confirmed.set(co_buyer.clone(), true);
         order.confirmed_count += 1;
         order.confirmed_value = checked_add(order.confirmed_value, share)?;
@@ -1524,10 +1553,6 @@ impl ProductionEscrowContract {
         let unanimous = order.confirmed_count == order.co_buyers.len();
 
         if majority_by_value || unanimous {
-            let mut campaign = load_campaign(&env, order.campaign_id)?;
-            if campaign.status == CampaignStatus::Settled {
-                return Err(SplitOrderError::CampaignNotHarvested);
-            }
             let net_revenue = checked_sub(order.total_amount, order.fee)?;
             campaign.total_revenue = checked_add(campaign.total_revenue, net_revenue)?;
             save_campaign(&env, &campaign);
@@ -1616,8 +1641,14 @@ impl ProductionEscrowContract {
             }
             SplitOrderResolution::ReleaseToFarmer => {
                 let mut campaign = campaign.clone();
-                if campaign.status == CampaignStatus::Settled {
-                    return Err(SplitOrderError::CampaignNotHarvested);
+                // Issue #1274: refuse to credit revenue to a terminal campaign
+                // (previously only Settled was rejected). The sibling
+                // `RefundCoBuyers` arm stays reachable in terminal states so
+                // disputed co-buyers always have an exit.
+                if campaign.status == CampaignStatus::Failed
+                    || campaign.status == CampaignStatus::Settled
+                {
+                    return Err(SplitOrderError::CampaignAlreadyTerminal);
                 }
                 let net_revenue = checked_sub(order.total_amount, order.fee)?;
                 campaign.total_revenue = checked_add(campaign.total_revenue, net_revenue)?;
@@ -1791,9 +1822,13 @@ impl ProductionEscrowContract {
         }
 
         let mut campaign = load_campaign(&env, order.campaign_id)?;
-        // Reject late confirmations after settlement (Issue #455).
-        if campaign.status == CampaignStatus::Settled {
-            return Err(EscrowError::CampaignNotHarvested);
+        // Issue #455 / #1274: reject late confirmations once the campaign is
+        // terminal. Previously only Settled was rejected, so a Failed
+        // campaign could still receive new revenue from stragglers.
+        if campaign.status == CampaignStatus::Failed
+            || campaign.status == CampaignStatus::Settled
+        {
+            return Err(EscrowError::CampaignAlreadyTerminal);
         }
 
         let net_revenue = checked_sub(order.amount, order.fee)?;

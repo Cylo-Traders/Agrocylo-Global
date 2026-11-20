@@ -8,8 +8,9 @@ use soroban_sdk::{
 
 use crate::{
     CampaignStatus, DataKey, DisputeResolution, EscrowError, Order, OrderStatus,
-    ProductionEscrowContract, ProductionEscrowContractClient, SplitOrderError, SplitOrderStatus,
-    MAX_VOLUME_MIGRATION_BATCH, ORDER_EXPIRY_SECS, SPLIT_FUNDING_DEADLINE_SECS,
+    ProductionEscrowContract, ProductionEscrowContractClient, SplitOrderError,
+    SplitOrderResolution, SplitOrderStatus, MAX_VOLUME_MIGRATION_BATCH, ORDER_EXPIRY_SECS,
+    SPLIT_FUNDING_DEADLINE_SECS,
 };
 
 // ---------------------------------------------------------------------------
@@ -4072,4 +4073,233 @@ fn test_milestone_cost_is_bounded_by_history_size() {
         large_cpu < small_cpu * 10,
         "milestone CPU grew scan-like with history: {small_cpu} -> {large_cpu}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Issue #1274: terminal-state guards on split-order and ordinary entry points.
+// Reject new deposits and revenue confirmations once a campaign has become
+// Failed or Settled. Preserve buyer recovery paths across the transition.
+// ---------------------------------------------------------------------------
+
+fn drive_to_in_production(t: &TestEnv<'_>, target: i128) -> u64 {
+    let deadline = future_deadline(t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &target, &deadline);
+    t.client.invest(&t.investor1, &id, &target);
+    t.client.start_production(&t.farmer, &id);
+    id
+}
+
+fn fail_via_dispute(t: &TestEnv<'_>, id: u64) {
+    t.client.open_dispute(&t.farmer, &id);
+    t.client
+        .resolve_dispute(&t.admin, &id, &DisputeResolution::RefundInvestors);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+}
+
+fn drive_to_settled(t: &TestEnv<'_>, id: u64) {
+    t.client.mark_harvest(&t.farmer, &t.attester, &id);
+    t.client.settle(&t.farmer, &id);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Settled);
+}
+
+fn make_two_party_split_order(
+    t: &TestEnv<'_>,
+    campaign_id: u64,
+    co_buyer: &Address,
+    share_each: i128,
+) -> u64 {
+    StellarAssetClient::new(&t.env, &t.token_id).mint(co_buyer, &(share_each * 2));
+    let mut co_buyers = Vec::new(&t.env);
+    co_buyers.push_back(t.buyer.clone());
+    co_buyers.push_back(co_buyer.clone());
+    let mut shares = Vec::new(&t.env);
+    shares.push_back(share_each);
+    shares.push_back(share_each);
+    t.client
+        .create_split_order(&t.buyer, &campaign_id, &co_buyers, &shares)
+}
+
+#[test]
+fn test_1274_fund_split_order_rejected_after_campaign_failed() {
+    let t = setup();
+    let id = drive_to_in_production(&t, 10_000);
+    let co_buyer = Address::generate(&t.env);
+    let order_id = make_two_party_split_order(&t, id, &co_buyer, 500);
+
+    fail_via_dispute(&t, id);
+
+    let err = t
+        .client
+        .try_fund_split_order(&t.buyer, &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::CampaignAlreadyTerminal);
+    let err = t
+        .client
+        .try_fund_split_order(&co_buyer, &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::CampaignAlreadyTerminal);
+}
+
+#[test]
+fn test_1274_fund_split_order_rejected_after_campaign_settled() {
+    let t = setup();
+    let id = drive_to_in_production(&t, 10_000);
+    let co_buyer = Address::generate(&t.env);
+    let order_id = make_two_party_split_order(&t, id, &co_buyer, 500);
+
+    drive_to_settled(&t, id);
+
+    let err = t
+        .client
+        .try_fund_split_order(&t.buyer, &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::CampaignAlreadyTerminal);
+}
+
+#[test]
+fn test_1274_confirm_split_receipt_rejected_after_campaign_failed() {
+    let t = setup();
+    let id = drive_to_in_production(&t, 10_000);
+    let co_buyer = Address::generate(&t.env);
+    let order_id = make_two_party_split_order(&t, id, &co_buyer, 500);
+    t.client.fund_split_order(&t.buyer, &order_id);
+    t.client.fund_split_order(&co_buyer, &order_id);
+    assert_eq!(
+        t.client.get_split_order(&order_id).status,
+        SplitOrderStatus::Active
+    );
+
+    fail_via_dispute(&t, id);
+
+    // Even an individual below-threshold confirmation is rejected, so
+    // order state cannot drift after the campaign is terminal.
+    let err = t
+        .client
+        .try_confirm_split_receipt(&t.buyer, &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::CampaignAlreadyTerminal);
+    let order_after = t.client.get_split_order(&order_id);
+    assert_eq!(order_after.confirmed_count, 0);
+    assert_eq!(order_after.status, SplitOrderStatus::Active);
+}
+
+#[test]
+fn test_1274_split_dispute_release_rejected_but_refund_preserved_after_failed() {
+    let t = setup();
+    let id = drive_to_in_production(&t, 10_000);
+    let co_buyer = Address::generate(&t.env);
+    let order_id = make_two_party_split_order(&t, id, &co_buyer, 500);
+    t.client.fund_split_order(&t.buyer, &order_id);
+    t.client.fund_split_order(&co_buyer, &order_id);
+    t.client.open_split_dispute(&t.buyer, &order_id);
+
+    fail_via_dispute(&t, id);
+
+    // ReleaseToFarmer must refuse to credit revenue on a terminal campaign.
+    let err = t
+        .client
+        .try_resolve_split_dispute(&t.admin, &order_id, &SplitOrderResolution::ReleaseToFarmer)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, SplitOrderError::CampaignAlreadyTerminal);
+
+    // The refund arm stays reachable; co-buyers get their shares back.
+    let buyer_before = balance(&t, &t.buyer);
+    let cob_before = balance(&t, &co_buyer);
+    t.client
+        .resolve_split_dispute(&t.admin, &order_id, &SplitOrderResolution::RefundCoBuyers);
+    assert_eq!(balance(&t, &t.buyer) - buyer_before, 500);
+    assert_eq!(balance(&t, &co_buyer) - cob_before, 500);
+    assert_eq!(
+        t.client.get_split_order(&order_id).status,
+        SplitOrderStatus::Refunded
+    );
+}
+
+#[test]
+fn test_1274_confirm_order_rejected_after_campaign_failed() {
+    let t = setup();
+    let id = drive_to_in_production(&t, 10_000);
+    let order_id = t.client.create_order(&t.buyer, &id, &500);
+
+    fail_via_dispute(&t, id);
+
+    let err = t
+        .client
+        .try_confirm_order(&t.buyer, &order_id)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignAlreadyTerminal);
+    // Campaign revenue is unchanged by the rejected confirmation attempt.
+    assert_eq!(t.client.get_campaign(&id).total_revenue, 0);
+}
+
+#[test]
+fn test_1274_pending_buyer_refund_via_batch_after_campaign_failed() {
+    let t = setup();
+    let id = drive_to_in_production(&t, 10_000);
+    let order_id = t.client.create_order(&t.buyer, &id, &500);
+    let buyer_before = balance(&t, &t.buyer);
+
+    fail_via_dispute(&t, id);
+
+    advance_ledger(&t.env, ORDER_EXPIRY_SECS + 1);
+    let mut ids = Vec::new(&t.env);
+    ids.push_back(order_id);
+    let (count, total) = t.client.batch_refund_orders(&ids);
+    assert_eq!(count, 1);
+    assert_eq!(total, 500);
+    assert_eq!(balance(&t, &t.buyer) - buyer_before, 500);
+}
+
+#[test]
+fn test_1274_interleaved_refunds_and_late_confirmations_isolate_campaigns() {
+    // Two independent campaigns. A fails after a pending order is placed and
+    // before a late confirmation is attempted. B stays alive and continues
+    // to operate normally; its balances and status are unaffected by A's
+    // transition. Pending buyers on A retain a working refund path.
+    let t = setup();
+    let id_a = drive_to_in_production(&t, 10_000);
+    let id_b = drive_to_in_production(&t, 10_000);
+
+    let a_pending = t.client.create_order(&t.buyer, &id_a, &500);
+    let b_pending = t.client.create_order(&t.buyer, &id_b, &400);
+
+    let a_revenue_before = t.client.get_campaign(&id_a).total_revenue;
+    let b_before = t.client.get_campaign(&id_b);
+
+    fail_via_dispute(&t, id_a);
+
+    // Late confirmation on A is rejected; its revenue does not move.
+    let err = t
+        .client
+        .try_confirm_order(&t.buyer, &a_pending)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::CampaignAlreadyTerminal);
+    assert_eq!(t.client.get_campaign(&id_a).total_revenue, a_revenue_before);
+
+    // Pending buyer on A exits via batch refund.
+    advance_ledger(&t.env, ORDER_EXPIRY_SECS + 1);
+    let mut ids = Vec::new(&t.env);
+    ids.push_back(a_pending);
+    let (count, _total) = t.client.batch_refund_orders(&ids);
+    assert_eq!(count, 1);
+
+    // B is untouched by A's failure.
+    let b_after = t.client.get_campaign(&id_b);
+    assert_eq!(b_after.status, b_before.status);
+    assert_eq!(b_after.total_raised, b_before.total_raised);
+    assert_eq!(b_after.total_revenue, b_before.total_revenue);
+
+    // B still accepts new revenue through the normal lifecycle.
+    t.client.mark_harvest(&t.farmer, &t.attester, &id_b);
+    t.client.confirm_order(&t.buyer, &b_pending);
+    assert!(t.client.get_campaign(&id_b).total_revenue > 0);
 }
