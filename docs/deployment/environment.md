@@ -42,6 +42,31 @@ and the contract set. Each app's `README.md` links here. Each app also ships a
 > `<CONTRACT>_CONTRACT_ID` everywhere would require a coordinated code + infra
 > change and is left as a follow-up.
 
+### Provisional testnet defaults and policy (maintainer review required)
+
+The checked-in `.env.example`, `docker-compose.yml`, and `client/Dockerfile`
+now carry the IDs from `deployments/deployed-addresses.testnet.json` so a clean
+testnet stack works without manual copying. These are **defaults only**:
+override every contract ID, RPC URL, and passphrase from the target network's
+manifest before any non-testnet deployment. The testnet USDC SAC
+`CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA` is derived from
+Circle's testnet issuer `GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5`
+and is already deployed; verify before any non-testnet deployment.
+
+Default policy decisions pending sign-off (tracked in issues #1363, #1364,
+#1367, #1369):
+
+- Chain-first checkout is authoritative: if the on-chain `create_order`
+  succeeds but REST persistence fails, the order is pending/recoverable, never
+  reported as a plain failure.
+- On-chain `confirm_order` is authoritative for release of escrow; the API
+  status may only follow a successful chain confirmation.
+- `intent:` placeholder rows are non-authoritative and expire after 30 minutes;
+  the event-derived row with the real `onChainId` wins.
+- Transaction rows created from indexed events use `status = indexed`; the
+  migration `20261122000000_mark_indexed_event_transactions` backfills existing
+  ledger-backed rows.
+
 ---
 
 ## Per-app reference
@@ -100,7 +125,7 @@ guidance and no secret echo (see `client/.env.example`).
 | `NEXT_PUBLIC_ESCROW_CONTRACT_ID` | | explicit escrow alias |
 | `NEXT_PUBLIC_MARKET_CONTRACT_ID` | | market contract (if split) |
 | `NEXT_PUBLIC_NATIVE_TOKEN_CONTRACT_ID` | ✅ | XLM SAC — required by `/orders/new` |
-| `NEXT_PUBLIC_TOKEN_CONTRACT_ID_USDC` | | USDC token contract (checkout) |
+| `NEXT_PUBLIC_TOKEN_CONTRACT_ID_USDC` | | USDC SAC (checkout), default `CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA` on testnet |
 | `NEXT_PUBLIC_MAX_FEE_STROOPS` | | tx fee ceiling |
 | `NEXT_PUBLIC_AGRO_PRODUCTION_URL` | | nav link to sub-app |
 | `NEXT_PUBLIC_APP_URL` | | canonical app URL |
