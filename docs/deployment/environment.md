@@ -42,6 +42,30 @@ and the contract set. Each app's `README.md` links here. Each app also ships a
 > `<CONTRACT>_CONTRACT_ID` everywhere would require a coordinated code + infra
 > change and is left as a follow-up.
 
+### Provisional testnet defaults and policy (maintainer review required)
+
+The checked-in `.env.example`, `docker-compose.yml`, and `client/Dockerfile`
+now carry the IDs from `deployments/deployed-addresses.testnet.json` so a clean
+testnet stack works without manual copying. These are **defaults only**:
+override every contract ID, RPC URL, and passphrase from the target network's
+manifest before any non-testnet deployment. No authoritative testnet USDC SAC
+is recorded in this repository, so `NEXT_PUBLIC_TOKEN_CONTRACT_ID_USDC` remains
+blank until a maintainer supplies it.
+
+Default policy decisions pending sign-off (tracked in issues #1363, #1364,
+#1367, #1369):
+
+- Chain-first checkout is authoritative: if the on-chain `create_order`
+  succeeds but REST persistence fails, the order is pending/recoverable, never
+  reported as a plain failure.
+- On-chain `confirm_order` is authoritative for release of escrow; the API
+  status may only follow a successful chain confirmation.
+- `intent:` placeholder rows are non-authoritative and expire after 30 minutes;
+  the event-derived row with the real `onChainId` wins.
+- Transaction rows created from indexed events use `status = indexed`; the
+  migration `20261122000000_mark_indexed_event_transactions` backfills existing
+  ledger-backed rows.
+
 ---
 
 ## Per-app reference
