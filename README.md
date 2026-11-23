@@ -336,3 +336,8 @@ For production, ensure the following are configured (see `.env.example`):
 * [Telegram](https://t.me/Tiya_jd)
 * [X](https://x.com/Tiya_JD)
 * [Community Telegram](https://t.me/AgricCylo)
+
+## Handsoff notes
+
+<!-- handsoff-issue-1378 -->
+- #1378: Remove the landing-page trust/partner strip
