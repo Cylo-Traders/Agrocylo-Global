@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { ProductImage } from "@/components/ProductImage";
 import { validateProductFilters } from "@/services/productService";
+import { describeApiError } from "@/services/apiDiagnostics";
 
 const product = {
   name: "Organic Tomatoes",
@@ -35,5 +36,24 @@ describe("marketplace contract boundaries", () => {
     image.dispatchEvent(new Event("error"));
     expect(image).toHaveAttribute("src", "/product-placeholder.svg");
     vi.unstubAllEnvs();
+  });
+});
+
+describe("product API diagnostics", () => {
+  it("distinguishes missing API configuration from a server error", () => {
+    const missing = describeApiError({ code: "MISSING_API_URL" });
+    const server = describeApiError({ code: "SERVER_ERROR" });
+
+    expect(missing.kind).toBe("configuration");
+    expect(server.kind).toBe("server");
+    expect(missing.message).not.toBe(server.message);
+  });
+
+  it("maps connectivity failures to actionable copy without leaking internals", () => {
+    const result = describeApiError({ code: "NETWORK_ERROR" });
+
+    expect(result.kind).toBe("connectivity");
+    expect(result.retryable).toBe(true);
+    expect(result.message).not.toMatch(/stack|http|token|secret/i);
   });
 });
