@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { ProductImage } from "@/components/ProductImage";
 import { validateProductFilters } from "@/services/productService";
 import { describeApiError } from "@/services/apiDiagnostics";
+import { buildProductQuery } from "@/services/productService";
 
 const product = {
   name: "Organic Tomatoes",
@@ -76,6 +77,43 @@ describe("marketplace contract boundaries", () => {
     image.dispatchEvent(new Event("error"));
     expect(image).toHaveAttribute("src", "/product-placeholder.svg");
     vi.unstubAllEnvs();
+  });
+});
+
+describe("marketplace pagination", () => {
+  it("requests the first page with the default page size", () => {
+    const query = buildProductQuery({ page: 1, pageSize: 24 });
+
+    expect(query).toContain("page=1");
+    expect(query).toContain("page_size=24");
+  });
+
+  it("preserves active filters and sort order on subsequent pages", () => {
+    const query = buildProductQuery({
+      page: 2,
+      pageSize: 24,
+      search: "tomato",
+      category: "vegetables",
+      minPrice: "10",
+      maxPrice: "20",
+      sort: "price_asc",
+    });
+
+    expect(query).toContain("page=2");
+    expect(query).toContain("page_size=24");
+    expect(query).toContain("search=tomato");
+    expect(query).toContain("category=vegetables");
+    expect(query).toContain("min_price=10");
+    expect(query).toContain("max_price=20");
+    expect(query).toContain("sort=price_asc");
+  });
+
+  it("omits empty filters so pagination stays stable", () => {
+    const query = buildProductQuery({ page: 3, pageSize: 24, search: "", category: "" });
+
+    expect(query).toContain("page=3");
+    expect(query).not.toContain("search=");
+    expect(query).not.toContain("category=");
   });
 });
 

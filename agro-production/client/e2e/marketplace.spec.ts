@@ -106,4 +106,50 @@ test.describe("marketplace API journey", () => {
     expect(correctedUrl.url()).toContain("priceMin=10");
     expect(correctedUrl.url()).toContain("priceMax=100");
   });
+
+  test("loads more results while preserving active filters", async ({ page }) => {
+    const productRequests: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/products") && request.method() === "GET") {
+        productRequests.push(request.url());
+      }
+    });
+
+    await page.goto("/marketplace");
+    await expect(page.getByRole("heading", { name: "Marketplace" })).toBeVisible();
+
+    // Apply a category filter so we can verify it survives pagination.
+    const filteredRequest = page.waitForRequest((request) =>
+      request.url().includes("/api/v1/products") && request.url().includes("category=VEGETABLES"),
+    );
+    await page.getByLabel("Category").selectOption("VEGETABLES");
+    await filteredRequest;
+    await expect(page.getByRole("status")).toContainText(/products available|No products found/);
+
+    const loadMore = page.getByRole("button", { name: /load more/i });
+    if ((await loadMore.count()) === 0) {
+      // Not enough results to paginate; nothing more to verify.
+      test.skip(true, "Not enough products to paginate");
+      return;
+    }
+
+    const nextPageRequest = page.waitForRequest((request) => {
+      const url = request.url();
+      return (
+        url.includes("/api/v1/products") &&
+        url.includes("category=VEGETABLES") &&
+        /[?&]page=2(&|$)/.test(url)
+      );
+    });
+
+    await loadMore.click();
+    const nextUrl = (await nextPageRequest).url();
+    expect(nextUrl).toContain("category=VEGETABLES");
+    expect(nextUrl).toMatch(/[?&]page=2(&|$)/);
+    expect(nextUrl).toMatch(/[?&]page_size=\d+/);
+
+    // Loading state resolves and the result count is still communicated.
+    await expect(page.getByRole("status")).toContainText(/products available|No products found/);
+    await expect(page.getByRole("link", { name: /View .* XLM per/ }).first()).toBeVisible();
+  });
 });
