@@ -2,6 +2,7 @@ import path from "node:path";
 import type { NextConfig } from "next";
 import { fileURLToPath } from "node:url";
 import { assertEndpointsValid } from "./src/lib/endpointValidator";
+import { assertMarketplaceBuildConfig } from "./src/lib/marketplaceBuildConfig";
 
 // ── Resolve repository root for Turbopack ────────────────────────────────
 // Issue #918: previous implementation used process.cwd() + a literal Windows
@@ -54,6 +55,16 @@ const repoRoot = getRepoRoot();
 // Do not echo secrets / query tokens / full endpoint values.
 function validateNetworkConfig() {
   const isProd = process.env.NODE_ENV === "production";
+
+  assertMarketplaceBuildConfig(
+    {
+      NEXT_PUBLIC_CONTRACT_ID: process.env.NEXT_PUBLIC_CONTRACT_ID,
+      NEXT_PUBLIC_NATIVE_TOKEN_CONTRACT_ID:
+        process.env.NEXT_PUBLIC_NATIVE_TOKEN_CONTRACT_ID,
+      NEXT_PUBLIC_DEMO_MODE: process.env.NEXT_PUBLIC_DEMO_MODE,
+    },
+    isProd,
+  );
 
   // EndpointValidator covers missing/empty, malformed, unsupported scheme,
   // and http-only-for-localhost rules. It reports ALL invalid vars at once

@@ -21,18 +21,31 @@ const NON_TERMINAL_STATUSES: TransactionStatus[] = [
 
 /** Bounds per-run cost; a backlog larger than this is itself worth knowing about (see `checked` in the result). */
 const SWEEP_BATCH_LIMIT = 200;
+const EXPIRED_INTENT_AGE_MS = 24 * 60 * 60 * 1000;
 
 export interface ReconciliationSweepResult {
   checked: number;
   drifted: number;
+  expiredIntents: number;
 }
 
 export async function runReconciliationSweep(): Promise<ReconciliationSweepResult> {
-  const transactions = await prisma.transaction.findMany({
-    where: { status: { in: NON_TERMINAL_STATUSES } },
-    select: { id: true, txHash: true, status: true },
-    take: SWEEP_BATCH_LIMIT,
-  });
+  const [transactions, expiredIntents] = await Promise.all([
+    prisma.transaction.findMany({
+      where: { status: { in: NON_TERMINAL_STATUSES } },
+      select: { id: true, txHash: true, status: true },
+      take: SWEEP_BATCH_LIMIT,
+    }),
+    prisma.order.findMany({
+      where: {
+        onChainId: { startsWith: 'intent:' },
+        status: 'PENDING',
+        createdAt: { lt: new Date(Date.now() - EXPIRED_INTENT_AGE_MS) },
+      },
+      select: { id: true, onChainId: true, createdAt: true },
+      take: SWEEP_BATCH_LIMIT,
+    }),
+  ]);
 
   let drifted = 0;
   for (const tx of transactions) {
@@ -52,6 +65,20 @@ export async function runReconciliationSweep(): Promise<ReconciliationSweepResul
 
   reconciliationDrift.set(drifted);
 
+  if (expiredIntents.length > 0) {
+    logger.warn(
+      '[reconciliationSweep] Unresolved order intents exceeded the 24-hour reconciliation window; manual review required',
+      {
+        count: expiredIntents.length,
+        intents: expiredIntents.map((order) => ({
+          id: order.id,
+          onChainId: order.onChainId,
+          createdAt: order.createdAt,
+        })),
+      },
+    );
+  }
+
   if (drifted > 0) {
     captureAlert(
       'reconciliation_drift',
@@ -60,7 +87,7 @@ export async function runReconciliationSweep(): Promise<ReconciliationSweepResul
     );
   }
 
-  return { checked: transactions.length, drifted };
+  return { checked: transactions.length, drifted, expiredIntents: expiredIntents.length };
 }
 
 let sweepTimer: ReturnType<typeof setInterval> | null = null;

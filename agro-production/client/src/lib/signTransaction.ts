@@ -39,6 +39,8 @@ export interface SignAndSubmitOptions {
    * resolution.
    */
   intent?: string;
+  /** Called after broadcast, before confirmation polling, when the tx hash is known. */
+  onSubmitted?: (txHash: string) => Promise<void>;
   /** Poll window in ms before returning `pending`. */
   confirmTimeoutMs?: number;
 }
@@ -113,6 +115,7 @@ export async function signAndSubmitTransaction(
     if (intent) {
       const inFlight = getInFlightForIntent(intent);
       if (inFlight) {
+        await options.onSubmitted?.(inFlight.hash);
         return {
           success: false,
           outcome: "pending",
@@ -165,6 +168,7 @@ export async function signAndSubmitTransaction(
         timeoutSeconds: TX_TIME_BOUND_SECONDS,
       });
     }
+    await options.onSubmitted?.(txHash);
 
     const deadline = Date.now() + confirmTimeoutMs;
     onStage?.("confirming");

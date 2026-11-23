@@ -4,10 +4,11 @@ import { useState, useCallback } from "react";
 import { useWallet } from "@/hooks/useWallet";
 import {
   createOrder as buildCreateOrder,
-  confirmDelivery as buildConfirmDelivery,
-  refundOrder as buildRefundOrder,
+  confirmReceipt as buildConfirmReceipt,
+  refundExpiredOrder as buildRefundExpiredOrder,
   openDispute as buildOpenDispute,
-  getOrder,
+  getOrderDetails as fetchOrderDetails,
+  resolveSplitDispute as buildResolveSplitDispute,
   type Order,
 } from "@/services/stellar/contractService";
 import { isTestMode } from "@/lib/testMode";
@@ -98,7 +99,7 @@ export function useEscrowContract() {
           return mocked;
         }
 
-        const result = await buildConfirmDelivery(address, orderId);
+        const result = await buildConfirmReceipt(address, orderId);
         if (!result.success || !result.data) {
           throw new Error(result.error ?? "Failed to build transaction");
         }
@@ -127,7 +128,7 @@ export function useEscrowContract() {
       setActiveAction("refund");
       setRefundState({ isLoading: true, error: null, blockchainError: null });
       try {
-        const result = await buildRefundOrder(address, orderId);
+        const result = await buildRefundExpiredOrder(address, orderId);
         if (!result.success || !result.data) {
           throw new Error(result.error ?? "Failed to build transaction");
         }
@@ -180,12 +181,12 @@ export function useEscrowContract() {
   );
 
   const resolveDispute = useCallback(
-    async (orderId: string, resolveToBuyer: boolean) => {
+    async (orderId: string, resolution: { tag: "Refund" | "Release" }) => {
       if (!address) throw new Error("Wallet not connected");
       setResolveState({ isLoading: true, error: null, blockchainError: null });
       try {
         const { resolveDispute: buildResolveDispute } = await import("@/services/stellar/contractService");
-        const result = await buildResolveDispute(address, orderId, resolveToBuyer);
+        const result = await buildResolveDispute(address, orderId, resolution);
         if (!result.success || !result.data) {
           throw new Error(result.error ?? "Failed to build transaction");
         }
@@ -206,13 +207,12 @@ export function useEscrowContract() {
     [address, signAndSubmit]
   );
 
-  const splitFunds = useCallback(
+  const resolveSplitDispute = useCallback(
     async (orderId: string, buyerShare: bigint, farmerShare: bigint) => {
       if (!address) throw new Error("Wallet not connected");
       setSplitState({ isLoading: true, error: null, blockchainError: null });
       try {
-        const { splitFunds: buildSplitFunds } = await import("@/services/stellar/contractService");
-        const result = await buildSplitFunds(address, orderId, buyerShare, farmerShare);
+        const result = await buildResolveSplitDispute(address, orderId, buyerShare, farmerShare);
         if (!result.success || !result.data) {
           throw new Error(result.error ?? "Failed to build transaction");
         }
@@ -237,7 +237,7 @@ export function useEscrowContract() {
     async (orderId: string): Promise<Order | null> => {
       setQueryState({ isLoading: true, error: null, blockchainError: null });
       try {
-        const result = await getOrder(orderId);
+        const result = await fetchOrderDetails(orderId);
         if (!result.success || !result.data) {
           throw new Error(result.error ?? "Order not found");
         }
@@ -280,7 +280,7 @@ export function useEscrowContract() {
     requestRefund,
     openDispute,
     resolveDispute,
-    splitFunds,
+    resolveSplitDispute,
     getOrderDetails,
     createState,
     confirmState,

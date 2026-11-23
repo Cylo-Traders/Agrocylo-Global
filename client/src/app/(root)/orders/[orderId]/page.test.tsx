@@ -50,16 +50,17 @@ vi.mock("@/hooks/useSocket", () => ({
 }));
 
 vi.mock("@/services/stellar/contractService", () => ({
-  getOrder: vi.fn(() =>
+  getOrderDetails: vi.fn(() =>
     Promise.resolve({
       success: true,
       data: {
         orderId: "order-123",
         buyer: "GD5DJQJ7P5DLYX6LXZJ2J5LYXZJ2J5LYXZJ2J5LYXZJ2J5LYXZJ2",
-        seller: "GC4KJ7P5DLYX6LXZJ2J5LYXZJ2J5LYXZJ2J5LYXZJ2J5LYXZJ3",
-        amount: "10000000",
+        farmer: "GC4KJ7P5DLYX6LXZJ2J5LYXZJ2J5LYXZJ2J5LYXZJ2J5LYXZJ3",
+        token: "CC4KJ7P5DLYX6LXZJ2J5LYXZJ2J5LYXZJ2J5LYXZJ2J5LYXZJ3",
+        amount: 10000000n,
         status: "Pending",
-        createdAt: Math.floor(Date.now() / 1000),
+        timestamp: Math.floor(Date.now() / 1000),
       },
     }),
   ),

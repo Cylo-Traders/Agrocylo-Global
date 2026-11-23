@@ -109,8 +109,11 @@ canonical mapping. Copy the IDs into the app env vars:
 | registry | `REGISTRY_CONTRACT_ID` | — |
 | investment basket | `BASKET_CONTRACT_ID` | — |
 
-Also set `NEXT_PUBLIC_NATIVE_TOKEN_CONTRACT_ID` (the XLM Stellar Asset
-Contract) on `client/`; `/orders/new` requires it.
+Set `NEXT_PUBLIC_NATIVE_TOKEN_CONTRACT_ID` (XLM SAC) and, when USDC checkout is
+enabled, `NEXT_PUBLIC_TOKEN_CONTRACT_ID_USDC` on `client/`. Source the escrow
+contract ID from the selected network's deployment manifest; token SAC IDs
+must be supplied by maintainers for that network. Production builds require
+the escrow and native-token IDs and reject `NEXT_PUBLIC_DEMO_MODE=true`.
 
 ## Local setup
 
@@ -335,20 +338,24 @@ flyctl deploy . \
   --config client/fly.toml \
   --dockerfile client/Dockerfile \
   --app agrocylo-client \
+  --build-arg NEXT_PUBLIC_API_URL='https://<marketplace-api-origin>' \
   --build-arg NEXT_PUBLIC_SOROBAN_RPC_URL='https://soroban-testnet.stellar.org' \
   --build-arg NEXT_PUBLIC_HORIZON_URL='https://horizon-testnet.stellar.org' \
   --build-arg NEXT_PUBLIC_NETWORK_PASSPHRASE='Test SDF Network ; September 2015' \
-  --build-arg NEXT_PUBLIC_STELLAR_ENV=testnet
+  --build-arg NEXT_PUBLIC_STELLAR_ENV=testnet \
+  --build-arg NEXT_PUBLIC_CONTRACT_ID='<escrow-id-from-manifest>' \
+  --build-arg NEXT_PUBLIC_NATIVE_TOKEN_CONTRACT_ID='<native-token-sac-id>' \
+  --build-arg NEXT_PUBLIC_TOKEN_CONTRACT_ID_USDC='<usdc-sac-id>' \
+  --build-arg NEXT_PUBLIC_DEMO_MODE=false
 ```
 
-> **Marketplace client build args:** `client/Dockerfile` currently declares only
-> the four Stellar/network args. If the marketplace API runs on a different
-> origin from the web app (the normal Fly/Render setup), add
-> `ARG NEXT_PUBLIC_API_URL` (plus `NEXT_PUBLIC_CONTRACT_ID`,
-> `NEXT_PUBLIC_NATIVE_TOKEN_CONTRACT_ID`, and any token contract IDs) and
-> re-export them as `ENV` before `npm run build`. Without this, the client falls
-> back to `http://localhost:5000`. Deploying the marketplace client on Vercel
-> avoids the issue because Vercel injects the env vars at build time.
+The deployment workflow passes marketplace values from its deployment
+environment (`NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_CONTRACT_ID`,
+`NEXT_PUBLIC_NATIVE_TOKEN_CONTRACT_ID`, and
+`NEXT_PUBLIC_TOKEN_CONTRACT_ID_USDC`); configure these variables for each
+target network. `NEXT_PUBLIC_DEMO_MODE` is pinned to `false` in the workflow.
+`docker compose build client` uses the testnet values in `client/.env.example`
+unless overridden in the root `.env`.
 
 `NEXT_PUBLIC_AGRO_PRODUCTION_ENABLED` must be exactly `true` for the campaign
 client to serve the app; any other value renders a "build not available" page.

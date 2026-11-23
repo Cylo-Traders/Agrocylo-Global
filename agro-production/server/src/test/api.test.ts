@@ -33,9 +33,18 @@ vi.mock('../db/client.js', () => ({
     order: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
+      delete: vi.fn(),
     },
+    transaction: {
+      create: vi.fn(),
+      findMany: vi.fn(),
+      findFirst: vi.fn(),
+      update: vi.fn(),
+    },
+    $transaction: vi.fn(),
     user: {
       upsert: vi.fn(),
     },
@@ -88,7 +97,7 @@ const mockInvestment = {
 
 const mockOrder = {
   id: ORDER_UUID,
-  onChainId: 'pending',
+  onChainId: '42',
   campaignId: CAMPAIGN_UUID,
   buyerAddress: BUYER,
   amount: '50',
@@ -102,6 +111,8 @@ const db = prisma as unknown as {
   campaign: Record<string, ReturnType<typeof vi.fn>>;
   investment: Record<string, ReturnType<typeof vi.fn>>;
   order: Record<string, ReturnType<typeof vi.fn>>;
+  transaction: Record<string, ReturnType<typeof vi.fn>>;
+  $transaction: ReturnType<typeof vi.fn>;
   user: Record<string, ReturnType<typeof vi.fn>>;
 };
 
@@ -442,6 +453,7 @@ describe('POST /api/v1/orders', () => {
     const res = await request(app)
       .post('/api/v1/orders')
       .set('Authorization', 'Bearer test-session')
+      .set('X-Idempotency-Key', 'create-order-success')
       .send({
         campaignId: CAMPAIGN_UUID,
         amount: '50',
@@ -449,6 +461,16 @@ describe('POST /api/v1/orders', () => {
 
     expect(res.status).toBe(201);
     expect(db.order.create).toHaveBeenCalledOnce();
+    const intentId = db.order.create.mock.calls[0][0].data.onChainId;
+    expect(intentId).toMatch(/^intent:/);
+    expect(db.transaction.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: 'order.created_intent',
+          payload: expect.objectContaining({ intentId }),
+        }),
+      }),
+    );
   });
 
   it('creates an order for an IN_PRODUCTION campaign', async () => {
@@ -462,6 +484,7 @@ describe('POST /api/v1/orders', () => {
     const res = await request(app)
       .post('/api/v1/orders')
       .set('Authorization', 'Bearer test-session')
+      .set('X-Idempotency-Key', 'create-order-production')
       .send({
         campaignId: CAMPAIGN_UUID,
         amount: '50',
@@ -476,6 +499,7 @@ describe('POST /api/v1/orders', () => {
     const res = await request(app)
       .post('/api/v1/orders')
       .set('Authorization', 'Bearer test-session')
+      .set('X-Idempotency-Key', 'create-order-missing-campaign')
       .send({
         campaignId: CAMPAIGN_UUID,
         amount: '50',
@@ -493,6 +517,7 @@ describe('POST /api/v1/orders', () => {
     const res = await request(app)
       .post('/api/v1/orders')
       .set('Authorization', 'Bearer test-session')
+      .set('X-Idempotency-Key', 'create-order-invalid-campaign-status')
       .send({
         campaignId: CAMPAIGN_UUID,
         amount: '50',
@@ -505,6 +530,7 @@ describe('POST /api/v1/orders', () => {
     const res = await request(app)
       .post('/api/v1/orders')
       .set('Authorization', 'Bearer test-session')
+      .set('X-Idempotency-Key', 'create-order-invalid-campaign-id')
       .send({
         campaignId: 'not-a-uuid',
         amount: '50',
@@ -539,6 +565,57 @@ describe('GET /api/v1/orders/:id', () => {
   });
 });
 
+describe('PUT /api/v1/orders/:id', () => {
+  beforeEach(() => {
+    mockVerifySession.mockResolvedValue({
+      walletAddress: BUYER,
+      sessionToken: 'test-session',
+    });
+  });
+
+  it('removes the placeholder when the indexed order arrives before its hash link', async () => {
+    const placeholder = { ...mockOrder, onChainId: 'intent:known' };
+    const indexedOrder = {
+      ...mockOrder,
+      onChainId: '42',
+      txHash: 'order-tx-hash',
+    };
+    const txUpdate = vi.fn().mockResolvedValue({});
+    const orderDelete = vi.fn().mockResolvedValue(placeholder);
+    db.order.findUnique.mockResolvedValue(placeholder);
+    db.$transaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          transaction: {
+            findMany: vi.fn().mockResolvedValue([
+              { id: 'intent-transaction', payload: { intentId: 'intent:known' } },
+            ]),
+            update: txUpdate,
+          },
+          order: {
+            findFirst: vi.fn().mockResolvedValue(indexedOrder),
+            delete: orderDelete,
+            update: vi.fn(),
+          },
+        }),
+    );
+
+    const res = await request(app)
+      .put(`/api/v1/orders/${ORDER_UUID}`)
+      .set('Authorization', 'Bearer test-session')
+      .send({ txHash: 'order-tx-hash' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(ORDER_UUID);
+    expect(res.body.onChainId).toBe('42');
+    expect(txUpdate).toHaveBeenCalledWith({
+      where: { id: 'intent-transaction' },
+      data: { txHash: 'order-tx-hash' },
+    });
+    expect(orderDelete).toHaveBeenCalledWith({ where: { id: ORDER_UUID } });
+  });
+});
+
 describe('PATCH /api/v1/orders/:id/confirm', () => {
   beforeEach(() => {
     mockVerifySession.mockResolvedValue({
@@ -549,14 +626,40 @@ describe('PATCH /api/v1/orders/:id/confirm', () => {
 
   it('confirms a pending order', async () => {
     db.order.findUnique.mockResolvedValue(mockOrder);
-    db.order.update.mockResolvedValue({ ...mockOrder, status: 'CONFIRMED' });
+    db.transaction.findFirst.mockResolvedValue({
+      payload: { orderId: mockOrder.onChainId },
+    });
+    db.order.update.mockResolvedValue({
+      ...mockOrder,
+      status: 'CONFIRMED',
+      txHash: 'confirmation-tx-hash',
+    });
 
     const res = await request(app)
       .patch(`/api/v1/orders/${ORDER_UUID}/confirm`)
-      .set('Authorization', 'Bearer test-session');
+      .set('Authorization', 'Bearer test-session')
+      .send({ txHash: 'confirmation-tx-hash' });
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('CONFIRMED');
+    expect(db.order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { status: 'CONFIRMED', txHash: 'confirmation-tx-hash' },
+      }),
+    );
+  });
+
+  it('does not confirm before the matching on-chain event is indexed', async () => {
+    db.order.findUnique.mockResolvedValue(mockOrder);
+    db.transaction.findFirst.mockResolvedValue(null);
+
+    const res = await request(app)
+      .patch(`/api/v1/orders/${ORDER_UUID}/confirm`)
+      .set('Authorization', 'Bearer test-session')
+      .send({ txHash: 'unindexed-hash' });
+
+    expect(res.status).toBe(409);
+    expect(db.order.update).not.toHaveBeenCalled();
   });
 
   it('returns 404 when the order does not exist', async () => {
@@ -564,7 +667,8 @@ describe('PATCH /api/v1/orders/:id/confirm', () => {
 
     const res = await request(app)
       .patch(`/api/v1/orders/${ORDER_UUID}/confirm`)
-      .set('Authorization', 'Bearer test-session');
+      .set('Authorization', 'Bearer test-session')
+      .send({ txHash: 'confirmation-tx-hash' });
 
     expect(res.status).toBe(404);
   });
@@ -578,12 +682,13 @@ describe('PATCH /api/v1/orders/:id/confirm', () => {
 
     const res = await request(app)
       .patch(`/api/v1/orders/${ORDER_UUID}/confirm`)
-      .set('Authorization', 'Bearer test-session');
+      .set('Authorization', 'Bearer test-session')
+      .send({ txHash: 'confirmation-tx-hash' });
 
     expect(res.status).toBe(403);
   });
 
-  it('returns 409 when the order is already confirmed', async () => {
+  it('returns the confirmed order without requiring another transaction', async () => {
     db.order.findUnique.mockResolvedValue({
       ...mockOrder,
       status: 'CONFIRMED',
@@ -591,9 +696,13 @@ describe('PATCH /api/v1/orders/:id/confirm', () => {
 
     const res = await request(app)
       .patch(`/api/v1/orders/${ORDER_UUID}/confirm`)
-      .set('Authorization', 'Bearer test-session');
+      .set('Authorization', 'Bearer test-session')
+      .send({ txHash: 'confirmation-tx-hash' });
 
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('CONFIRMED');
+    expect(db.transaction.findFirst).not.toHaveBeenCalled();
+    expect(db.order.update).not.toHaveBeenCalled();
   });
 });
 

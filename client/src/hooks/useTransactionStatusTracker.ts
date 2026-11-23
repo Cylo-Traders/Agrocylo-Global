@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { getOrder, type Order } from "@/services/stellar/contractService";
+import { getOrderDetails, type Order } from "@/services/stellar/contractService";
 import { useSocket } from "@/hooks/useSocket";
 import type { EscrowStatus } from "@/components/TransactionStatusTracker";
 
@@ -78,7 +78,7 @@ export function useTransactionStatusTracker({
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
     try {
-      const result = await getOrder(orderId);
+      const result = await getOrderDetails(orderId);
       if (!result.success || !result.data) {
         throw new Error(result.error ?? "Failed to fetch order status");
       }

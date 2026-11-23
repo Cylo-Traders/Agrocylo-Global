@@ -4,13 +4,25 @@ vi.mock('../config/logger.js', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-const { findMany } = vi.hoisted(() => ({ findMany: vi.fn() }));
+const { findMany, findOrders } = vi.hoisted(() => ({
+  findMany: vi.fn(),
+  findOrders: vi.fn(),
+}));
 vi.mock('../db/client.js', () => ({
-  prisma: { transaction: { findMany } },
+  prisma: {
+    transaction: { findMany },
+    order: { findMany: findOrders },
+  },
 }));
 
-const { captureAlert } = vi.hoisted(() => ({ captureAlert: vi.fn() }));
+const { captureAlert, loggerWarn } = vi.hoisted(() => ({
+  captureAlert: vi.fn(),
+  loggerWarn: vi.fn(),
+}));
 vi.mock('../config/sentry.js', () => ({ captureAlert }));
+vi.mock('../config/logger.js', () => ({
+  default: { info: vi.fn(), warn: loggerWarn, error: vi.fn(), debug: vi.fn() },
+}));
 
 const { reconcileTransaction } = vi.hoisted(() => ({
   reconcileTransaction: vi.fn(),
@@ -27,6 +39,7 @@ import { runReconciliationSweep } from './reconciliationSweep.js';
 describe('reconciliationSweep', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    findOrders.mockResolvedValue([]);
   });
 
   it('reports zero drift and does not alert when everything reconciles cleanly', async () => {
@@ -46,7 +59,7 @@ describe('reconciliationSweep', () => {
 
     const result = await runReconciliationSweep();
 
-    expect(result).toEqual({ checked: 2, drifted: 0 });
+    expect(result).toEqual({ checked: 2, drifted: 0, expiredIntents: 0 });
     expect(gaugeSet).toHaveBeenCalledWith(0);
     expect(captureAlert).not.toHaveBeenCalled();
   });
@@ -80,7 +93,7 @@ describe('reconciliationSweep', () => {
 
     const result = await runReconciliationSweep();
 
-    expect(result).toEqual({ checked: 2, drifted: 1 });
+    expect(result).toEqual({ checked: 2, drifted: 1, expiredIntents: 0 });
     expect(gaugeSet).toHaveBeenCalledWith(1);
     expect(captureAlert).toHaveBeenCalledWith(
       'reconciliation_drift',
@@ -97,7 +110,33 @@ describe('reconciliationSweep', () => {
     const result = await runReconciliationSweep();
 
     expect(reconcileTransaction).not.toHaveBeenCalled();
-    expect(result).toEqual({ checked: 1, drifted: 0 });
+    expect(result).toEqual({ checked: 1, drifted: 0, expiredIntents: 0 });
+  });
+
+  it('reports expired unresolved intents without changing their state', async () => {
+    const expiredIntent = {
+      id: 'order-placeholder',
+      onChainId: 'intent:expired',
+      createdAt: new Date('2025-01-01T00:00:00Z'),
+    };
+    findMany.mockResolvedValue([]);
+    findOrders.mockResolvedValue([expiredIntent]);
+
+    const result = await runReconciliationSweep();
+
+    expect(result.expiredIntents).toBe(1);
+    expect(loggerWarn).toHaveBeenCalledWith(
+      expect.stringContaining('manual review required'),
+      expect.objectContaining({ count: 1 }),
+    );
+    expect(findOrders).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          onChainId: { startsWith: 'intent:' },
+          status: 'PENDING',
+        }),
+      }),
+    );
   });
 });
 

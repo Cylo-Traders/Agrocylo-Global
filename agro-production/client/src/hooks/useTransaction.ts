@@ -22,7 +22,13 @@ export interface TxState {
 }
 
 export interface UseTransactionReturn extends TxState {
-  execute: (buildXdr: () => Promise<string>, options?: { intent?: string }) => Promise<void>;
+  execute: (
+    buildXdr: () => Promise<string>,
+    options?: {
+      intent?: string;
+      onSubmitted?: (txHash: string) => Promise<void>;
+    },
+  ) => Promise<void>;
   reset: () => void;
   isIdle: boolean;
   isPending: boolean;
@@ -108,7 +114,10 @@ export function useTransaction(): UseTransactionReturn {
 
   const execute = useCallback(async (
     buildXdr: () => Promise<string>,
-    options?: { intent?: string },
+    options?: {
+      intent?: string;
+      onSubmitted?: (txHash: string) => Promise<void>;
+    },
   ) => {
     if (options?.intent) {
       const inFlight = getInFlightForIntent(options.intent);
@@ -131,6 +140,7 @@ export function useTransaction(): UseTransactionReturn {
 
       const result = await signAndSubmitTransaction(xdr, undefined, {
         intent: options?.intent,
+        onSubmitted: options?.onSubmitted,
       });
 
       if (result.success) {

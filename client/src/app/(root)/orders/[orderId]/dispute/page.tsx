@@ -20,7 +20,7 @@ import DisputeForm from "@/components/orders/DisputeForm";
 import DisputeTracker from "@/components/orders/DisputeTracker";
 import { useWallet } from "@/hooks/useWallet";
 import { useEscrowContract } from "@/hooks/useEscrowContract";
-import { getOrder, type Order } from "@/services/stellar/contractService";
+import { getOrderDetails, type Order } from "@/services/stellar/contractService";
 
 export default function DisputePage() {
   const params = useParams<{ orderId: string }>();
@@ -39,7 +39,7 @@ export default function DisputePage() {
     if (!orderId) return;
     try {
       setLoading(true);
-      const res = await getOrder(orderId);
+      const res = await getOrderDetails(orderId);
       if (!res.success || !res.data) {
         throw new Error(res.error || "Failed to fetch order");
       }

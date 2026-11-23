@@ -1,142 +1,135 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/services/orderService", () => ({
-  confirmOrderReceipt: vi.fn(),
+const mocks = vi.hoisted(() => ({
+  buildConfirmOrder: vi.fn(),
+  signAndSubmitTransaction: vi.fn(),
+  get: vi.fn(),
+  post: vi.fn(),
+  patch: vi.fn(),
 }));
 
-import { confirmOrderReceipt } from "@/services/orderService";
+vi.mock("@/lib/contractService", () => ({
+  buildConfirmOrder: mocks.buildConfirmOrder,
+}));
+vi.mock("@/lib/signTransaction", () => ({
+  signAndSubmitTransaction: mocks.signAndSubmitTransaction,
+}));
+vi.mock("@/lib/apiClient", () => ({
+  default: { get: mocks.get, post: mocks.post, patch: mocks.patch },
+}));
+
+import { confirmOrderReceipt, createOrder } from "@/services/orderService";
 import type { Order } from "@/types";
 
-const mockConfirmOrderReceipt = vi.mocked(confirmOrderReceipt);
+const buyer =
+  "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU";
+const order = {
+  id: "db-order-1",
+  onChainId: "42",
+  campaignId: "campaign-1",
+  buyerAddress: buyer,
+  amount: "500",
+  status: "PENDING",
+} as Order;
 
-describe("Order confirmation", () => {
+describe("on-chain order confirmation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.post.mockResolvedValue(order);
+    mocks.buildConfirmOrder.mockResolvedValue({
+      success: true,
+      data: "unsigned-xdr",
+    });
+    mocks.signAndSubmitTransaction.mockResolvedValue({
+      success: true,
+      outcome: "confirmed",
+      txHash: "confirmed-hash",
+    });
+    mocks.get.mockResolvedValue(order);
+    mocks.patch.mockResolvedValue({ ...order, status: "CONFIRMED" });
   });
 
-  it("confirm button is hidden for non-buyer", () => {
-    const order = {
-      id: "order-123",
-      buyerAddress: "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU",
-      status: "PENDING",
-    };
-
-    const currentUserAddress = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-
-    // Confirm button should not be shown when addresses don't match
-    const canConfirm =
-      currentUserAddress === order.buyerAddress && order.status === "PENDING";
-
-    expect(canConfirm).toBe(false);
-  });
-
-  it("confirm button is hidden for non-eligible status", () => {
-    const order = {
-      id: "order-123",
-      buyerAddress: "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU",
-      status: "CONFIRMED",
-    };
-
-    const buyerAddress = "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU";
-
-    // Confirm button should not be shown for CONFIRMED status
-    const canConfirm = buyerAddress === order.buyerAddress && order.status === "PENDING";
-
-    expect(canConfirm).toBe(false);
-  });
-
-  it("confirm button is visible for PENDING status and buyer", () => {
-    const order = {
-      id: "order-456",
-      buyerAddress: "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU",
-      status: "PENDING",
-    };
-
-    const buyerAddress = "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU";
-
-    // Confirm button should be visible
-    const canConfirm = buyerAddress === order.buyerAddress && order.status === "PENDING";
-
-    expect(canConfirm).toBe(true);
-  });
-
-  it("successful confirmation refreshes order state", async () => {
-    const orderId = "order-789";
-    const buyerAddress = "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU";
-
-    mockConfirmOrderReceipt.mockResolvedValue({
-      id: orderId,
-      status: "CONFIRMED",
-    } as unknown as Order);
-
-    const result = await mockConfirmOrderReceipt(orderId, buyerAddress);
-
-    expect(mockConfirmOrderReceipt).toHaveBeenCalledWith(orderId, buyerAddress);
-    expect(result.status).toBe("CONFIRMED");
-  });
-
-  it("API error shows recoverable error state", async () => {
-    const orderId = "order-err";
-    const buyerAddress = "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU";
-
-    mockConfirmOrderReceipt.mockRejectedValue(
-      new Error("Network error occurred")
+  it("sends a required idempotency key when creating an order intent", async () => {
+    await createOrder(
+      { buyerAddress: buyer, campaignId: "campaign-1", amount: "500" },
+      "attempt-key",
     );
 
+    expect(mocks.post).toHaveBeenCalledWith(
+      "/orders",
+      { buyerAddress: buyer, campaignId: "campaign-1", amount: "500" },
+      {
+        retries: 0,
+        headers: { "X-Idempotency-Key": "attempt-key" },
+      },
+    );
+  });
+
+  it("submits confirm_order for the on-chain ID before updating the API", async () => {
+    const result = await confirmOrderReceipt(order, buyer);
+
+    expect(mocks.get).toHaveBeenCalledWith("/orders/db-order-1");
+    expect(mocks.buildConfirmOrder).toHaveBeenCalledWith(buyer, "42");
+    expect(mocks.signAndSubmitTransaction).toHaveBeenCalledWith(
+      "unsigned-xdr",
+      undefined,
+      { intent: `confirm_order:42:${buyer}` },
+    );
+    expect(mocks.patch).toHaveBeenCalledWith(
+      "/orders/db-order-1/confirm",
+      { buyerAddress: buyer, txHash: "confirmed-hash" },
+      { retries: 0 },
+    );
+    expect(result.order.status).toBe("CONFIRMED");
+    expect(result.alreadyConfirmed).toBe(false);
+  });
+
+  it("leaves database state unchanged when the wallet rejects", async () => {
+    mocks.signAndSubmitTransaction.mockResolvedValue({
+      success: false,
+      outcome: "failed",
+      error: "Transaction rejected by wallet",
+    });
+
+    await expect(confirmOrderReceipt(order, buyer)).rejects.toThrow(
+      "Transaction rejected by wallet",
+    );
+    expect(mocks.patch).not.toHaveBeenCalled();
+  });
+
+  it("does not mark a submitted but unconfirmed transaction as confirmed", async () => {
+    mocks.signAndSubmitTransaction.mockResolvedValue({
+      success: false,
+      outcome: "pending",
+      txHash: "pending-hash",
+      error: "Still confirming",
+    });
+
+    await expect(confirmOrderReceipt(order, buyer)).rejects.toThrow(
+      "Still confirming",
+    );
+    expect(mocks.patch).not.toHaveBeenCalled();
+  });
+
+  it("treats an already-confirmed order as a no-op", async () => {
+    const confirmed = { ...order, status: "CONFIRMED" } as Order;
+    mocks.get.mockResolvedValue(confirmed);
+
+    await expect(confirmOrderReceipt(order, buyer)).resolves.toEqual({
+      order: confirmed,
+      alreadyConfirmed: true,
+    });
+    expect(mocks.buildConfirmOrder).not.toHaveBeenCalled();
+    expect(mocks.signAndSubmitTransaction).not.toHaveBeenCalled();
+    expect(mocks.patch).not.toHaveBeenCalled();
+  });
+
+  it("does not submit an intent placeholder before indexer reconciliation", async () => {
+    mocks.get.mockResolvedValue({ ...order, onChainId: "intent:uuid" });
     await expect(
-      mockConfirmOrderReceipt(orderId, buyerAddress)
-    ).rejects.toThrow("Network error occurred");
-
-    expect(mockConfirmOrderReceipt).toHaveBeenCalledWith(orderId, buyerAddress);
-  });
-
-  it("duplicate click while pending does not send a second request", async () => {
-    const orderId = "order-dup";
-    const buyerAddress = "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU";
-
-    // Simulate a slow network response
-    mockConfirmOrderReceipt.mockImplementation(
-      () =>
-        new Promise<Order>((resolve) =>
-          setTimeout(
-            () =>
-              resolve({
-                id: orderId,
-                status: "CONFIRMED",
-              } as unknown as Order),
-            100
-          )
-        )
-    );
-
-    // Initiate first request
-    const promise1 = mockConfirmOrderReceipt(orderId, buyerAddress);
-
-    // Simulate second click attempt (should be prevented by loading state in UI)
-    // In the actual component, the button would be disabled during the request
-    const isBusy = true; // Simulates button being disabled
-
-    if (!isBusy) {
-      // This would not execute in real scenario
-      await mockConfirmOrderReceipt(orderId, buyerAddress);
-    }
-
-    // Wait for first request to complete
-    await promise1;
-
-    // Should only be called once
-    expect(mockConfirmOrderReceipt).toHaveBeenCalledTimes(1);
-  });
-
-  it("confirms that API call is client-side acknowledgement only", () => {
-    // The confirmOrderReceipt function should not release on-chain escrow funds.
-    // This is verified by checking that the endpoint is /orders/:id/confirm
-    // which updates status but doesn't interact with on-chain escrow.
-
-    const url = "/orders/order-id/confirm";
-    const isClientSideEndpoint = url.includes("confirm") && url.includes("orders");
-
-    expect(isClientSideEndpoint).toBe(true);
-    // The actual escrow release is handled by the smart contract, not this API call
+      confirmOrderReceipt(order, buyer),
+    ).rejects.toThrow("still being reconciled");
+    expect(mocks.buildConfirmOrder).not.toHaveBeenCalled();
+    expect(mocks.patch).not.toHaveBeenCalled();
   });
 });

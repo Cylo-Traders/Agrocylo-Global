@@ -174,14 +174,14 @@ export default function OrdersPage() {
   const buyerOrders = data?.buyer ?? [];
   const farmerOrders = data?.farmer ?? [];
 
-  const handleConfirmReceipt = async (orderId: string) => {
+  const handleConfirmReceipt = async (order: Order) => {
     if (!address) return;
     try {
-      await confirmOrderReceipt(orderId, address);
+      const result = await confirmOrderReceipt(order, address);
       // Refresh orders to update status
       reload();
-      setConfirmModalOpen(false);
-      setSelectedOrder(null);
+      setSelectedOrder(result.order);
+      return { alreadyConfirmed: result.alreadyConfirmed };
     } catch (err) {
       throw err;
     }

@@ -401,6 +401,24 @@ async function handleOrderCreated(event: OrderCreatedEvent) {
     if (await skipDuplicateInTransaction(tx, event)) return;
     await upsertUser(tx, event.buyer, 'BUYER');
 
+    const intentTransaction = event.txHash
+      ? await tx.transaction.findFirst({
+          where: {
+            eventType: 'order.created_intent',
+            txHash: event.txHash,
+          },
+          select: { payload: true },
+        })
+      : null;
+    const intentPayload = intentTransaction?.payload;
+    const intentId =
+      intentPayload &&
+      typeof intentPayload === 'object' &&
+      'intentId' in intentPayload &&
+      typeof intentPayload.intentId === 'string'
+        ? intentPayload.intentId
+        : null;
+
     const campaign = await tx.campaign.findUnique({
       where: { onChainId: event.campaignId },
     });
@@ -409,19 +427,37 @@ async function handleOrderCreated(event: OrderCreatedEvent) {
       throw new DependencyMissingError('campaign', event.campaignId);
     }
 
-    await tx.order.upsert({
+    const orderData = {
+      onChainId: event.orderId,
+      campaignId: campaign.id,
+      buyerAddress: event.buyer,
+      amount: event.amount,
+      ledger: event.ledger,
+      txHash: event.txHash ?? null,
+    };
+    const existingOrder = await tx.order.findUnique({
       where: { onChainId: event.orderId },
-      create: {
-        onChainId: event.orderId,
-        campaignId: campaign.id,
-        buyerAddress: event.buyer,
-        amount: event.amount,
-        status: 'PENDING',
-        ledger: event.ledger,
-        txHash: event.txHash,
-      },
-      update: {},
     });
+    const placeholder =
+      intentId && intentId !== event.orderId
+        ? await tx.order.findUnique({ where: { onChainId: intentId } })
+        : null;
+
+    if (placeholder && !existingOrder) {
+      await tx.order.update({
+        where: { id: placeholder.id },
+        data: { ...orderData, status: 'PENDING' },
+      });
+    } else {
+      if (placeholder && existingOrder && placeholder.id !== existingOrder.id) {
+        await tx.order.delete({ where: { id: placeholder.id } });
+      }
+      await tx.order.upsert({
+        where: { onChainId: event.orderId },
+        create: { ...orderData, status: 'PENDING' },
+        update: orderData,
+      });
+    }
 
     post = {
       orderId: event.orderId,
@@ -429,7 +465,7 @@ async function handleOrderCreated(event: OrderCreatedEvent) {
       buyerAddress: event.buyer,
       farmerAddress: campaign.farmerAddress,
       amount: event.amount,
-      status: 'PENDING',
+      status: existingOrder?.status ?? 'PENDING',
       txHash: event.txHash,
     };
 
