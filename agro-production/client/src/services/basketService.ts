@@ -81,6 +81,65 @@ export type BasketState =
   | { kind: "error"; message: string };
 
 /**
+ * Cart quantity/stock constraints (Issue #1395).
+ *
+ * The server remains authoritative for stock. These helpers let the cart
+ * controls show the product unit, block increments beyond known stock, and
+ * surface server-side stock adjustments with a clear message.
+ */
+export interface CartStockInfo {
+  /** Known available stock; `null` means unlimited/unknown. */
+  availableStock: number | null;
+  /** Product unit label (e.g. "kg", "crate"). */
+  unit: string;
+}
+
+/** True when the requested quantity exceeds known available stock. */
+export function exceedsAvailableStock(
+  quantity: number,
+  availableStock: number | null,
+): boolean {
+  if (availableStock === null) return false;
+  return quantity > availableStock;
+}
+
+/**
+ * Clamp a requested quantity to known stock. Unlimited stock (`null`) is
+ * passed through unchanged; the minimum is always 1.
+ */
+export function clampToAvailableStock(
+  quantity: number,
+  availableStock: number | null,
+): number {
+  const floored = Math.max(1, Math.floor(quantity));
+  if (availableStock === null) return floored;
+  return Math.min(floored, Math.max(1, availableStock));
+}
+
+/** Format a cart quantity together with the product unit. */
+export function formatCartQuantity(quantity: number, unit: string): string {
+  const trimmedUnit = unit.trim();
+  return trimmedUnit ? `${quantity} ${trimmedUnit}` : `${quantity}`;
+}
+
+/**
+ * Build a clear adjustment message when the server returns an authoritative
+ * quantity that differs from what the buyer submitted (e.g. stock changed).
+ * Returns `null` when no adjustment is needed.
+ */
+export function describeStockAdjustment(
+  requested: number,
+  authoritative: number,
+  unit: string,
+): string | null {
+  if (requested === authoritative) return null;
+  return `Stock changed — quantity adjusted to ${formatCartQuantity(
+    authoritative,
+    unit,
+  )}.`;
+}
+
+/**
  * Map a server summary to the documented view model. Positions are keyed by
  * deposit; the basket is a diversified set of campaign investments, so the
  * display name and campaign link reuse the on-chain basket id ("Campaign
