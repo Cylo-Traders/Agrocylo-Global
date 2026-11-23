@@ -99,6 +99,8 @@ export default function MarketplacePage() {
     setError(null);
   }
 
+  const hasActiveFilters = Boolean(category || location || minPrice || maxPrice);
+
   const statusMessage = loading
     ? "Loading products"
     : refreshing
@@ -106,7 +108,9 @@ export default function MarketplacePage() {
       : error
         ? error.message
         : products.length === 0
-          ? "No products found"
+          ? hasActiveFilters
+            ? "No products match your filters"
+            : "No products available"
           : `${products.length} products available`;
 
   return (
@@ -147,11 +151,18 @@ export default function MarketplacePage() {
           <p className="text-xs text-muted mt-3">No private wallet or session data is required to browse.</p>
         </div>
       ) : products.length === 0 ? (
-        <div className="text-center py-16 text-muted">
-          <p className="text-lg mb-1">No products found</p>
-          <p className="text-sm">Try adjusting your filters.</p>
-          <button onClick={resetFilters} className="text-sm text-primary-600 hover:underline mt-3">Reset filters</button>
-        </div>
+        hasActiveFilters ? (
+          <div className="text-center py-16 px-4 text-muted" role="status" aria-live="polite">
+            <p className="text-lg mb-1">No products match your filters</p>
+            <p className="text-sm">Your selected category, location, or price range returned no results.</p>
+            <button onClick={resetFilters} className="text-sm text-primary-600 hover:underline mt-3">Clear filters</button>
+          </div>
+        ) : (
+          <div className="text-center py-16 px-4 text-muted" role="status" aria-live="polite">
+            <p className="text-lg mb-1">No products available</p>
+            <p className="text-sm">The marketplace is empty right now. Check back soon for fresh listings.</p>
+          </div>
+        )
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" aria-label="Products list">
           {products.map((product) => <ProductCard key={product.id} product={product} />)}
