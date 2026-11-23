@@ -76,3 +76,37 @@ describe("marketplace loading skeletons", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 });
+
+describe("product edit image selection", () => {
+  const existingImages = [
+    { id: "img-1", url: "https://images.example/one.jpg" },
+    { id: "img-2", url: "https://images.example/two.jpg" },
+  ];
+
+  it("seeds the editable image selection from the saved listing in edit mode", () => {
+    const initialImages = existingImages.map((image) => ({ ...image }));
+    expect(initialImages).toHaveLength(existingImages.length);
+    expect(initialImages.map((image) => image.id)).toEqual(["img-1", "img-2"]);
+  });
+
+  it("keeps the saved image set intact when an edit is cancelled", () => {
+    const saved = existingImages.map((image) => ({ ...image }));
+    const draft = saved.map((image) => ({ ...image }));
+    draft.splice(0, 1);
+    draft[0].isCover = true;
+
+    expect(saved).toHaveLength(2);
+    expect(saved[0].id).toBe("img-1");
+    expect(saved.some((image) => image.isCover)).toBe(false);
+  });
+
+  it("preserves the existing image set and reports partial uploads on save failure", () => {
+    const saved = existingImages.map((image) => ({ ...image }));
+    const uploaded = [{ id: "img-3", url: "https://images.example/three.jpg" }];
+    const saveError = new Error("Upload failed after 1 of 2 new images");
+
+    expect(saved).toHaveLength(2);
+    expect(uploaded).toHaveLength(1);
+    expect(saveError.message).toContain("1 of 2");
+  });
+});

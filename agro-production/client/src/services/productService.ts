@@ -100,6 +100,48 @@ export async function fetchProduct(id: string, signal?: AbortSignal): Promise<Pr
   return response;
 }
 
+/**
+ * An image already attached to a saved listing. `id` is the server-side image
+ * identifier used for deletion; `url` is what the farmer sees in the form.
+ */
+export interface ExistingProductImage {
+  id: string;
+  url: string;
+}
+
+/**
+ * Load the image set currently attached to a listing so the edit form can
+ * review, reorder, replace, and remove existing photos. Returns an empty list
+ * when the listing has no images yet.
+ */
+export async function fetchProductImages(
+  productId: string,
+  signal?: AbortSignal,
+): Promise<ExistingProductImage[]> {
+  const response = await api.get<{ images?: unknown }>(`/products/${productId}/images`, { signal });
+  const images = response?.images;
+  if (!Array.isArray(images)) return [];
+  return images.filter(
+    (image): image is ExistingProductImage =>
+      !!image &&
+      typeof image === "object" &&
+      typeof (image as ExistingProductImage).id === "string" &&
+      typeof (image as ExistingProductImage).url === "string",
+  );
+}
+
+/**
+ * Remove a single image from a saved listing. The server deletes by image id;
+ * callers should only invoke this after the farmer confirms the edit so that
+ * cancelling leaves the persisted listing untouched.
+ */
+export async function deleteProductImage(
+  productId: string,
+  imageId: string,
+): Promise<void> {
+  await api.delete<void>(`/products/${productId}/images/${imageId}`);
+}
+
 /** Display a stroop price as XLM. Exact BigInt arithmetic — see validation.ts. */
 export function formatPrice(raw: string): string {
   return formatStroopsForDisplay(raw, 4);
