@@ -77,6 +77,22 @@ const envSchema = z.object({
   SHUTDOWN_TIMEOUT_MS: z.coerce.number().default(15000),
   RUN_RECONCILIATION_SWEEP: z.string().optional(),
   RECONCILIATION_SWEEP_INTERVAL_MS: z.coerce.number().default(300000),
+  // Issue #1341: weather advisory provider feed. Empty means "not
+  // configured" and the API reports advisories as unavailable.
+  WEATHER_ADVISORY_PROVIDER_URL: z.string().default(''),
+  WEATHER_ADVISORY_PROVIDER_API_KEY: z.string().default(''),
+  WEATHER_ADVISORY_CACHE_TTL_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(600000),
+  WEATHER_ADVISORY_MAX_STALE_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(3600000),
+  WEATHER_ADVISORY_RADIUS_KM: z.coerce.number().positive().default(100),
+  WEATHER_ADVISORY_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
 });
 
 const parsed = envSchema.parse(process.env);
@@ -126,6 +142,14 @@ export const config = {
   shutdownTimeoutMs: parsed.SHUTDOWN_TIMEOUT_MS,
   runReconciliationSweep: parsed.RUN_RECONCILIATION_SWEEP !== 'false',
   reconciliationSweepIntervalMs: parsed.RECONCILIATION_SWEEP_INTERVAL_MS,
+  weatherAdvisory: {
+    providerUrl: parsed.WEATHER_ADVISORY_PROVIDER_URL,
+    providerApiKey: parsed.WEATHER_ADVISORY_PROVIDER_API_KEY,
+    cacheTtlMs: parsed.WEATHER_ADVISORY_CACHE_TTL_MS,
+    maxStaleMs: parsed.WEATHER_ADVISORY_MAX_STALE_MS,
+    defaultRadiusKm: parsed.WEATHER_ADVISORY_RADIUS_KM,
+    timeoutMs: parsed.WEATHER_ADVISORY_TIMEOUT_MS,
+  },
 };
 
 export type Config = typeof config;
