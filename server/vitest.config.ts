@@ -18,6 +18,7 @@ export default defineConfig({
       SUPABASE_ANON_KEY: "test-anon-key",
       JWT_SECRET: "test-secret-at-least-32-chars-long!!",
       INTEGRATOR_API_KEY_PEPPER: "test-integrator-pepper-at-least-32-chars",
+      RUN_CONTRACT_WATCHER: "false",
     },
     coverage: {
       provider: "v8",

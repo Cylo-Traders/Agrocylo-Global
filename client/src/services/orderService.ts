@@ -96,6 +96,34 @@ async function fetchOrders(path: string): Promise<Order[]> {
   return (Array.isArray(rows) ? rows : []).map(mapServerOrder);
 }
 
+export async function resolveIndexedOrderId(
+  txHash: string,
+  attempts = 5,
+  delayMs = 800,
+): Promise<string | null> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const result = await apiRequest<{ orderId?: string | null }>(
+        `/orders/by-transaction/${encodeURIComponent(txHash)}`,
+      );
+      if (result.orderId) return result.orderId;
+    } catch (err) {
+      if (
+        !(
+          err instanceof ApiRequestError &&
+          (err.status === 404 || err.status === 401 || err.status === 403)
+        )
+      ) {
+        throw err;
+      }
+    }
+    if (attempt < attempts - 1 && delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return null;
+}
+
 /**
  * Generate a deterministic fake order for testing
  */

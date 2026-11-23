@@ -45,7 +45,7 @@ export type TransactionStatusResponse = z.infer<
 >;
 
 export const TransactionStatusUpdateSchema = z.object({
-  status: z.enum(['submitted', 'confirmed', 'failed']),
+  status: TransactionStatusEnum,
   message: z.string().max(256).optional(),
 });
 

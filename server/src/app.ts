@@ -43,6 +43,7 @@ import governanceRoutes from './routes/governanceRoutes.js';
 import ussdRoutes from './routes/ussdRoutes.js';
 import documentRoutes from './routes/documentRoutes.js';
 import { registerAllEndpoints } from './openapi/endpoints.js';
+import { getIndexerStatus } from './services/indexerStatus.js';
 
 // Initialize error tracking and tracing
 initializeSentry('api');
@@ -165,6 +166,17 @@ app.get('/health', async (_req: Request, res: Response) => {
 
   const statusCode = health.status === 'UP' ? 200 : 503;
   res.status(statusCode).json(health);
+});
+
+app.get('/health/indexer', async (_req: Request, res: Response) => {
+  try {
+    const status = await getIndexerStatus();
+    const healthy = status.status === 'fresh' || status.status === 'disabled';
+    res.status(healthy ? 200 : 503).json(status);
+  } catch (error) {
+    logger.error('Indexer health check failed', error);
+    res.status(503).json({ enabled: config.runContractWatcher, status: 'unknown' });
+  }
 });
 
 app.use(metricsRoutes);

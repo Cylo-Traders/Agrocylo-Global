@@ -16,7 +16,7 @@ const envSchema = z
     SUPABASE_ANON_KEY: z.string().min(1, 'SUPABASE_ANON_KEY is required'),
     REDIS_URL: z.url().default('redis://127.0.0.1:6379'),
     RUN_WORKERS: booleanFromEnv.default(false),
-    RUN_CONTRACT_WATCHER: booleanFromEnv.default(false),
+    RUN_CONTRACT_WATCHER: booleanFromEnv.default(true),
     METRICS_API_KEY: z.string().default(''),
     SUPABASE_SERVICE_ROLE_KEY: z.string().default(''),
     ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),

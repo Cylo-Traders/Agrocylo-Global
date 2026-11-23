@@ -34,9 +34,10 @@ import { useCart } from "@/context/CartContext";
 import type { CartGroup } from "@/types/cart";
 import { useWallet } from "@/hooks/useWallet";
 import {
-  createOrderWithOrderId,
+  buildCreateOrderTransaction,
   approveToken,
 } from "@/services/stellar/contractService";
+import { resolveIndexedOrderId } from "@/services/orderService";
 import {
   getNetworkConfig,
   isContractConfigured,
@@ -52,7 +53,7 @@ import {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-type OrderSuccess = { orderId: string; farmerWallet: string; currency: string; groupKey: string; txHash: string };
+type OrderSuccess = { orderId: string | null; farmerWallet: string; currency: string; groupKey: string; txHash: string };
 type OrderFailure = { farmerWallet: string; currency: string; groupKey: string; error: string };
 type GroupStatus = "pending" | "success" | "error";
 type CleanupFailure = { farmerWallet: string; error: string; itemIds: string[] };
@@ -151,6 +152,23 @@ export default function CartDrawer() {
     [running, closeAndReset, setDrawerOpen],
   );
 
+  const retryResolveOrder = useCallback(async (txHash: string) => {
+    try {
+      const orderId = await resolveIndexedOrderId(txHash);
+      if (orderId) {
+        setSuccessOrders((prev) =>
+          prev.map((order) =>
+            order.txHash === txHash ? { ...order, orderId } : order,
+          ),
+        );
+      } else {
+        toast.message("Order is not indexed on chain yet. Please check again shortly.");
+      }
+    } catch {
+      toast.error("Could not check order status. Please try again.");
+    }
+  }, []);
+
   const retryCleanup = useCallback(async () => {
     if (cleanupFailures.length === 0) return;
     const pending = [...cleanupFailures];
@@ -230,6 +248,8 @@ export default function CartDrawer() {
       return;
     }
 
+    checkoutGroupsRef.current = snapshotGroups;
+
     // Derive progress and totals from the confirmed snapshot
     setGroupProgress(
       Object.fromEntries(snapshotGroups.map((g) => [groupKeyOf(g), "pending"])),
@@ -237,10 +257,10 @@ export default function CartDrawer() {
 
     try {
       // Sequential — Freighter only handles one signing prompt at a time.
-      for (let i = 0; i < groups.length; i++) {
+      for (let i = 0; i < snapshotGroups.length; i++) {
         // Guard: if a newer operation started, abort this one
         if (operationIdRef.current !== opId) break;
-        const group = groups[i];
+        const group = snapshotGroups[i];
         const farmerWallet = group.farmer_wallet;
         const currency = group.currency;
         const gKey = groupKeyOf(group);
@@ -293,7 +313,7 @@ export default function CartDrawer() {
         }
 
         // Step B: create_order
-        const built = await createOrderWithOrderId(
+        const built = await buildCreateOrderTransaction(
           address,
           farmerWallet,
           tokenContractId,
@@ -310,8 +330,7 @@ export default function CartDrawer() {
         }
 
         setProgressMessage(`Creating escrow (${idxLabel})…`);
-        const builtData = built.data;
-        const createResult = await signAndSubmit(builtData.txXdr);
+        const createResult = await signAndSubmit(built.data);
         if (!createResult.success || !createResult.txHash) {
           const error = createResult.error || "create_order transaction failed.";
           setFailedOrders((prev) => [...prev, { farmerWallet, currency, groupKey: gKey, error }]);
@@ -322,7 +341,7 @@ export default function CartDrawer() {
         setSuccessOrders((prev) => [
           ...prev,
           {
-            orderId: builtData.orderId,
+            orderId: null,
             farmerWallet,
             currency,
             groupKey: gKey,
@@ -350,6 +369,22 @@ export default function CartDrawer() {
           } catch {
             // ignore
           }
+        }
+
+        try {
+          const resolvedOrderId = await resolveIndexedOrderId(
+            createResult.txHash!,
+          );
+          if (resolvedOrderId) {
+            setSuccessOrders((prev) =>
+              prev.map((order) =>
+                order.txHash === createResult.txHash
+                  ? { ...order, orderId: resolvedOrderId }
+                  : order,
+              ),
+            );
+          }
+        } catch {
         }
       }
     } finally {
@@ -410,6 +445,7 @@ export default function CartDrawer() {
                 router.push(`/orders/${orderId}`);
               }}
               onRetryCleanup={() => void retryCleanup()}
+              onRetryResolve={(txHash) => void retryResolveOrder(txHash)}
             />
           ) : empty ? (
             <EmptyCart
@@ -446,6 +482,7 @@ export default function CartDrawer() {
                 router.push(`/orders/${orderId}`);
               }}
               onRetryCleanup={() => void retryCleanup()}
+              onRetryResolve={(txHash) => void retryResolveOrder(txHash)}
             />
           )}
         </div>
@@ -754,12 +791,14 @@ function Step3Result({
   cleanupFailures,
   onView,
   onRetryCleanup,
+  onRetryResolve,
 }: {
   successOrders: OrderSuccess[];
   failedOrders: OrderFailure[];
   cleanupFailures: CleanupFailure[];
   onView: (orderId: string) => void;
   onRetryCleanup: () => void;
+  onRetryResolve: (txHash: string) => void;
 }) {
   return (
     <div className="space-y-5">
@@ -775,24 +814,41 @@ function Step3Result({
           <CardContent className="space-y-3">
             {successOrders.map((o) => (
               <div
-                key={`${o.groupKey}-${o.orderId}`}
+                key={`${o.groupKey}-${o.orderId ?? o.txHash}`}
                 className="flex items-start justify-between gap-3"
               >
                 <div className="min-w-0">
-                  <p className="text-sm font-medium">Order #{o.orderId} · {o.currency}</p>
+                  <p className="text-sm font-medium">
+                    {o.orderId ? `Order #${o.orderId}` : "Order pending confirmation"} · {o.currency}
+                  </p>
+                  {!o.orderId && (
+                    <p className="text-amber-600 text-xs">
+                      Transaction submitted. Waiting for the on-chain order id.
+                    </p>
+                  )}
                   <p className="text-muted-foreground font-mono text-xs break-all">
                     {o.txHash}
                   </p>
                   <p className="text-muted-foreground font-mono text-xs">{formatTruncatedAddress(o.farmerWallet)}</p>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onView(o.orderId)}
-                >
-                  View
-                  <ExternalLink className="size-3.5" />
-                </Button>
+                {o.orderId ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onView(o.orderId!)}
+                  >
+                    View
+                    <ExternalLink className="size-3.5" />
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onRetryResolve(o.txHash)}
+                  >
+                    Check again
+                  </Button>
+                )}
               </div>
             ))}
           </CardContent>

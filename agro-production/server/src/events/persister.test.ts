@@ -424,6 +424,68 @@ describe('EventPersister', () => {
     });
   });
 
+  describe('event-derived transaction status (issue #1369)', () => {
+    function capturingTx(create: ReturnType<typeof vi.fn>) {
+      return {
+        user: { upsert: vi.fn().mockResolvedValue({}) },
+        campaign: {
+          findUnique: vi.fn().mockResolvedValue({
+            id: 'camp-uuid',
+            farmerAddress:
+              'GFARMER000000000000000000000000000000000000000000000000',
+          }),
+        },
+        order: { upsert: vi.fn().mockResolvedValue({}) },
+        transaction: {
+          findUnique: vi.fn().mockResolvedValue(null),
+          create,
+        },
+      };
+    }
+
+    it('creates transaction rows with status indexed', async () => {
+      const { prisma } = await import('../db/client.js');
+      const create = vi.fn().mockResolvedValue({});
+      vi.mocked(prisma.transaction.findUnique).mockResolvedValueOnce(null);
+      vi.mocked(prisma.$transaction).mockImplementationOnce(
+        async (fn: (tx: any) => Promise<unknown>) => {
+          await fn(capturingTx(create));
+        },
+      );
+
+      await EventPersister.persist(makeOrderCreated());
+
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'indexed',
+            eventType: 'order.created',
+          }),
+        }),
+      );
+    });
+
+    it('replayed order.created does not create a second transaction row', async () => {
+      const { prisma } = await import('../db/client.js');
+      const create = vi.fn().mockResolvedValue({});
+      vi.mocked(prisma.transaction.findUnique)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'tx-1' } as never);
+      vi.mocked(prisma.$transaction).mockImplementationOnce(
+        async (fn: (tx: any) => Promise<unknown>) => {
+          await fn(capturingTx(create));
+        },
+      );
+
+      const event = makeOrderCreated();
+      await EventPersister.persist(event);
+      await EventPersister.persist(event);
+
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('order.confirmed', () => {
     it('persists an order.confirmed event', async () => {
       const { prisma } = await import('../db/client.js');
