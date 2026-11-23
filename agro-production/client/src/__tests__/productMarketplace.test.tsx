@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { ProductImage } from "@/components/ProductImage";
+import { ProductGrid } from "@/components/marketplace/ProductGrid";
 import { validateProductFilters } from "@/services/productService";
 
 const product = {
@@ -35,5 +36,43 @@ describe("marketplace contract boundaries", () => {
     image.dispatchEvent(new Event("error"));
     expect(image).toHaveAttribute("src", "/product-placeholder.svg");
     vi.unstubAllEnvs();
+  });
+});
+
+describe("marketplace loading skeletons", () => {
+  it("renders decorative skeleton cards and announces loading once", () => {
+    const { container } = render(<ProductGrid products={[]} loading />);
+
+    expect(screen.getByRole("status")).toHaveTextContent(/loading products/i);
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+
+    const skeletons = container.querySelectorAll("[data-testid='product-skeleton']");
+    expect(skeletons.length).toBeGreaterThan(0);
+    skeletons.forEach((skeleton) => {
+      expect(skeleton).toHaveAttribute("aria-hidden", "true");
+    });
+  });
+
+  it("removes the skeleton once products resolve", () => {
+    const { container } = render(
+      <ProductGrid
+        products={[
+          {
+            id: "1",
+            name: "Organic Tomatoes",
+            price: 10,
+            unit: "kg",
+            location: "Lagos",
+            category: "Vegetables",
+            imageUrl: "",
+            farmerName: "Ada",
+          },
+        ]}
+        loading={false}
+      />,
+    );
+
+    expect(container.querySelector("[data-testid='product-skeleton']")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });
