@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { render, screen, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ProductCard } from "../components/ProductCard";
 import type { Product } from "@/types";
 
@@ -33,7 +33,22 @@ const baseProduct: Product = {
   isSellable: true,
 };
 
+function setOnline(value: boolean) {
+  Object.defineProperty(window.navigator, "onLine", {
+    configurable: true,
+    get: () => value,
+  });
+}
+
 describe("ProductCard", () => {
+  beforeEach(() => {
+    setOnline(true);
+  });
+
+  afterEach(() => {
+    setOnline(true);
+  });
+
   it("renders product name", () => {
     render(<ProductCard product={baseProduct} />);
     expect(screen.getByText("Organic Tomatoes")).toBeTruthy();
@@ -48,5 +63,33 @@ describe("ProductCard", () => {
     render(<ProductCard product={baseProduct} />);
     const link = screen.getByRole("link");
     expect(link.getAttribute("aria-label")).toContain("kg");
+  });
+
+  it("shows a cached/read-only indicator when offline", () => {
+    setOnline(false);
+    render(<ProductCard product={baseProduct} />);
+    expect(screen.getByText(/cached/i)).toBeTruthy();
+  });
+
+  it("hides the cached indicator when online", () => {
+    render(<ProductCard product={baseProduct} />);
+    expect(screen.queryByText(/cached/i)).toBeNull();
+  });
+
+  it("updates the indicator when connectivity changes", () => {
+    render(<ProductCard product={baseProduct} />);
+    expect(screen.queryByText(/cached/i)).toBeNull();
+
+    act(() => {
+      setOnline(false);
+      window.dispatchEvent(new Event("offline"));
+    });
+    expect(screen.getByText(/cached/i)).toBeTruthy();
+
+    act(() => {
+      setOnline(true);
+      window.dispatchEvent(new Event("online"));
+    });
+    expect(screen.queryByText(/cached/i)).toBeNull();
   });
 });

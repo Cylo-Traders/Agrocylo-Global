@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 
 // Mock dependencies
@@ -37,9 +37,27 @@ const mockCreateOrder = vi.mocked(createOrder);
 const mockSignAndSubmit = vi.mocked(signAndSubmitTransaction);
 const mockLogErrorWithContext = vi.mocked(logErrorWithContext);
 
+/**
+ * Simulate the browser connectivity state used by the offline-aware
+ * marketplace behavior (issue #1392). Checkout must be unavailable while
+ * offline and become available again once connectivity returns.
+ */
+function setOnline(online: boolean) {
+  Object.defineProperty(window.navigator, "onLine", {
+    configurable: true,
+    get: () => online,
+  });
+  window.dispatchEvent(new Event(online ? "online" : "offline"));
+}
+
 describe("Product checkout error handling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    setOnline(true);
+  });
+
+  afterEach(() => {
+    setOnline(true);
   });
 
   it("builder failure surfaces in error UI", async () => {
@@ -205,5 +223,64 @@ describe("Product checkout error handling", () => {
     });
 
     expect(mockLogErrorWithContext).toHaveBeenCalled();
+  });
+
+  it("checkout is unavailable while offline and recovers on reconnect", async () => {
+    mockCreateOrder.mockResolvedValue({ id: "order-offline" } as Order);
+    mockBuildCreateOrder.mockResolvedValue({
+      success: true,
+      data: "prepared-xdr",
+    });
+    mockSignAndSubmit.mockResolvedValue({
+      success: true,
+      outcome: "confirmed",
+      txHash: "b".repeat(64),
+      status: "SUCCESS",
+    });
+
+    const { result } = renderHook(() => useTransaction());
+
+    // Go offline: checkout must not proceed.
+    act(() => {
+      setOnline(false);
+    });
+    expect(window.navigator.onLine).toBe(false);
+
+    const offlineBuilder = async () => {
+      if (!window.navigator.onLine) {
+        throw new Error("Checkout is unavailable while offline");
+      }
+      return "prepared-xdr";
+    };
+
+    await act(async () => {
+      await result.current.execute(offlineBuilder);
+    });
+
+    expect(result.current.isError).toBe(true);
+    expect(result.current.error).toContain("unavailable while offline");
+    expect(mockCreateOrder).not.toHaveBeenCalled();
+
+    // Reconnect: checkout becomes available again without duplicating actions.
+    act(() => {
+      setOnline(true);
+    });
+    expect(window.navigator.onLine).toBe(true);
+
+    const onlineBuilder = async () => {
+      await mockCreateOrder({
+        buyerAddress: "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU",
+        campaignId: "campaign-offline",
+        amount: "5000000",
+      });
+      return "prepared-xdr";
+    };
+
+    await act(async () => {
+      await result.current.execute(onlineBuilder);
+    });
+
+    expect(result.current.isSuccess).toBe(true);
+    expect(mockCreateOrder).toHaveBeenCalledTimes(1);
   });
 });

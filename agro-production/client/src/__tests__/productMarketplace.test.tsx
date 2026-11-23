@@ -1,11 +1,24 @@
-import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, act } from "@testing-library/react";
 import { ProductImage } from "@/components/ProductImage";
 import { validateProductFilters } from "@/services/productService";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 
 const product = {
   name: "Organic Tomatoes",
 };
+
+function setNavigatorOnline(value: boolean) {
+  Object.defineProperty(window.navigator, "onLine", {
+    configurable: true,
+    get: () => value,
+  });
+}
+
+function OnlineStatusProbe() {
+  const isOnline = useOnlineStatus();
+  return <span data-testid="status">{isOnline ? "online" : "offline"}</span>;
+}
 
 describe("marketplace contract boundaries", () => {
   it("rejects an inverted price range before making a request", () => {
@@ -35,5 +48,33 @@ describe("marketplace contract boundaries", () => {
     image.dispatchEvent(new Event("error"));
     expect(image).toHaveAttribute("src", "/product-placeholder.svg");
     vi.unstubAllEnvs();
+  });
+});
+
+describe("offline-aware marketplace status", () => {
+  beforeEach(() => setNavigatorOnline(true));
+  afterEach(() => setNavigatorOnline(true));
+
+  it("reflects the initial offline state", () => {
+    setNavigatorOnline(false);
+    render(<OnlineStatusProbe />);
+    expect(screen.getByTestId("status")).toHaveTextContent("offline");
+  });
+
+  it("updates when connectivity is lost and restored", () => {
+    render(<OnlineStatusProbe />);
+    expect(screen.getByTestId("status")).toHaveTextContent("online");
+
+    act(() => {
+      setNavigatorOnline(false);
+      window.dispatchEvent(new Event("offline"));
+    });
+    expect(screen.getByTestId("status")).toHaveTextContent("offline");
+
+    act(() => {
+      setNavigatorOnline(true);
+      window.dispatchEvent(new Event("online"));
+    });
+    expect(screen.getByTestId("status")).toHaveTextContent("online");
   });
 });
