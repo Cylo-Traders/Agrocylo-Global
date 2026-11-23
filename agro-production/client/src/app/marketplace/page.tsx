@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ApiError, isNetworkError } from "@/lib/apiClient";
 import { fetchProducts, validateProductFilters } from "@/services/productService";
 import { ProductCardSkeleton } from "@/components/Skeletons";
@@ -26,7 +27,44 @@ function classifyMarketplaceError(error: unknown): { kind: MarketplaceErrorKind;
 
 const defaultFilters = { category: "" as ProductCategory | "", location: "", minPrice: "", maxPrice: "" };
 
+const PRODUCT_CATEGORIES: ProductCategory[] = [
+  "vegetables",
+  "fruits",
+  "grains",
+  "dairy",
+  "meat",
+  "poultry",
+  "eggs",
+  "honey",
+  "herbs",
+  "other",
+];
+
+function parseCategory(value: string | null): ProductCategory | "" {
+  if (!value) return "";
+  return (PRODUCT_CATEGORIES as string[]).includes(value) ? (value as ProductCategory) : "";
+}
+
+function parsePrice(value: string | null): string {
+  if (!value) return "";
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? value : "";
+}
+
+function readFiltersFromParams(params: URLSearchParams) {
+  return {
+    category: parseCategory(params.get("category")),
+    location: params.get("location") ?? "",
+    minPrice: parsePrice(params.get("minPrice")),
+    maxPrice: parsePrice(params.get("maxPrice")),
+  };
+}
+
 export default function MarketplacePage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -40,6 +78,48 @@ export default function MarketplacePage() {
   const requestId = useRef(0);
   const controller = useRef<AbortController | null>(null);
   const hasSuccessfulData = useRef(false);
+  const initializedFromUrl = useRef(false);
+  const lastWrittenQuery = useRef<string | null>(null);
+
+  // Initialize filter state from URL search parameters on first load.
+  useEffect(() => {
+    if (initializedFromUrl.current) return;
+    initializedFromUrl.current = true;
+    const fromUrl = readFiltersFromParams(new URLSearchParams(searchParams.toString()));
+    setCategory(fromUrl.category);
+    setLocation(fromUrl.location);
+    setMinPrice(fromUrl.minPrice);
+    setMaxPrice(fromUrl.maxPrice);
+  }, [searchParams]);
+
+  // Restore filter state when the user navigates back/forward.
+  useEffect(() => {
+    if (!initializedFromUrl.current) return;
+    const query = searchParams.toString();
+    if (query === lastWrittenQuery.current) return;
+    const fromUrl = readFiltersFromParams(new URLSearchParams(query));
+    setCategory(fromUrl.category);
+    setLocation(fromUrl.location);
+    setMinPrice(fromUrl.minPrice);
+    setMaxPrice(fromUrl.maxPrice);
+  }, [searchParams]);
+
+  // Debounce writing filter state to the URL; use replace to avoid a history entry per keystroke.
+  useEffect(() => {
+    if (!initializedFromUrl.current) return;
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams();
+      if (category) params.set("category", category);
+      if (location) params.set("location", location);
+      if (minPrice) params.set("minPrice", minPrice);
+      if (maxPrice) params.set("maxPrice", maxPrice);
+      const query = params.toString();
+      if (query === searchParams.toString()) return;
+      lastWrittenQuery.current = query;
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [category, location, minPrice, maxPrice, pathname, router, searchParams]);
 
   const load = useCallback(async () => {
     const validation = validateProductFilters({ category, location, minPrice, maxPrice });
