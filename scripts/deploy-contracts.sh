@@ -189,6 +189,8 @@ if [[ "$VERIFY_ONLY" == "false" ]]; then
     [[ -n "$FEE_COLLECTOR" ]] || { echo "Error: FEE_COLLECTOR is required" >&2; exit 1; }
     [[ -n "$SUPPORTED_TOKENS" ]] || { echo "Error: SUPPORTED_TOKENS is required" >&2; exit 1; }
     [[ -n "$GOV_VOTERS" ]] || { echo "Error: GOV_VOTERS (comma-separated address:weight pairs) is required before governance handoff" >&2; exit 1; }
+    [[ -n "${GUARDIAN:-}" ]] || { echo "Error: GUARDIAN is required for deployment readiness" >&2; exit 1; }
+    [[ -n "${ATTESTER:-}" ]] || { echo "Error: ATTESTER is required for production_escrow attestation" >&2; exit 1; }
     (( GOV_QUORUM_WEIGHT > 0 )) || { echo "Error: GOV_QUORUM_WEIGHT must be > 0" >&2; exit 1; }
 fi
 # comma-separated -> repeated `--supported_tokens` JSON array element args
@@ -490,6 +492,29 @@ if [[ "$VERIFY_ONLY" == "false" ]]; then
         "$(invoke_read "$PROD_ESCROW" get_registry_contract || true)" "$REGISTRY" \
         invoke "$PROD_ESCROW" set_registry_contract --admin_caller "$ADMIN" --registry "$REGISTRY"
 
+    # Issue #1284: configure guardian/attester before governance handoff.
+    GUARDIAN="${GUARDIAN:-}"
+    ATTESTER="${ATTESTER:-}"
+    if [[ -z "$GUARDIAN" || -z "$ATTESTER" ]]; then
+        echo "Error: GUARDIAN and ATTESTER are required for deployment readiness" >&2
+        exit 1
+    fi
+    wire "escrow.guardian" \
+        "$(invoke_read "$ESCROW" get_guardian || true)" "$GUARDIAN" \
+        invoke "$ESCROW" set_guardian --caller "$ADMIN" --guardian "$GUARDIAN"
+    wire "production_escrow.guardian" \
+        "$(invoke_read "$PROD_ESCROW" get_guardian || true)" "$GUARDIAN" \
+        invoke "$PROD_ESCROW" set_guardian --caller "$ADMIN" --guardian "$GUARDIAN"
+    wire "registry.guardian" \
+        "$(invoke_read "$REGISTRY" get_guardian || true)" "$GUARDIAN" \
+        invoke "$REGISTRY" set_guardian --caller "$ADMIN" --guardian "$GUARDIAN"
+    wire "investment_basket.guardian" \
+        "$(invoke_read "$BASKET" get_guardian || true)" "$GUARDIAN" \
+        invoke "$BASKET" set_guardian --caller "$ADMIN" --guardian "$GUARDIAN"
+    wire "production_escrow.attester" \
+        "$(invoke_read "$PROD_ESCROW" get_attester || true)" "$ATTESTER" \
+        invoke "$PROD_ESCROW" set_attester --admin_caller "$ADMIN" --attester "$ATTESTER"
+
     echo "[wire] governance wiring (last — locks the other setters)..."
     wire "escrow.governance" \
         "$(invoke_read "$ESCROW" get_governance_contract || true)" "$GOVERNANCE" \
@@ -594,13 +619,21 @@ check "registry.get_admin"             "$(invoke_read "$REGISTRY" get_admin || t
 check "investment_basket.get_admin"    "$(invoke_read "$BASKET" get_admin || true)" "$ADMIN"
 
 GUARDIAN="${GUARDIAN:-}"
-if [[ -n "$GUARDIAN" ]]; then
+ATTESTER="${ATTESTER:-}"
+if [[ -z "$GUARDIAN" ]]; then
+    echo "  FAIL guardian: GUARDIAN is required for mainnet readiness" >&2
+    FAILURES=$((FAILURES + 1))
+else
     check "escrow.get_guardian"        "$(invoke_read "$ESCROW" get_guardian || true)" "$GUARDIAN"
     check "production_escrow.get_guardian" "$(invoke_read "$PROD_ESCROW" get_guardian || true)" "$GUARDIAN"
     check "registry.get_guardian"      "$(invoke_read "$REGISTRY" get_guardian || true)" "$GUARDIAN"
     check "investment_basket.get_guardian" "$(invoke_read "$BASKET" get_guardian || true)" "$GUARDIAN"
+fi
+if [[ -z "$ATTESTER" ]]; then
+    echo "  FAIL attester: ATTESTER is required for mainnet readiness" >&2
+    FAILURES=$((FAILURES + 1))
 else
-    echo "  ok   (GUARDIAN unset — skipping get_guardian readback)"
+    check "production_escrow.get_attester" "$(invoke_read "$PROD_ESCROW" get_attester || true)" "$ATTESTER"
 fi
 
 # registry.get_contract_refs returns {escrow, production, ...}; assert both links

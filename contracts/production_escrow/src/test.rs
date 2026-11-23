@@ -2662,13 +2662,13 @@ fn test_reject_confirm_order_after_settlement() {
     // Settlement prevents further order confirmations
     t.client.settle(&t.farmer, &id);
 
-    // Confirming order after settlement should fail (Issue #455)
+    // Confirming order after settlement should fail (Issue #455/#1274)
     let err = t
         .client
         .try_confirm_order(&t.buyer, &order_id)
         .unwrap_err()
         .unwrap();
-    assert_eq!(err, EscrowError::CampaignNotHarvested);
+    assert_eq!(err, EscrowError::CampaignAlreadyTerminal);
 }
 
 // ===========================================================================
@@ -4615,4 +4615,278 @@ fn test_1276_short_delivery_on_fake_token_cannot_subsidise_sac_campaign() {
         TokenClient::new(&t.env, &t.sac_token_id).balance(&t.client.address),
         sac_contract_balance_before
     );
+}
+
+#[test]
+fn test_1272_failed_campaign_cannot_reopen_dispute_no_prior_refund() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &5_000);
+    advance_ledger(&t.env, 8 * 24 * 3600);
+    t.client.finalize_failed(&id);
+
+    let err = t.client.try_open_dispute(&t.investor1, &id).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::CampaignAlreadyDisputed);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+}
+
+#[test]
+fn test_1272_failed_campaign_cannot_reopen_after_partial_refunds() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &4_000);
+    t.client.invest(&t.investor2, &id, &4_000);
+    advance_ledger(&t.env, 8 * 24 * 3600);
+    t.client.finalize_failed(&id);
+    t.client.refund(&t.investor1, &id);
+
+    let err = t.client.try_open_dispute(&t.investor2, &id).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::CampaignAlreadyDisputed);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+}
+
+#[test]
+fn test_1272_failed_campaign_cannot_reopen_after_full_refunds() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &4_000);
+    advance_ledger(&t.env, 8 * 24 * 3600);
+    t.client.finalize_failed(&id);
+    t.client.refund(&t.investor1, &id);
+
+    let err = t.client.try_open_dispute(&t.investor1, &id).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::CampaignAlreadyDisputed);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Failed);
+}
+
+#[test]
+fn test_1272_partial_resolution_after_refunds_preserves_second_campaign() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+
+    // Campaign A: funded, goes to InProduction, disputed, refunded partially, then resolved
+    let a = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &a, &10_000);
+    t.client.start_production(&t.farmer, &a);
+    t.client.open_dispute(&t.investor1, &a);
+    t.client.resolve_dispute(&t.admin, &a, &DisputeResolution::RefundInvestors);
+    // A is Failed; investor1 claims refund
+    let a_refund = t.client.refund(&t.investor1, &a);
+    assert_eq!(a_refund, 7_000); // 10k raised - 3k tranche released
+
+    // Campaign B holds same token
+    let b = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor2, &b, &10_000);
+    let b_balance_before = balance(&t, &t.client.address);
+
+    // A is terminal Failed; cannot reopen dispute
+    let err = t.client.try_open_dispute(&t.investor1, &a).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::CampaignAlreadyDisputed);
+    assert_eq!(t.client.get_campaign(&a).status, CampaignStatus::Failed);
+    assert_eq!(balance(&t, &t.client.address), b_balance_before);
+
+    // B investor can still be refunded through legitimate flow after failure
+    advance_ledger(&t.env, 8 * 24 * 3600);
+    // B is Funded so finalize_failed not allowed; settle path not possible. Mark failed by admin.
+    t.client.mark_campaign_failed(&t.admin, &b);
+    let b_refund = t.client.refund(&t.investor2, &b);
+    assert_eq!(b_refund, 10_000);
+}
+
+#[test]
+fn test_1272_partial_resolution_bounded_by_unpaid_liabilities_admin() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+
+    let a = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &a, &5_000);
+    t.client.invest(&t.investor2, &a, &5_000);
+    t.client.start_production(&t.farmer, &a);
+
+    // Second campaign uses same token pool in contract
+    let b = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor2, &b, &10_000);
+
+    // A fails after production, investor1 refunds part of remaining pool
+    t.client.open_dispute(&t.farmer, &a);
+    t.client.resolve_dispute(&t.admin, &a, &DisputeResolution::RefundInvestors);
+    let inv1_refund = t.client.refund(&t.investor1, &a);
+    assert!(inv1_refund > 0);
+    let contract_before = balance(&t, &t.client.address);
+    let farmer_before = balance(&t, &t.farmer);
+
+    // A is Failed terminal; cannot reopen
+    let err = t.client.try_open_dispute(&t.admin, &a).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::CampaignAlreadyDisputed);
+    assert_eq!(balance(&t, &t.client.address), contract_before);
+    assert_eq!(balance(&t, &t.farmer), farmer_before);
+
+    // B funds remain intact and refundable
+    advance_ledger(&t.env, 8 * 24 * 3600);
+    t.client.mark_campaign_failed(&t.admin, &b);
+    let b_refund = t.client.refund(&t.investor2, &b);
+    assert_eq!(b_refund, 10_000);
+}
+
+#[test]
+fn test_1272_arbitrator_quorum_cannot_resolve_terminal_or_drain_other_campaign() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+
+    let a = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &a, &10_000);
+    t.client.start_production(&t.farmer, &a);
+
+    let b = t
+        .client
+        .create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor2, &b, &10_000);
+
+    t.client.open_dispute(&t.farmer, &a);
+    t.client.resolve_dispute(&t.admin, &a, &DisputeResolution::RefundInvestors);
+    let a_refund = t.client.refund(&t.investor1, &a);
+    assert_eq!(a_refund, 7_000);
+
+    let arb1 = Address::generate(&t.env);
+    let arb2 = Address::generate(&t.env);
+    let mut arbs = Vec::new(&t.env);
+    arbs.push_back(arb1.clone());
+    arbs.push_back(arb2.clone());
+    t.client.set_arbitrators(&t.admin, &arbs, &2);
+
+    let contract_before = balance(&t, &t.client.address);
+    let err = t.client.try_vote_to_resolve(&arb1, &a, &DisputeResolution::Partial(10_000)).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::CampaignNotDisputed);
+    assert_eq!(balance(&t, &t.client.address), contract_before);
+
+    advance_ledger(&t.env, 8 * 24 * 3600);
+    t.client.mark_campaign_failed(&t.admin, &b);
+    assert_eq!(t.client.refund(&t.investor2, &b), 10_000);
+}
+
+#[test]
+fn test_1275_vote_to_resolve_blocked_while_paused_non_final() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t.client.create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.open_dispute(&t.farmer, &id);
+
+    let arb1 = Address::generate(&t.env);
+    let arb2 = Address::generate(&t.env);
+    let mut arbs = Vec::new(&t.env);
+    arbs.push_back(arb1.clone());
+    arbs.push_back(arb2.clone());
+    t.client.set_arbitrators(&t.admin, &arbs, &2);
+
+    t.client.set_guardian(&t.admin, &t.admin);
+    t.client.pause(&t.admin);
+
+    let err = t.client.try_vote_to_resolve(&arb1, &id, &DisputeResolution::RefundInvestors).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::ContractPaused);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Disputed);
+}
+
+#[test]
+fn test_1275_quorum_vote_cannot_finalize_while_paused_and_works_after_unpause() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t.client.create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.open_dispute(&t.farmer, &id);
+
+    let arb1 = Address::generate(&t.env);
+    let arb2 = Address::generate(&t.env);
+    let mut arbs = Vec::new(&t.env);
+    arbs.push_back(arb1.clone());
+    arbs.push_back(arb2.clone());
+    t.client.set_arbitrators(&t.admin, &arbs, &2);
+
+    t.client.set_guardian(&t.admin, &t.admin);
+    t.client.pause(&t.admin);
+    let err = t.client.try_vote_to_resolve(&arb1, &id, &DisputeResolution::FullPayoutToInvestors).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::ContractPaused);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Disputed);
+
+    t.client.unpause(&t.admin);
+    t.client.vote_to_resolve(&arb1, &id, &DisputeResolution::FullPayoutToInvestors);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Disputed);
+    t.client.vote_to_resolve(&arb2, &id, &DisputeResolution::FullPayoutToInvestors);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Settled);
+}
+
+#[test]
+fn test_1275_paused_vote_preserves_balances_for_partial_resolution() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    let id = t.client.create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    t.client.invest(&t.investor1, &id, &10_000);
+    t.client.start_production(&t.farmer, &id);
+    t.client.open_dispute(&t.farmer, &id);
+
+    let arb1 = Address::generate(&t.env);
+    let arb2 = Address::generate(&t.env);
+    let mut arbs = Vec::new(&t.env);
+    arbs.push_back(arb1.clone());
+    arbs.push_back(arb2.clone());
+    t.client.set_arbitrators(&t.admin, &arbs, &2);
+
+    let farmer_before = balance(&t, &t.farmer);
+    let contract_before = balance(&t, &t.client.address);
+    t.client.set_guardian(&t.admin, &t.admin);
+    t.client.pause(&t.admin);
+    let err = t.client.try_vote_to_resolve(&arb1, &id, &DisputeResolution::Partial(5000)).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::ContractPaused);
+    assert_eq!(balance(&t, &t.farmer), farmer_before);
+    assert_eq!(balance(&t, &t.client.address), contract_before);
+    assert_eq!(t.client.get_campaign(&id).status, CampaignStatus::Disputed);
+}
+
+#[test]
+fn test_1286_campaign_value_cap_enforced() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    t.client.set_campaign_value_cap(&t.admin, &t.token_id, &5_000);
+    let ok = t.client.create_campaign(&t.farmer, &t.token_id, &5_000, &deadline);
+    assert_eq!(t.client.get_campaign(&ok).target_amount, 5_000);
+    let err = t.client.try_create_campaign(&t.farmer, &t.token_id, &5_001, &deadline).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::InvalidAmount);
+}
+
+#[test]
+fn test_1286_active_campaign_limit_released_on_terminal() {
+    let t = setup();
+    let deadline = future_deadline(&t);
+    t.client.set_max_active_campaigns(&t.admin, &1);
+    let id = t.client.create_campaign(&t.farmer, &t.token_id, &10_000, &deadline);
+    let err = t.client.try_create_campaign(&t.farmer, &t.token_id, &10_000, &deadline).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::InvalidAmount);
+    t.client.invest(&t.investor1, &id, &1_000);
+    advance_ledger(&t.env, 8 * 24 * 3600);
+    t.client.finalize_failed(&id);
+    assert_eq!(t.client.get_active_campaign_count(), 0);
+    let deadline2 = t.env.ledger().timestamp() + 7 * 24 * 3600;
+    let id2 = t.client.create_campaign(&t.farmer, &t.token_id, &10_000, &deadline2);
+    assert!(id2 > id);
 }
