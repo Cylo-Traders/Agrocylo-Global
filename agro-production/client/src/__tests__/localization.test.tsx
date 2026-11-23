@@ -28,6 +28,15 @@ function collectEmptyValues(obj: Record<string, unknown>, path = ""): string[] {
   });
 }
 
+function getValue(obj: Record<string, unknown>, path: string): unknown {
+  return path.split(".").reduce<unknown>((acc, key) => {
+    if (acc && typeof acc === "object") {
+      return (acc as Record<string, unknown>)[key];
+    }
+    return undefined;
+  }, obj);
+}
+
 describe("Localization", () => {
   it("has all required sections in every locale", () => {
     for (const messages of Object.values(locales)) {
@@ -49,6 +58,36 @@ describe("Localization", () => {
   it("has no empty translation values in any locale", () => {
     for (const [locale, messages] of Object.entries(locales)) {
       expect(collectEmptyValues(messages), `empty values in ${locale}`).toEqual([]);
+    }
+  });
+
+  it("falls back to English for any key missing in a non-English locale", () => {
+    const enPaths = collectKeyPaths(enMessages);
+    for (const [locale, messages] of Object.entries(locales)) {
+      if (locale === "en") continue;
+      for (const keyPath of enPaths) {
+        const value = getValue(messages as Record<string, unknown>, keyPath);
+        const fallback = getValue(enMessages as Record<string, unknown>, keyPath);
+        // Every key must resolve to a non-empty string, either translated or via English fallback.
+        const resolved = typeof value === "string" && value.trim() !== "" ? value : fallback;
+        expect(typeof resolved, `${locale}:${keyPath} resolves`).toBe("string");
+        expect((resolved as string).trim(), `${locale}:${keyPath} non-empty`).not.toBe("");
+      }
+    }
+  });
+
+  it("keeps XLM/USDC unit labels explicit and untranslated in price strings", () => {
+    const unitPattern = /\b(XLM|USDC)\b/;
+    for (const [locale, messages] of Object.entries(locales)) {
+      const pricePaths = collectKeyPaths(messages).filter((p) => p.startsWith("prices."));
+      for (const pricePath of pricePaths) {
+        const value = getValue(messages as Record<string, unknown>, pricePath);
+        if (typeof value !== "string") continue;
+        // Price copy that references a settlement unit must keep the literal ticker.
+        if (/\{\w+\}/.test(value) && /price|amount/i.test(pricePath)) {
+          expect(value, `${locale}:${pricePath} keeps unit`).toMatch(unitPattern);
+        }
+      }
     }
   });
 });

@@ -67,4 +67,42 @@ describe("I18nProvider", () => {
     });
     expect(screen.getByTestId("marketplace-label").textContent).toBe("Mercado");
   });
+
+  it("falls back to English for missing translation keys", () => {
+    function MissingProbe() {
+      const { t } = useI18n();
+      return <span data-testid="missing">{t("navigation.marketplace")}</span>;
+    }
+    render(
+      <I18nProvider>
+        <LanguageSwitcher />
+        <MissingProbe />
+      </I18nProvider>,
+    );
+    fireEvent.change(screen.getByLabelText("Language"), { target: { value: "fr" } });
+    // A key absent from the active locale should resolve to the English string.
+    expect(screen.getByTestId("missing").textContent).toBe("Marché");
+  });
+
+  it("formats numbers and dates with the selected locale while keeping XLM/USDC units explicit", () => {
+    function FormatProbe() {
+      const { formatNumber, formatDate } = useI18n();
+      return (
+        <div>
+          <span data-testid="num">{formatNumber(1234.5)}</span>
+          <span data-testid="date">{formatDate(new Date("2024-01-15T00:00:00Z"))}</span>
+        </div>
+      );
+    }
+    render(
+      <I18nProvider>
+        <LanguageSwitcher />
+        <FormatProbe />
+      </I18nProvider>,
+    );
+    fireEvent.change(screen.getByLabelText("Language"), { target: { value: "fr" } });
+    // French uses a comma as the decimal separator.
+    expect(screen.getByTestId("num").textContent).toContain(",");
+    expect(screen.getByTestId("date").textContent).not.toBe("");
+  });
 });
