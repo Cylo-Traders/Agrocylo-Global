@@ -49,4 +49,10 @@ describe("ProductCard", () => {
     const link = screen.getByRole("link");
     expect(link.getAttribute("aria-label")).toContain("kg");
   });
+
+  it("renders a product that was created even when its image upload failed", () => {
+    render(<ProductCard product={{ ...baseProduct, imageUrl: null }} />);
+    expect(screen.getByText("Organic Tomatoes")).toBeTruthy();
+    expect(screen.getByRole("link").getAttribute("aria-label")).toContain("kg");
+  });
 });
