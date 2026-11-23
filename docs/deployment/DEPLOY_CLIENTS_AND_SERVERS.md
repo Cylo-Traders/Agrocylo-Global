@@ -241,8 +241,12 @@ flyctl secrets set --app agrocylo-marketplace \
   RPC_URL='https://soroban-testnet.stellar.org'
 ```
 
-Add `CONTRACT_ID` and `GOVERNANCE_CONTRACT_ID`, and set
-`RUN_CONTRACT_WATCHER=true`, if the marketplace indexer should run. In
+Add `CONTRACT_ID` and `GOVERNANCE_CONTRACT_ID`: the marketplace indexer
+(`RUN_CONTRACT_WATCHER`) is enabled by default and startup fails fast if
+both contract IDs are missing. Set `RUN_CONTRACT_WATCHER=false` only for
+an explicit REST-only deployment. Monitor indexer freshness via
+`GET /health/indexer` (last processed ledger, lag, and time since progress;
+503 when stalled). In
 production the root server validates `METRICS_API_KEY`,
 `SUPABASE_SERVICE_ROLE_KEY`, `USSD_PROVIDER_SECRET`, and a non-default
 `INTEGRATOR_API_KEY_PEPPER` on boot, and requires `ALLOWED_ORIGINS` to be

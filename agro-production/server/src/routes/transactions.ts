@@ -31,10 +31,10 @@ const VALID_TRANSITIONS: Record<
   TransactionStatus,
   readonly TransactionStatus[]
 > = {
-  awaiting_signature: ['submitted', 'failed'],
-  submitted: ['confirmed', 'failed'],
-  confirmed: ['indexed', 'failed'],
-  indexed: [],
+  awaiting_signature: ['submitted', 'indexed', 'failed'],
+  submitted: ['indexed', 'confirmed', 'failed'],
+  indexed: ['confirmed', 'failed'],
+  confirmed: [],
   failed: [],
 };
 

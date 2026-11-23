@@ -368,7 +368,7 @@ describe('Transaction Status & Reconciliation API', () => {
       expect(res.body.title).toContain('Invalid Status Transition');
     });
 
-    it('rejects transition from terminal indexed state', async () => {
+    it('rejects backwards transition: indexed -> submitted', async () => {
       (
         prisma.transaction.findUnique as ReturnType<typeof vi.fn>
       ).mockResolvedValue(makeTx({ status: 'indexed' }));
@@ -376,7 +376,82 @@ describe('Transaction Status & Reconciliation API', () => {
       const res = await request(app)
         .patch(`/api/v1/transactions/${REQUEST_ID}/status`)
         .set('Authorization', 'Bearer test-session')
+        .send({ status: 'submitted' });
+
+      expect(res.status).toBe(409);
+      expect(res.body.title).toContain('Invalid Status Transition');
+    });
+
+    it('transitions from submitted to indexed', async () => {
+      (
+        prisma.transaction.findUnique as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(makeTx({ status: 'submitted' }));
+      (prisma.transaction.update as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeTx({ status: 'indexed' }),
+      );
+
+      const res = await request(app)
+        .patch(`/api/v1/transactions/${REQUEST_ID}/status`)
+        .set('Authorization', 'Bearer test-session')
+        .send({ status: 'indexed' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('indexed');
+    });
+
+    it('transitions from indexed to confirmed', async () => {
+      (
+        prisma.transaction.findUnique as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(makeTx({ status: 'indexed' }));
+      (prisma.transaction.update as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeTx({ status: 'confirmed' }),
+      );
+
+      const res = await request(app)
+        .patch(`/api/v1/transactions/${REQUEST_ID}/status`)
+        .set('Authorization', 'Bearer test-session')
+        .send({ status: 'confirmed' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('confirmed');
+    });
+
+    it('transitions from indexed to failed', async () => {
+      (
+        prisma.transaction.findUnique as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(makeTx({ status: 'indexed' }));
+      (prisma.transaction.update as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeTx({ status: 'failed' }),
+      );
+
+      const res = await request(app)
+        .patch(`/api/v1/transactions/${REQUEST_ID}/status`)
+        .set('Authorization', 'Bearer test-session')
         .send({ status: 'failed' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('failed');
+    });
+
+    it('rejects unknown status values at validation', async () => {
+      const res = await request(app)
+        .patch(`/api/v1/transactions/${REQUEST_ID}/status`)
+        .set('Authorization', 'Bearer test-session')
+        .send({ status: 'bogus' });
+
+      expect(res.status).toBe(400);
+      expect(prisma.transaction.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects backwards transition: confirmed -> indexed', async () => {
+      (
+        prisma.transaction.findUnique as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(makeTx({ status: 'confirmed' }));
+
+      const res = await request(app)
+        .patch(`/api/v1/transactions/${REQUEST_ID}/status`)
+        .set('Authorization', 'Bearer test-session')
+        .send({ status: 'indexed' });
 
       expect(res.status).toBe(409);
     });
@@ -511,6 +586,27 @@ describe('Transaction Status & Reconciliation API', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.reconciledStatus).toBe('failed');
+    });
+
+    it('reconciles event-derived rows already stored as indexed', async () => {
+      (
+        prisma.transaction.findUnique as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(makeTx({ status: 'indexed', ledger: 1234 }));
+      (
+        prisma.eventCursor.findFirst as ReturnType<typeof vi.fn>
+      ).mockResolvedValue({ ledger: 5000 });
+      (
+        prisma.transaction.findFirst as ReturnType<typeof vi.fn>
+      ).mockResolvedValue({ id: REQUEST_ID, ledger: 1234, status: 'indexed' });
+
+      const res = await request(app)
+        .get(`/api/v1/transactions/${REQUEST_ID}/reconcile`)
+        .set('Authorization', 'Bearer test-session');
+
+      expect(res.status).toBe(200);
+      expect(res.body.dbStatus).toBe('indexed');
+      expect(res.body.reconciledStatus).toBe('indexed');
+      expect(res.body.indexedByWatcher).toBe(true);
     });
 
     it('returns 404 for unknown transaction', async () => {

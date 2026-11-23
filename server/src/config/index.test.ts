@@ -57,6 +57,33 @@ describe('environment validation', () => {
     }
   );
 
+  it('enables the contract watcher by default', async () => {
+    setRequiredEnv({ CONTRACT_ID: 'CTESTCONTRACT' });
+    delete process.env['RUN_CONTRACT_WATCHER'];
+
+    const { config } = await importFreshConfig();
+
+    expect(config.runContractWatcher).toBe(true);
+  });
+
+  it('fails fast when watcher is enabled but no contract IDs are set', async () => {
+    setRequiredEnv({ RUN_CONTRACT_WATCHER: 'true' });
+    delete process.env['CONTRACT_ID'];
+    delete process.env['GOVERNANCE_CONTRACT_ID'];
+
+    await expect(importFreshConfig()).rejects.toThrow(/CONTRACT_ID is required/);
+  });
+
+  it('supports explicit REST-only opt-out', async () => {
+    setRequiredEnv({ RUN_CONTRACT_WATCHER: 'false' });
+    delete process.env['CONTRACT_ID'];
+    delete process.env['GOVERNANCE_CONTRACT_ID'];
+
+    const { config } = await importFreshConfig();
+
+    expect(config.runContractWatcher).toBe(false);
+  });
+
   it('rejects non-HTTPS production origins', async () => {
     setRequiredEnv({
       NODE_ENV: 'production',

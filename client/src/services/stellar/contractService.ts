@@ -67,11 +67,6 @@ function isFeeRelatedError(errorMessage: string): boolean {
   );
 }
 
-export interface CreateOrderTx {
-  txXdr: string;
-  orderId: string;
-}
-
 // Re-export Order from canonical location so existing callers don't need to update.
 export type { Order } from "@/types/order";
 import type { Order } from "@/types/order";
@@ -247,7 +242,7 @@ export async function createOrder(
   deliveryDeadline?: string
 ): Promise<ContractResult<string>> {
   try {
-    const built = await createOrderWithOrderId(
+    const built = await buildCreateOrderTransaction(
       buyer,
       farmer,
       token,
@@ -257,34 +252,30 @@ export async function createOrder(
     if (!built.success || !built.data) {
       return { success: false, error: built.error || "Failed to build create_order" };
     }
-    return { success: true, data: built.data.txXdr };
+    return { success: true, data: built.data };
   } catch (err) {
     return { success: false, error: (err as Error).message };
   }
 }
 
 /**
- * Build a `create_order` transaction and also extract the returned `order_id`
- * from Soroban simulation.
+ * Build a `create_order` transaction. Simulation return values are never used
+ * as an order id — the authoritative id comes from the indexed order.created
+ * event after the transaction is confirmed.
  */
-export async function createOrderWithOrderId(
+export async function buildCreateOrderTransaction(
   buyer: string,
   farmer: string,
   token: string,
   amount: bigint,
   deliveryDeadline?: string,
-): Promise<ContractResult<CreateOrderTx>> {
+): Promise<ContractResult<string>> {
   try {
     // Test mode: return dummy transaction
     if (isTestMode()) {
-      // Return a minimal XDR string and generate a deterministic order ID
-      const orderId = String(Date.now());
       return {
         success: true,
-        data: {
-          txXdr: "AAAAAgAAAAABAABkdwAAAAIAAAABAAAAFgAAAAAABcekAAAB4w==",
-          orderId,
-        },
+        data: "AAAAAgAAAAABAABkdwAAAAIAAAABAAAAFgAAAAAABcekAAAB4w==",
       };
     }
 
@@ -324,14 +315,9 @@ export async function createOrderWithOrderId(
 
     const successSim =
       simulated as StellarSdk.rpc.Api.SimulateTransactionSuccessResponse;
-    const retval = successSim.result?.retval;
-    if (!retval) throw new Error("No return value from create_order");
-
-    const orderIdNative = StellarSdk.scValToNative(retval);
-    const orderId = String(orderIdNative);
 
     const prepared = StellarSdk.rpc.assembleTransaction(tx, successSim).build();
-    return { success: true, data: { txXdr: prepared.toXDR(), orderId } };
+    return { success: true, data: prepared.toXDR() };
   } catch (err) {
     return { success: false, error: (err as Error).message };
   }
