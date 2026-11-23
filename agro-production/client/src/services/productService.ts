@@ -11,6 +11,45 @@ export interface ProductFilters {
   limit?: number;
 }
 
+export interface CreateProductInput {
+  name: string;
+  description?: string;
+  imageUrl?: string;
+  pricePerUnit: string;
+  category: ProductCategory;
+  unit: string;
+  quantity: number;
+  location?: string;
+}
+
+/**
+ * Farmer-facing message for a failed create-product request. Maps the opaque
+ * browser `Failed to fetch` (network/CORS/timeout) and server errors to an
+ * actionable message so the form can surface it without leaking the raw
+ * exception. Entered values are preserved by the caller.
+ */
+export function describeCreateProductError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 0 || error.status === 408 || error.status === 504) {
+      return "We couldn't reach the product service. Check your connection and try again.";
+    }
+    if (error.status === 401 || error.status === 403) {
+      return "Your wallet session expired. Reconnect your wallet and try again.";
+    }
+    if (error.status >= 500) {
+      return "The product service is temporarily unavailable. Please try again shortly.";
+    }
+    return error.message || "We couldn't create your product. Please try again.";
+  }
+  if (error instanceof TypeError || (error instanceof Error && /failed to fetch|networkerror/i.test(error.message))) {
+    return "We couldn't reach the product service. This may be a network or CORS issue — check your connection and try again.";
+  }
+  if (error instanceof Error && error.name === "AbortError") {
+    return "The request timed out. Please try again.";
+  }
+  return "We couldn't create your product. Please try again.";
+}
+
 export function validateProductFilters(filters: {
   category: ProductCategory | "";
   location: string;
@@ -98,6 +137,26 @@ export async function fetchProduct(id: string, signal?: AbortSignal): Promise<Pr
     throw new ApiError(502, "The product service returned an invalid product");
   }
   return response;
+}
+
+/**
+ * Create a product. The request is sent to the configured API origin with the
+ * wallet session attached by the shared api client. Errors are normalized to
+ * an actionable message via `describeCreateProductError`.
+ */
+export async function createProduct(input: CreateProductInput): Promise<Product> {
+  try {
+    const response = await api.post<Product>("/products", input);
+    if (!isProduct(response)) {
+      throw new ApiError(502, "The product service returned an invalid product");
+    }
+    return response;
+  } catch (error) {
+    throw new ApiError(
+      error instanceof ApiError ? error.status : 0,
+      describeCreateProductError(error),
+    );
+  }
 }
 
 /** Display a stroop price as XLM. Exact BigInt arithmetic — see validation.ts. */
