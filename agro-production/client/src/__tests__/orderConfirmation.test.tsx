@@ -132,4 +132,40 @@ describe("on-chain order confirmation", () => {
     expect(mocks.buildConfirmOrder).not.toHaveBeenCalled();
     expect(mocks.patch).not.toHaveBeenCalled();
   });
+
+  it("distinguishes a wallet cancellation from a network failure", async () => {
+    mocks.signAndSubmitTransaction.mockResolvedValue({
+      success: false,
+      outcome: "cancelled",
+      error: "User rejected the request",
+    });
+
+    await expect(confirmOrderReceipt(order, buyer)).rejects.toThrow(
+      "User rejected the request",
+    );
+    expect(mocks.patch).not.toHaveBeenCalled();
+  });
+
+  it("does not resubmit an escrow transaction when refreshing a pending lookup", async () => {
+    mocks.signAndSubmitTransaction.mockResolvedValue({
+      success: false,
+      outcome: "pending",
+      txHash: "pending-hash",
+      error: "Still confirming",
+    });
+
+    await expect(confirmOrderReceipt(order, buyer)).rejects.toThrow(
+      "Still confirming",
+    );
+    expect(mocks.signAndSubmitTransaction).toHaveBeenCalledTimes(1);
+
+    // A status refresh must only re-read the order, never re-sign/submit.
+    mocks.get.mockResolvedValue({ ...order, status: "CONFIRMED" });
+    await expect(confirmOrderReceipt(order, buyer)).resolves.toEqual({
+      order: { ...order, status: "CONFIRMED" },
+      alreadyConfirmed: true,
+    });
+    expect(mocks.signAndSubmitTransaction).toHaveBeenCalledTimes(1);
+    expect(mocks.patch).not.toHaveBeenCalled();
+  });
 });

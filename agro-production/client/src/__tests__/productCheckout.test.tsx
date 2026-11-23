@@ -206,4 +206,90 @@ describe("Product checkout error handling", () => {
 
     expect(mockLogErrorWithContext).toHaveBeenCalled();
   });
+
+  it("distinguishes wallet cancellation from network failure", async () => {
+    mockCreateOrder.mockResolvedValue({ id: "order-cancel" } as Order);
+    mockBuildCreateOrder.mockResolvedValue({
+      success: true,
+      data: "prepared-xdr",
+    });
+    mockSignAndSubmit.mockResolvedValue({
+      success: false,
+      outcome: "cancelled",
+      error: "User rejected the request",
+    });
+
+    const { result } = renderHook(() => useTransaction());
+
+    const builderFn = async () => {
+      await mockCreateOrder({
+        buyerAddress: "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU",
+        campaignId: "campaign-cancel",
+        amount: "5000000",
+      });
+
+      const builtResult = await mockBuildCreateOrder(
+        "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU",
+        "campaign-cancel",
+        5000000n
+      );
+
+      if (!builtResult.success) {
+        throw new Error(builtResult.error);
+      }
+
+      return builtResult.data!;
+    };
+
+    await act(async () => {
+      await result.current.execute(builderFn);
+    });
+
+    expect(result.current.isError).toBe(true);
+    expect(result.current.error).toContain("rejected");
+  });
+
+  it("submitted but not indexed does not resubmit on retry", async () => {
+    mockCreateOrder.mockResolvedValue({ id: "order-index" } as Order);
+    mockBuildCreateOrder.mockResolvedValue({
+      success: true,
+      data: "prepared-xdr",
+    });
+    mockSignAndSubmit.mockResolvedValue({
+      success: true,
+      outcome: "pending",
+      txHash: "b".repeat(64),
+      status: "PENDING",
+    });
+
+    const { result } = renderHook(() => useTransaction());
+
+    const builderFn = async () => {
+      await mockCreateOrder({
+        buyerAddress: "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU",
+        campaignId: "campaign-index",
+        amount: "5000000",
+      });
+
+      const builtResult = await mockBuildCreateOrder(
+        "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU",
+        "campaign-index",
+        5000000n
+      );
+
+      if (!builtResult.success) {
+        throw new Error(builtResult.error);
+      }
+
+      return builtResult.data!;
+    };
+
+    await act(async () => {
+      await result.current.execute(builderFn);
+    });
+
+    // A pending (submitted, not yet indexed) transaction must not trigger a
+    // second escrow submission when the user retries the lookup.
+    expect(mockSignAndSubmit).toHaveBeenCalledTimes(1);
+  });
 });
