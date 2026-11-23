@@ -166,14 +166,37 @@ export const BasketDetailSchema = BasketSchema.extend({
  * BigInt arithmetic and must not convert through Number.
  * The protocol has no fiat leg — amounts are XLM-denominated.
  */
+/**
+ * One indexed direct campaign payout (`claim_returns`, Issue #1343).
+ * Basket payouts are reported by GET /investor/baskets, never here.
+ */
+export const CampaignClaimSchema = z.object({
+  campaignId: uuidParam,
+  /** On-chain campaign id, when the campaign is indexed. */
+  campaignOnChainId: z.string().optional(),
+  /** Exact payout received, i128 stroops string. */
+  payoutAmount: z.string(),
+  ledger: z.number().int(),
+  txHash: z.string().nullable().optional(),
+  claimedAt: dateField,
+});
+
 export const InvestorPortfolioSummarySchema = z.object({
   /** The authenticated wallet the data belongs to. */
   investorAddress: stellarAddress,
   positions: z.array(InvestmentSchema),
+  /** Direct campaign claims indexed for this wallet (Issue #1343). */
+  claims: z.array(CampaignClaimSchema),
   /** Invested amount for all listed positions, i128 stroops string. */
   totalInvested: z.string(),
-  /** Realized returns for listed positions, i128 stroops string ("0" if none). */
+  /**
+   * Realized direct-campaign returns: exact BigInt sum of indexed
+   * `campaign.claimed` payouts, i128 stroops string ("0" when nothing has
+   * been claimed). Excludes basket returns — see `returnsSource`.
+   */
   totalReturned: z.string(),
+  /** Identifies what `totalReturned` covers, distinct from basket returns. */
+  returnsSource: z.literal('campaign_claims'),
 });
 
 /**

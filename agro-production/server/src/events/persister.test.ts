@@ -4,6 +4,7 @@ import type {
   CampaignCreatedEvent,
   CampaignInvestedEvent,
   CampaignSettledEvent,
+  CampaignClaimedEvent,
   GenericCampaignEvent,
   OrderConfirmedEvent,
   OrderCreatedEvent,
@@ -79,9 +80,13 @@ vi.mock('../db/client.js', () => {
       findUnique: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({}),
     },
+    campaignClaim: {
+      upsert: vi.fn().mockResolvedValue({}),
+    },
   };
 
   return {
+    __tx: tx,
     prisma: {
       transaction: {
         findUnique: vi.fn().mockResolvedValue(null),
@@ -590,7 +595,6 @@ describe('EventPersister', () => {
     }
 
     const rawActions: GenericCampaignEvent['action'][] = [
-      'campaign.claimed',
       'campaign.refunded',
       'campaign.tranche',
     ];
@@ -605,6 +609,80 @@ describe('EventPersister', () => {
         expect(prisma.$transaction).not.toHaveBeenCalled();
       });
     }
+  });
+
+  describe('campaign.claimed (Issue #1343)', () => {
+    const INVESTOR = 'GINVESTOR0000000000000000000000000000000000000000000000';
+    function makeClaim(
+      overrides: Partial<CampaignClaimedEvent> = {},
+    ): CampaignClaimedEvent {
+      return {
+        ...baseEvent,
+        action: 'campaign.claimed',
+        campaignId: '1',
+        investor: INVESTOR,
+        payout: '170141183460469231731687303715884105727', // i128::MAX
+        txHash: 'f'.repeat(64),
+        ...overrides,
+      };
+    }
+
+    it('persists the investor and exact payout keyed by campaign/investor', async () => {
+      const mod = (await import('../db/client.js')) as unknown as {
+        __tx: Record<string, Record<string, ReturnType<typeof vi.fn>>>;
+      };
+      const tx = mod.__tx;
+
+      await EventPersister.persist(makeClaim());
+
+      expect(tx.campaignClaim.upsert).toHaveBeenCalledWith({
+        where: {
+          campaignId_investorAddress: {
+            campaignId: 'camp-uuid',
+            investorAddress: INVESTOR,
+          },
+        },
+        create: expect.objectContaining({
+          campaignId: 'camp-uuid',
+          investorAddress: INVESTOR,
+          payoutAmount: '170141183460469231731687303715884105727',
+          ledger: 200,
+          eventIndex: 0,
+        }),
+        update: expect.objectContaining({
+          payoutAmount: '170141183460469231731687303715884105727',
+        }),
+      });
+      expect(tx.transaction.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          campaignId: 'camp-uuid',
+          walletAddress: INVESTOR,
+          eventType: 'campaign.claimed',
+        }),
+      });
+    });
+
+    it('throws a retryable DependencyMissingError when the campaign is unknown', async () => {
+      const mod = (await import('../db/client.js')) as unknown as {
+        __tx: Record<string, Record<string, ReturnType<typeof vi.fn>>>;
+      };
+      mod.__tx.campaign.findUnique.mockResolvedValueOnce(null);
+
+      await expect(EventPersister.persist(makeClaim())).rejects.toBeInstanceOf(
+        DependencyMissingError,
+      );
+      expect(mod.__tx.campaignClaim.upsert).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-integer payout instead of persisting it', async () => {
+      const mod = (await import('../db/client.js')) as unknown as {
+        __tx: Record<string, Record<string, ReturnType<typeof vi.fn>>>;
+      };
+      await expect(
+        EventPersister.persist(makeClaim({ payout: '12.5' })),
+      ).rejects.toThrow(/not a non-negative integer/);
+      expect(mod.__tx.campaignClaim.upsert).not.toHaveBeenCalled();
+    });
   });
 
   describe('unknown action (fallback)', () => {

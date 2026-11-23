@@ -38,11 +38,26 @@ export interface PortfolioPositionDTO {
   };
 }
 
+/** Indexed direct campaign payout (`claim_returns`, Issue #1343). */
+export interface CampaignClaimDTO {
+  campaignId: string;
+  campaignOnChainId?: string;
+  /** Exact payout, i128 stroop string. */
+  payoutAmount: string;
+  ledger: number;
+  txHash?: string | null;
+  claimedAt: string;
+}
+
 export interface InvestorPortfolioDTO {
   investorAddress: string;
   positions: PortfolioPositionDTO[];
+  /** Absent on servers that predate Issue #1343. */
+  claims?: CampaignClaimDTO[];
   totalInvested: string;
+  /** Sum of direct campaign claim payouts (basket returns are separate). */
   totalReturned: string;
+  returnsSource?: "campaign_claims";
 }
 
 /** Documented view model — all monetary values are XLM strings. */
@@ -55,12 +70,17 @@ export interface PortfolioPosition {
   /** Position status (campaign lifecycle), e.g. FUNDING / HARVESTED. */
   status: string;
   investedAt: string;
+  /** Claimed payout for this position's campaign in XLM, or null if unclaimed. */
+  claimedReturn: string | null;
 }
 
 export interface PortfolioSummary {
   investorAddress: string;
   totalInvested: string;
+  /** Realized direct-campaign returns (claimed payouts) in XLM. */
   totalReturned: string;
+  /** Number of campaigns the investor has claimed proceeds from. */
+  claimCount: number;
   positions: PortfolioPosition[];
 }
 
@@ -70,10 +90,13 @@ function campaignDisplayName(position: PortfolioPositionDTO): string {
 
 /** Map the server contract to the documented XLM view model. */
 export function mapInvestorPortfolio(dto: InvestorPortfolioDTO): PortfolioSummary {
+  const claims = dto.claims ?? [];
+  const claimByCampaign = new Map(claims.map((c) => [c.campaignId, c.payoutAmount]));
   return {
     investorAddress: dto.investorAddress,
     totalInvested: formatStroopsForDisplay(dto.totalInvested || "0", 7),
     totalReturned: formatStroopsForDisplay(dto.totalReturned || "0", 7),
+    claimCount: claims.length,
     positions: dto.positions.map((position) => ({
       id: position.id,
       campaignId: position.campaignId,
@@ -81,6 +104,9 @@ export function mapInvestorPortfolio(dto: InvestorPortfolioDTO): PortfolioSummar
       amountInvested: formatStroopsForDisplay(position.amount, 7),
       status: position.campaign?.status ?? "UNKNOWN",
       investedAt: position.createdAt,
+      claimedReturn: claimByCampaign.has(position.campaignId)
+        ? formatStroopsForDisplay(claimByCampaign.get(position.campaignId)!, 7)
+        : null,
     })),
   };
 }
