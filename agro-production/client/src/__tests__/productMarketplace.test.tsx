@@ -9,6 +9,46 @@ const product = {
 };
 
 describe("marketplace contract boundaries", () => {
+  it("accepts a valid price range", () => {
+    const result = validateProductFilters({
+      category: "",
+      location: "Lagos",
+      minPrice: "10",
+      maxPrice: "20",
+    });
+
+    expect(result.valid).toBe(true);
+  });
+
+  it("keeps empty price bounds optional", () => {
+    const result = validateProductFilters({
+      category: "",
+      location: "Lagos",
+      minPrice: "",
+      maxPrice: "",
+    });
+
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects malformed and negative price bounds", () => {
+    const nonNumeric = validateProductFilters({
+      category: "",
+      location: "Lagos",
+      minPrice: "abc",
+      maxPrice: "20",
+    });
+    const negative = validateProductFilters({
+      category: "",
+      location: "Lagos",
+      minPrice: "-5",
+      maxPrice: "20",
+    });
+
+    expect(nonNumeric.valid).toBe(false);
+    expect(negative.valid).toBe(false);
+  });
+
   it("rejects an inverted price range before making a request", () => {
     const result = validateProductFilters({
       category: "",

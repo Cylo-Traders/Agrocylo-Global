@@ -50,4 +50,60 @@ test.describe("marketplace API journey", () => {
     await expect(page.getByRole("heading", { name: "Marketplace" })).toBeVisible();
     expect(consoleErrors).toEqual([]);
   });
+
+  test("validates minimum and maximum price filters together", async ({ page }) => {
+    const productRequests: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/products") && request.method() === "GET") {
+        productRequests.push(request.url());
+      }
+    });
+
+    await page.goto("/marketplace");
+    await expect(page.getByRole("heading", { name: "Marketplace" })).toBeVisible();
+
+    const minInput = page.getByLabel(/min(imum)? price/i);
+    const maxInput = page.getByLabel(/max(imum)? price/i);
+
+    // Empty bounds remain optional: no error and no price filter sent.
+    await minInput.fill("");
+    await maxInput.fill("");
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect
+      .poll(() => productRequests.some((url) => url.includes("priceMin") || url.includes("priceMax")))
+      .toBe(false);
+
+    // Malformed (non-numeric) value produces an inline error and no request.
+    const requestsBeforeMalformed = productRequests.length;
+    await minInput.fill("abc");
+    await expect(page.getByRole("alert")).toContainText(/price/i);
+    await page.waitForTimeout(300);
+    expect(productRequests.length).toBe(requestsBeforeMalformed);
+
+    // Negative value produces an inline error and no request.
+    await minInput.fill("-5");
+    await expect(page.getByRole("alert")).toContainText(/price/i);
+    await page.waitForTimeout(300);
+    expect(productRequests.length).toBe(requestsBeforeMalformed);
+
+    // Reversed range (min > max) produces an inline error and no request.
+    await minInput.fill("100");
+    await maxInput.fill("10");
+    await expect(page.getByRole("alert")).toContainText(/minimum.*maximum|max.*min/i);
+    await page.waitForTimeout(300);
+    expect(productRequests.length).toBe(requestsBeforeMalformed);
+
+    // Correcting the range clears the error and refreshes results with both bounds.
+    const correctedRequest = page.waitForRequest((request) =>
+      request.url().includes("/api/v1/products") &&
+      request.url().includes("priceMin=10") &&
+      request.url().includes("priceMax=100"),
+    );
+    await minInput.fill("10");
+    await maxInput.fill("100");
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    const correctedUrl = await correctedRequest;
+    expect(correctedUrl.url()).toContain("priceMin=10");
+    expect(correctedUrl.url()).toContain("priceMax=100");
+  });
 });
