@@ -3,6 +3,11 @@ import {
   filterOrdersForFarmer,
   summarizeFarmerOrders,
 } from "@/lib/farmerDashboard";
+import {
+  BULK_IMPORT_CSV_TEMPLATE,
+  buildBulkImportPreview,
+  summarizeBulkImport,
+} from "@/lib/bulkProductImport";
 import type { Order } from "@/types";
 
 const FARMER = "GFARMER";
@@ -60,5 +65,38 @@ describe("farmer dashboard order summary", () => {
     expect(summary.completedOrders).toHaveLength(1);
     expect(summary.pendingValue).toBe(15_000_000n);
     expect(summary.completedRevenue).toBe(25_000_000n);
+  });
+});
+
+describe("bulk product import", () => {
+  it("documents required and optional fields with example rows in the template", () => {
+    expect(BULK_IMPORT_CSV_TEMPLATE).toContain("name");
+    expect(BULK_IMPORT_CSV_TEMPLATE).toContain("price");
+    expect(BULK_IMPORT_CSV_TEMPLATE).toContain("quantity");
+    expect(BULK_IMPORT_CSV_TEMPLATE).toContain("description");
+    expect(BULK_IMPORT_CSV_TEMPLATE.split("\n").length).toBeGreaterThan(2);
+  });
+
+  it("flags invalid rows and duplicates before submission", () => {
+    const csv = [
+      "name,price,quantity,description",
+      "Tomatoes,100,5,Fresh",
+      "Tomatoes,100,5,Fresh",
+      ",abc,-1,Bad row",
+    ].join("\n");
+    const preview = buildBulkImportPreview(csv, []);
+    expect(preview.rows[0].status).toBe("valid");
+    expect(preview.rows[1].status).toBe("duplicate");
+    expect(preview.rows[2].status).toBe("invalid");
+    expect(preview.rows[2].errors.length).toBeGreaterThan(0);
+  });
+
+  it("reports created, skipped, and failed rows in the final summary", () => {
+    const summary = summarizeBulkImport([
+      { rowNumber: 2, status: "created" },
+      { rowNumber: 3, status: "skipped" },
+      { rowNumber: 4, status: "failed" },
+    ]);
+    expect(summary).toEqual({ created: 1, skipped: 1, failed: 1 });
   });
 });
