@@ -159,6 +159,7 @@ async function handleCampaignCreated(event: CampaignCreatedEvent) {
       data: {
         campaignId: campaign.id,
         eventType: event.action,
+        status: 'indexed',
         payload: toEventPayload(event),
         ledger: event.ledger,
         eventIndex: event.eventIndex,
@@ -286,6 +287,7 @@ async function handleCampaignInvested(event: CampaignInvestedEvent) {
       data: {
         campaignId: campaign.id,
         eventType: event.action,
+        status: 'indexed',
         payload: toEventPayload(event),
         ledger: event.ledger,
         eventIndex: event.eventIndex,
@@ -367,6 +369,7 @@ async function handleCampaignSettled(event: CampaignSettledEvent) {
       data: {
         campaignId: campaign.id,
         eventType: event.action,
+        status: 'indexed',
         payload: toEventPayload(event),
         ledger: event.ledger,
         eventIndex: event.eventIndex,
@@ -470,6 +473,7 @@ async function handleOrderCreated(event: OrderCreatedEvent) {
       data: {
         campaignId: campaign.id,
         eventType: event.action,
+        status: 'indexed',
         payload: toEventPayload(event),
         ledger: event.ledger,
         eventIndex: event.eventIndex,
@@ -538,6 +542,7 @@ async function handleOrderConfirmed(event: OrderConfirmedEvent) {
       data: {
         campaignId: order.campaignId,
         eventType: event.action,
+        status: 'indexed',
         payload: toEventPayload(event),
         ledger: event.ledger,
         eventIndex: event.eventIndex,
@@ -591,6 +596,7 @@ async function updateCampaignStatus(
       data: {
         campaignId: campaign.id,
         eventType: event.action,
+        status: 'indexed',
         payload: toEventPayload(event),
         ledger: event.ledger,
         eventIndex: event.eventIndex,
@@ -608,6 +614,7 @@ async function recordTransaction(
     data: {
       campaignId,
       eventType: event.action,
+      status: 'indexed',
       payload: toEventPayload(event),
       ledger: event.ledger,
       eventIndex: event.eventIndex,
@@ -693,6 +700,7 @@ async function handleDisputeOpened(event: DisputeOpenedEvent) {
       data: {
         campaignId: campaign.id,
         eventType: event.action,
+        status: 'indexed',
         payload: toEventPayload(event),
         ledger: event.ledger,
         eventIndex: event.eventIndex,
@@ -776,6 +784,7 @@ async function handleDisputeEvidenceSubmitted(
       data: {
         campaignId: currentDispute.campaignId,
         eventType: event.action,
+        status: 'indexed',
         payload: toEventPayload(event),
         ledger: event.ledger,
         eventIndex: event.eventIndex,
@@ -848,6 +857,7 @@ async function handleDisputeResolved(event: DisputeResolvedEvent) {
       data: {
         campaignId: currentDispute.campaignId,
         eventType: event.action,
+        status: 'indexed',
         payload: toEventPayload(event),
         ledger: event.ledger,
         eventIndex: event.eventIndex,
@@ -914,6 +924,7 @@ async function handleDisputeDismissed(event: DisputeDismissedEvent) {
       data: {
         campaignId: currentDispute.campaignId,
         eventType: event.action,
+        status: 'indexed',
         payload: toEventPayload(event),
         ledger: event.ledger,
         eventIndex: event.eventIndex,
@@ -945,6 +956,7 @@ async function handleBasketCreated(event: BasketCreatedEvent) {
     await tx.transaction.create({
       data: {
         eventType: event.action,
+        status: 'indexed',
         payload: toEventPayload(event),
         ledger: event.ledger,
         eventIndex: event.eventIndex,
@@ -1033,6 +1045,7 @@ async function handleBasketDeposit(event: BasketDepositEvent) {
     await tx.transaction.create({
       data: {
         eventType: event.action,
+        status: 'indexed',
         payload: toEventPayload(event),
         ledger: event.ledger,
         eventIndex: event.eventIndex,
@@ -1081,6 +1094,7 @@ async function handleBasketFunded(event: BasketFundedEvent) {
     await tx.transaction.create({
       data: {
         eventType: event.action,
+        status: 'indexed',
         payload: toEventPayload(event),
         ledger: event.ledger,
         eventIndex: event.eventIndex,
@@ -1162,6 +1176,7 @@ async function handleBasketWithdrawn(event: BasketWithdrawnEvent) {
     await tx.transaction.create({
       data: {
         eventType: event.action,
+        status: 'indexed',
         payload: toEventPayload(event),
         ledger: event.ledger,
         eventIndex: event.eventIndex,
@@ -1235,6 +1250,7 @@ async function handleBasketClaimed(event: BasketClaimedEvent) {
     await tx.transaction.create({
       data: {
         eventType: event.action,
+        status: 'indexed',
         payload: toEventPayload(event),
         ledger: event.ledger,
         eventIndex: event.eventIndex,

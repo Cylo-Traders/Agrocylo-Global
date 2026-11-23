@@ -91,7 +91,7 @@ Validated by a Zod schema in [`server/src/config/index.ts`](../../server/src/con
 | `JWT_SECRET` | ✅ | — | API JWT signing key, HS256, ≥ 32 bytes. See rotation below. |
 | `REDIS_URL` | | `redis://127.0.0.1:6379` | Queues / rate limiting |
 | `RUN_WORKERS` | | `false` | Enable background workers |
-| `RUN_CONTRACT_WATCHER` | | `false` | Enable the on-chain event watcher |
+| `RUN_CONTRACT_WATCHER` | | `true` | On-chain event watcher; enabled by default so successful orders are indexed. Set `false` for explicit REST-only development. Startup fails fast when enabled without contract IDs. Freshness: `GET /health/indexer` |
 | `CONTRACT_ID` | watcher | `""` | marketplace escrow ID (required when watcher on) |
 | `GOVERNANCE_CONTRACT_ID` | watcher | `""` | governance ID (required when watcher on) |
 | `RPC_URL` | | testnet RPC | Soroban RPC endpoint |

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, notFound } from "next/navigation";
 import { fetchProduct, formatPrice } from "@/services/productService";
@@ -27,6 +27,10 @@ export default function ProductDetailPage() {
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
   const { address, connected } = useWallet();
   const tx = useTransaction();
+  const orderIntent = useMemo(
+    () => `order:${id ?? ""}:${quantity}:${address ?? ""}`,
+    [id, quantity, address],
+  );
 
   useEffect(() => {
     if (!id) return;
@@ -112,21 +116,7 @@ export default function ProductDetailPage() {
         });
         throw err;
       }
-    }, {
-      intent: `create_order:${campaignId}:${address}:${totalPrice}`,
-      onSubmitted: async (txHash) => {
-        if (orderId) {
-          try {
-            await updateOrderWithTxHash(orderId, txHash);
-          } catch (error) {
-            throw new Error(
-              `The order transaction was submitted (${txHash}), but its backend reconciliation link could not be saved. Check your orders before retrying.`,
-              { cause: error },
-            );
-          }
-        }
-      },
-    });
+    }, { intent: orderIntent });
   }
 
   return (
@@ -170,10 +160,11 @@ export default function ProductDetailPage() {
               </div>
               <p className="text-sm text-muted">Total: <span className="font-semibold text-foreground">{formatPrice(String(totalPrice))} XLM</span></p>
               {tx.isSuccess && (<div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-800" role="status"><p className="font-semibold mb-1">✓ Order Created Successfully</p>{createdOrder && <p>Order ID: {createdOrder.id}</p>}{tx.txHash && (<p className="text-xs mt-1 font-mono">Tx: {tx.txHash}</p>)}</div>)}
+              {tx.isUnconfirmed && (<div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800" role="status"><p className="font-semibold mb-1">Order submitted, awaiting confirmation</p><p>Do not submit again — the transaction is still valid and may confirm shortly.</p>{tx.txHash && (<p className="text-xs mt-1 font-mono">Tx: {tx.txHash}</p>)}</div>)}
               {tx.isError && (<div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700" role="alert"><p className="font-semibold mb-1">Error</p><p>{tx.error}</p></div>)}
               <button
                 onClick={() => void handleOrder()}
-                disabled={tx.isPending || tx.isSuccess || !!quantityError}
+                disabled={tx.isPending || tx.isUnconfirmed || tx.isSuccess || !!quantityError}
                 aria-label={`Place order for ${quantity} ${product.unit}(s) of ${product.name}`}
                 className="w-full bg-primary-600 text-white py-2.5 rounded-lg font-medium hover:bg-primary-700 disabled:opacity-50 transition-colors text-sm inline-flex items-center justify-center gap-2"
               >
