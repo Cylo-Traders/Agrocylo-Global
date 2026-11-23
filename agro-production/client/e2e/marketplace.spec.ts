@@ -50,4 +50,34 @@ test.describe("marketplace API journey", () => {
     await expect(page.getByRole("heading", { name: "Marketplace" })).toBeVisible();
     expect(consoleErrors).toEqual([]);
   });
+
+  test("changes marketplace filters using only the keyboard", async ({ page }) => {
+    await page.goto("/home");
+    await page.getByRole("link", { name: "Browse marketplace" }).click();
+    await expect(page.getByRole("heading", { name: "Marketplace" })).toBeVisible();
+
+    const categoryFilter = page.getByLabel("Category");
+    await categoryFilter.focus();
+    await expect(categoryFilter).toBeFocused();
+
+    const filteredRequest = page.waitForRequest((request) =>
+      request.url().includes("/api/v1/products") && request.url().includes("category=VEGETABLES"),
+    );
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await filteredRequest;
+    await expect(categoryFilter).toHaveValue("VEGETABLES");
+    await expect(categoryFilter).toBeFocused();
+
+    const favoritesToggle = page.getByRole("button", { name: /favorites/i });
+    await favoritesToggle.focus();
+    await expect(favoritesToggle).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(favoritesToggle).toHaveAttribute("aria-pressed", "true");
+    await expect(favoritesToggle).toBeFocused();
+
+    await page.keyboard.press("Space");
+    await expect(favoritesToggle).toHaveAttribute("aria-pressed", "false");
+    await expect(favoritesToggle).toBeFocused();
+  });
 });
