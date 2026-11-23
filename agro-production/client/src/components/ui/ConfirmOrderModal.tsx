@@ -7,7 +7,7 @@ interface ConfirmOrderModalProps {
   open: boolean;
   order: Order | null;
   onClose: () => void;
-  onConfirm: (orderId: string) => Promise<void>;
+  onConfirm: (order: Order) => Promise<{ alreadyConfirmed?: boolean } | void>;
 }
 
 export default function ConfirmOrderModal({
@@ -19,6 +19,7 @@ export default function ConfirmOrderModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [alreadyConfirmed, setAlreadyConfirmed] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 
@@ -26,9 +27,11 @@ export default function ConfirmOrderModal({
     if (!order) return;
     setLoading(true);
     setError(null);
+    setAlreadyConfirmed(false);
 
     try {
-      await onConfirm(order.id);
+      const result = await onConfirm(order);
+      setAlreadyConfirmed(result?.alreadyConfirmed ?? false);
       setSuccess(true);
 
       // Auto-close after success
@@ -120,7 +123,7 @@ export default function ConfirmOrderModal({
             Status: <span className="font-semibold text-foreground">{order.status}</span>
           </p>
           <p className="text-xs text-muted mt-2">
-            Confirming receipt marks this order as received. On-chain escrow funds can only be released by the smart contract.
+            Confirming receipt releases escrow funds only after the on-chain transaction succeeds.
           </p>
         </div>
 
@@ -131,7 +134,11 @@ export default function ConfirmOrderModal({
             role="status"
           >
             <p className="font-semibold">✓ Receipt Confirmed</p>
-            <p className="mt-1 text-xs">Order marked as received.</p>
+            <p className="mt-1 text-xs">
+              {alreadyConfirmed
+                ? "This order was already confirmed. No transaction was sent."
+                : "On-chain receipt confirmation succeeded."}
+            </p>
           </div>
         )}
 

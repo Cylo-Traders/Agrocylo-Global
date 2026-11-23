@@ -36,7 +36,7 @@ import {
 import { useWallet } from "@/hooks/useWallet";
 import { useEscrowContract } from "@/hooks/useEscrowContract";
 import { useSocket } from "@/hooks/useSocket";
-import { getOrder, type Order } from "@/services/stellar/contractService";
+import { getOrderDetails, type Order } from "@/services/stellar/contractService";
 import { formatTruncatedAddress } from "@/lib/helpers/format-address";
 import CountdownTimer from "@/components/orders/CountdownTimer";
 import DisputeForm from "@/components/orders/DisputeForm";
@@ -72,8 +72,8 @@ export default function OrderDetailsPage() {
 
   // Tick expiry state outside render to keep it pure.
   useEffect(() => {
-    if (!order?.createdAt) return;
-    const expirySeconds = order.createdAt + EXPIRY_HOURS * 3600;
+    if (!order?.timestamp) return;
+    const expirySeconds = order.timestamp + EXPIRY_HOURS * 3600;
     let cancelled = false;
     const tick = () => {
       if (!cancelled) {
@@ -86,14 +86,14 @@ export default function OrderDetailsPage() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [order?.createdAt]);
+  }, [order?.timestamp]);
 
   const fetchOrder = useCallback(async () => {
     if (!orderId) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await getOrder(orderId);
+      const res = await getOrderDetails(orderId);
       if (!res.success || !res.data) {
         throw new Error(res.error || "Failed to fetch order");
       }
@@ -145,9 +145,9 @@ export default function OrderDetailsPage() {
   const isFarmer = useMemo(
     () =>
       Boolean(
-        connected && address && order?.seller && address === order.seller,
+        connected && address && order?.farmer && address === order.farmer,
       ),
-    [connected, address, order?.seller],
+    [connected, address, order?.farmer],
   );
 
   const isPending = order?.status === "Pending";
@@ -254,8 +254,8 @@ export default function OrderDetailsPage() {
   }
 
   const totalXlm = (Number(order.amount) / 1e7).toFixed(2);
-  const createdAtLabel = order.createdAt
-    ? new Date(order.createdAt * 1000).toLocaleString()
+  const createdAtLabel = order.timestamp
+    ? new Date(order.timestamp * 1000).toLocaleString()
     : "—";
 
   return (
@@ -281,7 +281,7 @@ export default function OrderDetailsPage() {
             </CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2">
               <AddressBlock label="Buyer" address={order.buyer} />
-              <AddressBlock label="Farmer" address={order.seller} />
+              <AddressBlock label="Farmer" address={order.farmer} />
             </CardContent>
           </Card>
 
@@ -301,7 +301,7 @@ export default function OrderDetailsPage() {
                   label="Expiry"
                   value={
                     isPending ? (
-                      <CountdownTimer createdAt={order.createdAt} />
+                      <CountdownTimer createdAt={order.timestamp} />
                     ) : (
                       "—"
                     )

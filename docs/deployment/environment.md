@@ -121,18 +121,23 @@ guidance and no secret echo (see `client/.env.example`).
 | `NEXT_PUBLIC_HORIZON_URL` | optional (validated if set; dev fallback `https://horizon-testnet.stellar.org`) | Horizon endpoint; overrides the per-network default in `src/lib/stellar.ts`. Same `https://` (local `http://`) scheme rules as RPC; malformed values fail fast. |
 | `NEXT_PUBLIC_NETWORK_PASSPHRASE` | ✅ prod / optional dev (defaults to `Test SDF Network ; September 2015`) | Stellar passphrase. Must match RPC. In `mainnet` mode an unset or testnet value is a hard build/runtime error — no silent fallback to testnet (see `src/services/stellar/networkConfig.ts`). |
 | `NEXT_PUBLIC_STELLAR_NETWORK` | | `testnet` / `mainnet` selector |
-| `NEXT_PUBLIC_CONTRACT_ID` | ✅ | marketplace escrow contract |
+| `NEXT_PUBLIC_CONTRACT_ID` | ✅ production | Marketplace escrow; source from `deployments/deployed-addresses.<network>.json → contracts.escrow.id` |
 | `NEXT_PUBLIC_ESCROW_CONTRACT_ID` | | explicit escrow alias |
 | `NEXT_PUBLIC_MARKET_CONTRACT_ID` | | market contract (if split) |
-| `NEXT_PUBLIC_NATIVE_TOKEN_CONTRACT_ID` | ✅ | XLM SAC — required by `/orders/new` |
-| `NEXT_PUBLIC_TOKEN_CONTRACT_ID_USDC` | | USDC SAC (checkout), default `CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA` on testnet |
+| `NEXT_PUBLIC_NATIVE_TOKEN_CONTRACT_ID` | ✅ production | XLM Stellar Asset Contract (SAC); required by `/orders/new` |
+| `NEXT_PUBLIC_TOKEN_CONTRACT_ID_USDC` | if using USDC | USDC SAC; example value is documented in `client/.env.example` |
 | `NEXT_PUBLIC_MAX_FEE_STROOPS` | | tx fee ceiling |
 | `NEXT_PUBLIC_AGRO_PRODUCTION_URL` | | nav link to sub-app |
 | `NEXT_PUBLIC_APP_URL` | | canonical app URL |
 | `NEXT_PUBLIC_MAP_TILE_URL`, `NEXT_PUBLIC_MAP_TILE_ATTRIBUTION` | | Leaflet tile URL/attribution (defaults to OpenStreetMap) |
 | `NEXT_PUBLIC_ANALYTICS_ENABLED`, `NEXT_PUBLIC_ANALYTICS_ENDPOINT` | | first-party analytics |
 | `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_DSN` | | error reporting |
-| `NEXT_PUBLIC_DEMO_MODE` | | deterministic dummy data (E2E/dev only) |
+| `NEXT_PUBLIC_DEMO_MODE` | ✅ production (`false`) | Deterministic dummy data (E2E/dev only); production builds reject `true` or a missing value |
+
+These values are compiled into the browser bundle. Supply them as Docker
+build arguments (not only container runtime environment variables). Local
+Compose defaults are testnet-only; production CI must provide the target
+network's escrow and token contract IDs.
 
 ### `agro-production/server/` (port 5001)
 

@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { rpc } from "@stellar/stellar-sdk";
 import { buildFeeForTransaction } from "./contractService";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 // Minimal mock of SimulateTransactionSuccessResponse
 function makeSim(minResourceFee: string | number) {
@@ -14,6 +17,35 @@ describe("buildFeeForTransaction", () => {
     // BASE_FEE is 100 stroops; a simulated 500 should be returned as-is
     const fee = buildFeeForTransaction(makeSim(500));
     expect(fee).toBe("500");
+  });
+
+  describe("escrow ABI conformance", () => {
+    it("uses only entry points exported by the Rust escrow contract", () => {
+      const repositoryRoot = path.resolve(
+        path.dirname(fileURLToPath(import.meta.url)),
+        "../../../../",
+      );
+      const service = readFileSync(
+        path.join(repositoryRoot, "client/src/services/stellar/contractService.ts"),
+        "utf8",
+      );
+      const contract = readFileSync(
+        path.join(repositoryRoot, "contracts/escrow/src/lib.rs"),
+        "utf8",
+      );
+      const exportedMethods = new Set(
+        [...contract.matchAll(/\bpub\s+fn\s+([a-z_]+)\s*\(/g)].map((match) => match[1]),
+      );
+      const invokedMethods = new Set([
+        ...[...service.matchAll(/contract\.call\(\s*"([a-z_]+)"/g)].map((match) => match[1]),
+        ...[...service.matchAll(/buildTransaction\(\s*[^,]+,\s*"([a-z_]+)"/g)].map((match) => match[1]),
+      ]);
+
+      expect(invokedMethods.size).toBeGreaterThan(0);
+      for (const method of invokedMethods) {
+        expect(exportedMethods.has(method), `${method} must be exported by escrow`).toBe(true);
+      }
+    });
   });
 
   it("returns BASE_FEE when simulated resource fee is lower", () => {

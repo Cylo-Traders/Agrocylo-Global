@@ -45,7 +45,7 @@ export default function DisputeActionModal({
   onClose,
   onSuccess,
 }: DisputeActionModalProps) {
-  const { resolveDispute, splitFunds, resolveState, splitState } =
+  const { resolveDispute, resolveSplitDispute, resolveState, splitState } =
     useEscrowContract();
 
   const [resolutionType, setResolutionType] = useState<ResolutionType>("refund");
@@ -69,11 +69,11 @@ export default function DisputeActionModal({
     setError(null);
     try {
       if (resolutionType === "refund") {
-        await resolveDispute(orderIdOnChain, true);
+        await resolveDispute(orderIdOnChain, { tag: "Refund" });
       } else if (resolutionType === "release") {
-        await resolveDispute(orderIdOnChain, false);
+        await resolveDispute(orderIdOnChain, { tag: "Release" });
       } else {
-        await splitFunds(orderIdOnChain, buyerStroops, farmerStroops);
+        await resolveSplitDispute(orderIdOnChain, buyerStroops, farmerStroops);
       }
       onSuccess();
     } catch (err) {

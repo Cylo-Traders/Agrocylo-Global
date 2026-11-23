@@ -84,6 +84,28 @@ const APPS = [
   },
 ];
 
+const MARKETPLACE_BUILD_PUBLIC_VARS = [
+  "NEXT_PUBLIC_API_URL",
+  "NEXT_PUBLIC_SOROBAN_RPC_URL",
+  "NEXT_PUBLIC_HORIZON_URL",
+  "NEXT_PUBLIC_NETWORK_PASSPHRASE",
+  "NEXT_PUBLIC_STELLAR_ENV",
+  "NEXT_PUBLIC_CONTRACT_ID",
+  "NEXT_PUBLIC_ESCROW_CONTRACT_ID",
+  "NEXT_PUBLIC_MARKET_CONTRACT_ID",
+  "NEXT_PUBLIC_NATIVE_TOKEN_CONTRACT_ID",
+  "NEXT_PUBLIC_TOKEN_CONTRACT_ID_USDC",
+  "NEXT_PUBLIC_MAX_FEE_STROOPS",
+  "NEXT_PUBLIC_AGRO_PRODUCTION_URL",
+  "NEXT_PUBLIC_APP_URL",
+  "NEXT_PUBLIC_MAP_TILE_URL",
+  "NEXT_PUBLIC_MAP_TILE_ATTRIBUTION",
+  "NEXT_PUBLIC_ANALYTICS_ENABLED",
+  "NEXT_PUBLIC_ANALYTICS_ENDPOINT",
+  "NEXT_PUBLIC_SENTRY_DSN",
+  "NEXT_PUBLIC_DEMO_MODE",
+];
+
 const SOURCE_EXT = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]);
 const IGNORE_DIR = new Set(["node_modules", ".next", "dist", "build", "coverage", ".turbo"]);
 const isTestFile = (f) => /\.(test|spec|e2e)\.[cm]?[jt]sx?$/.test(f) || /(^|\/)__tests__\//.test(f);
@@ -193,6 +215,40 @@ function main() {
     } else {
       console.log(`✓ ${app.name}  (${declared.size} vars, in sync)`);
     }
+  }
+
+  const dockerfile = fs.readFileSync(
+    path.join(REPO_ROOT, "client/Dockerfile"),
+    "utf8",
+  );
+  const compose = fs.readFileSync(
+    path.join(REPO_ROOT, "docker-compose.yml"),
+    "utf8",
+  );
+  const deployWorkflow = fs.readFileSync(
+    path.join(REPO_ROOT, ".github/workflows/deploy.yml"),
+    "utf8",
+  );
+  const buildProblems = [];
+  for (const variable of MARKETPLACE_BUILD_PUBLIC_VARS) {
+    if (!new RegExp(`^ARG ${variable}(?:=|\\s|$)`, "m").test(dockerfile)) {
+      buildProblems.push(`  client/Dockerfile is missing ARG ${variable}`);
+    }
+    if (!new RegExp(`\\b${variable}\\s*:`, "m").test(compose)) {
+      buildProblems.push(`  docker-compose.yml does not pass ${variable} to the client build`);
+    }
+    if (!deployWorkflow.includes(variable)) {
+      buildProblems.push(`  deploy workflow does not pass ${variable} to Docker builds`);
+    }
+  }
+  if (buildProblems.length > 0) {
+    hadDrift = true;
+    console.error("✗ marketplace build-time public environment");
+    for (const problem of buildProblems) console.error(problem);
+  } else {
+    console.log(
+      `✓ marketplace build-time public environment (${MARKETPLACE_BUILD_PUBLIC_VARS.length} vars wired)`,
+    );
   }
 
   if (hadDrift) {

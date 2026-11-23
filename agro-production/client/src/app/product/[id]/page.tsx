@@ -6,7 +6,7 @@ import { useParams, notFound } from "next/navigation";
 import { fetchProduct, formatPrice } from "@/services/productService";
 import { useTransaction } from "@/hooks/useTransaction";
 import { buildCreateOrder } from "@/lib/contractService";
-import { createOrder } from "@/services/orderService";
+import { createOrder, updateOrderWithTxHash } from "@/services/orderService";
 import { useWallet } from "@/context/WalletContext";
 import WalletConnect from "@/components/WalletConnect";
 import { validateQuantity, sanitizeString } from "@/lib/validation";
@@ -67,40 +67,37 @@ export default function ProductDetailPage() {
   const totalPrice = unitPrice * BigInt(quantity);
 
   /**
-   * Order lifecycle: draft → submitted → confirmed | failed
-   * 1. Create off-chain order record via createOrder
-   * 2. Build unsigned transaction via buildCreateOrder
-   * 3. Sign and submit via signAndSubmitTransaction (handled by useTransaction)
-   * 4. On success, order status moves to confirmed
+   * Build the transaction before creating its backend intent, then link the
+   * submitted hash immediately so the indexer can reconcile either arrival order.
    */
   async function handleOrder() {
     if (!address || !product) return;
 
     const campaignId = product.campaignId ?? "0";
+    let orderId: string | null = null;
 
     // Quantity validation already occurred via quantityError state
     if (quantityError) return;
 
     // Pass a builder function to tx.execute that will:
-    // 1. Create off-chain order record
-    // 2. Build the transaction XDR
+    // 1. Build the transaction XDR
+    // 2. Create the off-chain intent before broadcasting
     await tx.execute(async () => {
       try {
-        // Step 1: Create off-chain order record
-        const order = await createOrder({
-          buyerAddress: address,
-          campaignId: sanitizeString(campaignId),
-          amount: String(totalPrice),
-        });
-        setCreatedOrder(order);
-
-        // Step 2: Build transaction with the same amount (no floating-point issues with BigInt)
+        // Build with the same amount (no floating-point issues with BigInt).
         const builtResult = await buildCreateOrder(address, campaignId, totalPrice);
         if (!builtResult.success || !builtResult.data) {
           const classified = classifyError(builtResult.error, "buildOrderTransaction");
           throw new Error(builtResult.error ?? classified.actionableMessage);
         }
 
+        const order = await createOrder({
+          buyerAddress: address,
+          campaignId: sanitizeString(campaignId),
+          amount: String(totalPrice),
+        });
+        orderId = order.id;
+        setCreatedOrder(order);
         return builtResult.data;
       } catch (err) {
         const classified = classifyError(err, "productCheckout");
@@ -115,6 +112,20 @@ export default function ProductDetailPage() {
         });
         throw err;
       }
+    }, {
+      intent: `create_order:${campaignId}:${address}:${totalPrice}`,
+      onSubmitted: async (txHash) => {
+        if (orderId) {
+          try {
+            await updateOrderWithTxHash(orderId, txHash);
+          } catch (error) {
+            throw new Error(
+              `The order transaction was submitted (${txHash}), but its backend reconciliation link could not be saved. Check your orders before retrying.`,
+              { cause: error },
+            );
+          }
+        }
+      },
     });
   }
 

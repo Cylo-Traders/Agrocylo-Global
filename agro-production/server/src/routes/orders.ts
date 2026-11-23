@@ -1,5 +1,5 @@
 import { Router, type Response } from 'express';
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { prisma } from '../db/client.js';
 import {
@@ -196,7 +196,9 @@ router.post(
           eventType: 'order.created_intent',
           payload: { idempotencyKey, intent: true, intentId },
           ledger: 0,
-          eventIndex: 0,
+          // Negative indexes are reserved for off-chain intents; chain events
+          // use non-negative indexes from their ledger.
+          eventIndex: -randomInt(1, 2_147_483_647),
           txHash: null,
         },
       });
@@ -246,7 +248,7 @@ router.get(
   }),
 );
 
-// PUT /orders/:id — update txHash after on-chain confirmation
+// PUT /orders/:id — associate a submitted transaction with its order intent
 router.put(
   '/orders/:id',
   requireWallet,
@@ -274,9 +276,46 @@ router.put(
       return;
     }
 
-    const updated = await prisma.order.update({
-      where: { id: order.id },
-      data: { txHash: (req.body as { txHash: string }).txHash },
+    const txHash = (req.body as { txHash: string }).txHash;
+    const updated = await prisma.$transaction(async (tx) => {
+      const intentTransactions = await tx.transaction.findMany({
+        where: {
+          campaignId: order.campaignId,
+          eventType: 'order.created_intent',
+          txHash: null,
+        },
+        select: { id: true, payload: true },
+      });
+      for (const intentTransaction of intentTransactions) {
+        const payload = intentTransaction.payload;
+        if (
+          payload &&
+          typeof payload === 'object' &&
+          'intentId' in payload &&
+          payload.intentId === order.onChainId
+        ) {
+          await tx.transaction.update({
+            where: { id: intentTransaction.id },
+            data: { txHash },
+          });
+        }
+      }
+
+      const indexedOrder = await tx.order.findFirst({
+        where: {
+          txHash,
+          onChainId: { not: order.onChainId },
+        },
+      });
+      if (indexedOrder && order.onChainId.startsWith('intent:')) {
+        await tx.order.delete({ where: { id: order.id } });
+        return indexedOrder;
+      }
+
+      return tx.order.update({
+        where: { id: order.id },
+        data: { txHash },
+      });
     });
 
     jsonValidated(res, OrderSchema, 200, updated);
@@ -290,6 +329,7 @@ router.patch(
   requireWallet,
   writeLimiter,
   validateParams(OrderIdParamSchema),
+  validateBody(z.object({ txHash: z.string() })),
   validateResponse(OrderSchema),
   asyncHandler(async (req: WalletRequest, res: Response) => {
     const walletAddress = req.walletAddress!;
@@ -311,6 +351,10 @@ router.patch(
       problemDetail(res, req, 403, 'Forbidden', 'Not the buyer for this order');
       return;
     }
+    if (order.status === 'CONFIRMED') {
+      jsonValidated(res, OrderSchema, 200, order);
+      return;
+    }
     if (order.status !== 'PENDING') {
       problemDetail(
         res,
@@ -322,9 +366,34 @@ router.patch(
       return;
     }
 
+    const txHash = (req.body as { txHash: string }).txHash;
+    const indexedConfirmation = await prisma.transaction.findFirst({
+      where: { eventType: 'order.confirmed', txHash },
+      select: { payload: true },
+    });
+    const payload = indexedConfirmation?.payload;
+    if (
+      !payload ||
+      typeof payload !== 'object' ||
+      !('orderId' in payload) ||
+      payload.orderId !== order.onChainId
+    ) {
+      problemDetail(
+        res,
+        req,
+        409,
+        'Confirmation Not Indexed',
+        'The successful on-chain confirmation is not indexed yet. Refresh the order after the indexer catches up.',
+      );
+      return;
+    }
+
     const updated = await prisma.order.update({
       where: { id: order.id },
-      data: { status: 'CONFIRMED' },
+      data: {
+        status: 'CONFIRMED',
+        txHash,
+      },
     });
 
     jsonValidated(res, OrderSchema, 200, updated);

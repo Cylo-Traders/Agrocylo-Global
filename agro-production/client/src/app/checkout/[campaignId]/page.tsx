@@ -96,13 +96,55 @@ export default function CheckoutPage() {
       return;
     }
 
+    let order: Order;
+    try {
+      // Register the intent before broadcasting so the indexer can reconcile
+      // the eventual order.created event even when indexing is very fast.
+      order = await createOrder({
+        buyerAddress: addrResult.sanitized,
+        campaignId: sanitizeString(campaign.id),
+        amount: String(amountStroops),
+      });
+      setCreatedOrder(order);
+    } catch (err) {
+      const classified = classifyError(err, "recordOrderIntent");
+      logErrorWithContext(err, {
+        feature: "checkout",
+        action: "recordOrderIntent",
+        campaignId: campaign.id,
+        buyerAddress: addrResult.sanitized,
+        amountStroops: String(amountStroops),
+        category: classified.category,
+      });
+      setTx(advanceMachine(current, "failed", { error: classified.actionableMessage }));
+      return;
+    }
+
     // Step 2 — sign
     current = advanceMachine(current, "signing");
     setTx(current);
 
+    let reconciliationError: string | null = null;
     const result = await signAndSubmitTransaction(builtResult.data, undefined, {
       intent: `create_order:${campaign.onChainId}:${addrResult.sanitized}:${amountStroops}`,
+      onSubmitted: async (txHash) => {
+        try {
+          await updateOrderWithTxHash(order.id, txHash);
+        } catch (err) {
+          reconciliationError =
+            `The transaction hash (${txHash}) could not be linked to the order. Check your orders before retrying.`;
+          logErrorWithContext(err, {
+            feature: "checkout",
+            action: "updateOrderTxHash",
+            orderId: order.id,
+            txHash,
+          });
+        }
+      },
     });
+
+    current = advanceMachine(current, "submitting");
+    setTx(current);
 
     if (result.outcome === "pending") {
       // Submitted but not confirmed within the poll window — NOT failed. Show it
@@ -111,7 +153,7 @@ export default function CheckoutPage() {
       setTx(
         advanceMachine(current, "pending", {
           txHash: result.txHash,
-          error:
+          error: reconciliationError ??
             result.error ??
             "Your order was submitted and is awaiting confirmation. Do not submit again.",
         }),
@@ -131,53 +173,27 @@ export default function CheckoutPage() {
         status: result.status,
         category: classified.category,
       });
-      setTx(advanceMachine(current, "failed", { error: classified.actionableMessage }));
+      setTx(
+        advanceMachine(current, "failed", {
+          error: reconciliationError
+            ? `${classified.actionableMessage} ${reconciliationError}`
+            : classified.actionableMessage,
+        }),
+      );
       return;
     }
-
-    // Step 3 — submit
-    current = advanceMachine(current, "submitting");
-    setTx(current);
 
     // Step 4 — confirm (immediate for Stellar test network)
     current = advanceMachine(current, "confirming");
     setTx(current);
 
-    // Step 5 — record off-chain after confirmation
-    let order: Order;
-    try {
-      order = await createOrder({
-        buyerAddress: addrResult.sanitized,
-        campaignId: sanitizeString(campaign.id),
-        amount: String(amountStroops),
-      });
-      setCreatedOrder(order);
-
-      // Update order with transaction hash
-      if (result.txHash) {
-        try {
-          await updateOrderWithTxHash(order.id, result.txHash);
-        } catch (err) {
-          logErrorWithContext(err, {
-            feature: "checkout",
-            action: "updateOrderTxHash",
-            orderId: order.id,
-            txHash: result.txHash,
-          });
-        }
-      }
-    } catch (err) {
-      const classified = classifyError(err, "recordOrder");
-      logErrorWithContext(err, {
-        feature: "checkout",
-        action: "recordOrder",
-        campaignId: campaign.id,
-        buyerAddress: addrResult.sanitized,
-        amountStroops: String(amountStroops),
-        txHash: result.txHash,
-        category: classified.category,
-      });
-      setTx(advanceMachine(current, "failed", { error: classified.actionableMessage }));
+    if (reconciliationError) {
+      setTx(
+        advanceMachine(current, "failed", {
+          txHash: result.txHash,
+          error: `The order transaction was confirmed, but ${reconciliationError}`,
+        }),
+      );
       return;
     }
 

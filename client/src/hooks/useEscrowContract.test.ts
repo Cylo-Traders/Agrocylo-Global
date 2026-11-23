@@ -23,14 +23,14 @@ const mockWallet: WalletContextType = {
 };
 
 vi.mock("@/services/stellar/contractService", () => ({
-  confirmDelivery: vi.fn(() =>
+  confirmReceipt: vi.fn(() =>
     Promise.resolve({
       success: true,
       data: "AAAA...",
       error: null,
     }),
   ),
-  refundOrder: vi.fn(() =>
+  refundExpiredOrder: vi.fn(() =>
     Promise.resolve({
       success: true,
       data: "BBBB...",
@@ -50,10 +50,10 @@ vi.mock("@/services/stellar/contractService", () => ({
   resolveDispute: vi.fn(() =>
     Promise.resolve({ success: true, data: "EEEE...", error: null }),
   ),
-  splitFunds: vi.fn(() =>
+  resolveSplitDispute: vi.fn(() =>
     Promise.resolve({ success: true, data: "FFFF...", error: null }),
   ),
-  getOrder: vi.fn(),
+  getOrderDetails: vi.fn(),
 }));
 
 vi.mock("@/lib/testMode", () => ({
@@ -238,9 +238,9 @@ describe("useEscrowContract", () => {
         case "dispute":
           return api.openDispute("order-1", "reason", "evidence");
         case "resolve":
-          return api.resolveDispute("order-1", true);
+          return api.resolveDispute("order-1", { tag: "Refund" });
         case "split":
-          return api.splitFunds("order-1", 1n, 1n);
+          return api.resolveSplitDispute("order-1", 1n, 1n);
         case "refund":
           return api.requestRefund("order-1");
         default:

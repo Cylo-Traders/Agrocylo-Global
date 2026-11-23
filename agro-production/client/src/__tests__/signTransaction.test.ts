@@ -54,6 +54,17 @@ describe("signAndSubmitTransaction wallet boundary", () => {
     expect(doubles.adapter.signTransaction).toHaveBeenCalledWith("XDR", {
       networkPassphrase: "Test SDF Network ; September 2015",
     });
+
+    it("persists the intent hash immediately after broadcast, before confirmation polling", async () => {
+      const onSubmitted = vi.fn(async () => {});
+
+      await signAndSubmitTransaction("XDR", undefined, { onSubmitted });
+
+      expect(onSubmitted).toHaveBeenCalledWith("TXHASH");
+      expect(onSubmitted.mock.invocationCallOrder[0]).toBeLessThan(
+        doubles.getTransaction.mock.invocationCallOrder[0]!,
+      );
+    });
     expect(doubles.sendTransaction).toHaveBeenCalledWith("XDR");
   });
 

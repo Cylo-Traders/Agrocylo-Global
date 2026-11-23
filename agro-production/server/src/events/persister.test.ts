@@ -53,7 +53,9 @@ vi.mock('../db/client.js', () => {
         campaignId: 'camp-uuid',
         amount: '500',
       }),
+      findFirst: vi.fn().mockResolvedValue(null),
       update: vi.fn().mockResolvedValue({}),
+      delete: vi.fn().mockResolvedValue({}),
     },
     basket: {
       upsert: vi.fn().mockResolvedValue({ id: 'basket-uuid' }),
@@ -77,6 +79,7 @@ vi.mock('../db/client.js', () => {
     },
     transaction: {
       findUnique: vi.fn().mockResolvedValue(null),
+      findFirst: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({}),
     },
   };
@@ -419,6 +422,119 @@ describe('EventPersister', () => {
       const { prisma } = await import('../db/client.js');
 
       await EventPersister.persist(makeOrderCreated());
+
+      expect(prisma.$transaction).toHaveBeenCalledOnce();
+    });
+
+    it('replaces a matching intent placeholder with authoritative chain data', async () => {
+      const { prisma } = await import('../db/client.js');
+      const updatePlaceholder = vi.fn().mockResolvedValue({});
+      vi.mocked(prisma.$transaction).mockImplementationOnce(
+        async (fn: (tx: any) => Promise<unknown>) =>
+          fn({
+            user: { upsert: vi.fn().mockResolvedValue({}) },
+            campaign: {
+              findUnique: vi.fn().mockResolvedValue({
+                id: 'camp-uuid',
+                farmerAddress: 'GFARMER',
+              }),
+            },
+            transaction: {
+              findUnique: vi.fn().mockResolvedValue(null),
+              findFirst: vi.fn().mockResolvedValue({
+                payload: { intentId: 'intent:known' },
+              }),
+              create: vi.fn().mockResolvedValue({}),
+            },
+            order: {
+              findUnique: vi.fn(({ where }: { where: { onChainId: string } }) =>
+                Promise.resolve(
+                  where.onChainId === 'intent:known'
+                    ? { id: 'placeholder-id', onChainId: 'intent:known' }
+                    : null,
+                ),
+              ),
+              update: updatePlaceholder,
+              upsert: vi.fn().mockResolvedValue({}),
+              delete: vi.fn(),
+            },
+          }),
+      );
+
+      await EventPersister.persist(
+        makeOrderCreated({ txHash: 'order-tx-hash', ledger: 205 }),
+      );
+
+      expect(updatePlaceholder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'placeholder-id' },
+          data: expect.objectContaining({
+            onChainId: '10',
+            txHash: 'order-tx-hash',
+            ledger: 205,
+            amount: '500',
+            status: 'PENDING',
+          }),
+        }),
+      );
+    });
+
+    it('inserts indexed orders when no intent placeholder exists', async () => {
+      const { prisma } = await import('../db/client.js');
+      await EventPersister.persist(
+        makeOrderCreated({ orderId: '11', txHash: 'backfill-hash' }),
+      );
+
+      expect(prisma.$transaction).toHaveBeenCalledOnce();
+    });
+
+    it('does not regress an indexed order status when its create event is replayed', async () => {
+      const { prisma } = await import('../db/client.js');
+      const upsertOrder = vi.fn().mockResolvedValue({});
+      vi.mocked(prisma.$transaction).mockImplementationOnce(
+        async (fn: (tx: any) => Promise<unknown>) =>
+          fn({
+            user: { upsert: vi.fn().mockResolvedValue({}) },
+            campaign: {
+              findUnique: vi.fn().mockResolvedValue({
+                id: 'camp-uuid',
+                farmerAddress: 'GFARMER',
+              }),
+            },
+            transaction: {
+              findUnique: vi.fn().mockResolvedValue(null),
+              findFirst: vi.fn().mockResolvedValue(null),
+              create: vi.fn().mockResolvedValue({}),
+            },
+            order: {
+              findUnique: vi.fn().mockResolvedValue({
+                id: 'order-id',
+                onChainId: '10',
+                status: 'CONFIRMED',
+              }),
+              upsert: upsertOrder,
+            },
+          }),
+      );
+
+      await EventPersister.persist(makeOrderCreated());
+
+      expect(upsertOrder).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.not.objectContaining({ status: expect.anything() }),
+        }),
+      );
+    });
+
+    it('skips replayed order.created events without a second order write', async () => {
+      const { prisma } = await import('../db/client.js');
+      vi.mocked(prisma.transaction.findUnique)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'indexed-event' } as never);
+
+      const event = makeOrderCreated({ txHash: 'replay-hash' });
+      await EventPersister.persist(event);
+      await EventPersister.persist(event);
 
       expect(prisma.$transaction).toHaveBeenCalledOnce();
     });

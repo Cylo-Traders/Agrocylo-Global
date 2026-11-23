@@ -51,6 +51,25 @@ Every 5 seconds (`POLL_INTERVAL_MS`):
 - Broadcasts WebSocket notifications for real-time updates
 - Handles all status transitions (PENDING → FUNDED, CONFIRMED, SETTLED, etc.)
 
+#### Order intent reconciliation
+
+1. The API creates an order placeholder with `onChainId = intent:<uuid>` and an
+   `order.created_intent` transaction payload containing that same `intentId`.
+2. The client attaches the submitted transaction hash to both records as soon
+   as the RPC accepts the transaction.
+3. On `order.created`, the persister looks up the intent by transaction hash
+   and replaces the placeholder with the event's real order ID, hash, ledger,
+   amount, buyer, and `PENDING` status. Without a matching intent (for example,
+   a backfill), it upserts the event-derived order by real on-chain ID.
+4. If indexing wins the race before the client attaches the hash, the later
+   hash update removes the duplicate placeholder when it finds the already
+   indexed order. Replayed events update the real-ID upsert and remain
+   idempotent.
+5. A pending intent without an indexed order after 24 hours is reported by the
+   reconciliation sweep for manual review. It is not deleted or marked failed:
+   only ledger evidence can establish whether it succeeded or was cancelled.
+   The failed/cancelled intent status policy remains a maintainer decision.
+
 ### 5. Checkpoint Advance
 After all events in a batch are processed:
 - Advances the checkpoint to `highWaterMark + 1`

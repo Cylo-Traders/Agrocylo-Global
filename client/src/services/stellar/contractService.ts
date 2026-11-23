@@ -2,8 +2,8 @@
  * Soroban Contract Interaction Service
  *
  * Provides typed helpers for every escrow-contract method used by the
- * Agrocylo frontend: creating orders, confirming delivery, requesting
- * refunds, and querying order state.
+ * Agrocylo frontend: creating orders, confirming receipt, requesting
+ * expired-order refunds, and querying order state.
  *
  * All public functions return a {@link ContractResult} that wraps either
  * the decoded return value or a human-readable error so callers never
@@ -70,6 +70,32 @@ function isFeeRelatedError(errorMessage: string): boolean {
 export interface CreateOrderTx {
   txXdr: string;
   orderId: string;
+}
+
+export type DisputeResolution =
+  | { tag: "Refund" }
+  | { tag: "Release" }
+  | { tag: "Split"; buyerShareBps: number };
+
+function disputeResolutionScVal(
+  resolution: DisputeResolution,
+): StellarSdk.xdr.ScVal {
+  if (resolution.tag === "Split") {
+    if (
+      !Number.isInteger(resolution.buyerShareBps) ||
+      resolution.buyerShareBps < 0 ||
+      resolution.buyerShareBps > 10_000
+    ) {
+      throw new Error("Split share must be an integer between 0 and 10000 bps");
+    }
+    return StellarSdk.xdr.ScVal.scvVec([
+      StellarSdk.xdr.ScVal.scvSymbol("Split"),
+      StellarSdk.nativeToScVal(resolution.buyerShareBps, { type: "u32" }),
+    ]);
+  }
+  return StellarSdk.xdr.ScVal.scvVec([
+    StellarSdk.xdr.ScVal.scvSymbol(resolution.tag),
+  ]);
 }
 
 // Re-export Order from canonical location so existing callers don't need to update.
@@ -204,7 +230,7 @@ function decodeOrderStatus(val: StellarSdk.xdr.ScVal): string {
   return "Unknown";
 }
 
-function decodeOrder(val: StellarSdk.xdr.ScVal): Order {
+function decodeOrder(val: StellarSdk.xdr.ScVal, orderId: string): Order {
   if (val.type !== "scvMap" || !val.map) {
     throw new Error("Expected map value for order");
   }
@@ -219,12 +245,13 @@ function decodeOrder(val: StellarSdk.xdr.ScVal): Order {
   };
 
   return {
-    orderId: StellarSdk.scValToNative(get("order_id")),
+    orderId,
     buyer: StellarSdk.Address.fromScVal(get("buyer")).toString(),
-    seller: StellarSdk.Address.fromScVal(get("seller")).toString(),
-    amount: StellarSdk.scValToNative(get("amount")),
+    farmer: StellarSdk.Address.fromScVal(get("farmer")).toString(),
+    token: StellarSdk.Address.fromScVal(get("token")).toString(),
+    amount: BigInt(StellarSdk.scValToNative(get("amount"))),
     status: decodeOrderStatus(get("status")),
-    createdAt: Number(StellarSdk.scValToNative(get("created_at"))),
+    timestamp: Number(StellarSdk.scValToNative(get("timestamp"))),
   };
 }
 
@@ -386,23 +413,23 @@ export async function approveToken(
 }
 
 /**
- * Build a `confirm_delivery` transaction.
+ * Build a `confirm_receipt` transaction.
  *
  * @param buyer   - Stellar public key of the buyer confirming delivery
  * @param orderId - On-chain order identifier
  * @returns Transaction XDR ready for wallet signing
  */
-export async function confirmDelivery(
+export async function confirmReceipt(
   buyer: string,
   orderId: string
 ): Promise<ContractResult<string>> {
   try {
     const tx = await buildTransaction(
       buyer,
-      "confirm_delivery",
+      "confirm_receipt",
       [
         new StellarSdk.Address(buyer).toScVal(),
-        StellarSdk.nativeToScVal(orderId, { type: "symbol" }),
+        StellarSdk.nativeToScVal(BigInt(orderId), { type: "u64" }),
       ],
     );
     return { success: true, data: tx.toXDR() };
@@ -412,23 +439,23 @@ export async function confirmDelivery(
 }
 
 /**
- * Build a `refund_order` transaction.
+ * Build a `refund_expired_order` transaction.
  *
  * @param caller  - Stellar public key of the caller requesting the refund
  * @param orderId - On-chain order identifier
  * @returns Transaction XDR ready for wallet signing
  */
-export async function refundOrder(
+export async function refundExpiredOrder(
   caller: string,
   orderId: string
 ): Promise<ContractResult<string>> {
   try {
     const tx = await buildTransaction(
       caller,
-      "refund_order",
+      "refund_expired_order",
       [
         new StellarSdk.Address(caller).toScVal(),
-        StellarSdk.nativeToScVal(orderId, { type: "symbol" }),
+        StellarSdk.nativeToScVal(BigInt(orderId), { type: "u64" }),
       ],
     );
     return { success: true, data: tx.toXDR() };
@@ -473,12 +500,12 @@ export async function openDispute(
  *
  * @param admin          - Stellar public key of the admin
  * @param orderId        - On-chain order identifier
- * @param resolveToBuyer - True to refund buyer, false to release to farmer
+ * @param resolution - Contract `DisputeResolution` variant
  */
 export async function resolveDispute(
   admin: string,
   orderId: string,
-  resolveToBuyer: boolean
+  resolution: DisputeResolution
 ): Promise<ContractResult<string>> {
   try {
     const tx = await buildTransaction(
@@ -487,7 +514,7 @@ export async function resolveDispute(
       [
         new StellarSdk.Address(admin).toScVal(),
         StellarSdk.nativeToScVal(BigInt(orderId), { type: "u64" }),
-        StellarSdk.nativeToScVal(resolveToBuyer, { type: "bool" }),
+        disputeResolutionScVal(resolution),
       ]
     );
     return { success: true, data: tx.toXDR() };
@@ -497,14 +524,14 @@ export async function resolveDispute(
 }
 
 /**
- * Build a `split_funds` transaction (Admin only).
+ * Resolve a disputed order using the contract's `Split(bps)` outcome.
  *
  * @param admin       - Stellar public key of the admin
  * @param orderId     - On-chain order identifier
  * @param buyerShare  - Amount to refund to buyer
  * @param farmerShare - Amount to release to farmer
  */
-export async function splitFunds(
+export async function resolveSplitDispute(
   admin: string,
   orderId: string,
   buyerShare: bigint,
@@ -513,12 +540,14 @@ export async function splitFunds(
   try {
     const tx = await buildTransaction(
       admin,
-      "split_funds",
+      "resolve_dispute",
       [
         new StellarSdk.Address(admin).toScVal(),
         StellarSdk.nativeToScVal(BigInt(orderId), { type: "u64" }),
-        StellarSdk.nativeToScVal(buyerShare, { type: "i128" }),
-        StellarSdk.nativeToScVal(farmerShare, { type: "i128" }),
+        disputeResolutionScVal({
+          tag: "Split",
+          buyerShareBps: Number((buyerShare * 10_000n) / (buyerShare + farmerShare)),
+        }),
       ]
     );
     return { success: true, data: tx.toXDR() };
@@ -533,7 +562,7 @@ export async function splitFunds(
  * @param orderId - On-chain order identifier
  * @returns Decoded {@link Order} object
  */
-export async function getOrder(
+export async function getOrderDetails(
   orderId: string
 ): Promise<ContractResult<Order>> {
   try {
@@ -554,7 +583,7 @@ export async function getOrder(
     })
       .addOperation(
         contract.call(
-          "get_order",
+          "get_order_details",
           StellarSdk.nativeToScVal(BigInt(orderId), { type: "u64" })
         )
       )
@@ -574,10 +603,10 @@ export async function getOrder(
     const returnVal = successResult.result?.retval;
 
     if (!returnVal) {
-      throw new Error("No return value from get_order");
+      throw new Error("No return value from get_order_details");
     }
 
-    return { success: true, data: decodeOrder(returnVal) };
+    return { success: true, data: decodeOrder(returnVal, orderId) };
   } catch (err) {
     return { success: false, error: (err as Error).message };
   }
