@@ -89,25 +89,7 @@ fn setup_no_mock_auths() -> AuthTestEnv<'static> {
 // Helper: build a minimal authorized-invocation tree for a single call
 // ---------------------------------------------------------------------------
 
-fn single_auth(
-    env: &Env,
-    caller: &Address,
-    fn_name: &str,
-    args: soroban_sdk::Vec<soroban_sdk::Val>,
-) -> soroban_sdk::testutils::MockAuth<'_> {
-    soroban_sdk::testutils::MockAuth {
-        address: caller,
-        invoke: &AuthorizedInvocation {
-            function: AuthorizedFunction::Contract((
-                // The contract address is not checked here — the SDK fills it in.
-                caller.clone(),
-                Symbol::new(env, fn_name),
-                args,
-            )),
-            sub_invocations: &[],
-        },
-    }
-}
+// NOTE: auth helper removed; tests below use env.mock_all_auths() / env.set_auths() directly.
 
 // ---------------------------------------------------------------------------
 // 1. create_campaign: missing farmer authorization is rejected
@@ -121,8 +103,6 @@ fn test_create_campaign_requires_farmer_auth() {
         &t.farmer,
         &t.token_id,
         &100_000i128,
-        &1_000i128,
-        &1_000i128,
         &200_000u64,
     );
     assert!(
@@ -146,8 +126,6 @@ fn test_invest_requires_investor_auth() {
         &t.farmer,
         &t.token_id,
         &100_000i128,
-        &1_000i128,
-        &1_000i128,
         &200_000u64,
     );
     t.env.set_auths(&[]);
@@ -208,19 +186,17 @@ fn test_create_order_wrong_campaign_auth_rejected() {
         &t.farmer,
         &t.token_id,
         &10_000i128,
-        &1_000i128,
-        &1_000i128,
         &200_000u64,
     );
     t.client.invest(&t.investor, &campaign_id, &10_000i128);
     t.client.start_production(&t.farmer, &campaign_id);
-    t.client.mark_harvest(&t.attester, &campaign_id);
+    t.client.mark_harvest(&t.farmer, &t.attester, &campaign_id);
     t.env.set_auths(&[]);
 
     // Try create_order with NO authorization — must fail.
     let result = t
         .client
-        .try_create_order(&t.buyer, &campaign_id, &1_000i128, &t.token_id);
+        .try_create_order(&t.buyer, &campaign_id, &1_000i128);
     assert!(
         result.is_err(),
         "create_order must fail when buyer authorization is absent"
@@ -241,16 +217,14 @@ fn test_cancel_order_requires_owning_buyer() {
         &t.farmer,
         &t.token_id,
         &10_000i128,
-        &1_000i128,
-        &1_000i128,
         &200_000u64,
     );
     t.client.invest(&t.investor, &campaign_id, &10_000i128);
     t.client.start_production(&t.farmer, &campaign_id);
-    t.client.mark_harvest(&t.attester, &campaign_id);
+    t.client.mark_harvest(&t.farmer, &t.attester, &campaign_id);
     let order_id = t
         .client
-        .create_order(&t.buyer, &campaign_id, &1_000i128, &t.token_id);
+        .create_order(&t.buyer, &campaign_id, &1_000i128);
     t.env.set_auths(&[]);
 
     // A different address tries to cancel buyer's order — must fail.

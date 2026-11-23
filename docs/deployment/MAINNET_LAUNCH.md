@@ -143,8 +143,8 @@ Follow `docs/deployment/CONTRACTS.md` §"Deployment Steps" exactly.
 | 2.3 | `initialize` all 4 in dependency order (governance → escrow → registry → basket) | CO | `get_admin` on each; `production_escrow` supported_tokens = mainnet USDC |
 | 2.4 | `set_registry_contract` on escrow | CO | `get_registry_contract` = registry ID |
 | 2.5 | `set_governance_contract` on escrow, registry, basket | CO | `get_governance_contract` x3 |
-| 2.6 | `set_guardian` on escrow, registry, basket = guardian multisig | CO | `get_guardian` x3 = multisig addr |
-| 2.7 | `set_attester` on escrow | CO | `get_attester` = attester addr |
+| 2.6 | `set_guardian` on escrow, registry, basket, production_escrow = guardian multisig | CO | `get_guardian` x4 = multisig addr |
+| 2.7 | `set_attester` on production_escrow | CO | `get_attester` = attester addr |
 | 2.8 | Set Ramp Stage 1 campaign value cap (§8) via init param or governance param | CO | Read back cap = configured value |
 | 2.9 | Freeze `deployments/mainnet.json`, commit to repo, tag `mainnet-deploy-v1` | CO | Commit pushed |
 

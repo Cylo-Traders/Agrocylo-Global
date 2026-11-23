@@ -153,8 +153,8 @@ const PAUSE_GATING_MATRIX: &[(&str, bool, &str)] = &[
     ("get_quorum", false, "Read-only view"),
     (
         "vote_to_resolve",
-        false,
-        "Governance flow (not pause-gated?)",
+        true,
+        "Arbitration resolution must respect emergency pause (#1275)",
     ),
 ];
 

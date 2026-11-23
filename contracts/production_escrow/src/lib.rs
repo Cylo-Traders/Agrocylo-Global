@@ -376,6 +376,15 @@ pub enum DataKey {
     Guardian,
     /// Whether the contract is currently paused (Issue #757).
     Paused,
+    /// Issue #1272: cumulative investor refunds paid out for a campaign.
+    /// Stored separately to preserve existing Campaign deserialization.
+    TotalRefunded(u64),
+    /// Issue #1286: per-token campaign target cap in base units.
+    CampaignValueCap(Address),
+    /// Issue #1286: global active-campaign concurrency limit.
+    MaxActiveCampaigns,
+    /// Issue #1286: count of campaigns occupying active capacity.
+    ActiveCampaignCount,
 }
 
 /// Current on-chain storage layout version (Issue #757). Bump when a stored
@@ -635,6 +644,59 @@ impl ProductionEscrowContract {
         env.storage().instance().get(&DataKey::Guardian)
     }
 
+    /// Issue #1284: read-only getter for deployment verification.
+    pub fn get_attester(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Attester)
+    }
+
+    /// Issue #1286: governance-controlled per-token campaign value cap.
+    pub fn set_campaign_value_cap(
+        env: Env,
+        caller: Address,
+        token: Address,
+        cap: i128,
+    ) -> Result<(), EscrowError> {
+        caller.require_auth();
+        require_governed_caller(&env, &caller)?;
+        if cap <= 0 {
+            return Err(EscrowError::InvalidAmount);
+        }
+        bump_instance(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::CampaignValueCap(token), &cap);
+        Ok(())
+    }
+
+    pub fn get_campaign_value_cap(env: Env, token: Address) -> Option<i128> {
+        env.storage().instance().get(&DataKey::CampaignValueCap(token))
+    }
+
+    /// Issue #1286: governance-controlled active-campaign concurrency limit.
+    pub fn set_max_active_campaigns(env: Env, caller: Address, limit: u32) -> Result<(), EscrowError> {
+        caller.require_auth();
+        require_governed_caller(&env, &caller)?;
+        if limit == 0 {
+            return Err(EscrowError::InvalidAmount);
+        }
+        bump_instance(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxActiveCampaigns, &limit);
+        Ok(())
+    }
+
+    pub fn get_max_active_campaigns(env: Env) -> Option<u32> {
+        env.storage().instance().get(&DataKey::MaxActiveCampaigns)
+    }
+
+    pub fn get_active_campaign_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::ActiveCampaignCount)
+            .unwrap_or(0)
+    }
+
     /// Set the registry contract address. Authorized caller is the governance
     /// contract once configured via `set_governance_contract` (Issue #660);
     /// falls back to admin-only while governance is unset.
@@ -781,6 +843,31 @@ impl ProductionEscrowContract {
             return Err(EscrowError::UnsupportedToken);
         }
 
+        // Issue #1286: on-chain staged-launch exposure controls.
+        if let Some(cap) = env
+            .storage()
+            .instance()
+            .get::<_, i128>(&DataKey::CampaignValueCap(token.clone()))
+        {
+            if target_amount > cap {
+                return Err(EscrowError::InvalidAmount);
+            }
+        }
+        if let Some(limit) = env
+            .storage()
+            .instance()
+            .get::<_, u32>(&DataKey::MaxActiveCampaigns)
+        {
+            let active = env
+                .storage()
+                .instance()
+                .get::<_, u32>(&DataKey::ActiveCampaignCount)
+                .unwrap_or(0);
+            if active >= limit {
+                return Err(EscrowError::InvalidAmount);
+            }
+        }
+
         let mut id: u64 = env
             .storage()
             .instance()
@@ -811,15 +898,35 @@ impl ProductionEscrowContract {
             .extend_ttl(&DataKey::Campaign(id), TTL_THRESHOLD, TTL_EXTEND);
 
         // Register campaign with the registry if configured.
-        // If registry call fails, return error and do not persist campaign (atomic semantics).
+        // If registry call fails, roll back campaign creation.
         if let Some(registry) = env
             .storage()
             .instance()
             .get::<_, Address>(&DataKey::RegistryContract)
         {
             if registry_client::register_campaign(&env, &registry, id, &farmer, None).is_err() {
-                return Err(EscrowError::CampaignNotFound); // Registry call failed
+                env.storage().persistent().remove(&DataKey::Campaign(id));
+                env.storage()
+                    .instance()
+                    .set(&DataKey::CampaignCount, &(id - 1));
+                return Err(EscrowError::InvalidAmount);
             }
+        }
+
+        if env
+            .storage()
+            .instance()
+            .get::<_, u32>(&DataKey::MaxActiveCampaigns)
+            .is_some()
+        {
+            let active = env
+                .storage()
+                .instance()
+                .get::<_, u32>(&DataKey::ActiveCampaignCount)
+                .unwrap_or(0);
+            env.storage()
+                .instance()
+                .set(&DataKey::ActiveCampaignCount, &active.saturating_add(1));
         }
 
         env.events().publish(
@@ -1954,12 +2061,10 @@ impl ProductionEscrowContract {
             return Err(EscrowError::AlreadyClaimed);
         }
 
-        // Remaining escrow = total_raised + revenue - tranches already released.
+        // Remaining escrow = total_raised + revenue - tranches already released - refunded.
         // Rounding dust (due to integer division) goes to the platform fee collector (Issue #455).
-        let pool = checked_add(
-            campaign.total_raised,
-            checked_sub(campaign.total_revenue, campaign.tranche_released)?,
-        )?;
+        let total_refunded = get_total_refunded(&env, campaign_id);
+        let pool = campaign_available_pool(&campaign, total_refunded)?;
         if pool <= 0 {
             return Err(EscrowError::NothingToClaim);
         }
@@ -2084,34 +2189,39 @@ impl ProductionEscrowContract {
             .extend_ttl(&claim_key, TTL_THRESHOLD, TTL_EXTEND);
 
         let token_client = token::Client::new(&env, &campaign.token);
+        let total_refunded = get_total_refunded(&env, campaign_id);
 
         // Determine refund amount based on campaign state at failure time.
         // If no tranches were released, full refund is available.
         if campaign.tranche_released <= 0 {
-            // Full refund: all funds are still in escrow.
-            token_client.transfer(&env.current_contract_address(), &investor, &contribution);
+            let available = campaign_available_pool(&campaign, total_refunded)?;
+            let payout = contribution.min(available);
+            if payout <= 0 {
+                return Err(EscrowError::NothingToClaim);
+            }
+            token_client.transfer(&env.current_contract_address(), &investor, &payout);
+            add_total_refunded(&env, campaign_id, payout)?;
             env.events().publish(
                 (t_campaign(), symbol_short!("refunded")),
-                (campaign_id, investor, contribution),
+                (campaign_id, investor, payout),
             );
-            return Ok(contribution);
+            return Ok(payout);
         }
 
-        // Proportional refund: remaining pool = raised + revenue - released.
-        let pool = checked_add(
-            campaign.total_raised,
-            checked_sub(campaign.total_revenue, campaign.tranche_released)?,
-        )?;
-        if pool <= 0 {
+        // Proportional refund: remaining pool = raised + revenue - released - refunded.
+        let available = campaign_available_pool(&campaign, total_refunded)?;
+        if available <= 0 {
             return Err(EscrowError::NothingToClaim);
         }
 
-        let payout = checked_mul(pool, contribution)? / campaign.total_raised;
+        let base_pool = campaign_available_pool(&campaign, 0)?;
+        let payout = (checked_mul(base_pool, contribution)? / campaign.total_raised).min(available);
         if payout <= 0 {
             return Err(EscrowError::NothingToClaim);
         }
 
         token_client.transfer(&env.current_contract_address(), &investor, &payout);
+        add_total_refunded(&env, campaign_id, payout)?;
 
         env.events().publish(
             (t_campaign(), symbol_short!("refunded")),
@@ -2142,20 +2252,18 @@ impl ProductionEscrowContract {
         if env.storage().persistent().has(&claim_key) {
             return 0;
         }
-        if campaign.tranche_released <= 0 {
-            return contribution;
-        }
-        let pool = match checked_add(
-            campaign.total_raised,
-            checked_sub(campaign.total_revenue, campaign.tranche_released).unwrap_or(0),
-        ) {
+        let total_refunded = get_total_refunded(&env, campaign_id);
+        let available = match campaign_available_pool(&campaign, total_refunded) {
             Ok(p) => p,
             Err(_) => return 0,
         };
-        if pool <= 0 {
+        if available <= 0 {
             return 0;
         }
-        checked_mul(pool, contribution).unwrap_or(0) / campaign.total_raised
+        if campaign.tranche_released <= 0 {
+            return contribution.min(available);
+        }
+        (checked_mul(available, contribution).unwrap_or(0) / campaign.total_raised).min(available)
     }
 
     // -----------------------------------------------------------------------
@@ -2245,10 +2353,8 @@ impl ProductionEscrowContract {
         }
         let token_client = token::Client::new(&env, &campaign.token);
 
-        let pool = checked_add(
-            campaign.total_raised,
-            checked_sub(campaign.total_revenue, campaign.tranche_released)?,
-        )?;
+        let mut total_refunded = get_total_refunded(&env, campaign_id);
+        let initial_available = campaign_available_pool(&campaign, total_refunded)?;
         let full_refund = campaign.tranche_released <= 0;
 
         let mut count: u32 = 0;
@@ -2267,16 +2373,17 @@ impl ProductionEscrowContract {
             if env.storage().persistent().has(&claim_key) {
                 continue;
             }
+            let available = campaign_available_pool(&campaign, total_refunded)?;
+            if available <= 0 {
+                continue;
+            }
             env.storage().persistent().set(&claim_key, &true);
 
             let payout = if full_refund {
-                contribution
+                contribution.min(available)
             } else {
-                if pool <= 0 {
-                    continue;
-                }
-                match checked_mul(pool, contribution) {
-                    Ok(prod) => prod / campaign.total_raised,
+                match checked_mul(initial_available, contribution) {
+                    Ok(prod) => (prod / campaign.total_raised).min(available),
                     Err(_) => continue,
                 }
             };
@@ -2285,8 +2392,20 @@ impl ProductionEscrowContract {
             }
 
             token_client.transfer(&env.current_contract_address(), &investor, &payout);
+            total_refunded = checked_add(total_refunded, payout)?;
             count += 1;
             total = checked_add(total, payout)?;
+        }
+
+        if total > 0 {
+            env.storage()
+                .persistent()
+                .set(&DataKey::TotalRefunded(campaign_id), &total_refunded);
+            env.storage().persistent().extend_ttl(
+                &DataKey::TotalRefunded(campaign_id),
+                TTL_THRESHOLD,
+                TTL_EXTEND,
+            );
         }
 
         // Emit a single summary event for the whole batch.
@@ -2489,6 +2608,7 @@ impl ProductionEscrowContract {
         resolution: DisputeResolution,
     ) -> Result<(), EscrowError> {
         arbitrator.require_auth();
+        require_not_paused(&env)?;
 
         let arbitrators: Vec<Address> = env
             .storage()
@@ -2730,7 +2850,47 @@ fn load_campaign(env: &Env, id: u64) -> Result<Campaign, EscrowError> {
         .ok_or(EscrowError::CampaignNotFound)
 }
 
+fn campaign_is_terminal(status: &CampaignStatus) -> bool {
+    matches!(
+        status,
+        CampaignStatus::Failed | CampaignStatus::Settled
+    )
+}
+
+fn is_active_capacity_campaign(status: &CampaignStatus) -> bool {
+    !campaign_is_terminal(status)
+}
+
+fn release_active_capacity(env: &Env) {
+    if env
+        .storage()
+        .instance()
+        .get::<_, u32>(&DataKey::MaxActiveCampaigns)
+        .is_none()
+    {
+        return;
+    }
+    let active = env
+        .storage()
+        .instance()
+        .get::<_, u32>(&DataKey::ActiveCampaignCount)
+        .unwrap_or(0);
+    env.storage()
+        .instance()
+        .set(&DataKey::ActiveCampaignCount, &active.saturating_sub(1));
+}
+
 fn save_campaign(env: &Env, c: &Campaign) {
+    let prev_status = env
+        .storage()
+        .persistent()
+        .get::<_, Campaign>(&DataKey::Campaign(c.id))
+        .map(|p| p.status);
+    if let Some(prev) = prev_status {
+        if is_active_capacity_campaign(&prev) && campaign_is_terminal(&c.status) {
+            release_active_capacity(env);
+        }
+    }
     env.storage().persistent().set(&DataKey::Campaign(c.id), c);
     env.storage()
         .persistent()
@@ -2788,6 +2948,36 @@ fn refund_split_order_pro_rata(
         }
     }
     Ok(())
+}
+
+fn get_total_refunded(env: &Env, campaign_id: u64) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&DataKey::TotalRefunded(campaign_id))
+        .unwrap_or(0)
+}
+
+fn add_total_refunded(env: &Env, campaign_id: u64, amount: i128) -> Result<(), EscrowError> {
+    let key = DataKey::TotalRefunded(campaign_id);
+    let current = get_total_refunded(env, campaign_id);
+    let updated = checked_add(current, amount)?;
+    env.storage().persistent().set(&key, &updated);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND);
+    Ok(())
+}
+
+fn campaign_available_pool(campaign: &Campaign, total_refunded: i128) -> Result<i128, EscrowError> {
+    let pool = checked_add(
+        campaign.total_raised,
+        checked_sub(campaign.total_revenue, campaign.tranche_released)?,
+    )?;
+    let available = checked_sub(pool, total_refunded)?;
+    if available < 0 {
+        return Ok(0);
+    }
+    Ok(available)
 }
 
 /// Issue #1279: bounded confirmed-volume read. The value is maintained
@@ -2859,12 +3049,11 @@ fn resolve_dispute_internal(
             if farmer_bps > BPS_DENOM as u32 {
                 return Err(EscrowError::InvalidResolution);
             }
-            let pool = checked_add(
-                campaign.total_raised,
-                checked_sub(campaign.total_revenue, campaign.tranche_released)?,
-            )?;
+            let total_refunded = get_total_refunded(env, campaign_id);
+            let pool = campaign_available_pool(&campaign, total_refunded)?;
             if pool > 0 && farmer_bps > 0 {
-                let farmer_cut = checked_div(checked_mul(pool, farmer_bps as i128)?, BPS_DENOM)?;
+                let farmer_cut =
+                    (checked_div(checked_mul(pool, farmer_bps as i128)?, BPS_DENOM)?).min(pool);
                 if farmer_cut > 0 {
                     let token_client = token::Client::new(env, &campaign.token);
                     token_client.transfer(

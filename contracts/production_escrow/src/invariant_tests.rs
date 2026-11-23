@@ -52,6 +52,7 @@ use crate::{
 struct EscrowHarness<'a> {
     env: Env,
     client: ProductionEscrowContractClient<'a>,
+    contract_id: Address,
     token_id: Address,
     admin: Address,
     attester: Address,
@@ -98,6 +99,7 @@ fn make_harness(num_investors: usize) -> EscrowHarness<'static> {
     EscrowHarness {
         env,
         client,
+        contract_id,
         token_id,
         admin,
         attester,
