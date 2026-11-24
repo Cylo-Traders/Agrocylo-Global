@@ -114,7 +114,9 @@ test.describe("Add-to-Cart", () => {
     const addToCartBtn = page
       .getByRole("button", { name: /add to cart/i })
       .first();
-    await addToCartBtn.click().catch(() => {});
+    if (await addToCartBtn.count()) {
+      await addToCartBtn.click();
+    }
 
     // Cart badge should be visible if items exist
     const cartBadge = page.getByText("0").first();

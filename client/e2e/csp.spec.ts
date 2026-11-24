@@ -54,7 +54,7 @@ test("hydrates an interaction without unexpected CSP violations", async ({ page 
   expect(runtimeErrors).toEqual([]);
 
   const consentMessage = page.getByText(
-    "We use analytics to understand how Agrocylo is used",
+    "We use analytics to understand how Cylo is used",
   );
   await page.getByRole("button", { name: "Accept" }).click();
   await expect(consentMessage).not.toBeVisible();

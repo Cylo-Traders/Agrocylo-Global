@@ -6,7 +6,6 @@ import type {
   ProductWriteInput,
 } from "@/types/product";
 
-import { API_BASE_URL } from "@/lib/apiConfig";
 import { apiRequest } from "@/lib/apiHelper";
 import { isTestMode } from "@/lib/testMode";
 
@@ -14,22 +13,70 @@ function productFromJson(json: unknown): Product {
   return json as Product;
 }
 
-async function requestJson<T>(
-  input: RequestInfo | URL,
-  init?: RequestInit,
-): Promise<T> {
-  const res = await fetch(input, init);
-  if (!res.ok) {
-    let message = `Request failed with status ${res.status}`;
-    try {
-      const body = await res.json();
-      message = body?.message || body?.title || message;
-    } catch {
-      // ignore
-    }
-    throw new Error(message);
+function demoProducts(): Product[] {
+  const now = new Date().toISOString();
+  return [
+    {
+      id: "demo-tomatoes",
+      farmer_wallet: "GDEMOFARMER000000000000000000000000000000000000000000",
+      name: "Fresh Tomatoes",
+      category: "Vegetables",
+      price_per_unit: "12.50",
+      currency: "USDC",
+      unit: "kg",
+      stock_quantity: 120,
+      description: "Demo listing available when demo mode is enabled.",
+      location: "Lagos, NG",
+      delivery_window: "2-3 days",
+      is_available: true,
+      image_url: null,
+      created_at: now,
+      updated_at: now,
+    },
+    {
+      id: "demo-yam",
+      farmer_wallet: "GDEMOFARMER000000000000000000000000000000000000000000",
+      name: "Yam Tubers",
+      category: "Tubers",
+      price_per_unit: "8.00",
+      currency: "USDC",
+      unit: "kg",
+      stock_quantity: 80,
+      description: "Demo listing available when demo mode is enabled.",
+      location: "Ibadan, NG",
+      delivery_window: "3-5 days",
+      is_available: true,
+      image_url: null,
+      created_at: now,
+      updated_at: now,
+    },
+  ];
+}
+
+function filterDemoProducts(params: ListProductsParams) {
+  let items = demoProducts();
+  if (params.category) items = items.filter((p) => p.category === params.category);
+  if (params.search) {
+    const q = params.search.toLowerCase();
+    items = items.filter((p) => p.name.toLowerCase().includes(q));
   }
-  return (await res.json()) as T;
+  if (params.priceMin !== undefined) items = items.filter((p) => Number(p.price_per_unit) >= params.priceMin!);
+  if (params.priceMax !== undefined) items = items.filter((p) => Number(p.price_per_unit) <= params.priceMax!);
+  if (params.sort === "price-asc") items = [...items].sort((a, b) => Number(a.price_per_unit) - Number(b.price_per_unit));
+  if (params.sort === "price-desc") items = [...items].sort((a, b) => Number(b.price_per_unit) - Number(a.price_per_unit));
+  const page = params.page ?? 1;
+  const pageSize = params.pageSize ?? 24;
+  return { page, page_size: pageSize, total: items.length, items };
+}
+
+function toQuery(params: Record<string, string | number | boolean | undefined>): string {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === "") continue;
+    qs.set(k, String(v));
+  }
+  const s = qs.toString();
+  return s ? `?${s}` : "";
 }
 
 export type ProductSort =
@@ -55,50 +102,44 @@ export type ListProductsParams = {
 };
 
 export async function listProducts(params: ListProductsParams = {}) {
-  const url = new URL(`${API_BASE_URL}/products`);
-  if (params.farmer) url.searchParams.set("farmer", params.farmer);
-  if (params.category) url.searchParams.set("category", params.category);
-  if (params.categories && params.categories.length > 0) {
-    url.searchParams.set("categories", params.categories.join(","));
-  }
-  if (params.search) url.searchParams.set("q", params.search);
-  if (params.page) url.searchParams.set("page", String(params.page));
-  if (params.pageSize)
-    url.searchParams.set("page_size", String(params.pageSize));
-  if (params.includeUnavailable)
-    url.searchParams.set("include_unavailable", "true");
-  if (params.priceMin !== undefined)
-    url.searchParams.set("price_min", String(params.priceMin));
-  if (params.priceMax !== undefined)
-    url.searchParams.set("price_max", String(params.priceMax));
-  if (params.ratingMin !== undefined)
-    url.searchParams.set("rating_min", String(params.ratingMin));
-  if (params.location) url.searchParams.set("location", params.location);
-  if (params.inStockOnly) url.searchParams.set("in_stock", "true");
-  if (params.maxAgeDays !== undefined)
-    url.searchParams.set("max_age_days", String(params.maxAgeDays));
-  if (params.stockMin !== undefined)
-    url.searchParams.set("stock_min", String(params.stockMin));
-  if (params.sort) url.searchParams.set("sort", params.sort);
+  if (isTestMode()) return filterDemoProducts(params);
 
-  return await requestJson<{
+  const query = toQuery({
+    farmer: params.farmer,
+    category: params.category,
+    categories: params.categories?.length ? params.categories.join(",") : undefined,
+    q: params.search,
+    page: params.page,
+    page_size: params.pageSize,
+    include_unavailable: params.includeUnavailable ? true : undefined,
+    price_min: params.priceMin,
+    price_max: params.priceMax,
+    rating_min: params.ratingMin,
+    location: params.location,
+    in_stock: params.inStockOnly ? true : undefined,
+    max_age_days: params.maxAgeDays,
+    stock_min: params.stockMin,
+    sort: params.sort,
+  });
+
+  return await apiRequest<{
     page: number;
     page_size: number;
     items: Product[];
     total?: number;
-  }>(url);
+  }>(`/products${query}`, { method: "GET" });
 }
 
 export async function getProductById(
   productId: string,
 ): Promise<Product | null> {
+  if (isTestMode()) return demoProducts().find((p) => p.id === productId) ?? null;
   try {
-    const json = await requestJson<unknown>(
-      `${API_BASE_URL}/products/${productId}`,
-    );
+    const json = await apiRequest<unknown>(`/products/${productId}`, { method: "GET" });
     return productFromJson(json);
   } catch (err) {
-    if (err instanceof Error && /404|not found/i.test(err.message)) return null;
+    const anyErr = err as { status?: number; message?: string };
+    if (anyErr?.status === 404 || /404|not found/i.test(anyErr?.message || "")) return null;
     throw err;
   }
 }
@@ -198,19 +239,15 @@ export async function adminSetProductVisibility(
   productId: string,
   isAvailable: boolean,
 ): Promise<Product> {
-  return requestJson<Product>(
-    `${API_BASE_URL}/admin/products/${productId}/visibility`,
-    {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ is_available: isAvailable }),
-    },
-  );
+  return apiRequest<Product>(`/admin/products/${productId}/visibility`, {
+    method: "PATCH",
+    body: { is_available: isAvailable },
+  });
 }
 
 /** Admin: permanently delist (hard-delete) a product. */
 export async function adminDelistProduct(productId: string): Promise<void> {
-  await requestJson<void>(`${API_BASE_URL}/admin/products/${productId}`, {
+  await apiRequest<void>(`/admin/products/${productId}`, {
     method: "DELETE",
   });
 }

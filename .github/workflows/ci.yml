@@ -153,6 +153,12 @@ jobs:
       - name: Shared dependency policy check
         run: npm run check:versions
 
+      - name: Documentation label drift check
+        run: node scripts/check-doc-labels.js
+
+      - name: API contract coverage check
+        run: node scripts/check-api-contract.js
+
       - name: Doctor · both clients resolve Next.js inside the bundler root
         run: node scripts/doctor-next.js
 

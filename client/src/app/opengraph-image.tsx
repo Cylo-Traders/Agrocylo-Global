@@ -86,7 +86,7 @@ export default function OgImage() {
               letterSpacing: "-0.02em",
             }}
           >
-            AgroCylo
+            Cylo
           </span>
         </div>
 

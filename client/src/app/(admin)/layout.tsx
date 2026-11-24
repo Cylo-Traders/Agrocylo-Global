@@ -8,7 +8,7 @@ import { SkipLink } from "@/components/shared/skip-link";
 
 export const metadata = {
   title: {
-    template: "%s | AgroCylo Admin",
+    template: "%s | Cylo Admin",
     default: "Admin",
   },
 };

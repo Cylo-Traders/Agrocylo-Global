@@ -230,7 +230,7 @@ export default function ProductFormModal({
             {mode === "add" ? "Add Product" : "Edit Listing"}
           </DialogTitle>
           <DialogDescription>
-            Listings on AgroCylo can be priced in XLM or USDC and are
+            Listings on Cylo can be priced in XLM or USDC and are
             settled by the Soroban escrow when a buyer confirms receipt.
           </DialogDescription>
         </DialogHeader>

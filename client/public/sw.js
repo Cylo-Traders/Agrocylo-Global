@@ -79,7 +79,7 @@ self.addEventListener("fetch", (event) => {
 
 self.addEventListener("push", (event) => {
   const data = event.data ? event.data.json() : {};
-  const title = data.title || "Agrocylo Global";
+  const title = data.title || "Cylo Global";
   const options = {
     body: data.body || "You have a new notification.",
     icon: "/icon-192x192.svg",

@@ -1,9 +1,10 @@
 export const siteConfig = {
-  title: "AgroCylo 🌾",
+  brand: "Cylo",
+  title: "Cylo 🌾",
   description:
     "Peer-to-peer agro marketplace secured by Stellar escrow. Farmers sell directly to buyers — no middlemen, no chargebacks.",
 
-  ogTitle: "AgroCylo — Fair Trade. On-chain. For Every Farmer.",
+  ogTitle: "Cylo — Fair Trade. On-chain. For Every Farmer.",
   ogDescription:
     "Our platform connects farmers directly with buyers — Stellar escrow guarantees fair settlement, lower fees, and faster payouts.",
 
@@ -13,7 +14,7 @@ export const siteConfig = {
   url: "https://agrocylo.vercel.app",
 
   tCard: "summary_large_image" as const,
-  tTitle: "AgroCylo — Fair Trade. On-chain. For Every Farmer.",
+  tTitle: "Cylo — Fair Trade. On-chain. For Every Farmer.",
   tDescription:
     "Our platform connects farmers directly with buyers — Stellar escrow guarantees fair settlement, lower fees, and faster payouts.",
 };

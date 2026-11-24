@@ -69,11 +69,11 @@ export function ReferralCodeDisplay({
     if (!referralData) return;
 
     const url = `${window.location.origin}/onboarding?ref=${referralData.code}`;
-    const text = `Join AgroCylo with my referral code: ${referralData.code}`;
+    const text = `Join Cylo with my referral code: ${referralData.code}`;
 
     if (navigator.share) {
       try {
-        await navigator.share({ title: "AgroCylo Referral", text, url });
+        await navigator.share({ title: "Cylo Referral", text, url });
       } catch (err) {
         // User cancelled or error
       }

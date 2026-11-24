@@ -142,10 +142,21 @@ async function headers() {
   ];
 }
 
+async function rewrites() {
+  const backend = process.env.API_PROXY_TARGET ?? "http://localhost:5000";
+  return [
+    {
+      source: "/api/:path*",
+      destination: `${backend.replace(/\/$/, "")}/:path*`,
+    },
+  ];
+}
+
 const nextConfig: NextConfig = {
   transpilePackages: ["@agrocylo/instrumentation"],
   output: "standalone",
   headers,
+  rewrites,
   turbopack: {
     root: repoRoot,
   },
