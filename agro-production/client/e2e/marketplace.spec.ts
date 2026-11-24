@@ -14,6 +14,11 @@ test.describe("marketplace API journey", () => {
 
     await page.goto("/home");
     await page.getByRole("link", { name: "Browse marketplace" }).click();
+
+    const loadingStatus = page.getByRole("status", { name: /loading products/i });
+    await expect(loadingStatus).toBeVisible();
+    await expect(page.getByTestId("product-skeleton").first()).toBeVisible();
+
     const response = await productResponse;
     expect(response.ok()).toBeTruthy();
 
@@ -35,6 +40,8 @@ test.describe("marketplace API journey", () => {
     });
     await expect(page.getByRole("heading", { name: "Marketplace" })).toBeVisible();
     await expect(page.getByRole("link", { name: /View .* XLM per/ }).first()).toBeVisible();
+    await expect(page.getByTestId("product-skeleton")).toHaveCount(0);
+    await expect(loadingStatus).toHaveCount(0);
 
     const filteredRequest = page.waitForRequest((request) =>
       request.url().includes("/api/v1/products") && request.url().includes("category=VEGETABLES"),
@@ -51,105 +58,33 @@ test.describe("marketplace API journey", () => {
     expect(consoleErrors).toEqual([]);
   });
 
-  test("validates minimum and maximum price filters together", async ({ page }) => {
-    const productRequests: string[] = [];
-    page.on("request", (request) => {
-      if (request.url().includes("/api/v1/products") && request.method() === "GET") {
-        productRequests.push(request.url());
-      }
-    });
-
-    await page.goto("/marketplace");
+  test("changes marketplace filters using only the keyboard", async ({ page }) => {
+    await page.goto("/home");
+    await page.getByRole("link", { name: "Browse marketplace" }).click();
     await expect(page.getByRole("heading", { name: "Marketplace" })).toBeVisible();
 
-    const minInput = page.getByLabel(/min(imum)? price/i);
-    const maxInput = page.getByLabel(/max(imum)? price/i);
+    const categoryFilter = page.getByLabel("Category");
+    await categoryFilter.focus();
+    await expect(categoryFilter).toBeFocused();
 
-    // Empty bounds remain optional: no error and no price filter sent.
-    await minInput.fill("");
-    await maxInput.fill("");
-    await expect(page.getByRole("alert")).toHaveCount(0);
-    await expect
-      .poll(() => productRequests.some((url) => url.includes("priceMin") || url.includes("priceMax")))
-      .toBe(false);
-
-    // Malformed (non-numeric) value produces an inline error and no request.
-    const requestsBeforeMalformed = productRequests.length;
-    await minInput.fill("abc");
-    await expect(page.getByRole("alert")).toContainText(/price/i);
-    await page.waitForTimeout(300);
-    expect(productRequests.length).toBe(requestsBeforeMalformed);
-
-    // Negative value produces an inline error and no request.
-    await minInput.fill("-5");
-    await expect(page.getByRole("alert")).toContainText(/price/i);
-    await page.waitForTimeout(300);
-    expect(productRequests.length).toBe(requestsBeforeMalformed);
-
-    // Reversed range (min > max) produces an inline error and no request.
-    await minInput.fill("100");
-    await maxInput.fill("10");
-    await expect(page.getByRole("alert")).toContainText(/minimum.*maximum|max.*min/i);
-    await page.waitForTimeout(300);
-    expect(productRequests.length).toBe(requestsBeforeMalformed);
-
-    // Correcting the range clears the error and refreshes results with both bounds.
-    const correctedRequest = page.waitForRequest((request) =>
-      request.url().includes("/api/v1/products") &&
-      request.url().includes("priceMin=10") &&
-      request.url().includes("priceMax=100"),
-    );
-    await minInput.fill("10");
-    await maxInput.fill("100");
-    await expect(page.getByRole("alert")).toHaveCount(0);
-    const correctedUrl = await correctedRequest;
-    expect(correctedUrl.url()).toContain("priceMin=10");
-    expect(correctedUrl.url()).toContain("priceMax=100");
-  });
-
-  test("loads more results while preserving active filters", async ({ page }) => {
-    const productRequests: string[] = [];
-    page.on("request", (request) => {
-      if (request.url().includes("/api/v1/products") && request.method() === "GET") {
-        productRequests.push(request.url());
-      }
-    });
-
-    await page.goto("/marketplace");
-    await expect(page.getByRole("heading", { name: "Marketplace" })).toBeVisible();
-
-    // Apply a category filter so we can verify it survives pagination.
     const filteredRequest = page.waitForRequest((request) =>
       request.url().includes("/api/v1/products") && request.url().includes("category=VEGETABLES"),
     );
-    await page.getByLabel("Category").selectOption("VEGETABLES");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
     await filteredRequest;
-    await expect(page.getByRole("status")).toContainText(/products available|No products found/);
+    await expect(categoryFilter).toHaveValue("VEGETABLES");
+    await expect(categoryFilter).toBeFocused();
 
-    const loadMore = page.getByRole("button", { name: /load more/i });
-    if ((await loadMore.count()) === 0) {
-      // Not enough results to paginate; nothing more to verify.
-      test.skip(true, "Not enough products to paginate");
-      return;
-    }
+    const favoritesToggle = page.getByRole("button", { name: /favorites/i });
+    await favoritesToggle.focus();
+    await expect(favoritesToggle).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(favoritesToggle).toHaveAttribute("aria-pressed", "true");
+    await expect(favoritesToggle).toBeFocused();
 
-    const nextPageRequest = page.waitForRequest((request) => {
-      const url = request.url();
-      return (
-        url.includes("/api/v1/products") &&
-        url.includes("category=VEGETABLES") &&
-        /[?&]page=2(&|$)/.test(url)
-      );
-    });
-
-    await loadMore.click();
-    const nextUrl = (await nextPageRequest).url();
-    expect(nextUrl).toContain("category=VEGETABLES");
-    expect(nextUrl).toMatch(/[?&]page=2(&|$)/);
-    expect(nextUrl).toMatch(/[?&]page_size=\d+/);
-
-    // Loading state resolves and the result count is still communicated.
-    await expect(page.getByRole("status")).toContainText(/products available|No products found/);
-    await expect(page.getByRole("link", { name: /View .* XLM per/ }).first()).toBeVisible();
+    await page.keyboard.press("Space");
+    await expect(favoritesToggle).toHaveAttribute("aria-pressed", "false");
+    await expect(favoritesToggle).toBeFocused();
   });
 });

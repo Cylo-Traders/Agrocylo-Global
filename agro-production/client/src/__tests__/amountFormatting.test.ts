@@ -8,6 +8,7 @@ import {
   MAX_I128,
   STROOPS_PER_XLM,
 } from "../lib/validation";
+import { formatAmount, formatDate, SUPPORTED_LOCALES } from "../lib/i18n";
 
 function randomStroops(): bigint {
   let v = 0n;
@@ -75,6 +76,38 @@ describe("formatStroopsForDisplay", () => {
   });
 });
 
+describe("i18n — locale-aware amount and date formatting", () => {
+  it("exposes a small reviewed locale set including English", () => {
+    expect(SUPPORTED_LOCALES).toContain("en");
+    expect(SUPPORTED_LOCALES.length).toBeGreaterThan(1);
+    expect(SUPPORTED_LOCALES.length).toBeLessThanOrEqual(5);
+  });
+
+  it("keeps XLM/USDC unit labels explicit and does not convert values", () => {
+    const en = formatAmount(1_234_567n * STROOPS_PER_XLM, "XLM", "en");
+    expect(en).toContain("XLM");
+    expect(en).toContain("1,234,567");
+
+    const de = formatAmount(1_234_567n * STROOPS_PER_XLM, "XLM", "de");
+    expect(de).toContain("XLM");
+    // Same numeric value, locale-specific grouping (dots in de-DE).
+    expect(de).toContain("1.234.567");
+
+    const usdc = formatAmount(5_000_000n, "USDC", "en");
+    expect(usdc).toContain("USDC");
+    expect(usdc).toContain("0.5");
+  });
+
+  it("formats dates per locale", () => {
+    const d = new Date(Date.UTC(2024, 0, 15));
+    const en = formatDate(d, "en");
+    const de = formatDate(d, "de");
+    expect(en).not.toBe(de);
+    expect(en).toMatch(/2024/);
+    expect(de).toMatch(/2024/);
+  });
+});
+
 describe("CI guard: no float conversion of i128 amounts", () => {
   const SRC = join(__dirname, "..");
   const BANNED = [
@@ -106,6 +139,7 @@ describe("CI guard: no float conversion of i128 amounts", () => {
     for (const file of walk(SRC)) {
       const rel = file.slice(SRC.length + 1).replace(/\\/g, "/");
       if (rel === "lib/validation.ts") continue; // defines the docblock + formatters
+      if (rel === "lib/i18n.ts") continue; // locale formatters use exact BigInt math
       readFileSync(file, "utf8")
         .split("\n")
         .forEach((line, i) => {

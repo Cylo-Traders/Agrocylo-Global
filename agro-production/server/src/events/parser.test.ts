@@ -268,6 +268,27 @@ describe('ProductionEventParser', () => {
     });
   });
 
+  describe('campaign.claimed (Issue #1343)', () => {
+    it('parses investor and exact payout', () => {
+      const payout = 170141183460469231731687303715884105727n; // i128::MAX
+      const raw = makeRaw('campaign', 'claimed', [7n, 'GINVESTOR', payout]);
+      const event = ProductionEventParser.parse(raw);
+      expect(event.action).toBe('campaign.claimed');
+      if (event.action === 'campaign.claimed') {
+        expect(event.campaignId).toBe('7');
+        expect(event.investor).toBe('GINVESTOR');
+        expect(event.payout).toBe(payout.toString());
+      }
+    });
+
+    it('rejects a claim event missing the payout field', () => {
+      const raw = makeRaw('campaign', 'claimed', [7n, 'GINVESTOR']);
+      expect(() => ProductionEventParser.parse(raw)).toThrow(
+        /schema validation failed/,
+      );
+    });
+  });
+
   describe('EventAction coverage', () => {
     const allActions: EventAction[] = [
       'campaign.created',
@@ -313,7 +334,6 @@ describe('ProductionEventParser', () => {
       'harvest',
       'failed',
       'disputed',
-      'claimed',
       'refunded',
       'tranche',
     ])('parses campaign.%s', (verb) => {

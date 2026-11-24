@@ -14,6 +14,7 @@ export type WsEventType =
   | 'campaign.created'
   | 'campaign.invested'
   | 'campaign.settled'
+  | 'campaign.claimed'
   | 'investment.indexed'
   | 'order.created'
   | 'order.confirmed'

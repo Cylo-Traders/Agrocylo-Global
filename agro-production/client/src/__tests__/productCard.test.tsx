@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { ProductCard } from "../components/ProductCard";
+import { ProductCardSkeleton } from "../components/marketplace/ProductGrid";
 import type { Product } from "@/types";
 
 vi.mock("next/link", () => ({
@@ -48,5 +49,18 @@ describe("ProductCard", () => {
     render(<ProductCard product={baseProduct} />);
     const link = screen.getByRole("link");
     expect(link.getAttribute("aria-label")).toContain("kg");
+  });
+});
+
+describe("ProductCardSkeleton", () => {
+  it("is decorative and hidden from assistive tech", () => {
+    const { container } = render(<ProductCardSkeleton />);
+    const skeleton = container.firstElementChild as HTMLElement;
+    expect(skeleton.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("does not expose any accessible text", () => {
+    render(<ProductCardSkeleton />);
+    expect(screen.queryByRole("link")).toBeNull();
   });
 });

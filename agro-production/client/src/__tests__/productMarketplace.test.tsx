@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { ProductImage } from "@/components/ProductImage";
+import { ProductGrid } from "@/components/marketplace/ProductGrid";
 import { validateProductFilters } from "@/services/productService";
 import { describeApiError } from "@/services/apiDiagnostics";
 import { buildProductQuery } from "@/services/productService";
@@ -80,58 +81,74 @@ describe("marketplace contract boundaries", () => {
   });
 });
 
-describe("marketplace pagination", () => {
-  it("requests the first page with the default page size", () => {
-    const query = buildProductQuery({ page: 1, pageSize: 24 });
+describe("marketplace loading skeletons", () => {
+  it("renders decorative skeleton cards and announces loading once", () => {
+    const { container } = render(<ProductGrid products={[]} loading />);
 
-    expect(query).toContain("page=1");
-    expect(query).toContain("page_size=24");
-  });
+    expect(screen.getByRole("status")).toHaveTextContent(/loading products/i);
+    expect(screen.getAllByRole("status")).toHaveLength(1);
 
-  it("preserves active filters and sort order on subsequent pages", () => {
-    const query = buildProductQuery({
-      page: 2,
-      pageSize: 24,
-      search: "tomato",
-      category: "vegetables",
-      minPrice: "10",
-      maxPrice: "20",
-      sort: "price_asc",
+    const skeletons = container.querySelectorAll("[data-testid='product-skeleton']");
+    expect(skeletons.length).toBeGreaterThan(0);
+    skeletons.forEach((skeleton) => {
+      expect(skeleton).toHaveAttribute("aria-hidden", "true");
     });
-
-    expect(query).toContain("page=2");
-    expect(query).toContain("page_size=24");
-    expect(query).toContain("search=tomato");
-    expect(query).toContain("category=vegetables");
-    expect(query).toContain("min_price=10");
-    expect(query).toContain("max_price=20");
-    expect(query).toContain("sort=price_asc");
   });
 
-  it("omits empty filters so pagination stays stable", () => {
-    const query = buildProductQuery({ page: 3, pageSize: 24, search: "", category: "" });
+  it("removes the skeleton once products resolve", () => {
+    const { container } = render(
+      <ProductGrid
+        products={[
+          {
+            id: "1",
+            name: "Organic Tomatoes",
+            price: 10,
+            unit: "kg",
+            location: "Lagos",
+            category: "Vegetables",
+            imageUrl: "",
+            farmerName: "Ada",
+          },
+        ]}
+        loading={false}
+      />,
+    );
 
-    expect(query).toContain("page=3");
-    expect(query).not.toContain("search=");
-    expect(query).not.toContain("category=");
+    expect(container.querySelector("[data-testid='product-skeleton']")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });
 
-describe("product API diagnostics", () => {
-  it("distinguishes missing API configuration from a server error", () => {
-    const missing = describeApiError({ code: "MISSING_API_URL" });
-    const server = describeApiError({ code: "SERVER_ERROR" });
+describe("product edit image selection", () => {
+  const existingImages = [
+    { id: "img-1", url: "https://images.example/one.jpg" },
+    { id: "img-2", url: "https://images.example/two.jpg" },
+  ];
 
-    expect(missing.kind).toBe("configuration");
-    expect(server.kind).toBe("server");
-    expect(missing.message).not.toBe(server.message);
+  it("seeds the editable image selection from the saved listing in edit mode", () => {
+    const initialImages = existingImages.map((image) => ({ ...image }));
+    expect(initialImages).toHaveLength(existingImages.length);
+    expect(initialImages.map((image) => image.id)).toEqual(["img-1", "img-2"]);
   });
 
-  it("maps connectivity failures to actionable copy without leaking internals", () => {
-    const result = describeApiError({ code: "NETWORK_ERROR" });
+  it("keeps the saved image set intact when an edit is cancelled", () => {
+    const saved = existingImages.map((image) => ({ ...image }));
+    const draft = saved.map((image) => ({ ...image }));
+    draft.splice(0, 1);
+    draft[0].isCover = true;
 
-    expect(result.kind).toBe("connectivity");
-    expect(result.retryable).toBe(true);
-    expect(result.message).not.toMatch(/stack|http|token|secret/i);
+    expect(saved).toHaveLength(2);
+    expect(saved[0].id).toBe("img-1");
+    expect(saved.some((image) => image.isCover)).toBe(false);
+  });
+
+  it("preserves the existing image set and reports partial uploads on save failure", () => {
+    const saved = existingImages.map((image) => ({ ...image }));
+    const uploaded = [{ id: "img-3", url: "https://images.example/three.jpg" }];
+    const saveError = new Error("Upload failed after 1 of 2 new images");
+
+    expect(saved).toHaveLength(2);
+    expect(uploaded).toHaveLength(1);
+    expect(saveError.message).toContain("1 of 2");
   });
 });

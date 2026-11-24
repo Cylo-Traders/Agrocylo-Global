@@ -43,7 +43,8 @@ export const CANONICAL_EVENTS = {
   },
   'campaign.claimed': {
     version: '1.0.0',
-    fields: ['campaignId'],
+    // Contract publishes (campaign_id, investor, payout) — Issue #1343.
+    fields: ['campaignId', 'investor', 'payout'],
     description: 'Investor claimed campaign proceeds',
   },
   'campaign.refunded': {

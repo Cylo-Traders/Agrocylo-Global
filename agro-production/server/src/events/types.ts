@@ -69,6 +69,15 @@ export interface CampaignSettledEvent extends BaseEvent {
   totalRevenue: string;
 }
 
+/** Investor claimed direct campaign proceeds via `claim_returns` (Issue #1343). */
+export interface CampaignClaimedEvent extends BaseEvent {
+  action: 'campaign.claimed';
+  campaignId: string;
+  investor: string;
+  /** i128 payout in stroops, as a decimal string. */
+  payout: string;
+}
+
 export interface OrderCreatedEvent extends BaseEvent {
   action: 'order.created';
   orderId: string;
@@ -90,6 +99,7 @@ export interface GenericCampaignEvent extends BaseEvent {
     | 'campaign.created'
     | 'campaign.invested'
     | 'campaign.settled'
+    | 'campaign.claimed'
     | 'order.created'
     | 'order.confirmed'
     | 'dispute.opened'
@@ -185,6 +195,7 @@ export type ParsedEvent =
   | CampaignCreatedEvent
   | CampaignInvestedEvent
   | CampaignSettledEvent
+  | CampaignClaimedEvent
   | OrderCreatedEvent
   | OrderConfirmedEvent
   | GenericCampaignEvent
