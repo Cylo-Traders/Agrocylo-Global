@@ -3,8 +3,8 @@ import { siteConfig } from "@/config/site.config";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Cylo — Agro-DeFi Marketplace on Stellar",
-    short_name: "Cylo",
+    name: `${siteConfig.brand} — Agro-DeFi Marketplace on Stellar`,
+    short_name: siteConfig.brand,
     description: siteConfig.description,
     start_url: "/",
     display: "standalone",
@@ -14,15 +14,27 @@ export default function manifest(): MetadataRoute.Manifest {
     categories: ["finance", "shopping", "agriculture"],
     icons: [
       {
-        src: "/favicon.svg",
-        sizes: "any",
-        type: "image/svg+xml",
+        src: "/icons/icon-192x192.png",
+        sizes: "192x192",
+        type: "image/png",
         purpose: "any",
       },
       {
-        src: "/favicon.svg",
-        sizes: "any",
-        type: "image/svg+xml",
+        src: "/icons/icon-512x512.png",
+        sizes: "512x512",
+        type: "image/png",
+        purpose: "any",
+      },
+      {
+        src: "/icons/icon-maskable-192x192.png",
+        sizes: "192x192",
+        type: "image/png",
+        purpose: "maskable",
+      },
+      {
+        src: "/icons/icon-maskable-512x512.png",
+        sizes: "512x512",
+        type: "image/png",
         purpose: "maskable",
       },
     ],

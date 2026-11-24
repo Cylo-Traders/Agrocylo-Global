@@ -26,17 +26,29 @@ export async function fetchOrderProvenance(
   }
 }
 
-export async function fetchProductProvenance(
+export interface ProductProvenanceResult {
+  record: ProvenanceRecord | null;
+  error: unknown | null;
+}
+
+export async function fetchProductProvenanceWithError(
   productId: string,
-): Promise<ProvenanceRecord> {
+): Promise<ProductProvenanceResult> {
   try {
     const data = await apiRequest<Partial<ProvenanceRecord>>(
       `/products/${productId}/provenance`,
     );
-    return normalizeProvenance(data, { productId });
-  } catch {
-    return untrackedProvenance({ productId });
+    return { record: normalizeProvenance(data, { productId }), error: null };
+  } catch (error) {
+    return { record: null, error };
   }
+}
+
+export async function fetchProductProvenance(
+  productId: string,
+): Promise<ProvenanceRecord> {
+  const { record } = await fetchProductProvenanceWithError(productId);
+  return record ?? untrackedProvenance({ productId });
 }
 
 function untrackedProvenance(ids: {
