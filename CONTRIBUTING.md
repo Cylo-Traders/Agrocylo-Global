@@ -54,6 +54,11 @@ troubleshooting are maintained in
 [Frontend development setup](docs/FRONTEND_SETUP.md). Shared code belongs under
 `packages/*`; do not create client-specific lockfiles or dependency installs.
 
+**Client-focused contributors:** see
+[docs/CLIENT_CONTRIBUTING.md](docs/CLIENT_CONTRIBUTING.md) for a workspace map
+(which app owns a UI), local API setup, where components/services/tests live,
+UI/accessibility expectations, and lint/build/test commands.
+
 #### Dev ports
 
 Both dev servers use fixed ports so they can run side by side (also required

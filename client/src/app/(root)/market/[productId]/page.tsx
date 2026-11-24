@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, MapPin, Truck, Wallet } from "lucide-react";
+import { ArrowLeft, Clock, MapPin, Truck, Wallet } from "lucide-react";
 
 import Wrapper from "@/components/shared/wrapper";
 import { useWallet } from "@/hooks/useWallet";
@@ -19,6 +19,10 @@ import { fetchProductProvenance } from "@/services/provenanceService";
 import type { ProvenanceRecord } from "@/types/provenance";
 import type { Product } from "@/types/product";
 import { useAnalytics } from "@/hooks/useAnalytics";
+import {
+  formatAbsoluteTime,
+  formatRelativeTime,
+} from "@/lib/formatUpdatedAt";
 
 export default function ProductDetailPage() {
   const { productId } = useParams<{ productId: string }>();
@@ -40,6 +44,15 @@ export default function ProductDetailPage() {
     }
     return 0;
   }, [cart.groups, product]);
+
+  const updatedRelative = useMemo(
+    () => (product ? formatRelativeTime(product.updated_at) : null),
+    [product],
+  );
+  const updatedAbsolute = useMemo(
+    () => (product ? formatAbsoluteTime(product.updated_at) : null),
+    [product],
+  );
 
   useEffect(() => {
     if (product) {
@@ -157,6 +170,17 @@ export default function ProductDetailPage() {
             <p className="text-muted-foreground mt-2 flex items-center gap-1.5 text-sm">
               <MapPin className="size-3.5" />
               {product.location}
+            </p>
+            <p
+              className="text-muted-foreground mt-1.5 flex items-center gap-1.5 text-xs"
+              title={updatedAbsolute ?? undefined}
+            >
+              <Clock className="size-3.5" />
+              {updatedRelative ? (
+                <span>Updated {updatedRelative}</span>
+              ) : (
+                <span>Last updated time unavailable</span>
+              )}
             </p>
           </div>
 

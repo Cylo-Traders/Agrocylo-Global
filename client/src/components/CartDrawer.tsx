@@ -39,6 +39,10 @@ import {
 } from "@/services/stellar/contractService";
 import { resolveIndexedOrderId } from "@/services/orderService";
 import {
+  revalidateCartStock,
+  type StockRevalidationIssue,
+} from "@/services/productService";
+import {
   getNetworkConfig,
   isContractConfigured,
   requireTokenContractId,
@@ -91,6 +95,7 @@ export default function CartDrawer() {
   const [failedOrders, setFailedOrders] = useState<OrderFailure[]>([]);
   const [cleanupFailures, setCleanupFailures] = useState<CleanupFailure[]>([]);
   const [progressMessage, setProgressMessage] = useState<string>("");
+  const [stockIssues, setStockIssues] = useState<StockRevalidationIssue[]>([]);
   const [groupProgress, setGroupProgress] = useState<
     Record<string, GroupStatus>
   >({});
@@ -130,6 +135,7 @@ export default function CartDrawer() {
     setFailedOrders([]);
     setCleanupFailures([]);
     setProgressMessage("");
+    setStockIssues([]);
     setGroupProgress({});
     checkoutGroupsRef.current = null;
     setDrawerOpen(false);
@@ -219,6 +225,7 @@ export default function CartDrawer() {
     setSuccessOrders([]);
     setFailedOrders([]);
     setCleanupFailures([]);
+    setStockIssues([]);
     setProgressMessage("Starting checkout…");
 
     // Obtain confirmed snapshot before signing to avoid stale subtotal
@@ -249,6 +256,35 @@ export default function CartDrawer() {
     }
 
     checkoutGroupsRef.current = snapshotGroups;
+
+    // Revalidate live stock/availability against the confirmed snapshot before
+    // any signature is requested. The server remains the source of truth; if a
+    // listing changed since it was added we surface the changes and stop here
+    // rather than signing an order that can no longer be fulfilled (#1401).
+    setProgressMessage("Rechecking stock and availability…");
+    let issues: StockRevalidationIssue[] = [];
+    try {
+      issues = await revalidateCartStock(
+        snapshotGroups.flatMap((g) => g.items),
+      );
+    } catch {
+      // A failed re-check must not block checkout — the contract still enforces
+      // settlement — but we could not confirm freshness this time.
+      issues = [];
+    }
+    if (operationIdRef.current !== opId) return;
+    if (issues.length > 0) {
+      setStockIssues(issues);
+      setRunning(false);
+      setProgressMessage(
+        "Stock or availability changed. Review the updates before signing.",
+      );
+      toast.error(
+        "Some items changed since you added them. Review the updates before signing.",
+      );
+      return;
+    }
+    setStockIssues([]);
 
     // Derive progress and totals from the confirmed snapshot
     setGroupProgress(
@@ -471,6 +507,7 @@ export default function CartDrawer() {
               progressMessage={progressMessage}
               groupProgress={groupProgress}
               hasPendingUpdates={hasPendingUpdates}
+              stockIssues={stockIssues}
             />
           ) : (
             <Step3Result
@@ -721,6 +758,7 @@ function Step2Confirm({
   progressMessage,
   groupProgress,
   hasPendingUpdates,
+  stockIssues,
 }: {
   groups: CartGroup[];
   totalsPerCurrency: Array<{ currency: string; gross: bigint; fee: bigint; net: bigint }>;
@@ -730,9 +768,39 @@ function Step2Confirm({
   progressMessage: string;
   groupProgress: Record<string, GroupStatus>;
   hasPendingUpdates?: boolean;
+  stockIssues?: StockRevalidationIssue[];
 }) {
   return (
     <div className="space-y-5">
+      {stockIssues && stockIssues.length > 0 && (
+        <Card
+          className="border-amber-500/40"
+          role="alert"
+          aria-live="assertive"
+          data-testid="stock-revalidation"
+        >
+          <CardHeader>
+            <CardTitle className="text-amber-600 flex items-center gap-2 text-sm">
+              <X className="size-4" />
+              Availability changed
+            </CardTitle>
+            <p className="text-muted-foreground text-xs">
+              These items changed since you added them. Update your cart before
+              signing.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <ul className="list-inside list-disc space-y-1">
+              {stockIssues.map((issue) => (
+                <li key={`${issue.productId}-${issue.reason}`}>
+                  {issue.message}
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
       <Input
         type="datetime-local"
         label="Delivery deadline"
