@@ -1958,3 +1958,141 @@ fn test_vote_to_resolve_non_arbitrator_rejected() {
         EscrowError::ArbitratorNotFound
     );
 }
+
+// ---------------------------------------------------------------------------
+// Issue #1443: dispute resolution must respect the emergency pause
+// ---------------------------------------------------------------------------
+
+/// Registers a mock governance contract and a guardian, then pauses the escrow
+/// as the guardian. Returns the governance address so callers can unpause.
+fn pause_escrow(env: &Env, client: &EscrowContractClient, admin: &Address) -> Address {
+    let governance = env.register(MockGovernance, ());
+    client.set_governance_contract(admin, &governance);
+    let guardian = Address::generate(env);
+    client.set_guardian(&governance, &guardian);
+    client.pause(&guardian);
+    assert!(client.is_paused());
+    governance
+}
+
+#[test]
+fn test_resolve_dispute_blocked_while_paused() {
+    let (env, client, buyer, farmer, _collector, token, _, admin, _, contract_id) = setup_test();
+    let order_id = client
+        .mock_all_auths()
+        .create_order(&buyer, &farmer, &token.address, &500);
+    client.mock_all_auths().open_dispute(
+        &buyer,
+        &order_id,
+        &String::from_str(&env, "not received"),
+        &String::from_str(&env, "hash"),
+    );
+    let escrow_before = token.balance(&contract_id);
+    let buyer_before = token.balance(&buyer);
+
+    let governance = pause_escrow(&env, &client, &admin);
+
+    let result = client
+        .mock_all_auths()
+        .try_resolve_dispute(&admin, &order_id, &DisputeResolution::Refund);
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::ContractPaused);
+    assert_eq!(
+        client.get_order_details(&order_id).status,
+        OrderStatus::Disputed
+    );
+    assert_eq!(token.balance(&contract_id), escrow_before);
+    assert_eq!(token.balance(&buyer), buyer_before);
+
+    // Once unpaused the same call resolves the dispute as before.
+    client.unpause(&governance);
+    client
+        .mock_all_auths()
+        .resolve_dispute(&admin, &order_id, &DisputeResolution::Refund);
+    assert_eq!(
+        client.get_order_details(&order_id).status,
+        OrderStatus::Refunded
+    );
+}
+
+#[test]
+fn test_resolve_split_dispute_blocked_while_paused() {
+    let (env, client, farmer, co_buyers, token, contract_id, admin) = setup_split_test(2);
+    let mut shares = Vec::new(&env);
+    shares.push_back(600i128);
+    shares.push_back(400i128);
+    let order_id = client.mock_all_auths().create_split_order(
+        &co_buyers.get(0).unwrap(),
+        &farmer,
+        &token.address,
+        &co_buyers,
+        &shares,
+    );
+    for co_buyer in co_buyers.iter() {
+        client
+            .mock_all_auths()
+            .fund_split_order(&co_buyer, &order_id);
+    }
+    client.mock_all_auths().open_split_dispute(
+        &co_buyers.get(1).unwrap(),
+        &order_id,
+        &String::from_str(&env, "never arrived"),
+        &String::from_str(&env, "hash"),
+    );
+    let escrow_before = token.balance(&contract_id);
+    let farmer_before = token.balance(&farmer);
+
+    let governance = pause_escrow(&env, &client, &admin);
+
+    let result = client.mock_all_auths().try_resolve_split_dispute(
+        &admin,
+        &order_id,
+        &DisputeResolution::Release,
+    );
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::ContractPaused);
+    assert_eq!(
+        client.get_split_order(&order_id).status,
+        SplitOrderStatus::Disputed
+    );
+    assert_eq!(token.balance(&contract_id), escrow_before);
+    assert_eq!(token.balance(&farmer), farmer_before);
+
+    client.unpause(&governance);
+    client
+        .mock_all_auths()
+        .resolve_split_dispute(&admin, &order_id, &DisputeResolution::Release);
+    assert_ne!(
+        client.get_split_order(&order_id).status,
+        SplitOrderStatus::Disputed
+    );
+}
+
+#[test]
+fn test_vote_to_resolve_blocked_while_paused() {
+    let (env, client, admin, order_id, arbitrators, farmer, token) = setup_arbitrated_dispute(1);
+    let a1 = arbitrators.get(0).unwrap();
+    let farmer_before = token.balance(&farmer);
+
+    let governance = pause_escrow(&env, &client, &admin);
+
+    let result = client.mock_all_auths().try_vote_to_resolve(
+        &a1,
+        &order_id,
+        &DisputeResolution::Release,
+    );
+    assert_eq!(result.unwrap_err().unwrap(), EscrowError::ContractPaused);
+    assert_eq!(
+        client.get_order_details(&order_id).status,
+        OrderStatus::Disputed
+    );
+    assert_eq!(token.balance(&farmer), farmer_before);
+
+    // Unpaused, the vote that meets the quorum of 1 resolves the order.
+    client.unpause(&governance);
+    client
+        .mock_all_auths()
+        .vote_to_resolve(&a1, &order_id, &DisputeResolution::Release);
+    assert_eq!(
+        client.get_order_details(&order_id).status,
+        OrderStatus::Completed
+    );
+}
