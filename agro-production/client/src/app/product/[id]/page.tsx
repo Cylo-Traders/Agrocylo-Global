@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, notFound } from "next/navigation";
-import { fetchProduct, formatPrice } from "@/services/productService";
+import { fetchProduct, formatPrice, formatProductCategory } from "@/services/productService";
 import { useTransaction } from "@/hooks/useTransaction";
 import { buildCreateOrder } from "@/lib/contractService";
 import { createOrder, updateOrderWithTxHash } from "@/services/orderService";
@@ -130,7 +130,7 @@ export default function ProductDetailPage() {
         <ProductImage name={product.name} imageUrl={product.imageUrl} className="h-64 md:h-auto rounded-xl" />
         <div className="space-y-5">
           <div>
-            <span className="text-xs bg-primary-50 text-primary-700 px-2 py-0.5 rounded-full">{product.category}</span>
+            <span className="text-xs bg-primary-50 text-primary-700 px-2 py-0.5 rounded-full">{formatProductCategory(product.category)}</span>
             <h1 className="text-2xl font-bold text-foreground mt-2">{product.name}</h1>
             <p className="text-sm text-muted mt-1">{product.description ?? "No description provided."}</p>
           </div>

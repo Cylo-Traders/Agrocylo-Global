@@ -1,5 +1,5 @@
 import { Package, Search, Heart, SlidersHorizontal } from 'lucide-react';
-import { ProductCard } from './ProductCard';
+import { ProductCard } from '../ProductCard';
 import type { Product } from '../../types';
 
 interface ProductGridProps {
@@ -26,9 +26,11 @@ export function ProductGrid({
   if (loading) {
     return (
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <p role="status" className="sr-only">Loading products...</p>
         {Array.from({ length: 8 }).map((_, i) => (
           <div
             key={i}
+            data-testid="product-skeleton"
             className="h-72 animate-pulse rounded-lg bg-gray-200"
             aria-hidden="true"
           />

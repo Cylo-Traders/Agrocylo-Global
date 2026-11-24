@@ -3,15 +3,14 @@
 import { useCallback } from "react";
 import { sanitizeString } from "@/lib/validation";
 import type { ProductCategory } from "@/types";
+import { PRODUCT_CATEGORY_LABELS, VALID_PRODUCT_CATEGORIES } from "@/services/productService";
 
-const CATEGORIES: { label: string; value: ProductCategory | "" }[] = [
+export const CATEGORIES: { label: string; value: ProductCategory | "" }[] = [
   { label: "All Categories", value: "" },
-  { label: "Grains", value: "GRAINS" },
-  { label: "Vegetables", value: "VEGETABLES" },
-  { label: "Fruits", value: "FRUITS" },
-  { label: "Livestock", value: "LIVESTOCK" },
-  { label: "Dairy", value: "DAIRY" },
-  { label: "Other", value: "OTHER" },
+  ...VALID_PRODUCT_CATEGORIES.map((cat) => ({
+    label: PRODUCT_CATEGORY_LABELS[cat],
+    value: cat,
+  })),
 ];
 
 interface MarketplaceFiltersProps {

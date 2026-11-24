@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { formatPrice } from "@/services/productService";
+import { formatPrice, formatProductCategory } from "@/services/productService";
 import type { Product } from "@/types";
 import { ProductImage } from "@/components/ProductImage";
 
@@ -21,7 +21,7 @@ export function ProductCard({ product }: ProductCardProps) {
             {product.name}
           </h3>
           <span className="text-xs bg-primary-50 text-primary-700 px-2 py-0.5 rounded-full whitespace-nowrap">
-            {product.category}
+            {formatProductCategory(product.category)}
           </span>
         </div>
         <p className="text-sm text-muted line-clamp-2">{product.description ?? "No description provided."}</p>
