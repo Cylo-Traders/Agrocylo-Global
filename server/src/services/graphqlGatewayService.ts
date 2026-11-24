@@ -1,5 +1,6 @@
 import { ApiError } from '../http/errors.js';
 import { listProducts, getProductGraphData } from './productService.js';
+import { canIncludeUnavailable } from './productVisibility.js';
 import { OrderService } from './orderService.js';
 import { getProfileGraphData } from './profileService.js';
 import {
@@ -249,8 +250,14 @@ export async function executeGraphQL(
         maxPrice: typeof args.maxPrice === 'string' ? args.maxPrice : undefined,
         page: typeof args.page === 'string' ? args.page : undefined,
         pageSize: typeof args.pageSize === 'string' ? args.pageSize : undefined,
-        includeUnavailable:
-          typeof args.includeUnavailable === 'boolean' ? args.includeUnavailable : undefined,
+        // Same rule as GET /products: only an admin, or a farmer listing their
+        // own products, may include unavailable ones (#1427).
+        includeUnavailable: canIncludeUnavailable({
+          requested: typeof args.includeUnavailable === 'boolean' ? args.includeUnavailable : false,
+          farmer: typeof args.farmer === 'string' ? args.farmer : undefined,
+          walletAddress,
+          role: callerRole,
+        }),
       });
     },
 

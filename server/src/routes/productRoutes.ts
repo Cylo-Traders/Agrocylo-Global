@@ -1,5 +1,5 @@
 import express from 'express';
-import { requireWallet, type WalletRequest } from '../middleware/walletAuth.js';
+import { requireWallet, sessionPrincipal, type WalletRequest } from '../middleware/walletAuth.js';
 import { writeRateLimiter } from '../middleware/rateLimiter.js';
 import { ApiError, sendProblem } from '../http/errors.js';
 import {
@@ -10,11 +10,22 @@ import {
   softDeleteProduct,
   updateProduct,
 } from '../services/productService.js';
+import { canIncludeUnavailable } from '../services/productVisibility.js';
 
 const router = express.Router();
 
 router.get('/products', async (req, res, next) => {
   try {
+    // include_unavailable is only honoured for an admin or for a farmer
+    // listing their own products; anonymous callers always get available only.
+    const principal = sessionPrincipal(req);
+    const includeUnavailable = canIncludeUnavailable({
+      requested:
+        req.query['include_unavailable'] === 'true' || req.query['include_unavailable'] === '1',
+      farmer: typeof req.query['farmer'] === 'string' ? req.query['farmer'] : undefined,
+      walletAddress: principal?.walletAddress,
+      role: principal?.role,
+    });
     const result = await listProducts({
       farmer: typeof req.query['farmer'] === 'string' ? req.query['farmer'] : undefined,
       category: typeof req.query['category'] === 'string' ? req.query['category'] : undefined,
@@ -29,14 +40,7 @@ router.get('/products', async (req, res, next) => {
       page: typeof req.query['page'] === 'string' ? req.query['page'] : undefined,
       pageSize: typeof req.query['page_size'] === 'string' ? req.query['page_size'] : undefined,
       page_size: typeof req.query['page_size'] === 'string' ? req.query['page_size'] : undefined,
-      includeUnavailable:
-        typeof req.query['include_unavailable'] === 'string'
-          ? req.query['include_unavailable'] === 'true' || req.query['include_unavailable'] === '1'
-          : undefined,
-      include_unavailable:
-        typeof req.query['include_unavailable'] === 'string'
-          ? req.query['include_unavailable'] === 'true' || req.query['include_unavailable'] === '1'
-          : undefined,
+      includeUnavailable,
       sort: typeof req.query['sort'] === 'string' ? req.query['sort'] : undefined,
       lat: typeof req.query['lat'] === 'string' ? req.query['lat'] : undefined,
       lng: typeof req.query['lng'] === 'string' ? req.query['lng'] : undefined,
