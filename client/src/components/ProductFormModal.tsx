@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Upload, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { AlertCircle, ImageOff, Upload, X } from "lucide-react";
 
 import {
   Dialog,
@@ -62,6 +62,24 @@ const CURRENCIES: ProductCurrency[] = ["XLM", "USDC"];
 const UNITS: ProductUnit[] = ["kg", "bag", "crate", "piece", "litre", "dozen"];
 const MAX_IMAGES = 8;
 
+type PreviewStatus = "ready" | "uploading" | "done" | "error";
+
+interface PreviewItem {
+  id: string;
+  file: File;
+  url: string;
+  progress: number;
+  status: PreviewStatus;
+  error?: string;
+  previewFailed?: boolean;
+}
+
+let previewIdCounter = 0;
+function nextPreviewId(): string {
+  previewIdCounter += 1;
+  return `img-${Date.now()}-${previewIdCounter}`;
+}
+
 const SELECT_CLASSES =
   "border-input bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-12 w-full rounded-md border px-3 text-sm focus-visible:ring-[3px] focus-visible:outline-none";
 
@@ -92,16 +110,40 @@ export default function ProductFormModal({
   const [deliveryWindow, setDeliveryWindow] = useState("");
   const [isAvailable, setIsAvailable] = useState(true);
 
-  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [imageItems, setImageItems] = useState<PreviewItem[]>([]);
+  const [uploadAnnouncement, setUploadAnnouncement] = useState<string>("");
+  const imageItemsRef = useRef<PreviewItem[]>([]);
   const [errors, setErrors] = useState<FormErrors>({});
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    imageItemsRef.current = imageItems;
+  }, [imageItems]);
+
+  // Release every object URL when the form closes or unmounts so previews do
+  // not leak memory (#1402).
+  useEffect(() => {
+    return () => {
+      for (const item of imageItemsRef.current) {
+        URL.revokeObjectURL(item.url);
+      }
+    };
+  }, []);
 
   const createProductMutation = useCreateProduct();
   const updateProductMutation = useUpdateProduct();
   const saving = createProductMutation.isPending || updateProductMutation.isPending;
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      for (const item of imageItemsRef.current) {
+        URL.revokeObjectURL(item.url);
+      }
+      imageItemsRef.current = [];
+      setImageItems([]);
+      setUploadAnnouncement("");
+      return;
+    }
     setErrors({});
     setSaveError(null);
     setName(initialProduct?.name ?? "");
@@ -114,17 +156,37 @@ export default function ProductFormModal({
     setLocation(initialProduct?.location ?? "");
     setDeliveryWindow(initialProduct?.delivery_window ?? "");
     setIsAvailable(initialProduct?.is_available ?? true);
-    setImageFiles([]);
+    for (const item of imageItemsRef.current) {
+      URL.revokeObjectURL(item.url);
+    }
+    imageItemsRef.current = [];
+    setImageItems([]);
+    setUploadAnnouncement("");
   }, [open, initialProduct]);
 
   function handleFileChange(files: FileList | null) {
     if (!files) return;
     const next = Array.from(files);
-    if (imageFiles.length + next.length > MAX_IMAGES) {
+    if (imageItems.length + next.length > MAX_IMAGES) {
       setSaveError(`Maximum ${MAX_IMAGES} images allowed.`);
       return;
     }
-    setImageFiles((prev) => [...prev, ...next]);
+    const items: PreviewItem[] = next.map((file) => ({
+      id: nextPreviewId(),
+      file,
+      url: URL.createObjectURL(file),
+      progress: 0,
+      status: "ready",
+    }));
+    setImageItems((prev) => [...prev, ...items]);
+  }
+
+  function removeImage(id: string) {
+    setImageItems((prev) => {
+      const target = prev.find((item) => item.id === id);
+      if (target) URL.revokeObjectURL(target.url);
+      return prev.filter((item) => item.id !== id);
+    });
   }
 
   function validate(): boolean {
@@ -203,10 +265,58 @@ export default function ProductFormModal({
               input: payload,
             });
 
-      if (imageFiles.length > 0) {
-        await Promise.all(
-          imageFiles.map((file) => uploadProductImage(product.id, file)),
+      if (imageItems.length > 0) {
+        const results = await Promise.all(
+          imageItems.map(async (item) => {
+            setImageItems((prev) =>
+              prev.map((p) =>
+                p.id === item.id
+                  ? { ...p, status: "uploading", progress: 0, error: undefined }
+                  : p,
+              ),
+            );
+            setUploadAnnouncement(`Uploading ${item.file.name}…`);
+            try {
+              await uploadProductImage(product.id, item.file, (fraction) => {
+                const percent = Math.round(fraction * 100);
+                setImageItems((prev) =>
+                  prev.map((p) =>
+                    p.id === item.id ? { ...p, progress: percent } : p,
+                  ),
+                );
+                setUploadAnnouncement(
+                  `Uploading ${item.file.name}: ${percent}%`,
+                );
+              });
+              setImageItems((prev) =>
+                prev.map((p) =>
+                  p.id === item.id
+                    ? { ...p, status: "done", progress: 100 }
+                    : p,
+                ),
+              );
+              setUploadAnnouncement(`${item.file.name} uploaded.`);
+              return { id: item.id, ok: true as const };
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : "Upload failed.";
+              setImageItems((prev) =>
+                prev.map((p) =>
+                  p.id === item.id
+                    ? { ...p, status: "error", error: msg }
+                    : p,
+                ),
+              );
+              setUploadAnnouncement(
+                `${item.file.name} failed to upload: ${msg}`,
+              );
+              return { id: item.id, ok: false as const, error: msg };
+            }
+          }),
         );
+        const failed = results.find((r) => !r.ok);
+        if (failed && "error" in failed) {
+          throw new Error(failed.error);
+        }
       }
 
       await onSuccess();
@@ -395,30 +505,89 @@ export default function ProductFormModal({
               />
             </label>
 
-            {imageFiles.length > 0 && (
-              <div className="flex flex-wrap gap-2 pt-1">
-                {imageFiles.map((f, i) => (
-                  <span
-                    key={i}
-                    className="bg-secondary inline-flex min-w-0 max-w-full items-center gap-2 rounded-full border px-3 py-1 text-xs"
+            {imageItems.length > 0 && (
+              <div className="grid grid-cols-2 gap-3 pt-1 sm:grid-cols-3">
+                {imageItems.map((item) => (
+                  <figure
+                    key={item.id}
+                    className="border-border bg-secondary/40 relative overflow-hidden rounded-xl border"
                   >
-                    <span className="truncate">{f.name}</span>
+                    <div className="relative aspect-square w-full">
+                      {item.previewFailed ? (
+                        <div className="text-muted-foreground grid size-full place-content-center">
+                          <ImageOff className="size-6" />
+                          <span className="sr-only">
+                            Preview unavailable for {item.file.name}
+                          </span>
+                        </div>
+                      ) : (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={item.url}
+                          alt={`${item.file.name} preview`}
+                          className="size-full object-cover"
+                          onError={() =>
+                            setImageItems((prev) =>
+                              prev.map((p) =>
+                                p.id === item.id
+                                  ? { ...p, previewFailed: true }
+                                  : p,
+                              ),
+                            )
+                          }
+                        />
+                      )}
+                    </div>
                     <button
                       type="button"
-                      className="text-muted-foreground hover:text-foreground grid size-11 shrink-0 place-content-center"
-                      onClick={() =>
-                        setImageFiles((prev) =>
-                          prev.filter((_, idx) => idx !== i),
-                        )
-                      }
-                      aria-label={`Remove ${f.name}`}
+                      className="bg-background/80 text-foreground hover:bg-background absolute top-1 right-1 grid size-11 place-content-center rounded-full"
+                      onClick={() => removeImage(item.id)}
+                      aria-label={`Remove ${item.file.name}`}
                     >
-                      <X className="size-3" />
+                      <X className="size-4" />
                     </button>
-                  </span>
+                    <figcaption className="space-y-1 p-2">
+                      <span className="block truncate text-xs" title={item.file.name}>
+                        {item.file.name}
+                      </span>
+                      {item.status === "uploading" && (
+                        <div
+                          className="bg-muted h-1.5 w-full overflow-hidden rounded-full"
+                          role="progressbar"
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-valuenow={item.progress}
+                          aria-label={`Uploading ${item.file.name}`}
+                        >
+                          <div
+                            className="bg-primary h-full transition-[width]"
+                            style={{ width: `${item.progress}%` }}
+                          />
+                        </div>
+                      )}
+                      {item.status === "done" && (
+                        <span className="block text-xs text-emerald-700 dark:text-emerald-400">
+                          Uploaded
+                        </span>
+                      )}
+                      {item.status === "error" && (
+                        <span
+                          className="text-destructive flex items-start gap-1 text-xs"
+                          role="alert"
+                        >
+                          <AlertCircle className="mt-0.5 size-3 shrink-0" />
+                          {item.error ?? "Upload failed"}
+                        </span>
+                      )}
+                    </figcaption>
+                  </figure>
                 ))}
               </div>
             )}
+
+            <p className="sr-only" aria-live="polite">
+              {uploadAnnouncement}
+            </p>
           </div>
 
           {saveError && <FormError message={saveError} />}

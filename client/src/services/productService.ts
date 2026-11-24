@@ -7,6 +7,7 @@ import type {
 } from "@/types/product";
 
 import { apiRequest } from "@/lib/apiHelper";
+import { getAccessToken } from "@/lib/authToken";
 import { isTestMode } from "@/lib/testMode";
 
 function productFromJson(json: unknown): Product {
@@ -224,13 +225,67 @@ export async function softDeleteProduct(
 export async function uploadProductImage(
   productId: string,
   file: File,
+  onProgress?: (fraction: number) => void,
 ): Promise<{ image_url: string }> {
   const formData = new FormData();
   formData.append("image", file);
 
+  // `fetch` cannot report upload progress, so use XHR when a progress callback
+  // is supplied (#1402). The transport is the only difference; auth and error
+  // handling mirror `apiRequest`.
+  if (onProgress) {
+    return uploadFormDataWithProgress(
+      `/products/${productId}/image`,
+      formData,
+      onProgress,
+    );
+  }
+
   return apiRequest<{ image_url: string }>(`/products/${productId}/image`, {
     method: "POST",
     body: formData,
+  });
+}
+
+function uploadFormDataWithProgress<T>(
+  path: string,
+  formData: FormData,
+  onProgress: (fraction: number) => void,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const url = `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    xhr.responseType = "json";
+
+    const accessToken = getAccessToken();
+    if (accessToken) xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress(event.loaded / event.total);
+      }
+    };
+
+    xhr.onload = () => {
+      const status = xhr.status;
+      if (status >= 200 && status < 300) {
+        onProgress(1);
+        const body = xhr.response as { image_url?: string } | null;
+        resolve((body ?? {}) as T);
+        return;
+      }
+      let message = `Upload failed with status ${status}`;
+      const body = xhr.response as { message?: string; title?: string } | null;
+      if (body?.message || body?.title) {
+        message = body.message || body.title || message;
+      }
+      reject(new Error(message));
+    };
+    xhr.onerror = () => reject(new Error("Upload failed due to a network error."));
+    xhr.ontimeout = () => reject(new Error("Upload timed out."));
+
+    xhr.send(formData);
   });
 }
 
@@ -276,6 +331,120 @@ export function normalizeProductWriteInput(input: {
     delivery_window: input.deliveryWindow,
     is_available: input.isAvailable,
   };
+}
+
+// ─── Checkout stock / availability revalidation (#1401) ─────────────────────
+
+export type StockIssueReason =
+  | "not_found"
+  | "unavailable"
+  | "out_of_stock"
+  | "insufficient_stock";
+
+export interface StockRevalidationIssue {
+  productId: string;
+  name: string;
+  reason: StockIssueReason;
+  message: string;
+  requestedQuantity: number;
+  availableStock: number | null;
+}
+
+/**
+ * Re-fetch every product referenced by the cart and compare the live
+ * stock/availability against what the buyer is about to sign for. The server
+ * stays the source of truth: this never trusts the cart's cached numbers.
+ *
+ * Resolves to a (possibly empty) list of human-readable issues. A product that
+ * cannot be fetched is reported as `not_found` rather than silently dropped.
+ */
+export async function revalidateCartStock(
+  items: Array<{ product_id: string; name?: string; quantity: string }>,
+): Promise<StockRevalidationIssue[]> {
+  // Collapse duplicate product ids, summing the requested quantity.
+  const requested = new Map<string, { name: string; quantity: number }>();
+  for (const item of items) {
+    const qty = Number(item.quantity);
+    const safeQty = Number.isFinite(qty) ? qty : 0;
+    const existing = requested.get(item.product_id);
+    if (existing) {
+      existing.quantity += safeQty;
+    } else {
+      requested.set(item.product_id, {
+        name: item.name ?? "This item",
+        quantity: safeQty,
+      });
+    }
+  }
+
+  const entries = Array.from(requested.entries());
+  const results = await Promise.allSettled(
+    entries.map(([productId]) => getProductById(productId)),
+  );
+
+  const issues: StockRevalidationIssue[] = [];
+  entries.forEach(([productId, meta], index) => {
+    const result = results[index];
+    if (result.status === "rejected") {
+      // The re-check itself failed (network/5xx). Do not block checkout on an
+      // inconclusive result — the contract still enforces settlement — but we
+      // could not confirm freshness for this item this time.
+      return;
+    }
+    if (!result.value) {
+      issues.push({
+        productId,
+        name: meta.name,
+        reason: "not_found",
+        message: `${meta.name} is no longer available.`,
+        requestedQuantity: meta.quantity,
+        availableStock: null,
+      });
+      return;
+    }
+
+    const product = result.value;
+    if (!product.is_available) {
+      issues.push({
+        productId,
+        name: product.name,
+        reason: "unavailable",
+        message: `${product.name} is no longer listed.`,
+        requestedQuantity: meta.quantity,
+        availableStock: null,
+      });
+      return;
+    }
+
+    if (product.stock_quantity != null) {
+      const available = Number(product.stock_quantity);
+      if (Number.isFinite(available)) {
+        if (available <= 0) {
+          issues.push({
+            productId,
+            name: product.name,
+            reason: "out_of_stock",
+            message: `${product.name} is out of stock.`,
+            requestedQuantity: meta.quantity,
+            availableStock: 0,
+          });
+          return;
+        }
+        if (meta.quantity > available) {
+          issues.push({
+            productId,
+            name: product.name,
+            reason: "insufficient_stock",
+            message: `Only ${available} ${product.unit} of ${product.name} left — you requested ${meta.quantity}.`,
+            requestedQuantity: meta.quantity,
+            availableStock: available,
+          });
+        }
+      }
+    }
+  });
+
+  return issues;
 }
 
 // ─── Saved Searches ────────────────────────────────────────────────────────
