@@ -112,7 +112,11 @@ vi.mock('../config/logger.js', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-vi.mock('../services/wsServer.js', () => ({ broadcast: vi.fn() }));
+vi.mock('../services/wsServer.js', () => ({
+  broadcast: vi.fn(),
+  broadcastTo: vi.fn(),
+  broadcastToMany: vi.fn(),
+}));
 
 // ---------------------------------------------------------------------------
 // Shared fixture builders

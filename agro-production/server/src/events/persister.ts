@@ -1,7 +1,7 @@
 import type { CampaignStatus, Prisma, UserRole } from '@prisma/client';
 import { prisma } from '../db/client.js';
 import logger from '../config/logger.js';
-import { broadcast } from '../services/wsServer.js';
+import { broadcast, broadcastTo, broadcastToMany } from '../services/wsServer.js';
 import { recordEventProcessed, recordEventDuplicate } from './metrics.js';
 import { isValidTransition } from '../services/campaignStatusService.js';
 import type {
@@ -322,14 +322,22 @@ async function handleCampaignInvested(event: CampaignInvestedEvent) {
   });
 
   if (post) {
-    broadcast(
-      'campaign.invested',
-      (post as PostCommitPayloads).campaignInvested,
-    );
-    broadcast(
-      'investment.indexed',
-      (post as PostCommitPayloads).investmentIndexed,
-    );
+    const payload = post as PostCommitPayloads;
+    const invested = payload.campaignInvested;
+    broadcastTo(invested.investorAddress, 'campaign.invested', {
+      campaignId: invested.campaignId,
+      amount: invested.amount,
+      totalRaised: invested.totalRaised,
+      txHash: invested.txHash,
+    });
+    broadcastTo(invested.investorAddress, 'investment.indexed', {
+      id: payload.investmentIndexed.id,
+      campaignId: payload.investmentIndexed.campaignId,
+      amount: payload.investmentIndexed.amount,
+      ledger: payload.investmentIndexed.ledger,
+      txHash: payload.investmentIndexed.txHash,
+      createdAt: payload.investmentIndexed.createdAt,
+    });
   }
 }
 
@@ -383,7 +391,11 @@ async function handleCampaignSettled(event: CampaignSettledEvent) {
   });
 
   if (post) {
-    broadcast('campaign.settled', post);
+    const settled = post as { campaignId: string; onChainId: string; totalRevenue: string };
+    broadcast('campaign.settled', {
+      campaignId: settled.campaignId,
+      onChainId: settled.onChainId,
+    });
   }
 }
 
@@ -487,7 +499,18 @@ async function handleOrderCreated(event: OrderCreatedEvent) {
   });
 
   if (post) {
-    broadcast('order.created', post);
+    const order = post as PostCommitPayload;
+    broadcastToMany(
+      [order.buyerAddress, order.farmerAddress],
+      'order.created',
+      {
+        orderId: order.orderId,
+        campaignId: order.campaignId,
+        amount: order.amount,
+        status: order.status,
+        txHash: order.txHash,
+      },
+    );
   }
 }
 
@@ -556,7 +579,13 @@ async function handleOrderConfirmed(event: OrderConfirmedEvent) {
   });
 
   if (post) {
-    broadcast('order.confirmed', post);
+    const confirmed = post as PostCommitPayload;
+    broadcastTo(confirmed.buyerAddress, 'order.confirmed', {
+      orderId: confirmed.orderId,
+      campaignId: confirmed.campaignId,
+      status: confirmed.status,
+      txHash: confirmed.txHash,
+    });
   }
 }
 
@@ -714,7 +743,18 @@ async function handleDisputeOpened(event: DisputeOpenedEvent) {
   });
 
   if (post) {
-    broadcast('dispute.opened', post);
+    const dispute = post as PostCommitPayload;
+    broadcastToMany(
+      [dispute.initiatorAddress, dispute.respondentAddress],
+      'dispute.opened',
+      {
+        disputeId: dispute.disputeId,
+        campaignId: dispute.campaignId,
+        orderId: dispute.orderId,
+        status: dispute.status,
+        txHash: dispute.txHash,
+      },
+    );
   }
 }
 
@@ -798,7 +838,12 @@ async function handleDisputeEvidenceSubmitted(
   });
 
   if (post) {
-    broadcast('dispute.evidence_submitted', post);
+    const dispute = post as PostCommitPayload;
+    broadcastTo(dispute.submitterAddress, 'dispute.evidence_submitted', {
+      disputeId: dispute.disputeId,
+      status: dispute.status,
+      txHash: dispute.txHash,
+    });
   }
 }
 
@@ -852,6 +897,8 @@ async function handleDisputeResolved(event: DisputeResolvedEvent) {
 
     post = {
       disputeId: currentDispute.id,
+      initiatorAddress: currentDispute.initiatorAddress,
+      respondentAddress: currentDispute.respondentAddress,
       status: 'Resolved',
       resolutionOutcome: event.resolutionOutcome,
       txHash: event.txHash,
@@ -871,7 +918,19 @@ async function handleDisputeResolved(event: DisputeResolvedEvent) {
   });
 
   if (post) {
-    broadcast('dispute.resolved', post);
+    const dispute = post as PostCommitPayload & { initiatorAddress?: string; respondentAddress?: string };
+    broadcastToMany(
+      [dispute.initiatorAddress, dispute.respondentAddress].filter(
+        (v): v is string => Boolean(v),
+      ),
+      'dispute.resolved',
+      {
+        disputeId: dispute.disputeId,
+        status: dispute.status,
+        resolutionOutcome: dispute.resolutionOutcome,
+        txHash: dispute.txHash,
+      },
+    );
   }
 }
 
@@ -920,6 +979,8 @@ async function handleDisputeDismissed(event: DisputeDismissedEvent) {
 
     post = {
       disputeId: currentDispute.id,
+      initiatorAddress: currentDispute.initiatorAddress,
+      respondentAddress: currentDispute.respondentAddress,
       status: 'Dismissed',
       txHash: event.txHash,
     };
@@ -938,7 +999,18 @@ async function handleDisputeDismissed(event: DisputeDismissedEvent) {
   });
 
   if (post) {
-    broadcast('dispute.dismissed', post);
+    const dispute = post as PostCommitPayload & { initiatorAddress?: string; respondentAddress?: string };
+    broadcastToMany(
+      [dispute.initiatorAddress, dispute.respondentAddress].filter(
+        (v): v is string => Boolean(v),
+      ),
+      'dispute.dismissed',
+      {
+        disputeId: dispute.disputeId,
+        status: dispute.status,
+        txHash: dispute.txHash,
+      },
+    );
   }
 }
 
@@ -1059,7 +1131,13 @@ async function handleBasketDeposit(event: BasketDepositEvent) {
   });
 
   if (post) {
-    broadcast('basket.deposit', post);
+    const deposit = post as PostCommitPayload;
+    broadcastTo(deposit.depositorAddress, 'basket.deposit', {
+      basketId: deposit.basketId,
+      amount: deposit.amount,
+      totalDeposited: deposit.totalDeposited,
+      txHash: deposit.txHash,
+    });
   }
 }
 
@@ -1108,7 +1186,10 @@ async function handleBasketFunded(event: BasketFundedEvent) {
   });
 
   if (post) {
-    broadcast('basket.funded', post);
+    const funded = post as PostCommitPayload;
+    broadcast('basket.funded', {
+      basketId: funded.basketId,
+    });
   }
 }
 
@@ -1190,7 +1271,12 @@ async function handleBasketWithdrawn(event: BasketWithdrawnEvent) {
   });
 
   if (post) {
-    broadcast('basket.withdrawn', post);
+    const withdrawn = post as PostCommitPayload;
+    broadcastTo(withdrawn.depositorAddress, 'basket.withdrawn', {
+      basketId: withdrawn.basketId,
+      depositAmount: withdrawn.depositAmount,
+      txHash: withdrawn.txHash,
+    });
   }
 }
 
@@ -1271,7 +1357,12 @@ async function handleCampaignClaimed(event: CampaignClaimedEvent) {
   });
 
   if (post) {
-    broadcast('campaign.claimed', post);
+    const claim = post as PostCommitPayload;
+    broadcastTo(claim.investorAddress, 'campaign.claimed', {
+      campaignId: claim.campaignId,
+      payout: claim.payout,
+      txHash: claim.txHash,
+    });
   }
 }
 
@@ -1345,7 +1436,12 @@ async function handleBasketClaimed(event: BasketClaimedEvent) {
   });
 
   if (post) {
-    broadcast('basket.claimed', post);
+    const claim = post as PostCommitPayload;
+    broadcastTo(claim.depositorAddress, 'basket.claimed', {
+      basketId: claim.basketId,
+      payout: claim.payout,
+      txHash: claim.txHash,
+    });
   }
 }
 
