@@ -393,7 +393,7 @@ stellar keys add test-low-balance --sign-with-hash-meta
 ## References
 
 - [Soroban Documentation: Storage TTL](https://soroban.stellar.org/docs/learn/storage#storing-data)
-- [Production Escrow TTL Policy](./TTL_POLICY.md) — data key extension details
+- [Canonical Contract ABI](./CANONICAL_CONTRACT.md#abi-summary) — entry points, including `bump_instance_ttl`
 - [Issue #456](https://github.com/Cylo-Traders/Agrocylo-Global/issues/456) — original TTL policy design
 - [Issue #1290](https://github.com/Cylo-Traders/Agrocylo-Global/issues/1290) — keeper specification
 
