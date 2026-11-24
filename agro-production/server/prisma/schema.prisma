@@ -41,6 +41,7 @@ model Campaign {
 
   farmer        User           @relation("FarmerCampaigns", fields: [farmerAddress], references: [walletAddress], onDelete: Restrict)
   investments   Investment[]
+  claims        CampaignClaim[]
   orders        Order[]
   transactions  Transaction[]
   disputes      Dispute[]
@@ -105,6 +106,27 @@ model Investment {
   @@index([campaignId])
   @@index([investorAddress])
   @@map("investments")
+}
+
+/// Direct campaign payout claimed by an investor via `claim_returns`
+/// (Issue #1343). The contract allows exactly one claim per investor per
+/// campaign, so (campaignId, investorAddress) is the natural key and replays
+/// upsert onto the same row. Basket payouts live on BasketDeposit instead.
+model CampaignClaim {
+  id              String   @id @default(uuid())
+  campaignId      String
+  investorAddress String
+  payoutAmount    String   // i128 as string, exact stroops paid out
+  ledger          Int
+  eventIndex      Int
+  txHash          String?
+  createdAt       DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, investorAddress])
+  @@index([investorAddress])
+  @@map("campaign_claims")
 }
 
 model Order {
@@ -207,6 +229,9 @@ model EventCursor {
   ledger       Int
   eventIndex   Int
   ledgerHash   String?  // Hash of the ledger at this sequence — used to detect reorgs
+  /// When this contract's watcher last durably processed events and advanced
+  /// the cursor. Contract-scoped freshness source for readiness (Issue #1344).
+  lastProcessedAt DateTime?
   updatedAt    DateTime @updatedAt
   createdAt    DateTime @default(now())
 

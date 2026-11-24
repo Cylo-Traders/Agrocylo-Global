@@ -111,4 +111,41 @@ describe("pendingTransactions", () => {
     expect(remaining).toHaveLength(1);
     expect(remaining[0].hash).toBe("HASH1");
   });
+
+  it("distinguishes not-submitted from submitted-but-not-indexed", () => {
+    // No transaction recorded yet: the group is not submitted.
+    expect(hasInFlightForIntent(INTENT)).toBe(false);
+    expect(getInFlightForIntent(INTENT)).toBeUndefined();
+
+    // After submission the hash exists but the indexer may still return NOT_FOUND.
+    recordSubmittedTransaction({ intent: INTENT, hash: "HASH1", timeoutSeconds: 30 });
+    const inFlight = getInFlightForIntent(INTENT);
+    expect(inFlight?.hash).toBe("HASH1");
+    expect(inFlight?.status).toBe("submitted");
+  });
+
+  it("retrying a lookup does not submit a second escrow transaction", async () => {
+    recordSubmittedTransaction({ intent: INTENT, hash: "HASH1", timeoutSeconds: 30 });
+
+    // A status refresh (lookup retry) only reads; it must not create a new entry.
+    await resolvePendingTransactions({
+      getTransaction: async () => ({ status: "NOT_FOUND" }),
+    });
+
+    const entries = getPendingTransactions();
+    expect(entries).toHaveLength(1);
+    expect(entries[0].hash).toBe("HASH1");
+    expect(hasInFlightForIntent(INTENT)).toBe(true);
+  });
+
+  it("keeps checkout state across a simulated drawer close/reopen", () => {
+    recordSubmittedTransaction({ intent: INTENT, hash: "HASH1", timeoutSeconds: 30 });
+
+    // Closing and reopening the drawer re-reads persisted state for the session.
+    const reopened = getPendingTransactions();
+    expect(reopened).toHaveLength(1);
+    expect(reopened[0].intent).toBe(INTENT);
+    expect(reopened[0].hash).toBe("HASH1");
+    expect(reopened[0].status).toBe("submitted");
+  });
 });

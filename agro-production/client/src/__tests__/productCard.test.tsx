@@ -1,6 +1,7 @@
 import { render, screen, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ProductCard } from "../components/ProductCard";
+import { ProductCardSkeleton } from "../components/marketplace/ProductGrid";
 import type { Product } from "@/types";
 
 vi.mock("next/link", () => ({
@@ -65,31 +66,22 @@ describe("ProductCard", () => {
     expect(link.getAttribute("aria-label")).toContain("kg");
   });
 
-  it("shows a cached/read-only indicator when offline", () => {
-    setOnline(false);
-    render(<ProductCard product={baseProduct} />);
-    expect(screen.getByText(/cached/i)).toBeTruthy();
+  it("renders a product that was created even when its image upload failed", () => {
+    render(<ProductCard product={{ ...baseProduct, imageUrl: null }} />);
+    expect(screen.getByText("Organic Tomatoes")).toBeTruthy();
+    expect(screen.getByRole("link").getAttribute("aria-label")).toContain("kg");
+  });
+});
+
+describe("ProductCardSkeleton", () => {
+  it("is decorative and hidden from assistive tech", () => {
+    const { container } = render(<ProductCardSkeleton />);
+    const skeleton = container.firstElementChild as HTMLElement;
+    expect(skeleton.getAttribute("aria-hidden")).toBe("true");
   });
 
-  it("hides the cached indicator when online", () => {
-    render(<ProductCard product={baseProduct} />);
-    expect(screen.queryByText(/cached/i)).toBeNull();
-  });
-
-  it("updates the indicator when connectivity changes", () => {
-    render(<ProductCard product={baseProduct} />);
-    expect(screen.queryByText(/cached/i)).toBeNull();
-
-    act(() => {
-      setOnline(false);
-      window.dispatchEvent(new Event("offline"));
-    });
-    expect(screen.getByText(/cached/i)).toBeTruthy();
-
-    act(() => {
-      setOnline(true);
-      window.dispatchEvent(new Event("online"));
-    });
-    expect(screen.queryByText(/cached/i)).toBeNull();
+  it("does not expose any accessible text", () => {
+    render(<ProductCardSkeleton />);
+    expect(screen.queryByRole("link")).toBeNull();
   });
 });

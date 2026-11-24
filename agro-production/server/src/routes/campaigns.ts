@@ -47,9 +47,10 @@ const router = Router();
 //
 // The wallet address is derived from the session, so investors can only ever
 // read their own data. Amounts stay i128 stroop strings end-to-end; totals
-// are summed with BigInt. Realized returns are not indexed per investment
-// (no payout event for direct campaign investments yet), so totalReturned is
-// always "0" for now — the field documents the contract for when that lands.
+// are summed with BigInt. Realized returns (Issue #1343) are the indexed
+// `campaign.claimed` payouts for this wallet; campaigns the investor has not
+// claimed contribute nothing, so an unclaimed portfolio reports "0". Basket
+// payouts are reported separately by GET /investor/baskets.
 router.get(
   '/investor/portfolio',
   requireWallet,
@@ -77,16 +78,36 @@ router.get(
       },
     });
 
+    const claims = await prisma.campaignClaim.findMany({
+      where: { investorAddress: walletAddress },
+      orderBy: [{ ledger: 'desc' }, { eventIndex: 'desc' }],
+      include: { campaign: { select: { onChainId: true } } },
+    });
+
     let totalInvested = 0n;
     for (const investment of investments) {
       totalInvested += BigInt(investment.amount || '0');
     }
 
+    let totalReturned = 0n;
+    for (const claim of claims) {
+      totalReturned += BigInt(claim.payoutAmount || '0');
+    }
+
     jsonValidated(res, InvestorPortfolioSummarySchema, 200, {
       investorAddress: walletAddress,
       positions: investments,
+      claims: claims.map((claim) => ({
+        campaignId: claim.campaignId,
+        campaignOnChainId: claim.campaign?.onChainId,
+        payoutAmount: claim.payoutAmount,
+        ledger: claim.ledger,
+        txHash: claim.txHash,
+        claimedAt: claim.createdAt,
+      })),
       totalInvested: totalInvested.toString(),
-      totalReturned: '0',
+      totalReturned: totalReturned.toString(),
+      returnsSource: 'campaign_claims',
     });
   }),
 );

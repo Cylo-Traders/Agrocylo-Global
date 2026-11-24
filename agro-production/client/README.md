@@ -55,6 +55,16 @@ Notes for developers
 - API calls are centralized in `src/lib/apiClient.ts` and wrapped by the service modules in `src/services/*`.
 - Wallet context is in `src/context/WalletContext.tsx`; everything wallet-specific lives in `src/lib/wallets/`. No feature code should branch on a provider name.
 
+## Notifications
+
+The notification center surfaces order and listing events (e.g. order status
+changes, new listings, listing updates). Users control which event types and
+channels they receive from **Account settings → Notifications**; in-app
+delivery is on by default, while email and SMS delivery are opt-in and require
+the corresponding delivery provider to be configured on the server. Read/unread
+state is persisted per user across sessions, and duplicate event delivery is
+deduplicated by event identity so repeated events are idempotent.
+
 ## Privacy and offline support
 
 Behavioral analytics stays disabled until a visitor accepts it. The choice is

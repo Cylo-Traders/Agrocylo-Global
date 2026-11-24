@@ -14,6 +14,11 @@ test.describe("marketplace API journey", () => {
 
     await page.goto("/home");
     await page.getByRole("link", { name: "Browse marketplace" }).click();
+
+    const loadingStatus = page.getByRole("status", { name: /loading products/i });
+    await expect(loadingStatus).toBeVisible();
+    await expect(page.getByTestId("product-skeleton").first()).toBeVisible();
+
     const response = await productResponse;
     expect(response.ok()).toBeTruthy();
 
@@ -35,6 +40,8 @@ test.describe("marketplace API journey", () => {
     });
     await expect(page.getByRole("heading", { name: "Marketplace" })).toBeVisible();
     await expect(page.getByRole("link", { name: /View .* XLM per/ }).first()).toBeVisible();
+    await expect(page.getByTestId("product-skeleton")).toHaveCount(0);
+    await expect(loadingStatus).toHaveCount(0);
 
     const filteredRequest = page.waitForRequest((request) =>
       request.url().includes("/api/v1/products") && request.url().includes("category=VEGETABLES"),
@@ -49,5 +56,35 @@ test.describe("marketplace API journey", () => {
     await page.goBack();
     await expect(page.getByRole("heading", { name: "Marketplace" })).toBeVisible();
     expect(consoleErrors).toEqual([]);
+  });
+
+  test("changes marketplace filters using only the keyboard", async ({ page }) => {
+    await page.goto("/home");
+    await page.getByRole("link", { name: "Browse marketplace" }).click();
+    await expect(page.getByRole("heading", { name: "Marketplace" })).toBeVisible();
+
+    const categoryFilter = page.getByLabel("Category");
+    await categoryFilter.focus();
+    await expect(categoryFilter).toBeFocused();
+
+    const filteredRequest = page.waitForRequest((request) =>
+      request.url().includes("/api/v1/products") && request.url().includes("category=VEGETABLES"),
+    );
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await filteredRequest;
+    await expect(categoryFilter).toHaveValue("VEGETABLES");
+    await expect(categoryFilter).toBeFocused();
+
+    const favoritesToggle = page.getByRole("button", { name: /favorites/i });
+    await favoritesToggle.focus();
+    await expect(favoritesToggle).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(favoritesToggle).toHaveAttribute("aria-pressed", "true");
+    await expect(favoritesToggle).toBeFocused();
+
+    await page.keyboard.press("Space");
+    await expect(favoritesToggle).toHaveAttribute("aria-pressed", "false");
+    await expect(favoritesToggle).toBeFocused();
   });
 });

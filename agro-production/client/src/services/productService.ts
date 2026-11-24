@@ -11,6 +11,45 @@ export interface ProductFilters {
   limit?: number;
 }
 
+export interface CreateProductInput {
+  name: string;
+  description?: string;
+  imageUrl?: string;
+  pricePerUnit: string;
+  category: ProductCategory;
+  unit: string;
+  quantity: number;
+  location?: string;
+}
+
+/**
+ * Farmer-facing message for a failed create-product request. Maps the opaque
+ * browser `Failed to fetch` (network/CORS/timeout) and server errors to an
+ * actionable message so the form can surface it without leaking the raw
+ * exception. Entered values are preserved by the caller.
+ */
+export function describeCreateProductError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 0 || error.status === 408 || error.status === 504) {
+      return "We couldn't reach the product service. Check your connection and try again.";
+    }
+    if (error.status === 401 || error.status === 403) {
+      return "Your wallet session expired. Reconnect your wallet and try again.";
+    }
+    if (error.status >= 500) {
+      return "The product service is temporarily unavailable. Please try again shortly.";
+    }
+    return error.message || "We couldn't create your product. Please try again.";
+  }
+  if (error instanceof TypeError || (error instanceof Error && /failed to fetch|networkerror/i.test(error.message))) {
+    return "We couldn't reach the product service. This may be a network or CORS issue — check your connection and try again.";
+  }
+  if (error instanceof Error && error.name === "AbortError") {
+    return "The request timed out. Please try again.";
+  }
+  return "We couldn't create your product. Please try again.";
+}
+
 export function validateProductFilters(filters: {
   category: ProductCategory | "";
   location: string;
@@ -98,6 +137,48 @@ export async function fetchProduct(id: string, signal?: AbortSignal): Promise<Pr
     throw new ApiError(502, "The product service returned an invalid product");
   }
   return response;
+}
+
+/**
+ * An image already attached to a saved listing. `id` is the server-side image
+ * identifier used for deletion; `url` is what the farmer sees in the form.
+ */
+export interface ExistingProductImage {
+  id: string;
+  url: string;
+}
+
+/**
+ * Load the image set currently attached to a listing so the edit form can
+ * review, reorder, replace, and remove existing photos. Returns an empty list
+ * when the listing has no images yet.
+ */
+export async function fetchProductImages(
+  productId: string,
+  signal?: AbortSignal,
+): Promise<ExistingProductImage[]> {
+  const response = await api.get<{ images?: unknown }>(`/products/${productId}/images`, { signal });
+  const images = response?.images;
+  if (!Array.isArray(images)) return [];
+  return images.filter(
+    (image): image is ExistingProductImage =>
+      !!image &&
+      typeof image === "object" &&
+      typeof (image as ExistingProductImage).id === "string" &&
+      typeof (image as ExistingProductImage).url === "string",
+  );
+}
+
+/**
+ * Remove a single image from a saved listing. The server deletes by image id;
+ * callers should only invoke this after the farmer confirms the edit so that
+ * cancelling leaves the persisted listing untouched.
+ */
+export async function deleteProductImage(
+  productId: string,
+  imageId: string,
+): Promise<void> {
+  await api.delete<void>(`/products/${productId}/images/${imageId}`);
 }
 
 /** Display a stroop price as XLM. Exact BigInt arithmetic — see validation.ts. */

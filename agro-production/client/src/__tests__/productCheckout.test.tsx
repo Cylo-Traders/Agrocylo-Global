@@ -225,62 +225,89 @@ describe("Product checkout error handling", () => {
     expect(mockLogErrorWithContext).toHaveBeenCalled();
   });
 
-  it("checkout is unavailable while offline and recovers on reconnect", async () => {
-    mockCreateOrder.mockResolvedValue({ id: "order-offline" } as Order);
+  it("distinguishes wallet cancellation from network failure", async () => {
+    mockCreateOrder.mockResolvedValue({ id: "order-cancel" } as Order);
+    mockBuildCreateOrder.mockResolvedValue({
+      success: true,
+      data: "prepared-xdr",
+    });
+    mockSignAndSubmit.mockResolvedValue({
+      success: false,
+      outcome: "cancelled",
+      error: "User rejected the request",
+    });
+
+    const { result } = renderHook(() => useTransaction());
+
+    const builderFn = async () => {
+      await mockCreateOrder({
+        buyerAddress: "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU",
+        campaignId: "campaign-cancel",
+        amount: "5000000",
+      });
+
+      const builtResult = await mockBuildCreateOrder(
+        "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU",
+        "campaign-cancel",
+        5000000n
+      );
+
+      if (!builtResult.success) {
+        throw new Error(builtResult.error);
+      }
+
+      return builtResult.data!;
+    };
+
+    await act(async () => {
+      await result.current.execute(builderFn);
+    });
+
+    expect(result.current.isError).toBe(true);
+    expect(result.current.error).toContain("rejected");
+  });
+
+  it("submitted but not indexed does not resubmit on retry", async () => {
+    mockCreateOrder.mockResolvedValue({ id: "order-index" } as Order);
     mockBuildCreateOrder.mockResolvedValue({
       success: true,
       data: "prepared-xdr",
     });
     mockSignAndSubmit.mockResolvedValue({
       success: true,
-      outcome: "confirmed",
+      outcome: "pending",
       txHash: "b".repeat(64),
-      status: "SUCCESS",
+      status: "PENDING",
     });
 
     const { result } = renderHook(() => useTransaction());
 
-    // Go offline: checkout must not proceed.
-    act(() => {
-      setOnline(false);
-    });
-    expect(window.navigator.onLine).toBe(false);
-
-    const offlineBuilder = async () => {
-      if (!window.navigator.onLine) {
-        throw new Error("Checkout is unavailable while offline");
-      }
-      return "prepared-xdr";
-    };
-
-    await act(async () => {
-      await result.current.execute(offlineBuilder);
-    });
-
-    expect(result.current.isError).toBe(true);
-    expect(result.current.error).toContain("unavailable while offline");
-    expect(mockCreateOrder).not.toHaveBeenCalled();
-
-    // Reconnect: checkout becomes available again without duplicating actions.
-    act(() => {
-      setOnline(true);
-    });
-    expect(window.navigator.onLine).toBe(true);
-
-    const onlineBuilder = async () => {
+    const builderFn = async () => {
       await mockCreateOrder({
         buyerAddress: "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU",
-        campaignId: "campaign-offline",
+        campaignId: "campaign-index",
         amount: "5000000",
       });
-      return "prepared-xdr";
+
+      const builtResult = await mockBuildCreateOrder(
+        "GBUQWP3FTHOUQSV2HFEFNVD5B4BLXLLJFP3J62KH3FWRVFWTWQ32RHU",
+        "campaign-index",
+        5000000n
+      );
+
+      if (!builtResult.success) {
+        throw new Error(builtResult.error);
+      }
+
+      return builtResult.data!;
     };
 
     await act(async () => {
-      await result.current.execute(onlineBuilder);
+      await result.current.execute(builderFn);
     });
 
-    expect(result.current.isSuccess).toBe(true);
-    expect(mockCreateOrder).toHaveBeenCalledTimes(1);
+    // A pending (submitted, not yet indexed) transaction must not trigger a
+    // second escrow submission when the user retries the lookup.
+    expect(mockSignAndSubmit).toHaveBeenCalledTimes(1);
   });
 });

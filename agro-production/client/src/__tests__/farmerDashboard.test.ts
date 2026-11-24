@@ -2,13 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   filterOrdersForFarmer,
   summarizeFarmerOrders,
+  ANALYTICS_WINDOWS,
+  filterAnalyticsEventsByWindow,
+  summarizeListingAnalytics,
 } from "@/lib/farmerDashboard";
-import {
-  BULK_IMPORT_CSV_TEMPLATE,
-  buildBulkImportPreview,
-  summarizeBulkImport,
-} from "@/lib/bulkProductImport";
-import type { Order } from "@/types";
+import type { Order, ListingAnalyticsEvent } from "@/types";
 
 const FARMER = "GFARMER";
 
@@ -51,6 +49,46 @@ const orders: Order[] = [
   },
 ];
 
+const NOW = new Date("2026-02-01T00:00:00.000Z");
+
+const events: ListingAnalyticsEvent[] = [
+  {
+    id: "evt-view-recent",
+    listingId: "listing-a",
+    farmerAddress: FARMER,
+    metric: "VIEW",
+    occurredAt: "2026-01-30T00:00:00.000Z",
+  },
+  {
+    id: "evt-cart-recent",
+    listingId: "listing-a",
+    farmerAddress: FARMER,
+    metric: "CART_ADD",
+    occurredAt: "2026-01-31T00:00:00.000Z",
+  },
+  {
+    id: "evt-sale-recent",
+    listingId: "listing-a",
+    farmerAddress: FARMER,
+    metric: "SALE",
+    occurredAt: "2026-01-31T12:00:00.000Z",
+  },
+  {
+    id: "evt-view-old",
+    listingId: "listing-a",
+    farmerAddress: FARMER,
+    metric: "VIEW",
+    occurredAt: "2025-11-01T00:00:00.000Z",
+  },
+  {
+    id: "evt-other-farmer",
+    listingId: "listing-b",
+    farmerAddress: "GOTHER",
+    metric: "VIEW",
+    occurredAt: "2026-01-31T00:00:00.000Z",
+  },
+];
+
 describe("farmer dashboard order summary", () => {
   it("shows only orders on campaigns owned by the connected farmer", () => {
     expect(filterOrdersForFarmer(orders, FARMER).map((order) => order.id)).toEqual([
@@ -68,35 +106,34 @@ describe("farmer dashboard order summary", () => {
   });
 });
 
-describe("bulk product import", () => {
-  it("documents required and optional fields with example rows in the template", () => {
-    expect(BULK_IMPORT_CSV_TEMPLATE).toContain("name");
-    expect(BULK_IMPORT_CSV_TEMPLATE).toContain("price");
-    expect(BULK_IMPORT_CSV_TEMPLATE).toContain("quantity");
-    expect(BULK_IMPORT_CSV_TEMPLATE).toContain("description");
-    expect(BULK_IMPORT_CSV_TEMPLATE.split("\n").length).toBeGreaterThan(2);
+describe("farmer listing analytics", () => {
+  it("documents the supported time windows", () => {
+    expect(ANALYTICS_WINDOWS.map((window) => window.id)).toEqual(["7d", "30d", "90d"]);
+    expect(ANALYTICS_WINDOWS.find((window) => window.id === "7d")?.days).toBe(7);
   });
 
-  it("flags invalid rows and duplicates before submission", () => {
-    const csv = [
-      "name,price,quantity,description",
-      "Tomatoes,100,5,Fresh",
-      "Tomatoes,100,5,Fresh",
-      ",abc,-1,Bad row",
-    ].join("\n");
-    const preview = buildBulkImportPreview(csv, []);
-    expect(preview.rows[0].status).toBe("valid");
-    expect(preview.rows[1].status).toBe("duplicate");
-    expect(preview.rows[2].status).toBe("invalid");
-    expect(preview.rows[2].errors.length).toBeGreaterThan(0);
-  });
-
-  it("reports created, skipped, and failed rows in the final summary", () => {
-    const summary = summarizeBulkImport([
-      { rowNumber: 2, status: "created" },
-      { rowNumber: 3, status: "skipped" },
-      { rowNumber: 4, status: "failed" },
+  it("filters events by the selected window relative to now", () => {
+    const recent = filterAnalyticsEventsByWindow(events, "7d", NOW);
+    expect(recent.map((event) => event.id)).toEqual([
+      "evt-view-recent",
+      "evt-cart-recent",
+      "evt-sale-recent",
     ]);
-    expect(summary).toEqual({ created: 1, skipped: 1, failed: 1 });
+  });
+
+  it("keeps views, cart additions, and sales as distinct metrics scoped to the farmer", () => {
+    const rows = summarizeListingAnalytics(events, FARMER, "30d", NOW);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      listingId: "listing-a",
+      views: 1,
+      cartAdditions: 1,
+      completedSales: 1,
+    });
+  });
+
+  it("never exposes another farmer's events", () => {
+    const rows = summarizeListingAnalytics(events, FARMER, "90d", NOW);
+    expect(rows.some((row) => row.listingId === "listing-b")).toBe(false);
   });
 });

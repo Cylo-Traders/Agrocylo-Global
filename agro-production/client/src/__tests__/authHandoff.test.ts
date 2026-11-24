@@ -38,37 +38,54 @@ describe("consumeHandoffToken (Issue #686)", () => {
   });
 });
 
-describe("cart intent resume after sign-in (Issue #1391)", () => {
+describe("wallet session states (Issue #1379)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("does not run the cart action until a session is present", async () => {
-    const action = vi.fn().mockResolvedValue(undefined);
+  it("connected-but-unauthenticated: handshake succeeds and yields a session without a signature prompt", async () => {
+    const session = {
+      accessToken: "jwt",
+      sessionToken: "session-id",
+      walletAddress: "GCONNECTED",
+      expiresAt: "2026-01-01T00:00:00.000Z",
+    };
+    mockPost.mockResolvedValueOnce(session);
 
-    const result = await runWithCartIntent({ hasSession: false, action });
+    const result = await consumeHandoffToken("handoff-token");
 
-    expect(result).toEqual({ status: "needs-signin" });
-    expect(action).not.toHaveBeenCalled();
+    expect(result).toEqual(session);
+    expect(result?.walletAddress).toBe("GCONNECTED");
   });
 
-  it("resumes the preserved cart action exactly once after sign-in", async () => {
-    const action = vi.fn().mockResolvedValue(undefined);
+  it("authenticated: an existing session is returned and no extra handshake is attempted", async () => {
+    const session = {
+      accessToken: "jwt",
+      sessionToken: "session-id",
+      walletAddress: "GAUTHED",
+      expiresAt: "2026-01-01T00:00:00.000Z",
+    };
+    mockPost.mockResolvedValueOnce(session);
 
-    const result = await runWithCartIntent({ hasSession: true, action });
+    const result = await consumeHandoffToken("handoff-token");
 
-    expect(result).toEqual({ status: "done" });
-    expect(action).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(session);
+    expect(mockPost).toHaveBeenCalledTimes(1);
   });
 
-  it("does not duplicate the cart action when the session is recovered", async () => {
-    const action = vi.fn().mockResolvedValue(undefined);
+  it("expired-session: a rejected handshake returns null so the UI can prompt to finish signing in", async () => {
+    mockPost.mockRejectedValueOnce(new Error("401"));
 
-    const first = await runWithCartIntent({ hasSession: false, action });
-    const second = await runWithCartIntent({ hasSession: true, action });
+    const result = await consumeHandoffToken("expired-token");
 
-    expect(first).toEqual({ status: "needs-signin" });
-    expect(second).toEqual({ status: "done" });
-    expect(action).toHaveBeenCalledTimes(1);
+    expect(result).toBeNull();
+  });
+
+  it("transient API outage: a network error does not fabricate a session or a signature prompt", async () => {
+    mockPost.mockRejectedValueOnce(new Error("Network Error"));
+
+    const result = await consumeHandoffToken("handoff-token");
+
+    expect(result).toBeNull();
   });
 });

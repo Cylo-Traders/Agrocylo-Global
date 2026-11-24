@@ -59,6 +59,38 @@ if (process.env.NODE_ENV === "production" &&
   throw new Error("Set NEXT_PUBLIC_PRODUCTION_CONTRACT_ID to the deployed contract address before building.");
 }
 
+// ── Issue #1377: block the localhost API fallback in production ──────────
+// The browser bundle falls back to http://localhost:5000 when
+// NEXT_PUBLIC_API_URL is unset, which can never reach a developer's machine
+// from a deployed browser and surfaces as an opaque `Failed to fetch`.
+// Fail the production build instead of silently shipping that fallback.
+function assertProductionApiUrl() {
+  if (process.env.NODE_ENV !== "production") return;
+  const raw = process.env.NEXT_PUBLIC_API_URL?.trim();
+  if (!raw) {
+    throw new Error(
+      "Set NEXT_PUBLIC_API_URL to the deployed API origin before building. " +
+        "Without it the browser falls back to http://localhost:5000 and product creation fails with `Failed to fetch`.",
+    );
+  }
+  let hostname: string;
+  try {
+    hostname = new URL(raw).hostname.toLowerCase();
+  } catch {
+    throw new Error(
+      "NEXT_PUBLIC_API_URL must be an absolute URL (e.g. https://api.example.com) before building.",
+    );
+  }
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "0.0.0.0" || hostname === "::1" || hostname === "[::1]") {
+    throw new Error(
+      "NEXT_PUBLIC_API_URL points at localhost, which is unreachable from a deployed browser. " +
+        "Set it to the deployed API origin before building.",
+    );
+  }
+}
+
+assertProductionApiUrl();
+
 // ── Validate endpoints before using them for headers/images ─────────────
 // Mirrors client/next.config.ts validation (Issue #927). In production missing
 // endpoints block the build; in dev malformed values still fail predictably

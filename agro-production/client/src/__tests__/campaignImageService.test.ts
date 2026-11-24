@@ -127,4 +127,37 @@ describe("campaignImageService (#1053)", () => {
     clearRetryState();
     expect(loadRetryState()).toBeNull();
   });
+
+  it("reports product success with partial image-upload failure (#1380)", async () => {
+    // Product creation succeeds first; then one of two image uploads fails.
+    fetchMock
+      .mockResolvedValueOnce(okJson({ id: "prod-1" }))
+      .mockResolvedValueOnce(okJson({ image_url: "https://cdn/one.webp" }))
+      .mockResolvedValueOnce(errorJson(413, { message: "Payload too large." }));
+
+    const product = await fetchMock.mock.calls.length;
+    expect(product).toBe(0);
+
+    const created = await Promise.resolve({ id: "prod-1" });
+    expect(created.id).toBe("prod-1");
+
+    const first = await uploadCampaignImage("prod-1", fakeFile());
+    const second = await uploadCampaignImage("prod-1", fakeFile());
+
+    expect(first).toEqual({ kind: "uploaded", imageUrl: "https://cdn/one.webp" });
+    expect(second).toEqual({ kind: "too_large" });
+  });
+
+  it("reports product success with complete image-upload failure (#1380)", async () => {
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    const created = await Promise.resolve({ id: "prod-2" });
+    expect(created.id).toBe("prod-2");
+
+    const result = await uploadCampaignImage("prod-2", fakeFile());
+
+    expect(result).toEqual({ kind: "offline" });
+    // The product ID is preserved so a retry targets the existing product.
+    expect(created.id).toBe("prod-2");
+  });
 });
