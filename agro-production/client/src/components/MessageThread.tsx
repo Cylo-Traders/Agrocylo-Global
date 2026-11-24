@@ -1,8 +1,26 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+/**
+ * Issue #1256: the thread renders the conversation the page loaded and
+ * accepts initial messages as a prop. The old thread read
+ * `conversation.messages` and sent each message through a
+ * sessionToken-arg API that no longer exists; that field is gone from
+ * the service type and the thread pulls history via the page instead.
+ *
+ * Live updates still go through the shared WebSocket. The page now
+ * owns the full message list, so an incoming WS message is routed up
+ * through `onNewMessage` instead of being stashed on the thread's
+ * local state (which is kept for scroll + input handling only).
+ */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWebSocket, type WsMessage } from "@/hooks/useWebSocket";
-import { sendMessage as sendMessageApi, type Conversation, type Message } from "@/services/conversationService";
+import { getAccessToken } from "@/lib/authToken";
+import {
+  sendMessage as sendMessageApi,
+  type Conversation,
+  type Message,
+} from "@/services/conversationService";
 
 // Must mirror SendMessageSchema and EditMessageSchema in
 // agro-production/server/src/routes/conversations.ts, which in turn mirror
@@ -14,15 +32,22 @@ const MESSAGE_CONTENT_MAX_LENGTH = 4000;
 interface MessageThreadProps {
   conversation: Conversation;
   currentWallet: string;
-  sessionToken: string;
+  /** History + optimistic messages already loaded by the page. */
+  initialMessages: Message[];
+  /**
+   * Called once per message the thread learns about, whether via
+   * WebSocket or a successful send. The page owns the full list so a
+   * "load older" button on top can prepend history.
+   */
+  onNewMessage: (message: Message) => void;
 }
 
 export default function MessageThread({
   conversation,
   currentWallet,
-  sessionToken,
+  initialMessages,
+  onNewMessage,
 }: MessageThreadProps) {
-  const [messages, setMessages] = useState<Message[]>(conversation.messages || []);
   const [pendingMessage, setPendingMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,20 +59,32 @@ export default function MessageThread({
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, scrollToBottom]);
+  }, [initialMessages.length, scrollToBottom]);
 
-  const handleWebSocketMessage = useCallback((msg: WsMessage) => {
-    if (msg.type === "message.received") {
-      const newMessage = msg.payload as Message;
-      if (newMessage && typeof newMessage === "object" && "conversationId" in newMessage && newMessage.conversationId === conversation.id) {
-        setMessages((prev) => [...prev, newMessage]);
+  const handleWebSocketMessage = useCallback(
+    (msg: WsMessage) => {
+      if (msg.type !== "message.received") return;
+      const payload = msg.payload as Message;
+      if (
+        payload &&
+        typeof payload === "object" &&
+        "conversationId" in payload &&
+        payload.conversationId === conversation.id
+      ) {
+        onNewMessage(payload);
       }
-    }
-  }, [conversation.id]);
+    },
+    [conversation.id, onNewMessage],
+  );
 
   // Issue #1043: keep the options identity tied to the session token so a
   // re-auth is driven by the token itself and not by a fresh object literal.
-  const socketOptions = useMemo(() => ({ token: sessionToken }), [sessionToken]);
+  // #1256: read the token at mount from the same source the apiClient reads
+  // (`authToken`), so there is no second channel for session state.
+  const socketOptions = useMemo(() => {
+    const token = getAccessToken();
+    return token ? { token } : {};
+  }, []);
 
   useWebSocket(handleWebSocketMessage, socketOptions);
 
@@ -62,8 +99,8 @@ export default function MessageThread({
     setError(null);
 
     try {
-      const newMessage = await sendMessageApi(conversation.id, messageContent, sessionToken);
-      setMessages((prev) => [...prev, newMessage]);
+      const newMessage = await sendMessageApi(conversation.id, messageContent);
+      onNewMessage(newMessage);
       scrollToBottom();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send message");
@@ -73,26 +110,16 @@ export default function MessageThread({
     }
   };
 
-  const otherParticipant =
-    currentWallet.toLowerCase() === conversation.investorAddress.toLowerCase()
-      ? conversation.farmerAddress
-      : conversation.investorAddress;
-
   return (
-    <div className="flex flex-col h-screen bg-background">
-      {/* Header */}
-      <div className="border-b border-border p-4 bg-surface">
-        <p className="text-sm text-muted truncate">{otherParticipant}</p>
-      </div>
-
+    <div className="flex flex-col flex-1 bg-background">
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.length === 0 ? (
+        {initialMessages.length === 0 ? (
           <div className="flex items-center justify-center h-full text-muted">
             <p className="text-center">No messages yet. Start the conversation!</p>
           </div>
         ) : (
-          messages.map((msg) => (
+          initialMessages.map((msg) => (
             <div
               key={msg.id}
               className={`flex ${
