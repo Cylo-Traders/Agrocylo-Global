@@ -72,13 +72,52 @@ export interface CampaignListResponse {
   };
 }
 
-export type ProductCategory =
-  | "GRAINS"
-  | "VEGETABLES"
-  | "FRUITS"
-  | "LIVESTOCK"
-  | "DAIRY"
-  | "OTHER";
+export const PRODUCT_CATEGORIES = [
+  "GRAINS",
+  "VEGETABLES",
+  "FRUITS",
+  "LIVESTOCK",
+  "DAIRY",
+  "OTHER",
+] as const;
+
+export type ProductCategory = (typeof PRODUCT_CATEGORIES)[number];
+
+export const PRODUCT_CATEGORY_LABELS: Record<ProductCategory, string> = {
+  GRAINS: "Grains",
+  VEGETABLES: "Vegetables",
+  FRUITS: "Fruits",
+  LIVESTOCK: "Livestock",
+  DAIRY: "Dairy",
+  OTHER: "Other",
+};
+
+const LEGACY_CATEGORY_ALIASES: Record<string, ProductCategory> = {
+  grains: "GRAINS",
+  vegetables: "VEGETABLES",
+  fruits: "FRUITS",
+  livestock: "LIVESTOCK",
+  meat: "LIVESTOCK",
+  poultry: "LIVESTOCK",
+  dairy: "DAIRY",
+  other: "OTHER",
+};
+
+export function parseProductCategory(value: string | null | undefined): ProductCategory | "" {
+  if (!value) return "";
+  const trimmed = value.trim();
+  const upper = trimmed.toUpperCase();
+  if ((PRODUCT_CATEGORIES as readonly string[]).includes(upper)) {
+    return upper as ProductCategory;
+  }
+  const alias = LEGACY_CATEGORY_ALIASES[trimmed.toLowerCase()];
+  return alias ?? "";
+}
+
+export function formatProductCategory(category: string): string {
+  const canonical = parseProductCategory(category);
+  return canonical ? PRODUCT_CATEGORY_LABELS[canonical] : category;
+}
 
 export interface Product {
   id: string;

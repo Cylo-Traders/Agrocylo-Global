@@ -14,17 +14,16 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+  PRODUCT_CATEGORIES,
+  PRODUCT_CATEGORY_LABELS,
+  parseProductCategory,
+} from '@/types';
 
-const CATEGORIES = [
-  'Vegetables',
-  'Fruits',
-  'Grains',
-  'Dairy',
-  'Meat',
-  'Honey',
-  'Nuts',
-  'Herbs',
-];
+export const CATEGORIES = PRODUCT_CATEGORIES.map((value) => ({
+  value,
+  label: PRODUCT_CATEGORY_LABELS[value],
+}));
 
 const SORT_OPTIONS = [
   { value: 'newest', label: 'Newest' },
@@ -46,7 +45,9 @@ export function MarketplaceFilters() {
   const searchParams = useSearchParams();
 
   const [search, setSearch] = useState(searchParams.get('q') ?? '');
-  const [category, setCategory] = useState(searchParams.get('category') ?? '');
+  const [category, setCategory] = useState(
+    () => parseProductCategory(searchParams.get('category'))
+  );
   const [sort, setSort] = useState(() => {
     const value = searchParams.get('sort');
     return SORT_OPTIONS.some((option) => option.value === value)
@@ -94,7 +95,7 @@ export function MarketplaceFilters() {
   }, [search]);
 
   const handleCategoryChange = (value: string) => {
-    const next = value === 'all' ? '' : value;
+    const next = value === 'all' ? '' : parseProductCategory(value);
     setCategory(next);
     updateParams({ category: next || null });
   };
@@ -184,8 +185,8 @@ export function MarketplaceFilters() {
               <SelectContent>
                 <SelectItem value="all">All categories</SelectItem>
                 {CATEGORIES.map((item) => (
-                  <SelectItem key={item} value={item}>
-                    {item}
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
                   </SelectItem>
                 ))}
               </SelectContent>

@@ -14,7 +14,7 @@ import { trackProductViewed } from "@/lib/analytics";
 import { classifyError, logErrorWithContext } from "@/lib/errorHandling";
 import { isNetworkError } from "@/lib/apiClient";
 import { ButtonSpinner } from "@/components/Skeletons";
-import type { Product, Order } from "@/types";
+import { formatProductCategory, type Product, type Order } from "@/types";
 import { ProductImage } from "@/components/ProductImage";
 
 export default function ProductDetailPage() {
@@ -130,7 +130,7 @@ export default function ProductDetailPage() {
         <ProductImage name={product.name} imageUrl={product.imageUrl} className="h-64 md:h-auto rounded-xl" />
         <div className="space-y-5">
           <div>
-            <span className="text-xs bg-primary-50 text-primary-700 px-2 py-0.5 rounded-full">{product.category}</span>
+            <span className="text-xs bg-primary-50 text-primary-700 px-2 py-0.5 rounded-full">{formatProductCategory(product.category)}</span>
             <h1 className="text-2xl font-bold text-foreground mt-2">{product.name}</h1>
             <p className="text-sm text-muted mt-1">{product.description ?? "No description provided."}</p>
           </div>
