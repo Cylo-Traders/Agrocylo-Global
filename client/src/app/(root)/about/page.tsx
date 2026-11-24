@@ -15,7 +15,7 @@ const milestones = [
     year: "2024",
     title: "Concept Born",
     description:
-      "AgroCylo was conceptualized to bridge the gap between farmers and global buyers using blockchain technology.",
+      "Cylo was conceptualized to bridge the gap between farmers and global buyers using blockchain technology.",
   },
   {
     year: "2024",
@@ -27,7 +27,7 @@ const milestones = [
     year: "2025",
     title: "Marketplace Launch",
     description:
-      "AgroCylo marketplace goes live, enabling farmers to list products and buyers to purchase using XLM and USDC.",
+      "Cylo marketplace goes live, enabling farmers to list products and buyers to purchase using XLM and USDC.",
   },
   {
     year: "2025",
@@ -105,7 +105,7 @@ export default function AboutPage() {
               </p>
               <p className="text-muted-foreground text-base leading-relaxed md:text-lg">
                 By leveraging Stellar&apos;s high-throughput payment network and
-                Soroban smart contracts, AgroCylo processes transactions with
+                Soroban smart contracts, Cylo processes transactions with
                 sub-cent fees and 5-second finality, enabling micro-payments
                 that make sense for small-scale farmers everywhere.
               </p>

@@ -32,14 +32,14 @@ const footerLinks = {
     {
       title: "Contact",
       routes: [
-        { label: "About AgroCylo", path: "/about" },
+        { label: "About Cylo", path: "/about" },
         { label: "FAQ", path: "/" },
         { label: "Support", path: "/" },
       ],
     },
   ],
   socials: [
-    { label: "AgroCylo - X", icon: RiTwitterXLine, path: undefined as string | undefined },
+    { label: "Cylo - X", icon: RiTwitterXLine, path: undefined as string | undefined },
     { label: "Instagram", icon: RxInstagramLogo, path: undefined as string | undefined },
     { label: "LinkedIn", icon: PiLinkedinLogo, path: undefined as string | undefined },
     { label: "Facebook", icon: PiFacebookLogo, path: undefined as string | undefined },
@@ -143,7 +143,7 @@ export default function Footer() {
           </p>
 
           <p className="text-sm font-medium">
-            © {new Date().getFullYear()} AgroCylo. All rights reserved.
+            © {new Date().getFullYear()} Cylo. All rights reserved.
           </p>
         </div>
       </Wrapper>

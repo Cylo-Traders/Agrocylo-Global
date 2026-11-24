@@ -184,7 +184,7 @@ export default function OnboardingPage() {
       <div className="w-full max-w-2xl">
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
-            Welcome to AgroCylo 🌾
+            Welcome to Cylo 🌾
           </h1>
           <p className="text-muted-foreground mt-2 text-sm md:text-base">
             A few quick steps to set up your profile.

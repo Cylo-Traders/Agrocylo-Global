@@ -180,7 +180,7 @@ export function DashboardReadinessGate({
         id="dashboard-gate-wrong-network"
         icon={RadioTower}
         title="Switch to the correct network"
-        description="Your wallet is connected to a different Stellar network than the one Agrocylo is configured for. Open your wallet and switch networks, then return here."
+        description="Your wallet is connected to a different Stellar network than the one Cylo is configured for. Open your wallet and switch networks, then return here."
         actionLabel="I've switched – refresh"
         action={() => window.location.reload()}
       />
@@ -194,7 +194,7 @@ export function DashboardReadinessGate({
         id="dashboard-gate-api-unavailable"
         icon={AlertTriangle}
         title="Service temporarily unavailable"
-        description="Agrocylo's backend is currently unreachable. Your wallet is safe — please try again in a moment."
+        description="Cylo's backend is currently unreachable. Your wallet is safe — please try again in a moment."
         action={() => window.location.reload()}
         actionLabel="Retry"
       />
@@ -211,7 +211,7 @@ export function DashboardReadinessGate({
         description={
           sessionError
             ? "Your session has expired or the signature was declined. Sign the authentication request in your wallet to continue."
-            : "Agrocylo needs you to sign a challenge with your connected wallet to verify ownership. No funds are moved."
+            : "Cylo needs you to sign a challenge with your connected wallet to verify ownership. No funds are moved."
         }
         action={handleReauth}
         actionLabel="Sign in with Wallet"

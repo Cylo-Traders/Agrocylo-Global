@@ -445,7 +445,7 @@ function buildTrustIndicators(
     {
       label: "Member since",
       value: profile.memberSince,
-      description: "Joined the AgroCylo marketplace",
+      description: "Joined the Cylo marketplace",
     },
     {
       label: "Reputation badge",

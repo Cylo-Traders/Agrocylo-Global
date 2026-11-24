@@ -6,96 +6,59 @@ This document explains the repository structure, the relationship between the tw
 
 ## Overview
 
-Agrocylo-Global is a dual-application Agro-DeFi platform on Stellar/Soroban:
+Agrocylo-Global is an npm/Turborepo workspace on Stellar/Soroban with two active product surfaces:
 
-1. **Root `client/` + `server/`** — Original marketplace application (peer-to-peer farmer-consumer trade with escrow)
-2. **`agro-production/client/` + `agro-production/server/`** — Campaign-based production crowdfunding (investors fund agricultural campaigns and claim returns)
+1. **Root `client/` + `server/`** — Marketplace application (peer-to-peer agricultural trade with escrow, cart, orders, and real-time updates).
+2. **`agro-production/client/` + `agro-production/server/`** — Campaign-based production crowdfunding (investors fund agricultural campaigns and claim returns).
 
-Both applications use Stellar wallets, on-chain escrow, and WebSocket-based real-time updates. They are **independent** but share some architectural patterns and contract infrastructure.
+Both applications use Stellar wallet integrations, on-chain contracts, and WebSocket-based updates. They are independent deployables that share repo tooling and some patterns.
 
 ---
 
 ## Application Structure
 
-### 1. Root Marketplace (`client/` + `server/`)
+### 1. Marketplace (`client/` + `server/`)
 
-**Status:** Earlier-stage, simpler escrow pattern
-**Use case:** Peer-to-peer goods trade with immediate payment-on-delivery escrow
+**Use case:** Peer-to-peer goods trade with escrow-backed settlement.
 
 #### `client/`
-- Next.js 13+ (App Router)
-- **Wallet:** Freighter API (`@stellar/freighter-api`)
-- **State:** React Context (WalletContext, OrderContext)
-- **Features:**
-  - Product listing and search
-  - Order creation and tracking
-  - Escrow state transitions (confirm/refund/dispute)
-  - Notifications and real-time updates via WebSocket
-- **Key files:**
-  - `src/app/(root)/orders/` — order detail and management
-  - `src/components/` — reusable UI components
-  - `src/services/stellar/` — contract interaction, transaction signing
-  - `src/context/` — global state (wallet, orders)
+- Next.js 16 (App Router), React 19, TypeScript.
+- **Wallet:** `@stellar/freighter-api` and wallet adapter flows used by the app.
+- **State/data:** React Query hooks, React context, and service modules.
+- **Features:** product listing/search, cart/checkout, order management, escrow actions, notifications.
+- **Key paths:**
+  - `src/app/(root)/market/` — marketplace listing and product views
+  - `src/hooks/queries/useProducts.ts` — product query hook
+  - `src/services/productService.ts` — product API calls
+  - `src/lib/apiConfig.ts` / `src/lib/apiHelper.ts` — API base URL and request wrapper
 
 #### `server/`
-- Express.js
-- Prisma ORM with PostgreSQL
-- **Services:**
-  - Order and product management (REST API)
-  - WebSocket server for real-time notifications
-  - Event indexing from Stellar ledger (via Soroban RPC)
-  - Contract watcher for escrow state changes
-- **Key files:**
-  - `src/routes/` — REST API endpoints (orders, products, auth)
-  - `src/services/contractWatcher.ts` — polls RPC for escrow events
-  - `src/services/wsManager.ts` — WebSocket client/subscription management
-  - `src/controllers/` — business logic for orders, products
+- Express + TypeScript, Prisma/PostgreSQL.
+- **Services:** REST API for products/orders/auth/cart, Socket.io real-time updates, Stellar/Soroban integration.
+- **Key paths:**
+  - `src/routes/` — REST routes
+  - `src/controllers/` — request handlers/business logic
+  - `docs/API.md` and `openapi.yaml` — API documentation/contracts
 
-**Contracts used:** `contracts/escrow/` (direct payment escrow)
+**Primary contract:** `contracts/escrow/`.
 
 ---
 
 ### 2. Campaign Production App (`agro-production/client/` + `agro-production/server/`)
 
-**Status:** Current development focus (Stellar Wave bounty program)
-**Use case:** Campaign-based crowdfunding for agricultural production (investors lock funds, farmers execute production, investors claim returns)
+**Use case:** Campaign-based crowdfunding for agricultural production.
 
 #### `agro-production/client/`
-- Next.js 14+ (App Router)
-- **Wallet:** Freighter API (same pattern as root client)
-- **State:** React Context + custom hooks
-- **Features:**
-  - Campaign creation (by farmers)
-  - Campaign browsing and details
-  - Investment flow (XDR building, transaction signing, indexing polls)
-  - Investor dashboards and return claims
-  - Real-time campaign status updates
-- **Key files:**
-  - `src/app/campaigns/` — campaign listing and details
-  - `src/app/invest/` — investment flow
-  - `src/lib/contractService.ts` — builds invest XDR, interacts with production_escrow contract
-  - `src/lib/signTransaction.ts` — signs and submits transactions
-  - `src/hooks/` — custom React hooks (useInvest, useCampaign, etc.)
+- Next.js 16 (App Router), React 19, TypeScript.
+- **Features:** campaign creation/browsing, investment flow, dashboards, claims, real-time updates.
+- **Key paths:** `src/app/`, `src/lib/`, `src/hooks/`, `src/services/`.
 
 #### `agro-production/server/`
-- Express.js
-- Prisma ORM with PostgreSQL
-- **Services:**
-  - Campaign and investment REST API
-  - WebSocket for real-time campaign/investment updates
-  - Soroban event watcher (polls RPC for production_escrow events)
-  - Image upload endpoint for campaign photos
-- **Key files:**
-  - `src/routes/` — REST API for campaigns, investments, auth
-  - `src/services/contractWatcher.ts` — indexes production_escrow events (campaign.created, campaign.invested)
-  - `src/services/wsManager.ts` — broadcasts Soroban events to WebSocket clients
-  - `src/controllers/campaignController.ts` — campaign business logic
+- Express + TypeScript, Prisma/PostgreSQL.
+- **Features:** campaign/investment API, Soroban event watcher/indexing, WebSocket broadcasts.
+- **Key paths:** `src/routes/`, `src/controllers/`, `src/services/`.
 
-**Contracts used:** 
-- `contracts/production_escrow/` — main crowdfunding escrow
-- `contracts/registry/` — campaign/farmer registration
-- `contracts/investment_basket/` — investor pool management
-- `contracts/governance/` — DAO/governance features (future)
+**Contracts used:** `contracts/production_escrow/`, `contracts/registry/`, `contracts/investment_basket/`, and related governance/infrastructure contracts as needed.
 
 ---
 
@@ -241,37 +204,18 @@ Both apps use `classifyError()` utility to categorize contract errors:
 
 ## Development Focus
 
-### Current (Stellar Wave Program)
-- **Production escrow campaigns** (`agro-production/`) — MVP for agricultural crowdfunding
-- Critical issues: wallet auth, contract integration, error handling, observability
-
-### Next Phase
-- Archived weather-insurance reference (`archive/weather-insurance/`); excluded from active deployment
-- Governance features (`contracts/governance/`)
-- Root marketplace enhancements
-
-### Not Active
-- `client/` and `server/` (root marketplace) — production-ready but not under active development for Stellar Wave
+Active work is tracked in GitHub Issues and current campaign boards. Use issue labels and recent PRs as the source of truth for priority rather than static status claims in this document.
 
 ---
 
 ## Environment Configuration
 
-### Frontend (both client/ and agro-production/client/)
-```
-NEXT_PUBLIC_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
-NEXT_PUBLIC_NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
-NEXT_PUBLIC_CONTRACT_ID=<address>  # agro-production/client only
-```
+Environment variables and ports evolve; use these maintained sources:
 
-### Backend (both server/ and agro-production/server/)
-```
-DATABASE_URL=postgresql://...
-SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
-CONTRACT_ID=<address>
-RUN_CONTRACT_WATCHER=true
-PORT=3001
-```
+- Frontend setup: [`docs/FRONTEND_SETUP.md`](docs/FRONTEND_SETUP.md)
+- Deployment/environment reference: [`docs/deployment/environment.md`](docs/deployment/environment.md)
+- Backend unification notes: [`docs/architecture/backend-unification.md`](docs/architecture/backend-unification.md)
+- Local examples: `.env.example`, `client/.env.example`, `server/.env.example`, `agro-production/*/.env.example`
 
 ---
 
@@ -279,29 +223,19 @@ PORT=3001
 
 ### New Contributors
 
-1. **Understand the split:**
-   - **For campaign/production features:** Work in `agro-production/`
-   - **For marketplace features:** Work in root `client/` and `server/`
-   - **For shared contracts:** Check which app(s) consume it
-
-2. **Pick an area:**
-   - Backend: `agro-production/server/` (contract watcher, API routes, WebSocket)
-   - Frontend: `agro-production/client/` (investment flow, campaign pages)
-   - Contracts: `contracts/` (Rust/Soroban)
-
-3. **Run locally:**
-   - See `agro-production/README.md` for E2E test setup
-   - See `client/README.md` and `server/README.md` in each directory
-
-4. **File issues:**
-   - Use GitHub Issues with appropriate labels (`area:frontend`, `area:backend`, `type:bug`, etc.)
-   - Reference this document if explaining architectural decisions
+1. **Pick the surface:** marketplace (`client/`, `server/`), production (`agro-production/`), or contracts (`contracts/`).
+2. **Read local setup docs:** [`docs/FRONTEND_SETUP.md`](docs/FRONTEND_SETUP.md), [`server/README.md`](server/README.md), and app-specific READMEs.
+3. **Use GitHub Issues** with repository labels (`Frontend`, `Backend`, `Contract`, `bug`, `enhancement`, `documentation`, `good first issue`, `Stellar Wave`).
 
 ---
 
 ## Questions?
 
-- **Repo structure:** See this ARCHITECTURE.md
-- **API endpoints:** See `server/API.md` or `agro-production/server/API.md`
-- **Contract interfaces:** See `contracts/` and the documentation in `docs/contracts/`
-- **Deployment:** Check CI workflows in `.github/workflows/`
+- **Repo structure:** this document
+- **Frontend setup:** [`docs/FRONTEND_SETUP.md`](docs/FRONTEND_SETUP.md)
+- **Deployment/environment:** [`docs/deployment/environment.md`](docs/deployment/environment.md)
+- **Backend unification:** [`docs/architecture/backend-unification.md`](docs/architecture/backend-unification.md)
+- **API docs:** [`server/docs/API.md`](server/docs/API.md), [`client/API.md`](client/API.md), [`server/openapi.yaml`](server/openapi.yaml)
+- **Security audit:** [`contracts/SECURITY_AUDIT.md`](contracts/SECURITY_AUDIT.md)
+- **Contracts:** [`docs/contracts/`](docs/contracts/)
+- **CI workflows:** [`.github/workflows/`](.github/workflows/)

@@ -6,7 +6,7 @@ import { SkipLink } from "@/components/shared/skip-link";
 
 export const metadata = {
   title: {
-    template: "%s | AgroCylo Dashboard",
+    template: "%s | Cylo Dashboard",
     default: "Dashboard",
   },
 };

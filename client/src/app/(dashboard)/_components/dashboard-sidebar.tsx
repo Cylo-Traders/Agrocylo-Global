@@ -42,14 +42,14 @@ export function DashboardSidebar() {
         <Link href="/" className="flex items-center gap-2">
           <Image
             src="/logo.svg"
-            alt="AgroCylo"
+            alt="Cylo"
             width={70}
             height={24}
             className="dark:hidden"
           />
           <Image
             src="/logo-light.svg"
-            alt="AgroCylo"
+            alt="Cylo"
             width={70}
             height={24}
             className="hidden dark:block"

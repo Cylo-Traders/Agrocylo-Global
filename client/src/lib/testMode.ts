@@ -10,3 +10,8 @@
 export function isTestMode(): boolean {
   return process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 }
+
+
+export function isDemoMode(): boolean {
+  return isTestMode();
+}

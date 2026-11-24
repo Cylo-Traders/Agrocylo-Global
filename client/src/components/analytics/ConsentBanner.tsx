@@ -32,7 +32,7 @@ export default function ConsentBanner() {
       <Card className="mx-auto max-w-2xl">
         <CardContent className="flex flex-col items-center gap-4 py-4 sm:flex-row sm:justify-between">
           <p className="text-sm text-muted-foreground">
-            We use analytics to understand how Agrocylo is used and improve
+            We use analytics to understand how Cylo is used and improve
             the platform. No analytics data is collected until you accept.
           </p>
           <div className="flex w-full shrink-0 gap-2 sm:w-auto">

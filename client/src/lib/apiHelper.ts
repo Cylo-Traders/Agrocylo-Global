@@ -28,6 +28,10 @@ export class ApiRequestError extends Error {
   }
 }
 
+export function isApiRequestError(error: unknown): error is ApiRequestError {
+  return error instanceof ApiRequestError || (typeof error === "object" && error !== null && (error as { name?: string }).name === "ApiRequestError");
+}
+
 interface RequestOptions {
   method?: string;
   headers?: Record<string, string>;

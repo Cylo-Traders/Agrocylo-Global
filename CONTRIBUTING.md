@@ -21,14 +21,15 @@ Agrocylo-Global is an Agro-DeFi platform built on Stellar/Soroban. The repositor
 Issues are tracked in **[GitHub Issues](https://github.com/Cylo-Traders/Agrocylo-Global/issues)**.
 
 **Browse labels:**
-- `area:frontend` — Next.js/React work
-- `area:backend` — Express/Node.js work
-- `area:contracts` — Rust/Soroban work
-- `type:bug` — Bugs
-- `type:feature` — New features
-- `type:refactor` — Code quality
-- `good-first-issue` — Recommended for new contributors
-- `Stellar Wave` — Suitable for external contribution (bounty-eligible)
+- `Frontend` — Next.js/React work
+- `Backend` — Express/Node.js work
+- `Contract` — Rust/Soroban work
+- `bug` — Bugs
+- `enhancement` — New features or requests
+- `documentation` — Documentation improvements
+- `good first issue` — Recommended for new contributors
+- `help wanted` — Extra attention needed
+- `Stellar Wave` — Stellar Wave campaign work
 
 ### 2. Discuss Before Starting
 
@@ -161,9 +162,7 @@ npm run dev
 ```
 
 Do not share `node_modules`, lockfiles, or Prisma commands between these
-directories. See [the root server guide](server/README.md) for the distinction
-between generation and migrations, API-only runtime flags, and recovery from a
-missing `PrismaClient` export.
+directories. See [server/README.md](server/README.md) for root server setup and [server/docs/API.md](server/docs/API.md) for API details.
 
 #### For Smart Contracts (Rust/Soroban)
 ```bash
@@ -203,7 +202,7 @@ Smart contracts hold real user funds and are deployed to mainnet. Before opening
 1. **Run `cargo check --workspace`** — catches uncompilable references, missing enum variants, and other compile errors *before* code review. This is the single highest-leverage check (see §"Why This Matters" below).
 2. **Run `cargo test --workspace`** — ensure all tests pass, including regression tests
 3. **`cargo fmt --all` + `cargo clippy --workspace -- -D warnings`** — ensure code style and no warnings
-4. If you changed patterns in one contract, verify the change is applied consistently to other contracts that share the same pattern (e.g., `production_escrow` and `contracts/escrow` both have attester roles, governance gating, etc. — changes to one should be checked against the other per `docs/SECURITY_AUDIT.md` §14.6)
+4. If you changed patterns in one contract, verify the change is applied consistently to other contracts that share the same pattern (e.g., `production_escrow` and `contracts/escrow` both have attester roles, governance gating, etc. — changes to one should be checked against the other per `contracts/SECURITY_AUDIT.md` §14.6)
 
 **Why This Matters (The #679 Incident):**
 In a prior merge, two parallel PRs silently dropped each other's identifiers when merged — one added a new enum variant, the other also added one, and one was lost in merge resolution. No test caught it because they tested in isolation. This is why:
@@ -332,7 +331,7 @@ Previously, this repo maintained in-tree backlog documents (`client/issues.md`, 
 
 **How to contribute ideas now:**
 1. File a GitHub issue with a clear title and description
-2. Add relevant labels (`type:feature`, `area:frontend`, etc.)
+2. Add relevant labels (`enhancement`, `Frontend`, etc.)
 3. Discuss scope with maintainers before implementing
 
 See [BACKLOG_TRIAGE.md](BACKLOG_TRIAGE.md) for details on which items from the old backlog became real issues.
@@ -375,7 +374,7 @@ Agrocylo Global participates in the **Stellar Wave issue-claim bounty program** 
 ## Questions?
 
 - **Repo structure:** See [ARCHITECTURE.md](ARCHITECTURE.md)
-- **API endpoints:** See `server/API.md` or `agro-production/server/API.md`
+- **API docs:** [`server/docs/API.md`](server/docs/API.md), [`client/API.md`](client/API.md), [`server/openapi.yaml`](server/openapi.yaml)
 - **Smart contracts:** See `contracts/` and `docs/contracts/` README files
 - **Toolchain & versions:** See [docs/TOOLCHAIN.md](docs/TOOLCHAIN.md)
 - **Security & audit notes:** See [contracts/SECURITY_AUDIT.md](contracts/SECURITY_AUDIT.md)
