@@ -3,12 +3,15 @@ import { timingSafeEqual } from 'crypto';
 import { config } from '../config/index.js';
 
 /**
- * Guard for the Prometheus `/metrics` endpoint.
+ * Guard for the Prometheus `/metrics` and `/metrics/prom` endpoints.
  *
- * Policy: open-by-default. When `METRICS_API_KEY` is unset the endpoint is
- * served without authentication (with a one-time startup warning) so that
- * local/dev scraping keeps working. When the key is configured, requests must
- * present a matching `Authorization: Bearer <key>` header (or `x-api-key`).
+ * Policy:
+ * - Production: fail-closed. When `METRICS_API_KEY` is missing or unset, requests
+ *   are rejected with 401 Unauthorized to prevent operational data leakage.
+ * - Non-production (development/test): open-by-default with a one-time startup
+ *   warning when unset so local scraping continues to work.
+ * - When configured: requests must present a matching `Authorization: Bearer <key>`
+ *   or `x-api-key` header.
  */
 let warnedMissingKey = false;
 
@@ -23,11 +26,22 @@ function safeEqual(a: string, b: string): boolean {
 
 export function requireMetricsAuth(req: Request, res: Response, next: NextFunction): void {
   const expected = config.metricsApiKey || process.env.METRICS_API_KEY;
+  const isProduction = (config.nodeEnv || process.env.NODE_ENV) === 'production';
 
   if (!expected) {
+    if (isProduction) {
+      if (!warnedMissingKey) {
+        warnedMissingKey = true;
+        console.warn(
+          '[metricsAuth] METRICS_API_KEY is not configured in production. Rejecting request (fail-closed).'
+        );
+      }
+      res.status(401).json({ error: 'Unauthorized: METRICS_API_KEY is not configured' });
+      return;
+    }
+
     if (!warnedMissingKey) {
       warnedMissingKey = true;
-
       console.warn(
         '[metricsAuth] METRICS_API_KEY is not set; /metrics is open. Set METRICS_API_KEY to require authentication.'
       );
