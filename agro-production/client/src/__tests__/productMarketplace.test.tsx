@@ -2,9 +2,17 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { ProductImage } from "@/components/ProductImage";
 import { ProductGrid } from "@/components/marketplace/ProductGrid";
-import { validateProductFilters } from "@/services/productService";
 import { describeApiError } from "@/services/apiDiagnostics";
 import { buildProductQuery } from "@/services/productService";
+import {
+  PRODUCT_CATEGORY_LABELS,
+  VALID_PRODUCT_CATEGORIES,
+  validateProductFilters,
+  formatProductCategory,
+  parseProductCategory,
+} from "@/services/productService";
+import { CATEGORIES } from "@/components/MarketplaceFilters";
+import { parseCategory } from "@/app/marketplace/page";
 
 const product = {
   name: "Organic Tomatoes",
@@ -90,6 +98,88 @@ describe("marketplace contract boundaries", () => {
     image.dispatchEvent(new Event("error"));
     expect(image).toHaveAttribute("src", "/product-placeholder.svg");
     vi.unstubAllEnvs();
+  });
+
+  describe("category filter enum validation (Issue #1439)", () => {
+    it("accepts all canonical uppercase ProductCategory enums", () => {
+      for (const cat of VALID_PRODUCT_CATEGORIES) {
+        const result = validateProductFilters({
+          category: cat,
+          location: "Abuja",
+          minPrice: "10",
+          maxPrice: "50",
+        });
+        expect(result.valid).toBe(true);
+        if (result.valid) {
+          expect(result.sanitized.category).toBe(cat);
+        }
+      }
+    });
+
+    it("normalizes valid lowercase category strings to canonical uppercase enums", () => {
+      const lowercaseCategories = ["grains", "vegetables", "fruits", "livestock", "dairy", "other"];
+      for (const lower of lowercaseCategories) {
+        const result = validateProductFilters({
+          category: lower,
+          location: "",
+          minPrice: "",
+          maxPrice: "",
+        });
+        expect(result.valid).toBe(true);
+        if (result.valid) {
+          expect(result.sanitized.category).toBe(lower.toUpperCase());
+        }
+      }
+    });
+
+    it("rejects unsupported categories such as meat, poultry, or invalid strings", () => {
+      const invalid = ["meat", "poultry", "tubers", "unknown_category"];
+      for (const cat of invalid) {
+        const result = validateProductFilters({
+          category: cat,
+          location: "",
+          minPrice: "",
+          maxPrice: "",
+        });
+        expect(result.valid).toBe(false);
+        if (!result.valid) {
+          expect(result.errors.some((e) => e.field === "category")).toBe(true);
+        }
+      }
+    });
+
+    it("ensures UI filter options expose human-readable labels rather than raw uppercase IDs", () => {
+      for (const cat of VALID_PRODUCT_CATEGORIES) {
+        expect(PRODUCT_CATEGORY_LABELS[cat]).toBeDefined();
+        expect(PRODUCT_CATEGORY_LABELS[cat]).not.toBe(cat); // e.g. "Grains" vs "GRAINS"
+      }
+
+      // Check CATEGORIES dropdown options
+      const nonDefaultCategories = CATEGORIES.filter((c) => c.value !== "");
+      expect(nonDefaultCategories.map((c) => c.value)).toEqual(
+        expect.arrayContaining(VALID_PRODUCT_CATEGORIES as unknown as string[]),
+      );
+      for (const item of nonDefaultCategories) {
+        expect(item.label).toMatch(/^[A-Z][a-z]+/);
+      }
+    });
+
+    it("formats raw uppercase enum categories into human-readable labels", () => {
+      expect(formatProductCategory("GRAINS")).toBe("Grains");
+      expect(formatProductCategory("VEGETABLES")).toBe("Vegetables");
+      expect(formatProductCategory("LIVESTOCK")).toBe("Livestock");
+      expect(formatProductCategory("FRUITS")).toBe("Fruits");
+      expect(formatProductCategory("DAIRY")).toBe("Dairy");
+      expect(formatProductCategory("OTHER")).toBe("Other");
+    });
+
+    it("parses legacy URL categories and maps meat/poultry to LIVESTOCK", () => {
+      expect(parseCategory("vegetables")).toBe("VEGETABLES");
+      expect(parseCategory("meat")).toBe("LIVESTOCK");
+      expect(parseCategory("poultry")).toBe("LIVESTOCK");
+      expect(parseCategory("invalid")).toBe("");
+      expect(parseCategory(null)).toBe("");
+    });
   });
 });
 

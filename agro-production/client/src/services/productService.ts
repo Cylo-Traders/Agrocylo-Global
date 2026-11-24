@@ -24,7 +24,7 @@ export interface CreateProductInput {
 
 /**
  * Farmer-facing message for a failed create-product request. Maps the opaque
- * browser `Failed to fetch` (network/CORS/timeout) and server errors to an
+ * browser  (network/CORS/timeout) and server errors to an
  * actionable message so the form can surface it without leaking the raw
  * exception. Entered values are preserved by the caller.
  */
@@ -50,17 +50,65 @@ export function describeCreateProductError(error: unknown): string {
   return "We couldn't create your product. Please try again.";
 }
 
+export const VALID_PRODUCT_CATEGORIES: readonly ProductCategory[] = [
+  "GRAINS",
+  "VEGETABLES",
+  "FRUITS",
+  "LIVESTOCK",
+  "DAIRY",
+  "OTHER",
+] as const;
+
+export const PRODUCT_CATEGORY_LABELS: Record<ProductCategory, string> = {
+  GRAINS: "Grains",
+  VEGETABLES: "Vegetables",
+  FRUITS: "Fruits",
+  LIVESTOCK: "Livestock",
+  DAIRY: "Dairy",
+  OTHER: "Other",
+};
+
+export function formatProductCategory(category: ProductCategory | string | null | undefined): string {
+  if (!category) return "";
+  const trimmed = category.trim();
+  const normalized = trimmed.toUpperCase() as ProductCategory;
+  return PRODUCT_CATEGORY_LABELS[normalized] || trimmed;
+}
+
+export function parseProductCategory(value: string | null | undefined): ProductCategory | "" {
+  if (!value) return "";
+  const val = value.trim().toLowerCase();
+  if (val === "meat" || val === "poultry") return "LIVESTOCK";
+  const upper = val.toUpperCase() as ProductCategory;
+  return VALID_PRODUCT_CATEGORIES.includes(upper) ? upper : "";
+}
+
 export function validateProductFilters(filters: {
-  category: ProductCategory | "";
+  category: ProductCategory | "" | string;
   location: string;
   minPrice: string;
   maxPrice: string;
 }):
-  | { valid: true; sanitized: typeof filters }
+  | { valid: true; sanitized: { category: ProductCategory | ""; location: string; minPrice: string; maxPrice: string } }
   | { valid: false; errors: Array<{ field: string; message: string }> } {
   const errors: Array<{ field: string; message: string }> = [];
   const minPrice = filters.minPrice.trim();
   const maxPrice = filters.maxPrice.trim();
+  const rawCategory = (filters.category || "").trim();
+
+  let sanitizedCategory: ProductCategory | "" = "";
+  if (rawCategory !== "") {
+    const normalized = rawCategory.toUpperCase() as ProductCategory;
+    if (VALID_PRODUCT_CATEGORIES.includes(normalized)) {
+      sanitizedCategory = normalized;
+    } else {
+      errors.push({
+        field: "category",
+        message: `Invalid category "${rawCategory}". Allowed categories are: ${VALID_PRODUCT_CATEGORIES.join(", ")}`,
+      });
+    }
+  }
+
   if (minPrice && !/^\d+(\.\d+)?$/.test(minPrice)) {
     errors.push({ field: "minPrice", message: "Min price must be a valid number" });
   }
@@ -74,7 +122,7 @@ export function validateProductFilters(filters: {
   return {
     valid: true,
     sanitized: {
-      category: filters.category,
+      category: sanitizedCategory,
       location: filters.location.trim(),
       minPrice,
       maxPrice,

@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ApiError, isNetworkError } from "@/lib/apiClient";
-import { fetchProducts, validateProductFilters } from "@/services/productService";
+import {
+  fetchProducts,
+  validateProductFilters,
+  parseProductCategory,
+  VALID_PRODUCT_CATEGORIES,
+} from "@/services/productService";
 import { ProductCardSkeleton } from "@/components/Skeletons";
 import { MarketplaceFilters } from "@/components/MarketplaceFilters";
 import { ProductCard } from "@/components/ProductCard";
@@ -27,22 +32,8 @@ function classifyMarketplaceError(error: unknown): { kind: MarketplaceErrorKind;
 
 const defaultFilters = { category: "" as ProductCategory | "", location: "", minPrice: "", maxPrice: "" };
 
-const PRODUCT_CATEGORIES: ProductCategory[] = [
-  "vegetables",
-  "fruits",
-  "grains",
-  "dairy",
-  "meat",
-  "poultry",
-  "eggs",
-  "honey",
-  "herbs",
-  "other",
-];
-
-function parseCategory(value: string | null): ProductCategory | "" {
-  if (!value) return "";
-  return (PRODUCT_CATEGORIES as string[]).includes(value) ? (value as ProductCategory) : "";
+export function parseCategory(value: string | null): ProductCategory | "" {
+  return parseProductCategory(value);
 }
 
 function parsePrice(value: string | null): string {
