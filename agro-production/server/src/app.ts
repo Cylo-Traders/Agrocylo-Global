@@ -65,6 +65,7 @@ const corsOptions: cors.CorsOptions = {
     'Content-Type',
     'Authorization',
     'Idempotency-Key',
+    'x-idempotency-key',
     'x-api-key',
     'x-request-id',
     'x-wallet-address',

@@ -15,6 +15,7 @@ import {
   buildIdempotencyCacheKey,
   getCachedResponse,
   getIdempotencyKey,
+  isBodyMismatch,
   requireIdempotencyKey,
   setCachedResponse,
 } from '../middleware/idempotency.js';
@@ -321,6 +322,16 @@ router.post(
     const cacheKey = buildIdempotencyCacheKey(req);
     const cached = await getCachedResponse(cacheKey);
     if (cached) {
+      if (isBodyMismatch(cached, req.body)) {
+        problemDetail(
+          res,
+          req,
+          409,
+          'Idempotency Key Conflict',
+          'Idempotency key was already used with a different request payload',
+        );
+        return;
+      }
       res.status(cached.status).json(cached.body);
       return;
     }
@@ -358,7 +369,7 @@ router.post(
     });
 
     const response = campaign;
-    await setCachedResponse(cacheKey, 201, response);
+    await setCachedResponse(cacheKey, 201, response, req.body);
     jsonValidated(res, CampaignSchema, 201, response);
   }),
 );
@@ -434,6 +445,16 @@ router.post(
     const cacheKey = buildIdempotencyCacheKey(req);
     const cached = await getCachedResponse(cacheKey);
     if (cached) {
+      if (isBodyMismatch(cached, req.body)) {
+        problemDetail(
+          res,
+          req,
+          409,
+          'Idempotency Key Conflict',
+          'Idempotency key was already used with a different request payload',
+        );
+        return;
+      }
       res.status(cached.status).json(cached.body);
       return;
     }
@@ -494,7 +515,7 @@ router.post(
     });
 
     const response = investment;
-    await setCachedResponse(cacheKey, 201, response);
+    await setCachedResponse(cacheKey, 201, response, req.body);
     jsonValidated(res, InvestmentSchema, 201, response);
   }),
 );

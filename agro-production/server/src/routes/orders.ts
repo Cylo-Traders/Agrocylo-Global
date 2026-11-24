@@ -24,6 +24,7 @@ import {
   requireIdempotencyKey,
   getCachedResponse,
   getIdempotencyKey,
+  isBodyMismatch,
   setCachedResponse,
 } from '../middleware/idempotency.js';
 import logger from '../config/logger.js';
@@ -137,6 +138,16 @@ router.post(
 
       const cached = await getCachedResponse(scopedKey);
       if (cached) {
+        if (isBodyMismatch(cached, req.body)) {
+          problemDetail(
+            res,
+            req,
+            409,
+            'Idempotency Key Conflict',
+            'Idempotency key was already used with a different request payload',
+          );
+          return;
+        }
         res.status(cached.status).json(cached.body);
         return;
       }
@@ -204,7 +215,7 @@ router.post(
       });
 
       const response = order;
-      await setCachedResponse(scopedKey, 201, response);
+      await setCachedResponse(scopedKey, 201, response, req.body);
       jsonValidated(res, OrderSchema, 201, response);
     } catch (error) {
       logger.error('[POST /orders] Failed to create order', { error });

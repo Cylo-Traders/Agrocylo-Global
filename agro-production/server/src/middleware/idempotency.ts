@@ -4,10 +4,11 @@ import { createHash } from 'crypto';
 const IDEMPOTENCY_KEY_HEADER = 'x-idempotency-key';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-interface CachedResponse {
+export interface CachedResponse {
   status: number;
   body: unknown;
   bodyHash: string;
+  requestBodyHash?: string;
   timestamp: number;
 }
 
@@ -144,7 +145,8 @@ export function requireIdempotencyKey(
   res: Response,
   next: NextFunction,
 ): void {
-  const key = req.headers[IDEMPOTENCY_KEY_HEADER];
+  const key =
+    req.headers[IDEMPOTENCY_KEY_HEADER] ?? req.headers['idempotency-key'];
   if (!key || typeof key !== 'string' || !key.trim()) {
     res.status(400).json({ error: 'X-Idempotency-Key header is required' });
     return;
@@ -163,11 +165,16 @@ export async function setCachedResponse(
   key: string,
   status: number,
   body: unknown,
+  requestBody?: unknown,
 ): Promise<void> {
+  const responseHash = hashBody(body);
+  const reqHash =
+    requestBody !== undefined ? hashBody(requestBody) : responseHash;
   await store.set(key, {
     status,
     body,
-    bodyHash: hashBody(body),
+    bodyHash: responseHash,
+    requestBodyHash: reqHash,
     timestamp: Date.now(),
   });
 }
@@ -180,6 +187,10 @@ export async function clearIdempotencyCache(key: string): Promise<void> {
  * Returns true when a cached entry exists but was produced from a different
  * request body, signalling a 409 conflict to the caller.
  */
-export function isBodyMismatch(cached: CachedResponse, body: unknown): boolean {
-  return cached.bodyHash !== hashBody(body);
+export function isBodyMismatch(
+  cached: CachedResponse,
+  requestBody: unknown,
+): boolean {
+  const expectedHash = cached.requestBodyHash ?? cached.bodyHash;
+  return expectedHash !== hashBody(requestBody);
 }
