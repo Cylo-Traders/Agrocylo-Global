@@ -32,6 +32,9 @@ export type WsEventType =
   | 'message.edited'
   | 'message.deleted'
   | 'conversation.blocked'
+  // Issue #1257: live quantity update for the Group Orders page.
+  // Payload shape: { orderId: string; currentQuantity: number }.
+  | 'group_order.updated'
   | 'error';
 
 export interface WsEventEnvelope<T = unknown> {

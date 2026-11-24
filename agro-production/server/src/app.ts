@@ -24,6 +24,7 @@ import adminReconciliationRoutes from './routes/adminReconciliation.js';
 import indexerRoutes from './routes/indexer.js';
 import weatherRoutes from './routes/weather.js';
 import analyticsRoutes from './routes/analytics.js';
+import groupOrderRoutes from './routes/groupOrders.js';
 import { globalErrorHandler } from './middleware/errors.js';
 import {
   HealthResponseSchema,
@@ -114,6 +115,13 @@ app.use('/api/v1/indexer', indexerRoutes);
 app.use('/api/v1', weatherRoutes);
 app.use('/api/v1', analyticsRoutes);
 app.use(analyticsRoutes);
+// Issue #1257: Group Orders. The production client calls
+// `/api/group-orders[...]` (no version suffix) through its shared
+// apiClient, so the base path matches `NEXT_PUBLIC_API_URL` which
+// already ends in `/api`. The v1-prefixed mount is kept alongside for
+// parity with every other route.
+app.use('/api', groupOrderRoutes);
+app.use('/api/v1', groupOrderRoutes);
 
 app.get('/health', (_req: Request, res: Response) => {
   logger.info('Health check endpoint hit');
