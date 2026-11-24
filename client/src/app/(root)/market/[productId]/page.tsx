@@ -14,8 +14,15 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import ProvenanceViewer from "@/components/ProvenanceViewer";
-import { fetchProductProvenance } from "@/services/provenanceService";
+import { fetchProductProvenanceWithError } from "@/services/provenanceService";
+import { isApiRequestError } from "@/lib/apiHelper";
 import type { ProvenanceRecord } from "@/types/provenance";
 import type { Product } from "@/types/product";
 import { useAnalytics } from "@/hooks/useAnalytics";
@@ -24,16 +31,32 @@ import {
   formatRelativeTime,
 } from "@/lib/formatUpdatedAt";
 
+type ProductLoadState = "not-found" | "reauth" | "load-error";
+
+function getProductLoadState(error: unknown): ProductLoadState {
+  if (!isApiRequestError(error)) return "load-error";
+  if (error.status === 404) return "not-found";
+  if (error.status === 401 || error.status === 403) return "reauth";
+  return "load-error";
+}
+
 export default function ProductDetailPage() {
   const { productId } = useParams<{ productId: string }>();
   const router = useRouter();
-  const { connected } = useWallet();
+  const { connected, reauthenticate } = useWallet();
   const { cart, setQuantityForProduct } = useCart();
   const { trackFunnelStep, trackFeatureAdoption } = useAnalytics();
 
-  const { data: product, isLoading, error } = useProduct(productId);
+  const {
+    data: product,
+    isLoading,
+    error,
+    refetch,
+  } = useProduct(productId);
   const [provenance, setProvenance] = useState<ProvenanceRecord | null>(null);
+  const [provenanceError, setProvenanceError] = useState<unknown>(null);
   const [provenanceLoading, setProvenanceLoading] = useState(true);
+  const [provenanceRetryKey, setProvenanceRetryKey] = useState(0);
 
   const currentQty = useMemo(() => {
     if (!product) return 0;
@@ -67,9 +90,15 @@ export default function ProductDetailPage() {
     if (!productId) return;
     let cancelled = false;
     setProvenanceLoading(true);
-    void fetchProductProvenance(productId)
-      .then((rec) => {
-        if (!cancelled) setProvenance(rec);
+    setProvenanceError(null);
+    void fetchProductProvenanceWithError(productId)
+      .then((result) => {
+        if (cancelled) return;
+        if (result.error) {
+          setProvenanceError(result.error);
+        } else {
+          setProvenance(result.record);
+        }
       })
       .finally(() => {
         if (!cancelled) setProvenanceLoading(false);
@@ -77,7 +106,7 @@ export default function ProductDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [productId]);
+  }, [productId, provenanceRetryKey]);
 
   if (isLoading) {
     return (
@@ -96,21 +125,54 @@ export default function ProductDetailPage() {
   }
 
   if (error || !product) {
+    const loadState = error ? getProductLoadState(error) : "not-found";
+    const isNotFound = loadState === "not-found";
+    const isReauth = loadState === "reauth";
+
     return (
       <Wrapper className="py-40 text-center">
-        <h1 className="text-2xl font-semibold">Product not found</h1>
+        <h1 className="text-2xl font-semibold">
+          {isNotFound
+            ? "Product not found"
+            : isReauth
+              ? "Session expired"
+              : "Couldn't load this product"}
+        </h1>
         <p className="text-muted-foreground mt-2">
-          {error instanceof Error
-            ? error.message
-            : "We couldn't find this product."}
+          {isReauth
+            ? "Sign in again to view this product."
+            : isNotFound
+              ? "We couldn't find this product."
+              : "The product service is temporarily unavailable. Try again."}
         </p>
-        <Link
-          href="/market"
-          className={buttonVariants({ variant: "outline", className: "mt-6" })}
-        >
-          <ArrowLeft className="size-4" />
-          Back to market
-        </Link>
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+          {isReauth ? (
+            <Button
+              onClick={() => {
+                void reauthenticate().catch(() => undefined);
+              }}
+            >
+              Sign in again
+            </Button>
+          ) : null}
+          {!isNotFound && !isReauth ? (
+            <Button
+              variant="outline"
+              onClick={() => {
+                void refetch();
+              }}
+            >
+              Retry
+            </Button>
+          ) : null}
+          <Link
+            href="/market"
+            className={buttonVariants({ variant: "outline" })}
+          >
+            <ArrowLeft className="size-4" />
+            Back to market
+          </Link>
+        </div>
       </Wrapper>
     );
   }
@@ -306,12 +368,36 @@ export default function ProductDetailPage() {
       </div>
 
       <div className="mt-10">
-        <ProvenanceViewer
-          record={
-            provenance?.tracked
-              ? provenance
-              : product
-                ? {
+        {provenanceError ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">
+                Couldn't load supply-chain provenance
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-muted-foreground text-sm">
+                Provenance data is temporarily unavailable. This is separate
+                from whether the product is tracked.
+              </p>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setProvenanceError(null);
+                  setProvenanceLoading(true);
+                  setProvenanceRetryKey((key) => key + 1);
+                }}
+              >
+                Retry provenance
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <ProvenanceViewer
+            record={
+              provenance?.tracked
+                ? provenance
+                : {
                     productId: product.id,
                     farmerAddress: product.farmer_wallet,
                     originLocation: product.location,
@@ -324,10 +410,10 @@ export default function ProductDetailPage() {
                         : `/market/${product.id}`,
                     tracked: false,
                   }
-                : provenance
-          }
-          isLoading={provenanceLoading}
-        />
+            }
+            isLoading={provenanceLoading}
+          />
+        )}
       </div>
     </Wrapper>
   );

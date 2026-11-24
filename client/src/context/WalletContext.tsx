@@ -327,6 +327,17 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
     void cancelled;
   }, []);
 
+  const clearAuthenticatedSession = useCallback(() => {
+    setAuthenticated(false);
+    setSessionError(null);
+    void logoutWalletSession().catch((err) => {
+      console.error("Wallet logout failed:", err);
+    });
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("walletIdentityChanged"));
+    }
+  }, []);
+
   const disconnect = useCallback(() => {
     // Increment generations to cancel any in-flight restore/connect
     restoreGenerationRef.current += 1;
@@ -337,9 +348,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
         adapter: activeWalletId ?? undefined,
       });
     }
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new Event("walletIdentityChanged"));
-    }
+    clearAuthenticatedSession();
     setAddress(null);
     setBalance(null);
     setConnected(false);
@@ -351,7 +360,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
     localStorage.removeItem("walletAddress");
     localStorage.removeItem("walletNetwork");
     localStorage.removeItem("activeWalletId");
-  }, [address, network, activeWalletId]);
+  }, [address, network, activeWalletId, clearAuthenticatedSession]);
 
   const reauthenticate = useCallback(async () => {
     if (!address || !activeWalletId) {
@@ -432,10 +441,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
         const networkChanged = liveNetwork !== network;
         if (!accountChanged && !networkChanged) return;
 
-        setAuthenticated(false);
-        setSessionError(null);
-        void logoutWalletSession();
-        window.dispatchEvent(new Event("walletIdentityChanged"));
+        clearAuthenticatedSession();
         setBalance(null);
         setAddress(liveAddress);
         setNetwork(liveNetwork);
@@ -460,10 +466,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
         // blip) must not destroy a freshly-issued session — only a sustained
         // failure tears down the wallet (#1185).
         if (consecutiveFailures < RECONCILE_FAILURE_LIMIT) return;
-        setAuthenticated(false);
-        setSessionError(null);
-        void logoutWalletSession();
-        window.dispatchEvent(new Event("walletIdentityChanged"));
+        clearAuthenticatedSession();
         setError("Wallet is locked or disconnected. Please reconnect.");
         setAddress(null);
         setBalance(null);
@@ -520,7 +523,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({
         window.removeEventListener(event, handleProviderEvent),
       );
     };
-  }, [activeWalletId, address, connected, network]);
+  }, [activeWalletId, address, connected, network, clearAuthenticatedSession]);
 
   // The api layer dispatches AUTH_EXPIRED_EVENT when it clears an expired or
   // rejected session; flip the auth state here so the wallet gate and every

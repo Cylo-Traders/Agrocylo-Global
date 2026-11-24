@@ -85,8 +85,8 @@ export async function logoutWalletSession(): Promise<void> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refreshToken }),
     });
-  } catch {
-    // Local credentials are already gone; remote expiry remains the fallback.
+  } catch (err) {
+    console.error("Wallet logout request failed:", err);
   }
 }
 
