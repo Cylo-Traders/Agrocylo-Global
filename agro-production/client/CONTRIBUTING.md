@@ -1,134 +1,79 @@
-# Contributing to Agrocylo Frontend
+# Contributing to the Agro Client
 
-Thank you for helping improve the Agrocylo frontend. This guide covers everything you need to get started, make a change, and submit a pull request.
-
----
-
-## Prerequisites
-
-Use Node.js 22.13.x and npm 10.9.x as declared at the workspace root. Freighter
-is needed only for live wallet flows.
-
----
+Thanks for helping improve the marketplace client. This guide covers the
+internationalization (i18n) setup and how to contribute translations.
 
 ## Getting started
 
-```bash
-git clone https://github.com/<your-username>/Agrocylo-Global.git
-cd Agrocylo-Global
-npm ci
-cp agro-production/client/.env.example agro-production/client/.env.local
-npm run dev:production
+1. Fork the repository and create a branch from `main`.
+2. Install dependencies with `npm install` inside `agro-production/client`.
+3. Run the dev server with `npm run dev` and the tests with `npm test`.
+4. Open a pull request describing the change and linking the related issue.
+
+## Internationalization (i18n)
+
+### Supported locales
+
+We ship a small, reviewed set of locales. English (`en`) is the source of
+truth and the fallback for any missing translation.
+
+| Locale | Language |
+| ------ | -------- |
+| `en`   | English (default / fallback) |
+| `es`   | Spanish |
+| `fr`   | French |
+| `sw`   | Swahili |
+
+Adding a new locale requires a maintainer review before it is merged.
+
+### Message resources
+
+Translations live in `src/i18n/messages/<locale>.json` as flat key/value
+pairs. Keys are namespaced with dots, for example:
+
+```json
+{
+  "marketplace.title": "Marketplace",
+  "marketplace.price": "Price",
+  "marketplace.unit.xlm": "XLM",
+  "marketplace.unit.usdc": "USDC"
+}
 ```
 
-The app runs at `http://localhost:3001`. See
-[Frontend development setup](../../docs/FRONTEND_SETUP.md) for the canonical
-toolchain, both-app workflow, port overrides, and troubleshooting.
+Rules for keys:
 
-### Required environment variables
+- Use lowercase dot-separated namespaces (`feature.element`).
+- Never translate currency unit labels (`XLM`, `USDC`) — they must stay
+  explicit and unambiguous.
+- Do not embed numbers or dates in message strings; format them with the
+  locale-aware helpers instead.
 
-| Variable | Description |
-|---|---|
-| `NEXT_PUBLIC_API_URL` | Backend API base URL (default: `http://localhost:5001`) |
-| `NEXT_PUBLIC_SOROBAN_RPC_URL` | Soroban RPC endpoint |
-| `NEXT_PUBLIC_NETWORK_PASSPHRASE` | Stellar network passphrase |
+### Missing translations
 
----
+If a key is absent from a locale file, the client falls back to the English
+message automatically. Do not leave empty strings — omit the key instead so
+the fallback applies.
 
-## Project structure
+### Number and date formatting
 
-```
-src/
-  app/          # Next.js App Router pages and layouts
-  components/   # Shared UI components
-  context/      # React context providers (wallet, theme)
-  hooks/        # Custom React hooks
-  lib/          # Pure utilities (API client, signing, validation)
-  services/     # Data-fetching service modules
-  types/        # TypeScript type definitions
-```
+Use the shared formatting helpers (backed by `Intl.NumberFormat` and
+`Intl.DateTimeFormat`) with the user's selected locale. Prices are always
+displayed in their settlement currency (XLM or USDC) with the unit label
+kept explicit — never convert or relabel the underlying currency.
 
-Key files to know:
-- **`src/lib/apiClient.ts`** — all HTTP calls go through here
-- **`src/context/WalletContext.tsx`** — wallet connection state and signer
-- **`src/lib/signTransaction.ts`** — Stellar transaction signing logic
-- **`src/lib/validation.ts`** — form validation helpers
+### Locale preference
 
----
+The user's selected locale is persisted in `localStorage` under the
+`agro.locale` key and restored on load. Unsupported values fall back to
+English.
 
-## Running tests
+## Contributing a translation
 
-From the repository root:
+1. Copy `src/i18n/messages/en.json` to `src/i18n/messages/<locale>.json`.
+2. Translate the values only — keep the keys unchanged.
+3. Leave currency unit labels (`XLM`, `USDC`) untranslated.
+4. Run `npm test` to confirm the i18n tests pass.
+5. Open a pull request titled `i18n: add <locale> translations` and tag a
+   maintainer for review.
 
-```bash
-npm run test --workspace=agro-production/client
-npm run test:watch --workspace=agro-production/client
-```
-
-Tests use [Vitest](https://vitest.dev/) and live alongside source files. When
-adding a feature or fixing a bug, add a test that covers the new behaviour.
-
----
-
-## Adding a new wallet adapter
-
-1. Create a new adapter module in `src/lib/` following the pattern of `walletFreighter.ts`.
-2. The adapter must implement `connect()`, `getPublicKey()`, and `signTransaction()`.
-3. Wire it into `WalletContext.tsx` alongside the existing Freighter adapter.
-4. Add a unit test in `src/__tests__/` that mocks the adapter and verifies the integration.
-5. Update this file's "Prerequisites" section if the new wallet requires a browser extension.
-
----
-
-## Adding or updating translations
-
-Locale strings live in `src/lib/` (look for any `i18n` or locale file). To add a new language:
-
-1. Copy an existing locale file and rename it with the target locale code (e.g. `fr.ts`).
-2. Translate each string value; do not change the keys.
-3. Register the new locale in the locale config/index file.
-4. Open a PR with the `translation` label.
-
----
-
-## Issue and PR checklist
-
-### Before opening an issue
-
-- [ ] Search existing issues to avoid duplicates.
-- [ ] Include the browser, OS, and wallet extension version if reporting a UI bug.
-- [ ] Attach a screenshot or screen recording where possible.
-- [ ] Reference the relevant file path(s) from the project structure above.
-
-### Before submitting a pull request
-
-- [ ] Branch off `main`: `git checkout -b fix/short-description`.
-- [ ] Keep changes focused — one concern per PR.
-- [ ] Run `npm run test` and confirm all tests pass.
-- [ ] Run `npm run build` and confirm there are no TypeScript errors.
-- [ ] Add or update a story in Storybook if a component changed visually.
-- [ ] Fill in the PR description (what changed, why, how to test it).
-- [ ] Link the PR to the relevant GitHub issue using a closing keyword (e.g. `Closes #123`).
-
-### PR review expectations
-
-- Reviewers aim to respond within 48 hours.
-- Address all requested changes before asking for a re-review.
-- Squash fixup commits before merge if the reviewer asks.
-
----
-
-## Code style
-
-- TypeScript strict mode is on — no `any` without a comment explaining why.
-- Prefer named exports over default exports for components.
-- Keep component files focused; extract logic into hooks or service modules.
-- Do not commit console.log statements.
-
----
-
-## Useful links
-
-- [GitHub Issues](https://github.com/Cylo-Traders/Agrocylo-Global/issues) — open issues and backlog
-- [README](./README.md) — quick-start and environment reference
-- [Backend contributing guide](../../server/docs/SETUP.md) — if you also touch the API
+Partial translations are welcome; untranslated keys fall back to English.
