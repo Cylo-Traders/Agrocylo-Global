@@ -1607,6 +1607,8 @@ impl EscrowContract {
         order_id: u64,
         resolution: DisputeResolution,
     ) -> Result<(), EscrowError> {
+        // Emergency pause freezes all fund movement, dispute resolution included.
+        require_not_paused(&env)?;
         admin_caller.require_auth();
         let stored_admin = read_admin(&env)?;
         if admin_caller != stored_admin {
@@ -1724,6 +1726,8 @@ impl EscrowContract {
         order_id: u64,
         resolution: DisputeResolution,
     ) -> Result<(), EscrowError> {
+        // Emergency pause freezes all fund movement, dispute resolution included.
+        require_not_paused(&env)?;
         admin.require_auth();
 
         let stored_admin = read_admin(&env)?;
@@ -1798,6 +1802,8 @@ impl EscrowContract {
         order_id: u64,
         resolution: DisputeResolution,
     ) -> Result<(), EscrowError> {
+        // Emergency pause freezes all fund movement, dispute resolution included.
+        require_not_paused(&env)?;
         arbitrator.require_auth();
 
         let arbitrators: Vec<Address> = env
