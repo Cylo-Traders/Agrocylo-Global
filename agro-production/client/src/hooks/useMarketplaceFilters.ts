@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { parseProductCategory } from '@/types';
 
 export type MarketplaceSort = 'newest' | 'price-asc' | 'price-desc' | 'popular';
 
@@ -45,7 +46,7 @@ function parseFilters(params: URLSearchParams): MarketplaceFilters {
   const maxPrice = parsePrice(params.get('maxPrice'));
   return {
     search: params.get('q') ?? DEFAULT_MARKETPLACE_FILTERS.search,
-    category: params.get('category') ?? DEFAULT_MARKETPLACE_FILTERS.category,
+    category: parseProductCategory(params.get('category')),
     sort: parseSort(params.get('sort')),
     minPrice,
     maxPrice: minPrice !== null && maxPrice !== null && maxPrice < minPrice ? null : maxPrice,

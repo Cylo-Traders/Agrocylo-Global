@@ -2,16 +2,18 @@
 
 import { useCallback } from "react";
 import { sanitizeString } from "@/lib/validation";
-import type { ProductCategory } from "@/types";
+import {
+  PRODUCT_CATEGORIES,
+  PRODUCT_CATEGORY_LABELS,
+  type ProductCategory,
+} from "@/types";
 
-const CATEGORIES: { label: string; value: ProductCategory | "" }[] = [
+export const CATEGORIES: { label: string; value: ProductCategory | "" }[] = [
   { label: "All Categories", value: "" },
-  { label: "Grains", value: "GRAINS" },
-  { label: "Vegetables", value: "VEGETABLES" },
-  { label: "Fruits", value: "FRUITS" },
-  { label: "Livestock", value: "LIVESTOCK" },
-  { label: "Dairy", value: "DAIRY" },
-  { label: "Other", value: "OTHER" },
+  ...PRODUCT_CATEGORIES.map((value) => ({
+    label: PRODUCT_CATEGORY_LABELS[value],
+    value,
+  })),
 ];
 
 interface MarketplaceFiltersProps {
