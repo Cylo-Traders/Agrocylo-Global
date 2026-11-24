@@ -128,14 +128,61 @@ describe('GET /products query parameters (#1145)', () => {
     expect(res.body.page_size).toBe(20);
   });
 
-  it.each([
-    ['true', {}],
-    ['1', {}],
-    ['false', { isAvailable: true }],
-    ['yes', { isAvailable: true }],
-  ])('include_unavailable=%s', async (value, expected) => {
-    await request(app).get('/products').query({ include_unavailable: value });
-    expect(where()).toEqual(expected);
+  // #1427: anonymous callers can never include unavailable products.
+  it.each(['true', '1', 'false', 'yes'])(
+    'anonymous include_unavailable=%s still returns only available products',
+    async (value) => {
+      await request(app).get('/products').query({ include_unavailable: value });
+      expect(where()).toEqual({ isAvailable: true });
+    }
+  );
+
+  it('ignores include_unavailable from a signed-in buyer', async () => {
+    await request(app)
+      .get('/products')
+      .set('Authorization', bearer('BUYER', 'gbuyer'))
+      .query({ include_unavailable: 'true' });
+    expect(where()).toEqual({ isAvailable: true });
+  });
+
+  it('lets a farmer include their own unavailable products', async () => {
+    await request(app)
+      .get('/products')
+      .set('Authorization', bearer('FARMER'))
+      .query({ include_unavailable: 'true', farmer: OWNER });
+    expect(where()).toEqual({ farmerWallet: OWNER });
+  });
+
+  it("does not let a farmer include another farmer's unavailable products", async () => {
+    await request(app)
+      .get('/products')
+      .set('Authorization', bearer('FARMER'))
+      .query({ include_unavailable: 'true', farmer: 'gother' });
+    expect(where()).toEqual({ isAvailable: true, farmerWallet: 'gother' });
+  });
+
+  it('does not let a farmer include everyone\'s unavailable products without a farmer filter', async () => {
+    await request(app)
+      .get('/products')
+      .set('Authorization', bearer('FARMER'))
+      .query({ include_unavailable: 'true' });
+    expect(where()).toEqual({ isAvailable: true });
+  });
+
+  it('lets an admin include unavailable products', async () => {
+    await request(app)
+      .get('/products')
+      .set('Authorization', bearer('ADMIN', 'gadmin'))
+      .query({ include_unavailable: 'true' });
+    expect(where()).toEqual({});
+  });
+
+  it('treats an invalid token as anonymous', async () => {
+    await request(app)
+      .get('/products')
+      .set('Authorization', 'Bearer not-a-real-token')
+      .query({ include_unavailable: 'true' });
+    expect(where()).toEqual({ isAvailable: true });
   });
 
   it('ignores a repeated parameter, which Express parses as an array', async () => {
