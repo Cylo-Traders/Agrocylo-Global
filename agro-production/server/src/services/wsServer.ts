@@ -192,6 +192,59 @@ export class WsServer {
     }
   }
 
+  broadcastToMany<T>(
+    walletAddresses: string[],
+    type: WsEventType,
+    payload: T,
+  ): void {
+    const targets = new Set(
+      walletAddresses
+        .filter((address): address is string => Boolean(address))
+        .map((address) => address.toLowerCase()),
+    );
+    if (targets.size === 0) return;
+
+    let message: string;
+    try {
+      message = JSON.stringify({
+        version: '1',
+        type,
+        payload,
+        timestamp: new Date().toISOString(),
+      } satisfies WsEventEnvelope<T>);
+    } catch (error) {
+      logger.warn('Unable to serialize WebSocket message', {
+        type,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+
+    for (const client of this.wss.clients) {
+      const metadata = this.clientMetadata.get(client);
+      if (!metadata || client.readyState !== WebSocket.OPEN) continue;
+      const wallet = metadata.walletAddress?.toLowerCase();
+      if (!wallet || !targets.has(wallet)) continue;
+
+      const queue = this.clientQueues.get(client);
+      if (queue) {
+        if (queue.length >= this.maxQueueDepth) {
+          queue.shift();
+          logger.warn(
+            'WebSocket send queue exceeded, dropping oldest message',
+            {
+              clientCount: this.wss.clients.size,
+              queueDepth: this.maxQueueDepth,
+            },
+          );
+        }
+        queue.push(message);
+      }
+
+      this.flushQueue(client, type);
+    }
+  }
+
   sendTo<T>(walletAddress: string, type: WsEventType, payload: T): void {
     let message: string;
     try {
@@ -337,6 +390,14 @@ export function broadcastTo(
   payload: unknown,
 ): void {
   activeServer?.sendTo(walletAddress, type, payload);
+}
+
+export function broadcastToMany(
+  walletAddresses: string[],
+  type: WsEventType,
+  payload: unknown,
+): void {
+  activeServer?.broadcastToMany(walletAddresses, type, payload);
 }
 
 export function getWsClientCount(): number {
