@@ -57,48 +57,56 @@ jobs:
 
       - name: Wait for services to become healthy
         run: |
-          echo "Waiting for services to become healthy..."
-          timeout 120 bash -c 'until docker compose ps --format json | python3 -c "
+          echo "Waiting for the named services..."
+          timeout 180 bash -c 'until docker compose ps --all --format json | python3 -c "
           import sys, json
-          services = [json.loads(line) for line in sys.stdin if line.strip()]
-          healthy = sum(1 for s in services if s.get(\"Health\", \"\") == \"healthy\")
-          total = len(services)
-          print(f\"{healthy}/{total} services healthy\")
-          sys.exit(0 if healthy >= 5 else 1)
+          raw = sys.stdin.read().strip()
+          rows = json.loads(raw) if raw.startswith(\"[\") else [json.loads(l) for l in raw.splitlines() if l.strip()]
+          state = {r[\"Service\"]: r for r in rows}
+          need_healthy = [\"postgres\", \"postgres-agro\", \"redis\"]
+          need_running = [\"backend\", \"agro-backend\", \"client\", \"agro-client\", \"caddy\"]
+          bad = [s for s in need_healthy if state.get(s, {}).get(\"Health\") != \"healthy\"]
+          bad += [s for s in need_running if state.get(s, {}).get(\"State\") != \"running\"]
+          print(\"waiting on:\", bad or \"nothing\")
+          sys.exit(1 if bad else 0)
           "; do sleep 5; done'
 
       - name: Verify API endpoints respond
         run: |
           echo "--- Root backend health ---"
-          curl -sf http://localhost:5000/health || echo "WARN: root backend not responding"
+          curl -fsS --max-time 10 http://localhost:5000/health
           echo ""
           echo "--- Agro backend health ---"
-          curl -sf http://localhost:5001/health || echo "WARN: agro backend not responding"
+          curl -fsS --max-time 10 http://localhost:5001/health
           echo ""
 
       - name: Verify client apps respond
         run: |
-          echo "--- Root client ---"
-          curl -sf -o /dev/null -w "%{http_code}" http://localhost:3000/ || echo "WARN: root client not responding"
-          echo ""
-          echo "--- Agro client ---"
-          curl -sf -o /dev/null -w "%{http_code}" http://localhost:3001/ || echo "WARN: agro client not responding"
-          echo ""
+          for url in http://localhost:3000/ http://localhost:3001/; do
+            code=$(curl -sS --max-time 10 -o /dev/null -w "%{http_code}" "$url")
+            echo "$url -> $code"
+            [ "$code" = "200" ] || { echo "::error::$url returned $code"; exit 1; }
+          done
 
       - name: Verify Caddy proxy routes
         run: |
           echo "--- Proxy: root client ---"
-          curl -sf -o /dev/null -w "%{http_code}" http://localhost/ || echo "WARN: proxy root not responding"
-          echo ""
+          code=$(curl -sS --max-time 10 -o /dev/null -w "%{http_code}" http://localhost/)
+          echo "/ -> $code"
+          [ "$code" = "200" ] || { echo "::error::proxy / returned $code"; exit 1; }
           echo "--- Proxy: root API ---"
-          curl -sf http://localhost/api/health || echo "WARN: proxy /api not responding"
+          curl -fsS --max-time 10 http://localhost/api/health
           echo ""
-          echo "--- Proxy: agro client ---"
-          curl -sf -o /dev/null -w "%{http_code}" http://localhost/agro/ || echo "WARN: proxy /agro not responding"
-          echo ""
-          echo "--- Proxy: agro API ---"
-          curl -sf http://localhost/api/v1/ || echo "WARN: proxy /api/v1 not responding"
-          echo ""
+          # These two routes may answer 404 for the bare path, but a stopped
+          # upstream or a missing route gives 000 or 5xx, which must fail.
+          for path in /agro/ /api/v1/; do
+            code=$(curl -sS --max-time 10 -o /dev/null -w "%{http_code}" "http://localhost$path")
+            echo "$path -> $code"
+            if [ "$code" = "000" ] || [ "$code" -ge 500 ]; then
+              echo "::error::proxy $path returned $code"
+              exit 1
+            fi
+          done
 
       - name: Collect service logs on failure
         if: failure()
