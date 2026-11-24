@@ -499,3 +499,50 @@ enum UserRole {
   BUYER
   ADMIN
 }
+
+// Issue #1257: GroupOrder + GroupOrderParticipant back the production
+// client's `/group-orders` page. A group order pools buyer demand for a
+// single product and settles when the target quantity is reached. The
+// join flow is authenticated, idempotent, and concurrency-safe: two
+// concurrent joins by the same wallet collapse to one row on the
+// unique `(groupOrderId, participantAddress)` index, and the parent's
+// `currentQuantity` advances through a transaction against the same
+// index.
+
+model GroupOrder {
+  id              String           @id @default(uuid())
+  productName     String
+  pricePerUnit    String           // i128 as string - matches the Order.amount pattern
+  targetQuantity  Int
+  currentQuantity Int              @default(0)
+  expiresAt       DateTime
+  status          GroupOrderStatus @default(OPEN)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  participants GroupOrderParticipant[]
+
+  @@index([status])
+  @@index([expiresAt])
+  @@map("group_orders")
+}
+
+model GroupOrderParticipant {
+  id                 String   @id @default(uuid())
+  groupOrderId       String
+  participantAddress String
+  quantity           Int      @default(1)
+  joinedAt           DateTime @default(now())
+
+  groupOrder GroupOrder @relation(fields: [groupOrderId], references: [id], onDelete: Cascade)
+
+  @@unique([groupOrderId, participantAddress])
+  @@index([participantAddress])
+  @@map("group_order_participants")
+}
+
+enum GroupOrderStatus {
+  OPEN
+  EXPIRED
+  COMPLETED
+}
