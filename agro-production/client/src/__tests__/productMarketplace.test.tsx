@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, act } from "@testing-library/react";
 import { ProductImage } from "@/components/ProductImage";
 import { ProductGrid } from "@/components/marketplace/ProductGrid";
 import { validateProductFilters } from "@/services/productService";
@@ -9,6 +9,18 @@ import { buildProductQuery } from "@/services/productService";
 const product = {
   name: "Organic Tomatoes",
 };
+
+function setNavigatorOnline(value: boolean) {
+  Object.defineProperty(window.navigator, "onLine", {
+    configurable: true,
+    get: () => value,
+  });
+}
+
+function OnlineStatusProbe() {
+  const isOnline = useOnlineStatus();
+  return <span data-testid="status">{isOnline ? "online" : "offline"}</span>;
+}
 
 describe("marketplace contract boundaries", () => {
   it("accepts a valid price range", () => {

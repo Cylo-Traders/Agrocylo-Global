@@ -7,6 +7,7 @@ vi.mock("@/lib/apiClient", () => ({
 }));
 
 import { consumeHandoffToken } from "@/lib/authHandoff";
+import { runWithCartIntent } from "@/lib/cartIntent";
 
 describe("consumeHandoffToken (Issue #686)", () => {
   beforeEach(() => {

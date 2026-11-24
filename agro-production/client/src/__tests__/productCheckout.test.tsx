@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 
 // Mock dependencies
@@ -37,9 +37,27 @@ const mockCreateOrder = vi.mocked(createOrder);
 const mockSignAndSubmit = vi.mocked(signAndSubmitTransaction);
 const mockLogErrorWithContext = vi.mocked(logErrorWithContext);
 
+/**
+ * Simulate the browser connectivity state used by the offline-aware
+ * marketplace behavior (issue #1392). Checkout must be unavailable while
+ * offline and become available again once connectivity returns.
+ */
+function setOnline(online: boolean) {
+  Object.defineProperty(window.navigator, "onLine", {
+    configurable: true,
+    get: () => online,
+  });
+  window.dispatchEvent(new Event(online ? "online" : "offline"));
+}
+
 describe("Product checkout error handling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    setOnline(true);
+  });
+
+  afterEach(() => {
+    setOnline(true);
   });
 
   it("builder failure surfaces in error UI", async () => {

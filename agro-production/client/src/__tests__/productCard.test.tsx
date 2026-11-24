@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { render, screen, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ProductCard } from "../components/ProductCard";
 import { ProductCardSkeleton } from "../components/marketplace/ProductGrid";
 import type { Product } from "@/types";
@@ -34,7 +34,22 @@ const baseProduct: Product = {
   isSellable: true,
 };
 
+function setOnline(value: boolean) {
+  Object.defineProperty(window.navigator, "onLine", {
+    configurable: true,
+    get: () => value,
+  });
+}
+
 describe("ProductCard", () => {
+  beforeEach(() => {
+    setOnline(true);
+  });
+
+  afterEach(() => {
+    setOnline(true);
+  });
+
   it("renders product name", () => {
     render(<ProductCard product={baseProduct} />);
     expect(screen.getByText("Organic Tomatoes")).toBeTruthy();
