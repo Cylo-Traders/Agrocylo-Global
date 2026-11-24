@@ -81,6 +81,15 @@ export class ProductionEventParser {
           totalRevenue: toEventString(data[1]),
         };
 
+      case 'campaign.claimed':
+        return {
+          ...base,
+          action,
+          campaignId: toEventString(data[0]),
+          investor: toEventString(data[1]),
+          payout: toEventString(data[2]),
+        };
+
       case 'order.created':
         return {
           ...base,
@@ -210,7 +219,6 @@ export class ProductionEventParser {
       case 'campaign.harvest':
       case 'campaign.failed':
       case 'campaign.disputed':
-      case 'campaign.claimed':
       case 'campaign.refunded':
       case 'campaign.tranche':
         return {

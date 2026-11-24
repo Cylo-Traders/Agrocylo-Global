@@ -20,6 +20,36 @@ interface WeatherAdvisory {
   expiresAt?: string;
 }
 
+/**
+ * Server envelope (Issue #1341). `status` is authoritative: an empty
+ * `advisories` list only means "nothing active" when status is `ok`.
+ */
+interface AdvisoryResponse {
+  status: "ok" | "stale" | "unavailable";
+  advisories: WeatherAdvisory[];
+  fetchedAt: string | null;
+  ageSeconds: number | null;
+  reason?: "provider_not_configured" | "provider_error" | "data_expired";
+  radiusKm?: number;
+}
+
+function isAdvisoryResponse(value: unknown): value is AdvisoryResponse {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return (
+    (v.status === "ok" || v.status === "stale" || v.status === "unavailable") &&
+    Array.isArray(v.advisories)
+  );
+}
+
+function formatAge(ageSeconds: number | null, fetchedAt: string | null): string | null {
+  if (ageSeconds === null || !fetchedAt) return null;
+  if (ageSeconds < 60) return "Updated just now";
+  const minutes = Math.floor(ageSeconds / 60);
+  if (minutes < 60) return `Updated ${minutes} min ago`;
+  return `Updated ${new Date(fetchedAt).toLocaleString()}`;
+}
+
 interface WeatherAdvisoryWidgetProps {
   farmerId?: string;
   location?: { lat: number; lng: number };
@@ -43,9 +73,17 @@ export function WeatherAdvisoryWidget({ farmerId, location }: WeatherAdvisoryWid
         `/weather/advisories?${params}`;
 
       const response = await fetch(url, { signal });
-      if (!response.ok) throw new Error("Failed to fetch weather data");
+      // 503 carries the same envelope with status "unavailable" — render it
+      // as an explicit unavailable state rather than a generic error.
+      if (!response.ok && response.status !== 503) {
+        throw new Error("Failed to fetch weather data");
+      }
 
-      return (await response.json()) as WeatherAdvisory[];
+      const body: unknown = await response.json();
+      if (!isAdvisoryResponse(body)) {
+        throw new Error("Unexpected weather advisory response");
+      }
+      return body;
     },
     [farmerId, location],
   );
@@ -56,7 +94,9 @@ export function WeatherAdvisoryWidget({ farmerId, location }: WeatherAdvisoryWid
     fetchAdvisories,
   );
 
-  const advisories = data ?? [];
+  const advisories = data?.advisories ?? [];
+  const status = data?.status;
+  const freshness = data ? formatAge(data.ageSeconds, data.fetchedAt) : null;
 
   const getSeverityColor = (severity: string) => {
     const colors = {
@@ -106,6 +146,26 @@ export function WeatherAdvisoryWidget({ farmerId, location }: WeatherAdvisoryWid
     );
   }
 
+  if (status === "unavailable") {
+    return (
+      <div className="bg-white border rounded-lg p-6 shadow-sm">
+        <h3 className="text-lg font-semibold mb-2">Weather Advisories</h3>
+        <div className="bg-gray-50 border border-gray-200 rounded p-3" role="status">
+          <p className="text-gray-700 text-sm font-medium">
+            Weather advisory data is currently unavailable
+          </p>
+          <p className="text-gray-500 text-xs mt-1">
+            We can&apos;t confirm current conditions for your area. Check local
+            weather services before acting.
+          </p>
+          <button onClick={reload} className="mt-2 text-gray-700 text-sm underline">
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const activeAdvisories = advisories.filter((adv) => {
     if (!adv.expiresAt) return true;
     return new Date(adv.expiresAt) > new Date();
@@ -124,13 +184,25 @@ export function WeatherAdvisoryWidget({ farmerId, location }: WeatherAdvisoryWid
         </Link>
       </div>
 
+      {status === "stale" && (
+        <div
+          className="bg-yellow-50 border border-yellow-200 rounded p-3 mb-3 text-sm text-yellow-800"
+          role="status"
+        >
+          Showing the last available update — advisory data may be out of date.
+        </div>
+      )}
+
       {activeAdvisories.length === 0 ? (
         <div className="text-center py-8">
-          <span className="text-4xl mb-2 block" aria-hidden="true">
-            ☀️
-          </span>
+          {/* Issue #1341: no rows is not a forecast — never imply favorable
+              conditions, only that no advisory is currently issued. */}
           <p className="text-gray-600">No active weather advisories</p>
-          <p className="text-sm text-gray-500 mt-1">Conditions are favorable</p>
+          <p className="text-sm text-gray-500 mt-1">
+            {status === "stale"
+              ? "None were active in the last update we received."
+              : "No advisories are currently issued for your area."}
+          </p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -182,6 +254,12 @@ export function WeatherAdvisoryWidget({ farmerId, location }: WeatherAdvisoryWid
             </div>
           )}
         </div>
+      )}
+
+      {freshness && (
+        <p className="text-xs text-gray-500 mt-3" data-testid="advisory-freshness">
+          {freshness}
+        </p>
       )}
     </div>
   );

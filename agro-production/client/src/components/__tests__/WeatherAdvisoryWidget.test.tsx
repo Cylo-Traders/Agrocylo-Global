@@ -19,7 +19,19 @@ vi.mock("next/link", () => ({
 }));
 
 global.fetch = vi.fn();
-const fetchMock = vi.mocked(global.fetch);
+// Loosely typed: tests stub only the Response fields the widget reads.
+const fetchMock = vi.mocked(global.fetch) as unknown as ReturnType<typeof vi.fn>;
+
+/** Server envelope (Issue #1341). */
+function envelope(advisories: unknown[], overrides: Record<string, unknown> = {}) {
+  return {
+    status: "ok",
+    advisories,
+    fetchedAt: new Date().toISOString(),
+    ageSeconds: 30,
+    ...overrides,
+  };
+}
 
 describe("WeatherAdvisoryWidget", () => {
   beforeEach(() => {
@@ -48,13 +60,62 @@ describe("WeatherAdvisoryWidget", () => {
   it("renders no advisory state", async () => {
     fetchMock.mockResolvedValue({
       ok: true,
-      json: async () => [],
+      json: async () => envelope([]),
     });
 
     render(<WeatherAdvisoryWidget />);
     await waitFor(() => {
       expect(screen.getByText(/no active weather advisories/i)).toBeInTheDocument();
-      expect(screen.getByText(/conditions are favorable/i)).toBeInTheDocument();
+    });
+    // Issue #1341: an empty list must never be presented as favorable weather.
+    expect(screen.queryByText(/favorable/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId("advisory-freshness")).toHaveTextContent(/updated just now/i);
+  });
+
+  it("renders an explicit unavailable state (503) without implying favorable conditions", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () =>
+        envelope([], {
+          status: "unavailable",
+          fetchedAt: null,
+          ageSeconds: null,
+          reason: "provider_not_configured",
+        }),
+    });
+
+    render(<WeatherAdvisoryWidget />);
+    await waitFor(() => {
+      expect(
+        screen.getByText(/weather advisory data is currently unavailable/i),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/no active weather advisories/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/favorable/i)).not.toBeInTheDocument();
+  });
+
+  it("flags stale data and shows its age", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () =>
+        envelope([], { status: "stale", ageSeconds: 1200, reason: "provider_error" }),
+    });
+
+    render(<WeatherAdvisoryWidget />);
+    await waitFor(() => {
+      expect(screen.getByText(/may be out of date/i)).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("advisory-freshness")).toHaveTextContent("Updated 20 min ago");
+    expect(screen.queryByText(/favorable/i)).not.toBeInTheDocument();
+  });
+
+  it("treats a malformed response as an error rather than 'no advisories'", async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => [] });
+
+    render(<WeatherAdvisoryWidget />);
+    await waitFor(() => {
+      expect(screen.getByText(/unexpected weather advisory response/i)).toBeInTheDocument();
     });
   });
 
@@ -73,7 +134,7 @@ describe("WeatherAdvisoryWidget", () => {
 
     fetchMock.mockResolvedValue({
       ok: true,
-      json: async () => mockAdvisories,
+      json: async () => envelope(mockAdvisories),
     });
 
     render(<WeatherAdvisoryWidget />);
@@ -98,7 +159,7 @@ describe("WeatherAdvisoryWidget", () => {
 
     fetchMock.mockResolvedValue({
       ok: true,
-      json: async () => mockAdvisories,
+      json: async () => envelope(mockAdvisories),
     });
 
     render(<WeatherAdvisoryWidget />);
@@ -120,17 +181,18 @@ describe("WeatherAdvisoryWidget", () => {
 
     fetchMock.mockResolvedValueOnce({
       ok: true,
-      json: async () => [
-        {
-          id: "1",
-          severity: "moderate",
-          type: "New Alert",
-          description: "Test",
-          location: { lat: 10, lng: 20, name: "Farm" },
-          issuedAt: new Date().toISOString(),
-          expiresAt: new Date(Date.now() + 86400000).toISOString(),
-        },
-      ],
+      json: async () =>
+        envelope([
+          {
+            id: "1",
+            severity: "moderate",
+            type: "New Alert",
+            description: "Test",
+            location: { lat: 10, lng: 20, name: "Farm" },
+            issuedAt: new Date().toISOString(),
+            expiresAt: new Date(Date.now() + 86400000).toISOString(),
+          },
+        ]),
     });
 
     await user.click(screen.getByText("Retry"));
@@ -143,7 +205,7 @@ describe("WeatherAdvisoryWidget", () => {
   it("calls the correct API endpoint", async () => {
     fetchMock.mockResolvedValue({
       ok: true,
-      json: async () => [],
+      json: async () => envelope([]),
     });
 
     render(<WeatherAdvisoryWidget farmerId="farmer-1" location={{ lat: 6.5, lng: 3.4 }} />);
@@ -162,7 +224,7 @@ describe("WeatherAdvisoryWidget", () => {
   it("View All link points to /notifications", async () => {
     fetchMock.mockResolvedValue({
       ok: true,
-      json: async () => [],
+      json: async () => envelope([]),
     });
 
     render(<WeatherAdvisoryWidget />);

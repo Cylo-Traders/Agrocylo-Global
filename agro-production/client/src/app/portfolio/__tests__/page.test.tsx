@@ -20,6 +20,7 @@ function portfolioFixture() {
     investorAddress: "GBP7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7X",
     totalInvested: "1,234.5678901",
     totalReturned: "0.0000000",
+    claimCount: 0,
     positions: [
       {
         id: "pos-1",
@@ -28,6 +29,7 @@ function portfolioFixture() {
         amountInvested: "1,234.5678901",
         status: "FUNDING",
         investedAt: new Date().toISOString(),
+        claimedReturn: null,
       },
     ],
   };
@@ -132,5 +134,42 @@ describe("portfolioService mapping (#1051)", () => {
     });
 
     expect(summary.totalInvested).toBe("1,000,000,000.0000001");
+    expect(summary.totalReturned).toBe("0.0000000");
+    expect(summary.claimCount).toBe(0);
+  });
+
+  it("maps claimed campaign payouts exactly and leaves unclaimed positions null (#1343)", async () => {
+    const { mapInvestorPortfolio } = await import("@/services/portfolioService");
+
+    const position = (id: string, campaignId: string) => ({
+      id,
+      campaignId,
+      investorAddress: "GBP7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7X",
+      amount: "10000000",
+      ledger: 1,
+      createdAt: new Date().toISOString(),
+    });
+
+    const summary = mapInvestorPortfolio({
+      investorAddress: "GBP7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7XY7J7Y7X",
+      positions: [position("p1", "c1"), position("p2", "c2")],
+      claims: [
+        {
+          campaignId: "c1",
+          campaignOnChainId: "1",
+          payoutAmount: "90071992547409930000001",
+          ledger: 5,
+          claimedAt: new Date().toISOString(),
+        },
+      ],
+      totalInvested: "20000000",
+      totalReturned: "90071992547409930000001",
+      returnsSource: "campaign_claims",
+    });
+
+    expect(summary.totalReturned).toBe("9,007,199,254,740,993.0000001");
+    expect(summary.claimCount).toBe(1);
+    expect(summary.positions[0].claimedReturn).toBe("9,007,199,254,740,993.0000001");
+    expect(summary.positions[1].claimedReturn).toBeNull();
   });
 });
