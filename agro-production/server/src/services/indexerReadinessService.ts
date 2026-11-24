@@ -51,13 +51,13 @@ export async function getIndexerReadiness(
       };
     }
 
-    const lastTx = await prisma.transaction.findFirst({
-      where: { ledger: { gte: cursor.ledger - 10 } },
-      orderBy: { processedAt: 'desc' },
-      take: 1,
-    });
-
-    const lastProcessedTime = lastTx?.processedAt ?? null;
+    // Issue #1344: freshness comes only from this contract's own cursor
+    // metadata. The shared transactions table mixes events from every
+    // watched contract, so another contract's activity must never make this
+    // indexer look fresh. Rows written before `lastProcessedAt` existed fall
+    // back to the cursor's own `updatedAt`, which is also contract-scoped.
+    const lastProcessedTime =
+      cursor.lastProcessedAt ?? cursor.updatedAt ?? null;
     const now = new Date();
     const freshnessSeconds = lastProcessedTime
       ? Math.floor((now.getTime() - lastProcessedTime.getTime()) / 1000)

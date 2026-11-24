@@ -1,122 +1,142 @@
-import { useState } from 'react';
-import { useWallet } from '../context/WalletContext';
+import { useState, useRef, ChangeEvent, FormEvent } from 'react';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+const MAX_IMAGE_SIZE_BYTES = 2 * 1024 * 1024;
+const SUPPORTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+const MAX_IMAGES = 8;
 
-function isLocalhostApi(url: string): boolean {
-  try {
-    const { hostname } = new URL(url);
-    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0';
-  } catch {
-    return false;
-  }
+interface ProductFormProps {
+  onSubmit?: (data: { name: string; price: string; images: File[] }) => void;
 }
 
-function describeCreateError(err: unknown): string {
-  if (err instanceof DOMException && err.name === 'AbortError') {
-    return 'The request timed out. Check your connection and try again.';
-  }
-  if (err instanceof TypeError) {
-    return `Could not reach the API at ${API_URL}. This is usually a network or CORS configuration problem. Check your connection and try again.`;
-  }
-  if (err instanceof Error) {
-    return err.message;
-  }
-  return 'Something went wrong while creating the product. Please try again.';
+interface ImageError {
+  filename: string;
+  reason: string;
 }
 
-export default function ProductForm() {
-  const { address, signMessage } = useWallet();
+export default function ProductForm({ onSubmit }: ProductFormProps) {
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
-  const [description, setDescription] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [images, setImages] = useState<File[]>([]);
+  const [imageErrors, setImageErrors] = useState<ImageError[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const configError =
-    process.env.NODE_ENV === 'production' && isLocalhostApi(API_URL)
-      ? `The API URL is misconfigured (${API_URL}). Set NEXT_PUBLIC_API_URL to your deployed API origin.`
-      : null;
+  const handleImageChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(event.target.files ?? []);
+    const errors: ImageError[] = [];
+    const accepted: File[] = [];
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-
-    if (configError) {
-      setError(configError);
-      return;
-    }
-    if (!address) {
-      setError('Connect your wallet before creating a product.');
-      return;
-    }
-
-    setSubmitting(true);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-
-    try {
-      const signature = await signMessage('Create product');
-      const res = await fetch(`${API_URL}/api/products`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Wallet-Address': address,
-          'X-Wallet-Signature': signature,
-        },
-        body: JSON.stringify({ name, price, description }),
-        signal: controller.signal,
-      });
-
-      if (!res.ok) {
-        let message = `The server rejected the request (${res.status}).`;
-        try {
-          const body = await res.json();
-          if (body?.error) message = body.error;
-        } catch {
-          // keep default message
-        }
-        throw new Error(message);
+    for (const file of selected) {
+      if (!SUPPORTED_IMAGE_TYPES.includes(file.type)) {
+        errors.push({
+          filename: file.name,
+          reason: 'Unsupported file type. Use PNG, JPG, or WEBP.',
+        });
+        continue;
       }
-
-      setName('');
-      setPrice('');
-      setDescription('');
-    } catch (err) {
-      setError(describeCreateError(err));
-    } finally {
-      clearTimeout(timeout);
-      setSubmitting(false);
+      if (file.size > MAX_IMAGE_SIZE_BYTES) {
+        errors.push({
+          filename: file.name,
+          reason: 'File exceeds the 2 MB size limit.',
+        });
+        continue;
+      }
+      accepted.push(file);
     }
-  }
+
+    setImageErrors(errors);
+    if (accepted.length > 0) {
+      setImages((prev) => {
+        const combined = [...prev, ...accepted];
+        if (combined.length > MAX_IMAGES) {
+          setImageErrors((current) => [
+            ...current,
+            {
+              filename: accepted[accepted.length - 1].name,
+              reason: `You can upload at most ${MAX_IMAGES} images.`,
+            },
+          ]);
+          return combined.slice(0, MAX_IMAGES);
+        }
+        return combined;
+      });
+    }
+
+    // Clear the native input so the same rejected file can be selected again.
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveImage = (index: number) => {
+    setImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    onSubmit?.({ name, price, images });
+  };
 
   return (
     <form onSubmit={handleSubmit}>
-      {configError && (
-        <p role="alert" className="form-error">
-          {configError}
-        </p>
-      )}
-      {error && (
-        <p role="alert" className="form-error">
-          {error}
-        </p>
-      )}
-      <label>
-        Name
-        <input value={name} onChange={(e) => setName(e.target.value)} required />
-      </label>
-      <label>
-        Price
-        <input value={price} onChange={(e) => setPrice(e.target.value)} required />
-      </label>
-      <label>
-        Description
-        <textarea value={description} onChange={(e) => setDescription(e.target.value)} />
-      </label>
-      <button type="submit" disabled={submitting}>
-        {submitting ? 'Creating…' : 'Create product'}
-      </button>
+      <div>
+        <label htmlFor="product-name">Name</label>
+        <input
+          id="product-name"
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          required
+        />
+      </div>
+
+      <div>
+        <label htmlFor="product-price">Price</label>
+        <input
+          id="product-price"
+          type="text"
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+          required
+        />
+      </div>
+
+      <div>
+        <label htmlFor="product-images">Images</label>
+        <input
+          id="product-images"
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          multiple
+          onChange={handleImageChange}
+        />
+        <p>PNG, JPG, or WEBP up to 2 MB each (max {MAX_IMAGES} images).</p>
+
+        {imageErrors.length > 0 && (
+          <ul role="alert">
+            {imageErrors.map((error, index) => (
+              <li key={`${error.filename}-${index}`}>
+                {error.filename}: {error.reason}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {images.length > 0 && (
+          <ul>
+            {images.map((file, index) => (
+              <li key={`${file.name}-${index}`}>
+                {file.name}
+                <button type="button" onClick={() => handleRemoveImage(index)}>
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <button type="submit">Save product</button>
     </form>
   );
 }

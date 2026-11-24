@@ -68,6 +68,9 @@ async function advanceCursor(
   eventIndex: number,
   ledgerHash?: string,
 ): Promise<void> {
+  // Issue #1344: stamp a contract-scoped processing time so readiness never
+  // has to infer freshness from the shared transactions table.
+  const lastProcessedAt = new Date();
   await prisma.eventCursor.upsert({
     where: { contractId: CONTRACT_ID },
     create: {
@@ -75,10 +78,12 @@ async function advanceCursor(
       ledger,
       eventIndex,
       ledgerHash,
+      lastProcessedAt,
     },
     update: {
       ledger,
       eventIndex,
+      lastProcessedAt,
       ...(ledgerHash && { ledgerHash }),
     },
   });

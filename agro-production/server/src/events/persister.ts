@@ -8,6 +8,7 @@ import type {
   CampaignCreatedEvent,
   CampaignInvestedEvent,
   CampaignSettledEvent,
+  CampaignClaimedEvent,
   DisputeOpenedEvent,
   DisputeEvidenceSubmittedEvent,
   DisputeResolvedEvent,
@@ -67,6 +68,9 @@ export class EventPersister {
         break;
       case 'campaign.settled':
         await handleCampaignSettled(event);
+        break;
+      case 'campaign.claimed':
+        await handleCampaignClaimed(event);
         break;
       case 'order.created':
         await handleOrderCreated(event);
@@ -1187,6 +1191,87 @@ async function handleBasketWithdrawn(event: BasketWithdrawnEvent) {
 
   if (post) {
     broadcast('basket.withdrawn', post);
+  }
+}
+
+/**
+ * Issue #1343: persist the investor and exact payout of a direct campaign
+ * claim so portfolio returns can be aggregated per wallet. The contract
+ * permits one claim per (campaign, investor); replays upsert the same row.
+ */
+async function handleCampaignClaimed(event: CampaignClaimedEvent) {
+  type PostCommitPayload = {
+    campaignId: string;
+    investorAddress: string;
+    payout: string;
+    txHash: string | undefined;
+  };
+  let post: PostCommitPayload | null = null;
+
+  // Reject non-integer payloads before writing: amounts are summed with BigInt.
+  if (!/^\d+$/.test(event.payout)) {
+    throw new Error(
+      `campaign.claimed ${event.rawId}: payout "${event.payout}" is not a non-negative integer`,
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    if (await skipDuplicateInTransaction(tx, event)) return;
+    await upsertUser(tx, event.investor, 'INVESTOR');
+
+    const campaign = await tx.campaign.findUnique({
+      where: { onChainId: event.campaignId },
+    });
+    if (!campaign) {
+      throw new DependencyMissingError('campaign', event.campaignId);
+    }
+
+    await tx.campaignClaim.upsert({
+      where: {
+        campaignId_investorAddress: {
+          campaignId: campaign.id,
+          investorAddress: event.investor,
+        },
+      },
+      create: {
+        campaignId: campaign.id,
+        investorAddress: event.investor,
+        payoutAmount: event.payout,
+        ledger: event.ledger,
+        eventIndex: event.eventIndex,
+        txHash: event.txHash,
+      },
+      update: {
+        payoutAmount: event.payout,
+        ledger: event.ledger,
+        eventIndex: event.eventIndex,
+        txHash: event.txHash,
+      },
+    });
+
+    await tx.transaction.create({
+      data: {
+        campaignId: campaign.id,
+        walletAddress: event.investor,
+        eventType: event.action,
+        status: 'indexed',
+        payload: toEventPayload(event),
+        ledger: event.ledger,
+        eventIndex: event.eventIndex,
+        txHash: event.txHash,
+      },
+    });
+
+    post = {
+      campaignId: campaign.id,
+      investorAddress: event.investor,
+      payout: event.payout,
+      txHash: event.txHash,
+    };
+  });
+
+  if (post) {
+    broadcast('campaign.claimed', post);
   }
 }
 

@@ -170,6 +170,10 @@ export default function PortfolioPage() {
         <div className="bg-white border rounded-lg p-6 shadow-sm">
           <h3 className="text-sm text-gray-600 mb-2">Total Returned</h3>
           <p className="text-2xl font-bold">{portfolio.totalReturned} XLM</p>
+          <p className="text-xs text-gray-500 mt-1">
+            Claimed campaign payouts ({portfolio.claimCount}
+            {portfolio.claimCount === 1 ? " claim" : " claims"}). Basket returns are shown below.
+          </p>
         </div>
         <div className="bg-white border rounded-lg p-6 shadow-sm">
           <h3 className="text-sm text-gray-600 mb-2">Positions</h3>
@@ -221,6 +225,14 @@ export default function PortfolioPage() {
                 <div>
                   <p className="text-gray-600">Invested</p>
                   <p className="font-semibold">{position.amountInvested} XLM</p>
+                </div>
+                <div>
+                  <p className="text-gray-600">Campaign payout claimed</p>
+                  <p className="font-semibold">
+                    {position.claimedReturn !== null
+                      ? `${position.claimedReturn} XLM`
+                      : "Not claimed"}
+                  </p>
                 </div>
                 <div>
                   <p className="text-gray-600">Date</p>

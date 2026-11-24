@@ -12,8 +12,16 @@ describe("NotificationPreferences Component", () => {
     
     expect(screen.getByText("Notification Preferences")).toBeInTheDocument();
     expect(screen.getByText("Order Notifications")).toBeInTheDocument();
+    expect(screen.getByText("Listing Notifications")).toBeInTheDocument();
     expect(screen.getByText("Dispute Notifications")).toBeInTheDocument();
     expect(screen.getByText("System Notifications")).toBeInTheDocument();
+  });
+
+  it("renders opt-in email and SMS channel controls", () => {
+    render(<NotificationPreferences />);
+
+    expect(screen.getByText("Email Notifications")).toBeInTheDocument();
+    expect(screen.getByText("SMS Notifications")).toBeInTheDocument();
   });
 
   it("loads default preferences when no stored preferences exist", async () => {
@@ -22,6 +30,15 @@ describe("NotificationPreferences Component", () => {
     await waitFor(() => {
       const orderSwitch = screen.getByRole("switch", { name: /order notifications/i });
       expect(orderSwitch).toHaveAttribute("aria-checked", "true");
+    });
+  });
+
+  it("defaults email and SMS channels to opt-in off", async () => {
+    render(<NotificationPreferences />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("switch", { name: /email notifications/i })).toHaveAttribute("aria-checked", "false");
+      expect(screen.getByRole("switch", { name: /sms notifications/i })).toHaveAttribute("aria-checked", "false");
     });
   });
 
@@ -42,6 +59,24 @@ describe("NotificationPreferences Component", () => {
     
     const stored = JSON.parse(localStorage.getItem("notification_preferences") || "{}");
     expect(stored.orderNotifications).toBe(false);
+  });
+
+  it("toggles listing notifications preference", async () => {
+    render(<NotificationPreferences />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("switch", { name: /listing notifications/i })).toBeInTheDocument();
+    });
+
+    const listingSwitch = screen.getByRole("switch", { name: /listing notifications/i });
+    fireEvent.click(listingSwitch);
+
+    await waitFor(() => {
+      expect(listingSwitch).toHaveAttribute("aria-checked", "false");
+    });
+
+    const stored = JSON.parse(localStorage.getItem("notification_preferences") || "{}");
+    expect(stored.listingNotifications).toBe(false);
   });
 
   it("toggles dispute notifications preference", async () => {
@@ -115,6 +150,7 @@ describe("NotificationPreferences Component", () => {
   it("loads saved preferences on mount", async () => {
     localStorage.setItem("notification_preferences", JSON.stringify({
       orderNotifications: false,
+      listingNotifications: false,
       disputeNotifications: true,
       systemNotifications: false,
     }));
@@ -123,10 +159,12 @@ describe("NotificationPreferences Component", () => {
     
     await waitFor(() => {
       const orderSwitch = screen.getByRole("switch", { name: /order notifications/i });
+      const listingSwitch = screen.getByRole("switch", { name: /listing notifications/i });
       const disputeSwitch = screen.getByRole("switch", { name: /dispute notifications/i });
       const systemSwitch = screen.getByRole("switch", { name: /system notifications/i });
       
       expect(orderSwitch).toHaveAttribute("aria-checked", "false");
+      expect(listingSwitch).toHaveAttribute("aria-checked", "false");
       expect(disputeSwitch).toHaveAttribute("aria-checked", "true");
       expect(systemSwitch).toHaveAttribute("aria-checked", "false");
     });
@@ -142,13 +180,17 @@ describe("Notification Preferences Utilities", () => {
     const prefs = getNotificationPreferences();
     
     expect(prefs.orderNotifications).toBe(true);
+    expect(prefs.listingNotifications).toBe(true);
     expect(prefs.disputeNotifications).toBe(true);
     expect(prefs.systemNotifications).toBe(true);
+    expect(prefs.emailNotifications).toBe(false);
+    expect(prefs.smsNotifications).toBe(false);
   });
 
   it("getNotificationPreferences returns stored preferences", () => {
     localStorage.setItem("notification_preferences", JSON.stringify({
       orderNotifications: false,
+      listingNotifications: false,
       disputeNotifications: true,
       systemNotifications: false,
     }));
@@ -156,6 +198,7 @@ describe("Notification Preferences Utilities", () => {
     const prefs = getNotificationPreferences();
     
     expect(prefs.orderNotifications).toBe(false);
+    expect(prefs.listingNotifications).toBe(false);
     expect(prefs.disputeNotifications).toBe(true);
     expect(prefs.systemNotifications).toBe(false);
   });
@@ -163,17 +206,32 @@ describe("Notification Preferences Utilities", () => {
   it("shouldShowNotification respects order notification preference", () => {
     localStorage.setItem("notification_preferences", JSON.stringify({
       orderNotifications: false,
+      listingNotifications: true,
       disputeNotifications: true,
       systemNotifications: true,
     }));
 
     expect(shouldShowNotification("order")).toBe(false);
+    expect(shouldShowNotification("listing")).toBe(true);
     expect(shouldShowNotification("dispute")).toBe(true);
     expect(shouldShowNotification("system")).toBe(true);
   });
 
+  it("shouldShowNotification respects listing notification preference", () => {
+    localStorage.setItem("notification_preferences", JSON.stringify({
+      orderNotifications: true,
+      listingNotifications: false,
+      disputeNotifications: true,
+      systemNotifications: true,
+    }));
+
+    expect(shouldShowNotification("listing")).toBe(false);
+    expect(shouldShowNotification("order")).toBe(true);
+  });
+
   it("shouldShowNotification returns true by default", () => {
     expect(shouldShowNotification("order")).toBe(true);
+    expect(shouldShowNotification("listing")).toBe(true);
     expect(shouldShowNotification("dispute")).toBe(true);
     expect(shouldShowNotification("system")).toBe(true);
   });

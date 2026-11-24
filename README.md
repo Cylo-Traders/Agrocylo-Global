@@ -339,5 +339,5 @@ For production, ensure the following are configured (see `.env.example`):
 
 ## Handsoff notes
 
-<!-- handsoff-issue-1378 -->
-- #1378: Remove the landing-page trust/partner strip
+<!-- handsoff-issue-1397 -->
+- #1397: Add buyer reviews and verified purchase indicators

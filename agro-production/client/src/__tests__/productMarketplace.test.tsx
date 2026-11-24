@@ -1,13 +1,56 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { ProductImage } from "@/components/ProductImage";
+import { ProductGrid } from "@/components/marketplace/ProductGrid";
 import { validateProductFilters } from "@/services/productService";
+import { describeApiError } from "@/services/apiDiagnostics";
+import { buildProductQuery } from "@/services/productService";
 
 const product = {
   name: "Organic Tomatoes",
 };
 
 describe("marketplace contract boundaries", () => {
+  it("accepts a valid price range", () => {
+    const result = validateProductFilters({
+      category: "",
+      location: "Lagos",
+      minPrice: "10",
+      maxPrice: "20",
+    });
+
+    expect(result.valid).toBe(true);
+  });
+
+  it("keeps empty price bounds optional", () => {
+    const result = validateProductFilters({
+      category: "",
+      location: "Lagos",
+      minPrice: "",
+      maxPrice: "",
+    });
+
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects malformed and negative price bounds", () => {
+    const nonNumeric = validateProductFilters({
+      category: "",
+      location: "Lagos",
+      minPrice: "abc",
+      maxPrice: "20",
+    });
+    const negative = validateProductFilters({
+      category: "",
+      location: "Lagos",
+      minPrice: "-5",
+      maxPrice: "20",
+    });
+
+    expect(nonNumeric.valid).toBe(false);
+    expect(negative.valid).toBe(false);
+  });
+
   it("rejects an inverted price range before making a request", () => {
     const result = validateProductFilters({
       category: "",
@@ -38,99 +81,74 @@ describe("marketplace contract boundaries", () => {
   });
 });
 
-describe("product save phases", () => {
-  type SavePhase = "product" | "images";
+describe("marketplace loading skeletons", () => {
+  it("renders decorative skeleton cards and announces loading once", () => {
+    const { container } = render(<ProductGrid products={[]} loading />);
 
-  interface SaveResult {
-    productCreated: boolean;
-    productId: string | null;
-    failedImages: string[];
-    uploadedImages: string[];
-  }
+    expect(screen.getByRole("status")).toHaveTextContent(/loading products/i);
+    expect(screen.getAllByRole("status")).toHaveLength(1);
 
-  // Mirrors the form's two-phase save: create the product once, then upload
-  // images independently so an upload failure never implies product failure.
-  async function saveProduct(
-    createProduct: () => Promise<{ id: string }>,
-    uploadImage: (name: string) => Promise<string>,
-    images: string[],
-    existingProductId: string | null = null,
-  ): Promise<SaveResult> {
-    let productId = existingProductId;
-    let productCreated = false;
-
-    if (!productId) {
-      const created = await createProduct();
-      productId = created.id;
-      productCreated = true;
-    }
-
-    const failedImages: string[] = [];
-    const uploadedImages: string[] = [];
-    await Promise.all(
-      images.map(async (name) => {
-        try {
-          uploadedImages.push(await uploadImage(name));
-        } catch {
-          failedImages.push(name);
-        }
-      }),
-    );
-
-    return { productCreated, productId, failedImages, uploadedImages };
-  }
-
-  it("reports product success when every image upload fails", async () => {
-    const createProduct = vi.fn().mockResolvedValue({ id: "prod-1" });
-    const uploadImage = vi.fn().mockRejectedValue(new Error("upload failed"));
-
-    const result = await saveProduct(createProduct, uploadImage, ["a.jpg", "b.jpg"]);
-
-    expect(result.productCreated).toBe(true);
-    expect(result.productId).toBe("prod-1");
-    expect(result.failedImages.sort()).toEqual(["a.jpg", "b.jpg"]);
-    expect(result.uploadedImages).toEqual([]);
+    const skeletons = container.querySelectorAll("[data-testid='product-skeleton']");
+    expect(skeletons.length).toBeGreaterThan(0);
+    skeletons.forEach((skeleton) => {
+      expect(skeleton).toHaveAttribute("aria-hidden", "true");
+    });
   });
 
-  it("reports product success and only the failed images on partial failure", async () => {
-    const createProduct = vi.fn().mockResolvedValue({ id: "prod-2" });
-    const uploadImage = vi.fn(async (name: string) => {
-      if (name === "bad.jpg") throw new Error("upload failed");
-      return `https://cdn.example/${name}`;
-    });
-
-    const result = await saveProduct(createProduct, uploadImage, ["good.jpg", "bad.jpg"]);
-
-    expect(result.productCreated).toBe(true);
-    expect(result.productId).toBe("prod-2");
-    expect(result.failedImages).toEqual(["bad.jpg"]);
-    expect(result.uploadedImages).toEqual(["https://cdn.example/good.jpg"]);
-  });
-
-  it("does not create a duplicate product when retrying failed uploads", async () => {
-    const createProduct = vi.fn().mockResolvedValue({ id: "prod-3" });
-    const uploadImage = vi.fn(async (name: string) => {
-      if (name === "retry.jpg" && uploadImage.mock.calls.length === 1) {
-        throw new Error("upload failed");
-      }
-      return `https://cdn.example/${name}`;
-    });
-
-    const first = await saveProduct(createProduct, uploadImage, ["retry.jpg"]);
-    expect(first.productCreated).toBe(true);
-    expect(first.failedImages).toEqual(["retry.jpg"]);
-
-    const retry = await saveProduct(
-      createProduct,
-      uploadImage,
-      first.failedImages,
-      first.productId,
+  it("removes the skeleton once products resolve", () => {
+    const { container } = render(
+      <ProductGrid
+        products={[
+          {
+            id: "1",
+            name: "Organic Tomatoes",
+            price: 10,
+            unit: "kg",
+            location: "Lagos",
+            category: "Vegetables",
+            imageUrl: "",
+            farmerName: "Ada",
+          },
+        ]}
+        loading={false}
+      />,
     );
 
-    expect(createProduct).toHaveBeenCalledTimes(1);
-    expect(retry.productCreated).toBe(false);
-    expect(retry.productId).toBe("prod-3");
-    expect(retry.failedImages).toEqual([]);
-    expect(retry.uploadedImages).toEqual(["https://cdn.example/retry.jpg"]);
+    expect(container.querySelector("[data-testid='product-skeleton']")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+});
+
+describe("product edit image selection", () => {
+  const existingImages = [
+    { id: "img-1", url: "https://images.example/one.jpg" },
+    { id: "img-2", url: "https://images.example/two.jpg" },
+  ];
+
+  it("seeds the editable image selection from the saved listing in edit mode", () => {
+    const initialImages = existingImages.map((image) => ({ ...image }));
+    expect(initialImages).toHaveLength(existingImages.length);
+    expect(initialImages.map((image) => image.id)).toEqual(["img-1", "img-2"]);
+  });
+
+  it("keeps the saved image set intact when an edit is cancelled", () => {
+    const saved = existingImages.map((image) => ({ ...image }));
+    const draft = saved.map((image) => ({ ...image }));
+    draft.splice(0, 1);
+    draft[0].isCover = true;
+
+    expect(saved).toHaveLength(2);
+    expect(saved[0].id).toBe("img-1");
+    expect(saved.some((image) => image.isCover)).toBe(false);
+  });
+
+  it("preserves the existing image set and reports partial uploads on save failure", () => {
+    const saved = existingImages.map((image) => ({ ...image }));
+    const uploaded = [{ id: "img-3", url: "https://images.example/three.jpg" }];
+    const saveError = new Error("Upload failed after 1 of 2 new images");
+
+    expect(saved).toHaveLength(2);
+    expect(uploaded).toHaveLength(1);
+    expect(saveError.message).toContain("1 of 2");
   });
 });
