@@ -12,6 +12,7 @@ export interface Order {
   amount: bigint;
   status: string;
   timestamp: number;
+  deliveryDeadline?: number;
   /** Present when the indexer has surfaced the originating transaction (Issue #1015). */
   txHash?: string;
 }

@@ -64,7 +64,18 @@ export const currencySchema = z.enum(["XLM", "USDC"]);
 
 export const unitSchema = z.enum(["kg", "bag", "crate", "piece", "litre", "dozen", "bunch"]);
 
-export const deliveryDeadlineSchema = z.string().min(1, "Delivery deadline is required");
+export const deliveryDeadlineSchema = z
+  .string()
+  .min(1, "Delivery deadline is required")
+  .refine((v) => {
+    const selected = new Date(v);
+    return !Number.isNaN(selected.getTime()) && selected > new Date();
+  }, "Delivery deadline must be in the future");
+
+export function toDatetimeLocalMin(date: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
 
 export const amountSchema = z
   .string()
@@ -149,14 +160,6 @@ export const escrowFormSchema = z.object({
     .string()
     .regex(/^\d+(\.\d+)?$/, "Quantity must be a valid number")
     .refine((v) => parseFloat(v) > 0, "Quantity must be greater than 0"),
-  deliveryDeadline: z
-    .string()
-    .min(1, "Delivery deadline is required")
-    .refine((v) => {
-      if (!v) return false;
-      const selected = new Date(v);
-      const now = new Date();
-      return selected > now;
-    }, "Delivery deadline must be in the future"),
+  deliveryDeadline: deliveryDeadlineSchema,
 });
 

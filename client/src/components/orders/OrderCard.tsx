@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { formatTruncatedAddress } from "@/lib/helpers/format-address";
+import { getOrderExpirySeconds } from "@/lib/order-expiry";
 import CountdownTimer from "./CountdownTimer";
 
 interface OrderCardProps {
@@ -18,7 +19,6 @@ interface OrderCardProps {
 }
 
 const PLATFORM_FEE_PCT = 3;
-const EXPIRY_HOURS = 96;
 
 /** stroops (1e-7 XLM) → human-readable XLM, 2 decimals. */
 function formatAmount(stroops: bigint): string {
@@ -36,7 +36,7 @@ export default function OrderCard({
   const feeXlm = (totalXlm * PLATFORM_FEE_PCT) / 100;
   const netXlm = totalXlm - feeXlm;
 
-  const expirySeconds = order.createdAt + EXPIRY_HOURS * 3600;
+  const expirySeconds = getOrderExpirySeconds(order);
   const [isExpired] = useState(
     () => Math.floor(Date.now() / 1000) >= expirySeconds,
   );
@@ -81,7 +81,10 @@ export default function OrderCard({
 
         <div className="flex flex-col gap-3 pt-1 sm:flex-row sm:items-center sm:justify-between">
           {isPending ? (
-            <CountdownTimer createdAt={order.createdAt} />
+            <CountdownTimer
+              createdAt={order.createdAt}
+              deliveryDeadline={order.deliveryDeadline}
+            />
           ) : (
             <span className="text-muted-foreground text-xs">
               {new Date(order.createdAt * 1000).toLocaleDateString()}

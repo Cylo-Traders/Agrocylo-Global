@@ -19,7 +19,7 @@ import { Separator } from "@/components/ui/separator";
 import { useEscrowContract } from "@/hooks/useEscrowContract";
 import { useWallet } from "@/hooks/useWallet";
 import { useAnalytics } from "@/hooks/useAnalytics";
-import { createOrderFormSchema } from "@/lib/validation";
+import { createOrderFormSchema, toDatetimeLocalMin } from "@/lib/validation";
 import { FormError } from "@/components/FormError";
 import { getInitials } from "@/lib/utils";
 import { formatTruncatedAddress } from "@/lib/helpers/format-address";
@@ -330,6 +330,7 @@ export function CreateOrderForm({
           label="Delivery deadline"
           hint="If the farmer doesn't deliver by this time, you can refund the escrow."
           type="datetime-local"
+          min={toDatetimeLocalMin()}
           value={deliveryDeadline}
           onChange={(e) => {
             setDeliveryDeadline(e.target.value);
