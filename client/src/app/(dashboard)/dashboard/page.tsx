@@ -34,7 +34,10 @@ import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { DashboardReadinessGate } from "@/components/DashboardReadinessGate";
 import { useMyProducts } from "@/hooks/queries/useProducts";
-import { useSellerOrders } from "@/hooks/queries/useOrders";
+import {
+  buildMonthlyOrderBuckets,
+  useSellerOrders,
+} from "@/hooks/queries/useOrders";
 
 const EarningsLineChart = dynamic(
   () => import("@/components/shared/charts").then((m) => ({ default: m.EarningsLineChart })),
@@ -53,6 +56,15 @@ function StatCardSkeleton() {
       <Skeleton className="h-4 w-24" />
       <Skeleton className="h-8 w-32" />
       <Skeleton className="h-3 w-20" />
+    </div>
+  );
+}
+
+/** Honest empty state for charts with no real data (Issue #1473). */
+function ChartEmptyState({ message }: { message: string }) {
+  return (
+    <div className="flex h-[220px] items-center justify-center rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+      {message}
     </div>
   );
 }
@@ -196,23 +208,12 @@ function DashboardContent() {
     },
   ];
 
-  const earningsData = [
-    { month: "Jan", gross: 0, net: 0 },
-    { month: "Feb", gross: 0, net: 0 },
-    { month: "Mar", gross: 0, net: 0 },
-    { month: "Apr", gross: 0, net: 0 },
-    { month: "May", gross: 0, net: 0 },
-    { month: "Jun", gross: totalRevenue, net: totalRevenue * 0.97 },
-  ];
-
-  const ordersChart = [
-    {
-      month: "Jun",
-      completed: completed.length,
-      pending: pending.length,
-      refunded: orders.filter((o) => o.status === "Refunded").length,
-    },
-  ];
+  // Issue #1473: chart buckets come from real order timestamps, not placeholders.
+  const monthlyBuckets = buildMonthlyOrderBuckets(orders);
+  const chartRange =
+    monthlyBuckets.length > 0
+      ? `${monthlyBuckets[0].month} – ${monthlyBuckets[monthlyBuckets.length - 1].month} (UTC)`
+      : null;
 
   const recentOrders = orders.slice(0, 3);
 
@@ -248,19 +249,29 @@ function DashboardContent() {
 
       <div className="grid min-w-0 gap-6 lg:grid-cols-2">
         <div className="min-w-0 overflow-hidden rounded-2xl border bg-card p-4 sm:p-6">
-          <h2 className="mb-4 font-semibold">Earnings Overview</h2>
+          <h2 className="font-semibold">Earnings Overview</h2>
+          <p className="mb-4 text-xs text-muted-foreground">
+            {chartRange ?? "No order history yet"}
+          </p>
           {isLoading ? (
             <Skeleton className="h-80 w-full" />
+          ) : completed.length > 0 ? (
+            <EarningsLineChart data={monthlyBuckets} />
           ) : (
-            <EarningsLineChart data={earningsData} />
+            <ChartEmptyState message="No completed sales yet. Earnings will appear here once orders are completed." />
           )}
         </div>
         <div className="min-w-0 overflow-hidden rounded-2xl border bg-card p-4 sm:p-6">
-          <h2 className="mb-4 font-semibold">Orders Breakdown</h2>
+          <h2 className="font-semibold">Orders Breakdown</h2>
+          <p className="mb-4 text-xs text-muted-foreground">
+            {chartRange ?? "No order history yet"}
+          </p>
           {isLoading ? (
             <Skeleton className="h-80 w-full" />
+          ) : monthlyBuckets.length > 0 ? (
+            <OrdersBarChart data={monthlyBuckets} />
           ) : (
-            <OrdersBarChart data={ordersChart} />
+            <ChartEmptyState message="No orders yet. Monthly order activity will appear here." />
           )}
         </div>
       </div>
