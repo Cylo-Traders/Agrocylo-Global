@@ -106,6 +106,7 @@ services:
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-placeholder-service-role-key}
       SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET:-placeholder-jwt-secret}
       JWT_SECRET: ${JWT_SECRET:-b873d25323eb8673ad2d4ef5a86f7181ddb5f3cae3ed14c5fd8573c5b1d5f5e8}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost,http://127.0.0.1}
       RUN_WORKERS: "false"
       # TESTNET DEFAULTS (provisional — maintainer review required before mainnet):
       RUN_CONTRACT_WATCHER: ${RUN_CONTRACT_WATCHER:-true}
@@ -137,7 +138,8 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       JWT_SECRET: dev-secret-key-do-not-use-in-production
       LOG_LEVEL: debug
-      CORS_ORIGINS: ""
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost,http://127.0.0.1}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost,http://127.0.0.1}
       SUPABASE_URL: ${SUPABASE_URL:-https://placeholder.supabase.co}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-placeholder-anon-key}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-placeholder-service-role-key}
