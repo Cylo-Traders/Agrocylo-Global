@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Heart, RefreshCw, Search, WifiOff } from "lucide-react";
+import { Heart, PackageOpen, RefreshCw, Search, WifiOff } from "lucide-react";
 
 import Wrapper from "@/components/shared/wrapper";
 import { Button } from "@/components/ui/button";
@@ -70,6 +70,22 @@ export default function MarketPage() {
   if (showFavoritesOnly) {
     products = products.filter((p) => favoriteIds.includes(p.id));
   }
+
+  const hasActiveFilters =
+    category !== "All" ||
+    Boolean(search.trim()) ||
+    Boolean(minPrice.trim()) ||
+    Boolean(maxPrice.trim()) ||
+    showFavoritesOnly;
+
+  const resetFilters = () => {
+    setCategory("All");
+    setSearch("");
+    setSortKey("newest");
+    setMinPrice("");
+    setMaxPrice("");
+    setShowFavoritesOnly(false);
+  };
 
   const quantityByProductId = useMemo(() => {
     const map = new Map<string, number>();
@@ -247,8 +263,53 @@ export default function MarketPage() {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-              {products.map((product) => {
+            {!isLoading && products.length === 0 ? (
+              <div
+                className="bg-card flex flex-col items-center gap-4 rounded-2xl border p-10 text-center"
+                role="status"
+                data-testid="market-empty-state"
+              >
+                <div className="bg-muted text-muted-foreground flex size-12 items-center justify-center rounded-2xl">
+                  <PackageOpen className="size-5" aria-hidden="true" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-lg font-semibold">
+                    {hasActiveFilters
+                      ? "No products match these filters"
+                      : "Products unavailable"}
+                  </h3>
+                  <p className="text-muted-foreground text-sm">
+                    {hasActiveFilters
+                      ? "Try adjusting or resetting your category, search query, price range, or favorites filter."
+                      : "There are currently no marketplace listings available. Please check back soon or try again."}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  {hasActiveFilters && (
+                    <Button
+                      type="button"
+                      variant="default"
+                      onClick={resetFilters}
+                    >
+                      Reset filters
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void refetch()}
+                    disabled={isFetching}
+                  >
+                    <RefreshCw
+                      className={isFetching ? "size-4 animate-spin" : "size-4"}
+                    />
+                    Try again
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                {products.map((product) => {
                 const currentQty = quantityByProductId.get(product.id) ?? 0;
 
                 return (
@@ -373,7 +434,8 @@ export default function MarketPage() {
                   </article>
                 );
               })}
-            </div>
+              </div>
+            )}
           </div>
         )}
       </Wrapper>
