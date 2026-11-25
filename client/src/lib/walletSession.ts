@@ -44,14 +44,22 @@ export async function authenticateWallet(
     );
   }
 
-  const challenge = await readJson<NonceResponse>(
-    await fetch(`${API_BASE_URL}/auth/nonce`, {
+  let nonceResponse: Response;
+  try {
+    nonceResponse = await fetch(`${API_BASE_URL}/auth/nonce`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ walletAddress }),
       signal,
-    }),
-  );
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    throw new Error(
+      "Unable to reach the authentication service. Please check your connection and try again.",
+    );
+  }
+
+  const challenge = await readJson<NonceResponse>(nonceResponse);
   if (Date.parse(challenge.expiresAt) <= Date.now()) {
     throw new Error("The sign-in challenge expired. Try signing in again.");
   }
@@ -60,8 +68,9 @@ export async function authenticateWallet(
   if (signal?.aborted)
     throw new DOMException("Sign-in cancelled", "AbortError");
 
-  const tokens = await readJson<TokenResponse>(
-    await fetch(`${API_BASE_URL}/auth/verify`, {
+  let verifyResponse: Response;
+  try {
+    verifyResponse = await fetch(`${API_BASE_URL}/auth/verify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -70,8 +79,15 @@ export async function authenticateWallet(
         message: challenge.message,
       }),
       signal,
-    }),
-  );
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    throw new Error(
+      "Unable to reach the authentication service. Please check your connection and try again.",
+    );
+  }
+
+  const tokens = await readJson<TokenResponse>(verifyResponse);
   setAuthSession(walletAddress, tokens.accessToken, tokens.refreshToken);
 }
 

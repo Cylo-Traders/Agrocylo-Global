@@ -28,11 +28,51 @@ import {
   uploadProductImage,
 } from "@/services/productService";
 import { useCreateProduct, useUpdateProduct } from "@/hooks/queries/useProducts";
+import {
+  ApiRequestError,
+  isRawNetworkErrorMessage,
+} from "@/lib/apiHelper";
 import { isTestMode } from "@/lib/testMode";
 import { productFormSchema } from "@/lib/validation";
 import { FormError } from "@/components/FormError";
 import { logger } from "@/lib/logger";
 import { useWallet } from "@/hooks/useWallet";
+import { toast } from "sonner";
+
+export const FRIENDLY_PRODUCT_SAVE_ERROR =
+  "We couldn't save your product because the marketplace service is unavailable. Your entries are still here.";
+
+function formatProductSaveError(err: unknown): string {
+  if (err instanceof ApiRequestError) {
+    if (
+      err.code === "NETWORK_ERROR" ||
+      err.code === "TIMEOUT" ||
+      err.status === 0 ||
+      isRawNetworkErrorMessage(err.message) ||
+      /unable to reach the (marketplace|authentication) service/i.test(
+        err.message,
+      )
+    ) {
+      return FRIENDLY_PRODUCT_SAVE_ERROR;
+    }
+    return err.message;
+  }
+  if (err instanceof TypeError) {
+    return FRIENDLY_PRODUCT_SAVE_ERROR;
+  }
+  if (err instanceof Error) {
+    if (
+      isRawNetworkErrorMessage(err.message) ||
+      /failed to fetch|load failed|networkerror|fetch failed|unable to reach the (marketplace|authentication) service/i.test(
+        err.message,
+      )
+    ) {
+      return FRIENDLY_PRODUCT_SAVE_ERROR;
+    }
+    return err.message;
+  }
+  return "Failed to save.";
+}
 
 type Mode = "add" | "edit";
 
@@ -171,15 +211,15 @@ export default function ProductFormModal({
     return Object.keys(next).length === 0;
   }
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function submitProduct() {
     if (!validate()) return;
     setSaveError(null);
     try {
       // Product writes and image uploads require the API session. The wallet
       // can still be connected after a reload while its short-lived JWT has
       // expired, so restore it before starting the multi-request save flow.
-      if (!authenticated) {
+      // Demo/test mode saves locally without contacting /auth/nonce (#1420).
+      if (!authenticated && !isTestMode()) {
         await reauthenticate();
       }
       const payload = normalizeProductWriteInput({
@@ -203,23 +243,34 @@ export default function ProductFormModal({
               input: payload,
             });
 
-      if (imageFiles.length > 0) {
+      if (imageFiles.length > 0 && !isTestMode()) {
         await Promise.all(
           imageFiles.map((file) => uploadProductImage(product.id, file)),
         );
       }
 
+      toast.success(
+        mode === "add"
+          ? "Product listed successfully."
+          : "Product listing updated.",
+      );
       await onSuccess();
       onClose();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to save.";
-      setSaveError(msg);
+      const rawMsg = err instanceof Error ? err.message : "Failed to save.";
+      const friendlyMsg = formatProductSaveError(err);
+      setSaveError(friendlyMsg);
       logger?.error("Product form save failed", {
-        error: msg,
+        error: rawMsg,
         mode,
         stack: err instanceof Error ? err.stack : undefined,
       });
     }
+  }
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    await submitProduct();
   }
 
   return (
@@ -421,7 +472,22 @@ export default function ProductFormModal({
             )}
           </div>
 
-          {saveError && <FormError message={saveError} />}
+          {saveError && (
+            <div className="space-y-2">
+              <FormError message={saveError} />
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={saving}
+                  onClick={() => void submitProduct()}
+                >
+                  Retry
+                </Button>
+              </div>
+            </div>
+          )}
 
           <Separator />
 

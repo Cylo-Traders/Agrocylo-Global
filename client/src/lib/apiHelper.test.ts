@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiRequestError, apiRequest } from "./apiHelper";
+import {
+  ApiRequestError,
+  FRIENDLY_NETWORK_ERROR_MESSAGE,
+  apiRequest,
+} from "./apiHelper";
 import {
   AUTH_EXPIRED_EVENT,
   getAccessToken,
@@ -172,5 +176,23 @@ describe("apiRequest error classification", () => {
     expect(getAccessToken()).toBeNull();
     expect(getRefreshToken()).toBeNull();
     expect(expired).toHaveBeenCalledOnce();
+  });
+
+  it("maps raw TypeError 'Failed to fetch' to friendly NETWORK_ERROR copy (#1420)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new TypeError("Failed to fetch")),
+    );
+
+    const error = await apiRequest("/products", { method: "POST" }).catch(
+      (value: unknown) => value,
+    );
+    expect(error).toBeInstanceOf(ApiRequestError);
+    expect(error).toMatchObject({
+      code: "NETWORK_ERROR",
+      status: 0,
+      message: FRIENDLY_NETWORK_ERROR_MESSAGE,
+    });
+    expect((error as Error).message).not.toMatch(/failed to fetch/i);
   });
 });

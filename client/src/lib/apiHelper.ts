@@ -41,6 +41,15 @@ const DEFAULT_TIMEOUT = 15_000;
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 100;
 
+export const FRIENDLY_NETWORK_ERROR_MESSAGE =
+  "Unable to reach the marketplace service. Please check your connection and try again.";
+
+export function isRawNetworkErrorMessage(message: string): boolean {
+  return /^(failed to fetch|load failed|networkerror|fetch failed|network request failed)/i.test(
+    message.trim(),
+  );
+}
+
 function errorCodeFromResponse(
   parsed: { code?: unknown } | null,
   status: number,
@@ -185,9 +194,15 @@ export async function apiRequest<T>(
           status: 0,
         });
       }
+      const rawMessage =
+        err instanceof Error ? err.message : "Network request failed";
+      const message =
+        err instanceof TypeError || isRawNetworkErrorMessage(rawMessage)
+          ? FRIENDLY_NETWORK_ERROR_MESSAGE
+          : rawMessage;
       throw new ApiRequestError({
         code: "NETWORK_ERROR",
-        message: err instanceof Error ? err.message : "Network request failed",
+        message,
         status: 0,
       });
     } finally {
