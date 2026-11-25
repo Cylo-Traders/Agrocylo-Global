@@ -86,6 +86,71 @@ describe("analytics consent gating", () => {
       granted.events.filter((e) => e.name === "page_view"),
     ).toHaveLength(1);
   });
+
+  it("updates in-memory consent and buffers events even when localStorage.setItem throws", async () => {
+    const {
+      setAnalyticsConsent,
+      getAnalyticsConsent,
+      getAnalyticsSnapshot,
+      trackClick,
+    } = await import("./analytics");
+
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("QuotaExceededError", "QuotaExceededError");
+    });
+
+    expect(() => setAnalyticsConsent("granted")).not.toThrow();
+    expect(getAnalyticsConsent()).toBe("granted");
+    expect(getAnalyticsSnapshot().consent).toBe("granted");
+    expect(
+      getAnalyticsSnapshot().events.some((e) => e.name === "consent_changed"),
+    ).toBe(true);
+
+    expect(() => trackClick({ element: "button", label: "Buy" })).not.toThrow();
+    expect(
+      getAnalyticsSnapshot().events.some((e) => e.name === "click"),
+    ).toBe(true);
+  });
+
+  it("keeps consent transitions working when localStorage.getItem and removeItem throw", async () => {
+    const {
+      setAnalyticsConsent,
+      getAnalyticsConsent,
+      getAnalyticsSnapshot,
+    } = await import("./analytics");
+
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("SecurityError", "SecurityError");
+    });
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new DOMException("SecurityError", "SecurityError");
+    });
+
+    expect(() => setAnalyticsConsent("denied")).not.toThrow();
+    expect(getAnalyticsConsent()).toBe("denied");
+    expect(getAnalyticsSnapshot().consent).toBe("denied");
+  });
+
+  it("resets consentState, initialized, sessionId, and anonymousId in resetAnalyticsForTests", async () => {
+    const {
+      setAnalyticsConsent,
+      getAnalyticsSnapshot,
+      resetAnalyticsForTests,
+    } = await import("./analytics");
+
+    setAnalyticsConsent("granted");
+    expect(getAnalyticsSnapshot().consent).toBe("granted");
+    expect(getAnalyticsSnapshot().sessionId).not.toBe("session");
+
+    window.localStorage.clear();
+    resetAnalyticsForTests();
+
+    const resetSnap = getAnalyticsSnapshot();
+    expect(resetSnap.consent).toBe("unknown");
+    expect(resetSnap.sessionId).toBe("session");
+    expect(resetSnap.anonymousId).toBe("anonymous");
+    expect(resetSnap.events).toHaveLength(0);
+  });
 });
 
 describe("analytics store subscription", () => {

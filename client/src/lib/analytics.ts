@@ -139,19 +139,35 @@ function persistConsent(next: AnalyticsConsentState) {
 
 function loadSessionId(): string {
   if (!isBrowser) return generateId();
-  const cached = window.localStorage.getItem(STORAGE_KEYS.sessionId);
-  if (cached) return cached;
+  try {
+    const cached = window.localStorage.getItem(STORAGE_KEYS.sessionId);
+    if (cached) return cached;
+  } catch {
+    // Storage unavailable; use in-memory session id.
+  }
   const next = generateId();
-  window.localStorage.setItem(STORAGE_KEYS.sessionId, next);
+  try {
+    window.localStorage.setItem(STORAGE_KEYS.sessionId, next);
+  } catch {
+    // Ignore storage write failure.
+  }
   return next;
 }
 
 function loadAnonymousId(): string {
   if (!isBrowser) return generateId();
-  const cached = window.localStorage.getItem(STORAGE_KEYS.anonymousId);
-  if (cached) return cached;
+  try {
+    const cached = window.localStorage.getItem(STORAGE_KEYS.anonymousId);
+    if (cached) return cached;
+  } catch {
+    // Storage unavailable; use in-memory anonymous id.
+  }
   const next = generateId();
-  window.localStorage.setItem(STORAGE_KEYS.anonymousId, next);
+  try {
+    window.localStorage.setItem(STORAGE_KEYS.anonymousId, next);
+  } catch {
+    // Ignore storage write failure.
+  }
   return next;
 }
 
@@ -170,7 +186,23 @@ function loadEvents(): AnalyticsEvent[] {
 
 function persistEvents(events: AnalyticsEvent[]) {
   if (!isBrowser) return;
-  window.localStorage.setItem(STORAGE_KEYS.events, JSON.stringify(events.slice(-MAX_STORED_EVENTS)));
+  try {
+    window.localStorage.setItem(
+      STORAGE_KEYS.events,
+      JSON.stringify(events.slice(-MAX_STORED_EVENTS)),
+    );
+  } catch {
+    // Keep events in the in-memory `storedEvents` fallback buffer when storage throws.
+  }
+}
+
+function clearPersistedEvents() {
+  if (!isBrowser) return;
+  try {
+    window.localStorage.removeItem(STORAGE_KEYS.events);
+  } catch {
+    // Ignore storage removal errors.
+  }
 }
 
 function invalidateSnapshot() {
@@ -454,37 +486,43 @@ export function initAnalytics() {
 }
 
 export function setAnalyticsConsent(next: AnalyticsConsentState) {
-  if (!initialized) ensureWindowTracking();
-  consentState = next;
-  persistConsent(next);
+  try {
+    if (!initialized) ensureWindowTracking();
+    consentState = next;
+    persistConsent(next);
 
-  if (next === "denied") {
-    transportQueue.length = 0;
-    storedEvents = [];
-    if (isBrowser) {
-      window.localStorage.removeItem(STORAGE_KEYS.events);
+    if (next === "denied") {
+      transportQueue.length = 0;
+      storedEvents = [];
+      clearPersistedEvents();
     }
-  }
 
-  if (next === "granted") {
-    persistEvents(storedEvents);
-  }
+    if (next === "granted") {
+      persistEvents(storedEvents);
+    }
 
-  storeEvent(
-    createEvent("consent_changed", {
-      consent: next,
-    }),
-  );
+    storeEvent(
+      createEvent("consent_changed", {
+        consent: next,
+      }),
+    );
+  } finally {
+    emit();
+  }
 }
 
 export function getAnalyticsConsent(): AnalyticsConsentState {
-  if (!isBrowser) return consentState;
-  return loadConsent();
+  if (!initialized && isBrowser && consentState === "unknown") {
+    consentState = loadConsent();
+  }
+  return consentState;
 }
 
 export function getAnalyticsEvents() {
-  if (!isBrowser) return storedEvents;
-  return loadEvents();
+  if (!initialized && isBrowser && storedEvents.length === 0) {
+    storedEvents = loadEvents();
+  }
+  return storedEvents;
 }
 
 function buildSnapshot(): AnalyticsSnapshot {
@@ -805,6 +843,10 @@ function emptyFunnel(): AnalyticsMetrics["funnels"][AnalyticsFunnelName] {
 }
 
 export function resetAnalyticsForTests() {
+  initialized = false;
+  consentState = "unknown";
+  sessionId = "session";
+  anonymousId = "anonymous";
   storedEvents = [];
   transportQueue.length = 0;
   trackedFeatureAdoption.clear();
