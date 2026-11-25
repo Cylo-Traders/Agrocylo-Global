@@ -55,50 +55,89 @@ jobs:
       - name: Start all services
         run: docker compose up -d
 
-      - name: Wait for services to become healthy
+      - name: Wait for required services to become healthy
         run: |
-          echo "Waiting for services to become healthy..."
-          timeout 120 bash -c 'until docker compose ps --format json | python3 -c "
+          set -euo pipefail
+          echo "Waiting for required services to become healthy..."
+          timeout 180 bash -c 'until docker compose ps --format json | python3 -c "
           import sys, json
-          services = [json.loads(line) for line in sys.stdin if line.strip()]
-          healthy = sum(1 for s in services if s.get(\"Health\", \"\") == \"healthy\")
-          total = len(services)
-          print(f\"{healthy}/{total} services healthy\")
-          sys.exit(0 if healthy >= 5 else 1)
+          raw = sys.stdin.read().strip()
+          if not raw:
+              sys.exit(1)
+          services = json.loads(raw) if raw.startswith(\"[\") else [json.loads(line) for line in raw.splitlines() if line.strip()]
+          by_service = {s.get(\"Service\") or s.get(\"Name\", \"\"): s for s in services}
+
+          required_healthy = [\"postgres\", \"postgres-agro\", \"redis\", \"backend\", \"agro-backend\", \"client\", \"agro-client\"]
+          required_running = [\"caddy\"]
+
+          missing_or_unhealthy = []
+          for name in required_healthy:
+              svc = by_service.get(name)
+              health = (svc or {}).get(\"Health\", \"\")
+              if health != \"healthy\":
+                  missing_or_unhealthy.append(f\"{name}={health or '\''missing'\''}\")
+
+          for name in required_running:
+              svc = by_service.get(name)
+              state = (svc or {}).get(\"State\", \"\")
+              if state != \"running\":
+                  missing_or_unhealthy.append(f\"{name}={state or '\''missing'\''}\")
+
+          if missing_or_unhealthy:
+              print(\"Pending services:\", \", \".join(missing_or_unhealthy))
+              sys.exit(1)
+
+          print(\"All required services are healthy and running.\")
+          sys.exit(0)
           "; do sleep 5; done'
 
       - name: Verify API endpoints respond
         run: |
+          set -euo pipefail
           echo "--- Root backend health ---"
-          curl -sf http://localhost:5000/health || echo "WARN: root backend not responding"
-          echo ""
+          root_health="$(curl -fsS --max-time 10 http://localhost:5000/health)"
+          echo "$root_health"
+          grep -qE '"status"\s*:\s*"(ok|UP|healthy)"' <<<"$root_health"
+
           echo "--- Agro backend health ---"
-          curl -sf http://localhost:5001/health || echo "WARN: agro backend not responding"
-          echo ""
+          agro_health="$(curl -fsS --max-time 10 http://localhost:5001/health)"
+          echo "$agro_health"
+          grep -qE '"status"\s*:\s*"(UP|ok|healthy)"' <<<"$agro_health"
 
       - name: Verify client apps respond
         run: |
+          set -euo pipefail
           echo "--- Root client ---"
-          curl -sf -o /dev/null -w "%{http_code}" http://localhost:3000/ || echo "WARN: root client not responding"
-          echo ""
+          root_code="$(curl -fsS --max-time 10 -o /dev/null -w "%{http_code}" http://localhost:3000/)"
+          echo "HTTP $root_code"
+          test "$root_code" = "200"
+
           echo "--- Agro client ---"
-          curl -sf -o /dev/null -w "%{http_code}" http://localhost:3001/ || echo "WARN: agro client not responding"
-          echo ""
+          agro_code="$(curl -fsS --max-time 10 -L -o /dev/null -w "%{http_code}" http://localhost:3001/)"
+          echo "HTTP $agro_code"
+          test "$agro_code" = "200"
 
       - name: Verify Caddy proxy routes
         run: |
+          set -euo pipefail
           echo "--- Proxy: root client ---"
-          curl -sf -o /dev/null -w "%{http_code}" http://localhost/ || echo "WARN: proxy root not responding"
-          echo ""
+          proxy_root_code="$(curl -fsS --max-time 10 -o /dev/null -w "%{http_code}" http://localhost/)"
+          echo "HTTP $proxy_root_code"
+          test "$proxy_root_code" = "200"
+
           echo "--- Proxy: root API ---"
-          curl -sf http://localhost/api/health || echo "WARN: proxy /api not responding"
-          echo ""
+          proxy_api="$(curl -fsS --max-time 10 http://localhost/api/health)"
+          echo "$proxy_api"
+          grep -qE '"status"\s*:\s*"(ok|UP|healthy)"' <<<"$proxy_api"
+
           echo "--- Proxy: agro client ---"
-          curl -sf -o /dev/null -w "%{http_code}" http://localhost/agro/ || echo "WARN: proxy /agro not responding"
-          echo ""
+          proxy_agro_code="$(curl -fsS --max-time 10 -L -o /dev/null -w "%{http_code}" http://localhost/agro/)"
+          echo "HTTP $proxy_agro_code"
+          test "$proxy_agro_code" = "200"
+
           echo "--- Proxy: agro API ---"
-          curl -sf http://localhost/api/v1/ || echo "WARN: proxy /api/v1 not responding"
-          echo ""
+          proxy_agro_api="$(curl -fsS --max-time 10 http://localhost/api/v1/campaigns)"
+          echo "$proxy_agro_api"
 
       - name: Collect service logs on failure
         if: failure()

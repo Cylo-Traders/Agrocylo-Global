@@ -120,8 +120,6 @@ jobs:
 
   repo-scripts:
     name: Repo scripts · unit tests (Issue #920 / #921 / #923 / #924)
-    needs: paths
-    if: needs.paths.outputs.scripts == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
