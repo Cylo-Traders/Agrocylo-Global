@@ -14,10 +14,11 @@ COPY . .
 RUN npx prisma generate
 RUN npm run build
 
+ENV PORT=5000
 EXPOSE 5000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD wget --timeout=5 -q -O /dev/null http://localhost:5000/health 2>/dev/null; test $? -le 1
+  CMD wget --timeout=5 -q --spider "http://localhost:${PORT:-5000}/health" || exit 1
 
 # Production startup only launches the compiled application. Schema changes
 # must go through the ordered migration workflow. The generated client is
