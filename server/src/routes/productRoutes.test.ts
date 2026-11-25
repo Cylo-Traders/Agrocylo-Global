@@ -233,10 +233,21 @@ describe('product write role matrix (#1145)', () => {
       expect(prisma.product.create).not.toHaveBeenCalled();
     });
 
-    it.each(['FARMER', 'ADMIN'])('allows %s', async (role) => {
+    it.each(['FARMER', 'SELLER', 'ADMIN'])('allows %s with 201', async (role) => {
+      vi.mocked(prisma.profile.findUnique).mockResolvedValue({ role } as any);
       const res = await request(app)
         .post('/products')
         .set('Authorization', bearer(role))
+        .send(validProduct);
+      expect(res.status).toBe(201);
+      expect(prisma.product.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('allows ADMIN even when no farmer profile row exists', async () => {
+      vi.mocked(prisma.profile.findUnique).mockResolvedValue(null);
+      const res = await request(app)
+        .post('/products')
+        .set('Authorization', bearer('ADMIN'))
         .send(validProduct);
       expect(res.status).toBe(201);
       expect(prisma.product.create).toHaveBeenCalledTimes(1);
@@ -268,8 +279,39 @@ describe('product write role matrix (#1145)', () => {
       expect(vi.mocked(prisma.product.create).mock.calls[0]![0]!.data.currency).toBe('USDC');
     });
 
-    // Any authenticated wallet can list products today. #1133 adds requireRole.
-    it.todo('rejects BUYER with 403 (#1133)');
+    it('rejects BUYER with 403 FORBIDDEN_ROLE in Problem+JSON format (#1426)', async () => {
+      vi.mocked(prisma.profile.findUnique).mockResolvedValue({ role: 'BUYER' } as any);
+      const res = await request(app)
+        .post('/products')
+        .set('Authorization', bearer('BUYER'))
+        .send(validProduct);
+      expect(res.status).toBe(403);
+      expect(res.headers['content-type']).toContain('application/problem+json');
+      expect(res.body).toMatchObject({
+        status: 403,
+        title: 'Forbidden',
+        code: 'FORBIDDEN_ROLE',
+        detail: 'Complete your farmer profile to list products',
+      });
+      expect(prisma.product.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects missing profile (non-admin) with 403 FORBIDDEN_ROLE in Problem+JSON format (#1426)', async () => {
+      vi.mocked(prisma.profile.findUnique).mockResolvedValue(null);
+      const res = await request(app)
+        .post('/products')
+        .set('Authorization', bearer('FARMER'))
+        .send(validProduct);
+      expect(res.status).toBe(403);
+      expect(res.headers['content-type']).toContain('application/problem+json');
+      expect(res.body).toMatchObject({
+        status: 403,
+        title: 'Forbidden',
+        code: 'FORBIDDEN_ROLE',
+        detail: 'Complete your farmer profile to list products',
+      });
+      expect(prisma.product.create).not.toHaveBeenCalled();
+    });
   });
 
   describe.each([
@@ -292,6 +334,28 @@ describe('product write role matrix (#1145)', () => {
     it('allows the owning farmer', async () => {
       expect((await call(bearer('FARMER'))).status).toBe(okStatus);
       expect(prisma.product.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects an owning user whose profile role was downgraded to BUYER with 403 FORBIDDEN_ROLE (#1426)', async () => {
+      vi.mocked(prisma.profile.findUnique).mockResolvedValue({ role: 'BUYER' } as any);
+      const res = await call(bearer('FARMER'));
+      expect(res.status).toBe(403);
+      expect(res.headers['content-type']).toContain('application/problem+json');
+      expect(res.body).toMatchObject({
+        status: 403,
+        code: 'FORBIDDEN_ROLE',
+        detail: 'Complete your farmer profile to list products',
+      });
+      expect(prisma.product.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects an owning user with a missing profile with 403 FORBIDDEN_ROLE (#1426)', async () => {
+      vi.mocked(prisma.profile.findUnique).mockResolvedValue(null);
+      const res = await call(bearer('FARMER'));
+      expect(res.status).toBe(403);
+      expect(res.headers['content-type']).toContain('application/problem+json');
+      expect(res.body.code).toBe('FORBIDDEN_ROLE');
+      expect(prisma.product.update).not.toHaveBeenCalled();
     });
 
     it.each(['FARMER', 'BUYER', 'ADMIN'])('rejects a non-owning %s with 403', async (role) => {
