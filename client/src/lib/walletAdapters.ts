@@ -24,9 +24,59 @@ function isMobile(): boolean {
   if (typeof navigator === "undefined") return false;
   return /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
 }
+  /**
+   * Interactive: asks the user to authorize this site. May open the wallet
+   * popup. Only call this from an explicit user action (Connect button).
+   */
+  connect(): Promise<string>;
+  /**
+   * Silent: returns the already-authorized public key. MUST NOT open a popup.
+   * Used by session restore and the identity poll. Throws when the site is
+   * not (or no longer) authorized / the wallet is locked.
+   */
+  getPublicKey(): Promise<string>;
+  getNetwork(): Promise<string>;
 
 // ─── Freighter adapter ──────────────────────────────────────────────────────
 
+  async connect() {
+    const direct = window.freighter ?? window.freighterApi ?? null;
+    // FreighterApi.getPublicKey() opens the authorization popup when the site
+    // is not yet allowed — this is the ONLY place we let that happen.
+    const pub = direct
+      ? await direct.getPublicKey()
+      : await FreighterApi.getPublicKey();
+    if (!pub) throw new Error("Freighter did not return a public key");
+    return pub;
+  },
+
+  async getPublicKey() {
+    const direct = window.freighter ?? window.freighterApi ?? null;
+    if (direct) {
+      const pub = await direct.getPublicKey();
+      if (!pub) throw new Error("Freighter did not return a public key");
+      return pub;
+    }
+    // Never call FreighterApi.getPublicKey() here: on an un-allowed site it
+    // opens the extension popup, which made Freighter load twice (once from
+    // connect, again from the 5s identity poll).
+    const api = FreighterApi as unknown as {
+      isAllowed?: () => Promise<boolean>;
+      getUserInfo?: () => Promise<{ publicKey?: string }>;
+    };
+    if (api.isAllowed && !(await api.isAllowed())) {
+      throw new Error("Freighter has not authorized this site");
+    }
+    if (api.getUserInfo) {
+      const info = await api.getUserInfo();
+      if (!info?.publicKey) throw new Error("Freighter is locked");
+      return info.publicKey;
+    }
+    // Old extension without silent reads — allowed already, so this won't prompt.
+    const pub = await FreighterApi.getPublicKey();
+    if (!pub) throw new Error("Freighter did not return a public key");
+    return pub;
+  },
 export const FreighterAdapter: WalletAdapter = {
   id: "freighter",
   name: "Freighter",
@@ -35,6 +85,27 @@ export const FreighterAdapter: WalletAdapter = {
   isAvailable() {
     if (typeof window === "undefined") return false;
     return !!(window.freighter ?? window.freighterApi) || !isMobile();
+  },
+    async connect() {
+    const sdk = (window as XBullWindow).xBullSDK;
+    if (!sdk) throw new Error("xBull wallet extension is not installed");
+    await sdk.connect({ canRequestPublicKey: true });
+    const pub = await sdk.getPublicKey();
+    if (!pub) throw new Error("xBull did not return a public key");
+    return pub;
+  },
+
+  async getPublicKey() {
+    const sdk = (window as XBullWindow).xBullSDK;
+    if (!sdk) throw new Error("xBull wallet extension is not installed");
+    // Silent read: never sdk.connect() here — that re-opens the xBull popup
+    // on every identity poll tick.
+    if (!(await sdk.isConnected())) {
+      throw new Error("xBull is not connected");
+    }
+    const pub = await sdk.getPublicKey();
+    if (!pub) throw new Error("xBull did not return a public key");
+    return pub;
   },
 
   supportsMobile() {
