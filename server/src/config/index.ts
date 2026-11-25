@@ -7,6 +7,17 @@ const booleanFromEnv = z
   .optional()
   .transform((value) => value === 'true' || value === '1');
 
+// Comma-separated list; trims whitespace, drops empties and trailing slashes.
+export function parseAllowedOrigins(raw: string | undefined): string[] {
+  return (raw ?? 'http://localhost:3000')
+    .split(',')
+    .map((o) => o.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
+}
+
+// in the config object, replacing the current line 22:
+allowedOrigins: parseAllowedOrigins(process.env.ALLOWED_ORIGINS),
+
 const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),

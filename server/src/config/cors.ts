@@ -1,32 +1,26 @@
 import type { CorsOptions } from 'cors';
-import { config } from './index.js';
+import { config } from './index';
 
-/**
- * Browser request-header contract. Wallet identity is carried only by the
- * signed Bearer JWT; `x-wallet-address` is tolerated for legacy client calls
- * but is never trusted for authentication.
- */
-export const CORS_ALLOWED_HEADERS = [
+export const ALLOWED_HEADERS = [
   'Content-Type',
   'Authorization',
   'Idempotency-Key',
-  'x-api-key',
-  'x-request-id',
-  'x-wallet-address',
+  'X-Idempotency-Key',
 ];
 
 export const corsOptions: CorsOptions = {
-  origin: (origin, callback) => {
+  origin(origin, callback) {
+    // Non-browser clients (curl, server-to-server) send no Origin header.
     if (!origin || config.allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
+      return callback(null, true);
     }
+    // Don't pass an Error: that turns into a 500 from the error handler.
+    // Deny cleanly and leave a server-side trace for debugging.
+    console.warn(`[cors] blocked origin ${origin}; allowed: ${config.allowedOrigins.join(', ')}`);
+    return callback(null, false);
   },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ALLOWED_HEADERS,
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: CORS_ALLOWED_HEADERS,
-  // Lets browser code read the correlation id for support/debugging.
-  exposedHeaders: ['x-request-id'],
-  maxAge: 3600,
+  maxAge: 600,
 };

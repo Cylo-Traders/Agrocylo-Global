@@ -61,6 +61,32 @@ if (
     ).Handlers.requestHandler()
   );
 }
+// app.ts
+app.get('/health', async (_req, res) => {
+  const checks: Record<string, { ok: boolean; required: boolean; error?: string }> = {};
+
+  const run = async (name: string, required: boolean, probe: () => Promise<unknown>) => {
+    try {
+      await probe();
+      checks[name] = { ok: true, required };
+    } catch (err) {
+      checks[name] = { ok: false, required, error: err instanceof Error ? err.message : 'probe failed' };
+    }
+  };
+
+  await Promise.all([
+    run('postgres', true, () => pingPostgres()),       // reuse your existing probe
+    run('supabase', config.supabaseRequired, () => pingSupabase()), // reuse your existing probe
+  ]);
+
+  const fatal = Object.values(checks).some((c) => c.required && !c.ok);
+  const degraded = Object.values(checks).some((c) => !c.ok);
+
+  res.status(fatal ? 503 : 200).json({
+    status: fatal ? 'unhealthy' : degraded ? 'degraded' : 'ok',
+    checks,
+  });
+});
 
 // Trust proxy to correctly extract client IP from X-Forwarded-For
 app.set('trust proxy', 1);
