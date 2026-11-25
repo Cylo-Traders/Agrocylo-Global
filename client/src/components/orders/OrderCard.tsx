@@ -15,6 +15,7 @@ interface OrderCardProps {
   isBuyer: boolean;
   onConfirm?: (orderId: string) => void;
   isConfirming?: boolean;
+  confirmError?: string;
 }
 
 const PLATFORM_FEE_PCT = 3;
@@ -30,6 +31,7 @@ export default function OrderCard({
   isBuyer,
   onConfirm,
   isConfirming,
+  confirmError,
 }: OrderCardProps) {
   const counterparty = isBuyer ? order.seller : order.buyer;
   const totalXlm = Number(order.amount) / 1e7;
@@ -89,13 +91,18 @@ export default function OrderCard({
           )}
 
           <div className="flex flex-wrap items-center gap-2">
+            {confirmError && isPending && isBuyer && (
+              <p role="alert" className="text-destructive w-full text-xs sm:w-auto">
+                {confirmError}
+              </p>
+            )}
             {isPending && isBuyer && onConfirm && !isExpired && (
               <Button
                 size="sm"
                 isLoading={isConfirming}
                 onClick={() => onConfirm(order.orderId)}
               >
-                Confirm Receipt
+                {confirmError ? "Retry Confirmation" : "Confirm Receipt"}
               </Button>
             )}
             {isPending && isExpired && (
