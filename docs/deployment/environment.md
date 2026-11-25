@@ -96,7 +96,7 @@ Validated by a Zod schema in [`server/src/config/index.ts`](../../server/src/con
 | `GOVERNANCE_CONTRACT_ID` | watcher | `""` | governance ID (required when watcher on) |
 | `RPC_URL` | | testnet RPC | Soroban RPC endpoint |
 | `WS_PATH` | | `/ws` | Socket.io path |
-| `METRICS_API_KEY` | ✅ prod | `""` | Bearer token for `/metrics`; blank denies access |
+| `METRICS_API_KEY` | ✅ prod | `""` | Bearer token (`Authorization: Bearer <METRICS_API_KEY>` or `x-api-key`) for `/metrics` and `/metrics/prom`. In production, an unset key fails closed with `503 METRICS_UNAVAILABLE`; in development/test, unauthenticated scrapes are permitted only from loopback/private-network IPs. Configure Prometheus `scrape_configs` with `authorization: { type: Bearer, credentials_file: /etc/prometheus/metrics_api_key }`. |
 | `INTEGRATOR_API_KEY_PEPPER` | ✅ prod | development-only value | HMAC secret for integrator API-key digests |
 | `INTEGRATOR_MONTHLY_QUOTA` | | `10000` | Maximum requests per integrator key per UTC month |
 | `USSD_PROVIDER_SECRET` | ✅ to enable `/ussd` | `""` | Shared secret for USSD provider callbacks; blank fails closed with 503 |
