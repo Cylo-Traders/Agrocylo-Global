@@ -213,6 +213,27 @@ function decodeOrder(val: StellarSdk.xdr.ScVal, orderId: string): Order {
     return entry.val;
   };
 
+  const getOptional = (key: string): StellarSdk.xdr.ScVal | undefined => {
+    const entry = fields.find(
+      (e) => e.key.type === "scvSymbol" && e.key.value === key,
+    );
+    return entry?.val;
+  };
+
+  const deadlineVal =
+    getOptional("delivery_deadline") ??
+    getOptional("deadline") ??
+    getOptional("expires_at");
+  const rawDeadline = deadlineVal
+    ? Number(StellarSdk.scValToNative(deadlineVal))
+    : undefined;
+  const deliveryDeadline =
+    rawDeadline && Number.isFinite(rawDeadline) && rawDeadline > 0
+      ? rawDeadline > 1e12
+        ? Math.floor(rawDeadline / 1000)
+        : rawDeadline
+      : undefined;
+
   return {
     orderId,
     buyer: StellarSdk.Address.fromScVal(get("buyer")).toString(),
@@ -221,6 +242,7 @@ function decodeOrder(val: StellarSdk.xdr.ScVal, orderId: string): Order {
     amount: BigInt(StellarSdk.scValToNative(get("amount"))),
     status: decodeOrderStatus(get("status")),
     timestamp: Number(StellarSdk.scValToNative(get("timestamp"))),
+    ...(deliveryDeadline !== undefined ? { deliveryDeadline } : {}),
   };
 }
 

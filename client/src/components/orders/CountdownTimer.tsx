@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 import { Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-const EXPIRY_HOURS = 96;
+import { getOrderExpirySeconds } from "@/lib/order-expiry";
 
 interface CountdownTimerProps {
   /** Unix timestamp in seconds when the order was created. */
   createdAt: number;
+  /** Optional persisted delivery deadline (Unix seconds or ISO string). */
+  deliveryDeadline?: number | string | null;
   className?: string;
 }
 
@@ -24,20 +25,21 @@ function formatTime(totalSeconds: number): string {
 
 export default function CountdownTimer({
   createdAt,
+  deliveryDeadline,
   className,
 }: CountdownTimerProps) {
   const [remaining, setRemaining] = useState<string>("");
 
   useEffect(() => {
     function update() {
-      const expiryTime = createdAt + EXPIRY_HOURS * 3600;
+      const expiryTime = getOrderExpirySeconds({ createdAt, deliveryDeadline });
       const diff = expiryTime - Math.floor(Date.now() / 1000);
       setRemaining(formatTime(diff));
     }
     update();
     const id = setInterval(update, 60_000);
     return () => clearInterval(id);
-  }, [createdAt]);
+  }, [createdAt, deliveryDeadline]);
 
   const isExpired = remaining === "Expired";
 

@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { escrowFormSchema } from "./validation";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { escrowFormSchema, deliveryDeadlineSchema } from "./validation";
 
 describe("escrowFormSchema validation", () => {
   it("should validate successfully with correct values", () => {
@@ -56,5 +56,29 @@ describe("escrowFormSchema validation", () => {
       deliveryDeadline: "not-a-date",
     });
     expect(resultInvalid.success).toBe(false);
+  });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("deliveryDeadlineSchema", () => {
+  it("rejects an empty string", () => {
+    expect(deliveryDeadlineSchema.safeParse("").success).toBe(false);
+  });
+
+  it("rejects a past date", () => {
+    vi.useFakeTimers({ now: new Date("2025-01-15T12:00:00Z") });
+    expect(deliveryDeadlineSchema.safeParse("2025-01-14T12:00:00").success).toBe(false);
+  });
+
+  it("rejects an invalid date string", () => {
+    expect(deliveryDeadlineSchema.safeParse("not-a-date").success).toBe(false);
+  });
+
+  it("accepts a future date", () => {
+    vi.useFakeTimers({ now: new Date("2025-01-15T12:00:00Z") });
+    expect(deliveryDeadlineSchema.safeParse("2025-01-20T12:00:00").success).toBe(true);
   });
 });

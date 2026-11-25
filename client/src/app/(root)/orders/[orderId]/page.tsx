@@ -38,6 +38,7 @@ import { useEscrowContract } from "@/hooks/useEscrowContract";
 import { useSocket } from "@/hooks/useSocket";
 import { getOrderDetails, type Order } from "@/services/stellar/contractService";
 import { formatTruncatedAddress } from "@/lib/helpers/format-address";
+import { DEFAULT_EXPIRY_HOURS, getOrderExpirySeconds } from "@/lib/order-expiry";
 import CountdownTimer from "@/components/orders/CountdownTimer";
 import DisputeForm from "@/components/orders/DisputeForm";
 import MilestoneEscrowProgress from "@/components/MilestoneEscrowProgress";
@@ -45,8 +46,6 @@ import ProvenanceViewer from "@/components/ProvenanceViewer";
 import { fetchOrderProvenance } from "@/services/provenanceService";
 import type { ProvenanceRecord } from "@/types/provenance";
 import { toast } from "sonner";
-
-const EXPIRY_HOURS = 96;
 
 export default function OrderDetailsPage() {
   const params = useParams<{ orderId: string }>();
@@ -73,7 +72,7 @@ export default function OrderDetailsPage() {
   // Tick expiry state outside render to keep it pure.
   useEffect(() => {
     if (!order?.timestamp) return;
-    const expirySeconds = order.timestamp + EXPIRY_HOURS * 3600;
+    const expirySeconds = getOrderExpirySeconds(order);
     let cancelled = false;
     const tick = () => {
       if (!cancelled) {
@@ -86,7 +85,7 @@ export default function OrderDetailsPage() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [order?.timestamp]);
+  }, [order?.timestamp, order?.deliveryDeadline]);
 
   const fetchOrder = useCallback(async () => {
     if (!orderId) return;
@@ -301,7 +300,10 @@ export default function OrderDetailsPage() {
                   label="Expiry"
                   value={
                     isPending ? (
-                      <CountdownTimer createdAt={order.timestamp} />
+                      <CountdownTimer
+                        createdAt={order.timestamp}
+                        deliveryDeadline={order.deliveryDeadline}
+                      />
                     ) : (
                       "—"
                     )
@@ -438,8 +440,9 @@ export default function OrderDetailsPage() {
             <CardContent className="space-y-2 py-4 text-xs">
               <p className="text-muted-foreground flex items-center gap-1.5">
                 <Clock className="size-3.5" />
-                Orders expire {EXPIRY_HOURS}h after creation. If not confirmed,
-                buyers can refund the escrow.
+                {order.deliveryDeadline
+                  ? "Orders expire at the agreed delivery deadline. If not confirmed, buyers can refund the escrow."
+                  : `Orders expire ${DEFAULT_EXPIRY_HOURS}h after creation. If not confirmed, buyers can refund the escrow.`}
               </p>
             </CardContent>
           </Card>

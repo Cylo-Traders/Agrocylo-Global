@@ -45,6 +45,22 @@ const eslintConfig = defineConfig([
     files: ["src/lib/validation.ts"],
     rules: { "no-restricted-syntax": "off" },
   },
+  {
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@solana/*"],
+              message:
+                "This client uses the Stellar network. Do not import Solana packages.",
+            },
+          ],
+        },
+      ],
+    },
+  },
 ]);
 
 export default eslintConfig;
