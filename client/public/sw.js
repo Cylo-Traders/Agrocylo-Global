@@ -1,4 +1,15 @@
-const CACHE_NAME = "agrocylo-v2";
+// Cache Storage is shared by every app/feature on this origin, so activation
+// only ever deletes caches this app owns (Issue #1475).
+const CACHE_PREFIX = "agrocylo-sw-";
+const CACHE_NAME = `${CACHE_PREFIX}v3`;
+// Pre-prefix names this app used before (e.g. "agrocylo-v2").
+const LEGACY_CACHE_PATTERN = /^agrocylo-v\d+$/;
+
+function isObsoleteAppCache(name) {
+  if (name === CACHE_NAME) return false;
+  return name.startsWith(CACHE_PREFIX) || LEGACY_CACHE_PATTERN.test(name);
+}
+
 const OFFLINE_URL = "/offline";
 const PRECACHE_URLS = [
   "/",
@@ -46,7 +57,7 @@ self.addEventListener("activate", (event) => {
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames
-          .filter((name) => name !== CACHE_NAME)
+          .filter(isObsoleteAppCache)
           .map((name) => caches.delete(name)),
       );
     }),
