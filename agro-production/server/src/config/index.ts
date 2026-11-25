@@ -70,6 +70,7 @@ const envSchema = z.object({
   SENTRY_DSN: z.string().default(''),
   SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().default(0.1),
   CORS_ORIGINS: z.string().default(''),
+  ALLOWED_ORIGINS: z.string().default(''),
   REDIS_URL: z.string().default(''),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60000),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(100),
@@ -132,7 +133,8 @@ export const config = {
   metricsApiKey,
   sentryDsn: parsed.SENTRY_DSN,
   sentryTracesSampleRate: parsed.SENTRY_TRACES_SAMPLE_RATE,
-  corsOrigins: parsed.CORS_ORIGINS.split(',')
+  corsOrigins: (parsed.CORS_ORIGINS || parsed.ALLOWED_ORIGINS)
+    .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
   redisUrl: parsed.REDIS_URL,

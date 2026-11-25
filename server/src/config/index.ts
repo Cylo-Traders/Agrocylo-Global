@@ -19,7 +19,11 @@ const envSchema = z
     RUN_CONTRACT_WATCHER: booleanFromEnv.default(true),
     METRICS_API_KEY: z.string().default(''),
     SUPABASE_SERVICE_ROLE_KEY: z.string().default(''),
-    ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),
+    ALLOWED_ORIGINS: z
+      .string()
+      .default(
+        'http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost,http://127.0.0.1'
+      ),
     INTEGRATOR_API_KEY_PEPPER: z
       .string()
       .min(32)
@@ -112,7 +116,9 @@ validateContractWatcherConfig(
 export const config = {
   port: env.PORT,
   nodeEnv: env.NODE_ENV,
-  allowedOrigins: env.ALLOWED_ORIGINS.split(',').map((origin) => origin.trim()),
+  allowedOrigins: env.ALLOWED_ORIGINS.split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean),
   redisUrl: env.REDIS_URL,
   runWorkers: env.RUN_WORKERS,
   runContractWatcher: env.RUN_CONTRACT_WATCHER,

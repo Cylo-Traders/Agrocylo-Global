@@ -43,28 +43,43 @@ const app = express();
 // Simple lifetime counter for api_requests_total Prometheus metric.
 let _requestTotal = 0;
 
+const DEFAULT_LOCAL_ALLOWED_ORIGINS = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:3001',
+  'http://127.0.0.1:3001',
+  'http://localhost',
+  'http://127.0.0.1',
+];
+
 const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {
     if (!origin) {
       callback(null, true);
       return;
     }
-    const allowedOrigins = config.corsOrigins;
-    if (allowedOrigins.length === 0 && config.nodeEnv !== 'production') {
-      callback(null, true);
-      return;
-    }
+    const configuredOrigins = Array.isArray(config.corsOrigins)
+      ? config.corsOrigins
+      : [];
+    const allowedOrigins =
+      configuredOrigins.length > 0
+        ? configuredOrigins
+        : config.nodeEnv !== 'production'
+          ? DEFAULT_LOCAL_ALLOWED_ORIGINS
+          : [];
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
+      logger.warn('CORS request rejected for disallowed origin', { origin });
       callback(new Error('Not allowed by CORS'));
     }
   },
-  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: [
     'Content-Type',
     'Authorization',
     'Idempotency-Key',
+    'x-idempotency-key',
     'x-api-key',
     'x-request-id',
     'x-wallet-address',

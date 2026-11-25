@@ -102,7 +102,7 @@ Validated by a Zod schema in [`server/src/config/index.ts`](../../server/src/con
 | `USSD_PROVIDER_SECRET` | ✅ to enable `/ussd` | `""` | Shared secret for USSD provider callbacks; blank fails closed with 503 |
 | `SENTRY_DSN` | | `""` | Error reporting (blank = disabled) |
 | `SENTRY_TRACES_SAMPLE_RATE` | | `0.1` | |
-| `ALLOWED_ORIGINS` | ✅ prod | `http://localhost:3000` | Comma-separated CORS origins; HTTPS only in production |
+| `ALLOWED_ORIGINS` | ✅ prod | `http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost,http://127.0.0.1` | Comma-separated CORS origins; HTTPS only in production |
 | `ADMIN_WALLETS` | | `""` | Comma-separated Stellar public keys that receive `ADMIN` JWTs on login. See [`admin.md`](./admin.md). |
 | `PORT`, `NODE_ENV` | | `5000` / `development` | Log level is derived from `NODE_ENV`, not a separate var |
 
@@ -160,7 +160,7 @@ Validated in [`agro-production/server/src/config/index.ts`](../../agro-productio
 | `CAMPAIGN_IMAGE_PLACEHOLDER_URL` | | placehold.co URL | |
 | `REDIS_URL` | | local Redis | |
 | `METRICS_API_KEY` | ✅ prod | — | `/metrics` bearer token |
-| `CORS_ORIGINS` | | `""` (all in dev) | Comma-separated origins |
+| `CORS_ORIGINS` / `ALLOWED_ORIGINS` | | `""` (local dev/Caddy origins in dev) | Comma-separated origins (`CORS_ORIGINS` or `ALLOWED_ORIGINS` alias) |
 | `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX_REQUESTS` / `RATE_LIMIT_WRITE_MAX_REQUESTS` | | `60000` / `100` / `10` | |
 | `SHUTDOWN_TIMEOUT_MS` | | `15000` | Graceful shutdown |
 | `EVENT_POLL_INTERVAL_MS` / `CONFIRMATION_DEPTH` | | `5000` / `10` | On-chain event watcher tuning |
