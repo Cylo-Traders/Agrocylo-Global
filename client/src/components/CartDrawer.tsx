@@ -48,6 +48,7 @@ import {
   requireTokenContractId,
 } from "@/services/stellar/networkConfig";
 import { formatTruncatedAddress } from "@/lib/helpers/format-address";
+import { deliveryDeadlineSchema, toDatetimeLocalMin } from "@/lib/validation";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -90,6 +91,9 @@ export default function CartDrawer() {
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [deliveryDeadline, setDeliveryDeadline] = useState<string>("");
+  const [deadlineError, setDeadlineError] = useState<string | undefined>(
+    undefined,
+  );
   const [running, setRunning] = useState(false);
   const [successOrders, setSuccessOrders] = useState<OrderSuccess[]>([]);
   const [failedOrders, setFailedOrders] = useState<OrderFailure[]>([]);
@@ -178,23 +182,21 @@ export default function CartDrawer() {
   const retryCleanup = useCallback(async () => {
     if (cleanupFailures.length === 0) return;
     const pending = [...cleanupFailures];
-    setCleanupFailures([]);
+    const remainingFailures: CleanupFailure[] = [];
     for (const entry of pending) {
       try {
         await Promise.all(entry.itemIds.map((id) => removeCartItem(id)));
       } catch (err) {
-        setCleanupFailures((prev) => [
-          ...prev,
-          {
-            farmerWallet: entry.farmerWallet,
-            error: err instanceof Error ? err.message : "Failed to clear cart items.",
-            itemIds: entry.itemIds,
-          },
-        ]);
+        remainingFailures.push({
+          farmerWallet: entry.farmerWallet,
+          error: err instanceof Error ? err.message : "Failed to clear cart items.",
+          itemIds: entry.itemIds,
+        });
       }
     }
+    setCleanupFailures(remainingFailures);
     await refreshCart();
-    if (cleanupFailures.length === 0) {
+    if (remainingFailures.length === 0) {
       toast.success("Cart cleanup completed.");
     }
   }, [cleanupFailures, removeCartItem, refreshCart]);
@@ -213,11 +215,19 @@ export default function CartDrawer() {
       toast.error("Cart updates are still pending. Please wait a moment and try again.");
       return;
     }
-    const deadline = deliveryDeadline?.trim();
-    if (!deadline) {
-      toast.error("Please select a delivery deadline.");
+    const deadlineResult = deliveryDeadlineSchema.safeParse(
+      deliveryDeadline?.trim() ?? "",
+    );
+    if (!deadlineResult.success) {
+      const msg =
+        deadlineResult.error.issues[0]?.message ??
+        "Please select a valid future delivery deadline.";
+      setDeadlineError(msg);
+      toast.error(msg);
       return;
     }
+    setDeadlineError(undefined);
+    const deadline = deadlineResult.data;
 
     const opId = ++operationIdRef.current;
     checkoutGroupsRef.current = groups;
@@ -291,6 +301,23 @@ export default function CartDrawer() {
       Object.fromEntries(snapshotGroups.map((g) => [groupKeyOf(g), "pending"])),
     );
 
+    let succeededCount = 0;
+    const failedGroups: OrderFailure[] = [];
+
+    const recordGroupFailure = (
+      farmerWallet: string,
+      currency: string,
+      groupKey: string,
+      error: string,
+    ) => {
+      failedGroups.push({ farmerWallet, currency, groupKey, error });
+      setFailedOrders((prev) => [
+        ...prev,
+        { farmerWallet, currency, groupKey, error },
+      ]);
+      setGroupProgress((prev) => ({ ...prev, [groupKey]: "error" }));
+    };
+
     try {
       // Sequential — Freighter only handles one signing prompt at a time.
       for (let i = 0; i < snapshotGroups.length; i++) {
@@ -302,125 +329,143 @@ export default function CartDrawer() {
         const gKey = groupKeyOf(group);
         const idxLabel = `${i + 1} of ${snapshotGroups.length}`;
 
-        const gross = BigInt(group.subtotal || "0");
-
-        setProgressMessage(`Creating order ${idxLabel}…`);
-
-        let tokenContractId: string;
         try {
-          tokenContractId = requireTokenContractId(currency);
-        } catch {
-          const error = `Missing token contract for ${currency}.`;
-          setFailedOrders((prev) => [...prev, { farmerWallet, currency, groupKey: gKey, error }]);
-          setGroupProgress((prev) => ({ ...prev, [gKey]: "error" }));
-          continue;
-        }
+          const gross = BigInt(group.subtotal || "0");
 
-        if (gross <= BigInt(0)) {
-          const error = "Amount must be positive.";
-          setFailedOrders((prev) => [...prev, { farmerWallet, currency, groupKey: gKey, error }]);
-          setGroupProgress((prev) => ({ ...prev, [gKey]: "error" }));
-          continue;
-        }
+          setProgressMessage(`Creating order ${idxLabel}…`);
 
-        const { contractId } = getNetworkConfig();
+          let tokenContractId: string;
+          try {
+            tokenContractId = requireTokenContractId(currency);
+          } catch {
+            recordGroupFailure(
+              farmerWallet,
+              currency,
+              gKey,
+              `Missing token contract for ${currency}.`,
+            );
+            continue;
+          }
 
-        // Step A: token approval (best-effort — skip on simulation failure).
-        if (contractId && contractId.trim().length > 0) {
-          const approval = await approveToken(
-            address,
-            tokenContractId,
-            contractId,
-            gross,
-          );
-          if (approval.success && approval.data) {
-            setProgressMessage(`Approving escrow (${idxLabel})…`);
-            const approvalResult = await signAndSubmit(approval.data);
-            if (!approvalResult.success || !approvalResult.txHash) {
-              const error = approvalResult.error || "Approval transaction failed.";
-              setFailedOrders((prev) => [...prev, { farmerWallet, currency, groupKey: gKey, error }]);
-              setGroupProgress((prev) => ({
-                ...prev,
-                [gKey]: "error",
-              }));
-              continue;
+          if (gross <= BigInt(0)) {
+            recordGroupFailure(
+              farmerWallet,
+              currency,
+              gKey,
+              "Amount must be positive.",
+            );
+            continue;
+          }
+
+          const { contractId } = getNetworkConfig();
+
+          // Step A: token approval (best-effort — skip on simulation failure).
+          if (contractId && contractId.trim().length > 0) {
+            const approval = await approveToken(
+              address,
+              tokenContractId,
+              contractId,
+              gross,
+            );
+            if (approval.success && approval.data) {
+              setProgressMessage(`Approving escrow (${idxLabel})…`);
+              const approvalResult = await signAndSubmit(approval.data);
+              if (!approvalResult.success || !approvalResult.txHash) {
+                recordGroupFailure(
+                  farmerWallet,
+                  currency,
+                  gKey,
+                  approvalResult.error || "Approval transaction failed.",
+                );
+                continue;
+              }
             }
           }
-        }
 
-        // Step B: create_order
-        const built = await buildCreateOrderTransaction(
-          address,
-          farmerWallet,
-          tokenContractId,
-          gross,
-          deadline,
-        );
-
-        if (!built.success || !built.data) {
-          const error =
-            built.error || "Failed to build create_order transaction.";
-          setFailedOrders((prev) => [...prev, { farmerWallet, currency, groupKey: gKey, error }]);
-          setGroupProgress((prev) => ({ ...prev, [gKey]: "error" }));
-          continue;
-        }
-
-        setProgressMessage(`Creating escrow (${idxLabel})…`);
-        const createResult = await signAndSubmit(built.data);
-        if (!createResult.success || !createResult.txHash) {
-          const error = createResult.error || "create_order transaction failed.";
-          setFailedOrders((prev) => [...prev, { farmerWallet, currency, groupKey: gKey, error }]);
-          setGroupProgress((prev) => ({ ...prev, [gKey]: "error" }));
-          continue;
-        }
-
-        setSuccessOrders((prev) => [
-          ...prev,
-          {
-            orderId: null,
+          // Step B: create_order
+          const built = await buildCreateOrderTransaction(
+            address,
             farmerWallet,
-            currency,
-            groupKey: gKey,
-            txHash: createResult.txHash!,
-          },
-        ]);
-        setGroupProgress((prev) => ({ ...prev, [gKey]: "success" }));
-
-        // Remove items for this farmer+currency so a partial-failure retry doesn't
-        // duplicate the orders that already succeeded.
-        // Cleanup failures are isolated – they must not mark the escrow as failed
-        // and must not trigger another escrow creation on retry.
-        try {
-          await Promise.all(group.items.map((it) => removeCartItem(it.id)));
-          await refreshCart();
-        } catch (err) {
-          const cleanupError = err instanceof Error ? err.message : "Failed to clear cart items after escrow creation.";
-          setCleanupFailures((prev) => [
-            ...prev,
-            { farmerWallet, error: cleanupError, itemIds: group.items.map((it) => it.id) },
-          ]);
-          // Still refresh to sync any partial removals; ignore secondary errors
-          try {
-            await refreshCart();
-          } catch {
-            // ignore
-          }
-        }
-
-        try {
-          const resolvedOrderId = await resolveIndexedOrderId(
-            createResult.txHash!,
+            tokenContractId,
+            gross,
+            deadline,
           );
-          if (resolvedOrderId) {
-            setSuccessOrders((prev) =>
-              prev.map((order) =>
-                order.txHash === createResult.txHash
-                  ? { ...order, orderId: resolvedOrderId }
-                  : order,
-              ),
+
+          if (!built.success || !built.data) {
+            recordGroupFailure(
+              farmerWallet,
+              currency,
+              gKey,
+              built.error || "Failed to build create_order transaction.",
             );
+            continue;
           }
-        } catch {
+
+          setProgressMessage(`Creating escrow (${idxLabel})…`);
+          const createResult = await signAndSubmit(built.data);
+          if (!createResult.success || !createResult.txHash) {
+            recordGroupFailure(
+              farmerWallet,
+              currency,
+              gKey,
+              createResult.error || "create_order transaction failed.",
+            );
+            continue;
+          }
+
+          succeededCount += 1;
+          setSuccessOrders((prev) => [
+            ...prev,
+            {
+              orderId: null,
+              farmerWallet,
+              currency,
+              groupKey: gKey,
+              txHash: createResult.txHash!,
+            },
+          ]);
+          setGroupProgress((prev) => ({ ...prev, [gKey]: "success" }));
+
+          // Remove items for this farmer+currency so a partial-failure retry doesn't
+          // duplicate the orders that already succeeded.
+          // Cleanup failures are isolated – they must not mark the escrow as failed
+          // and must not trigger another escrow creation on retry.
+          try {
+            await Promise.all(group.items.map((it) => removeCartItem(it.id)));
+            await refreshCart();
+          } catch (err) {
+            const cleanupError = err instanceof Error ? err.message : "Failed to clear cart items after escrow creation.";
+            setCleanupFailures((prev) => [
+              ...prev,
+              { farmerWallet, error: cleanupError, itemIds: group.items.map((it) => it.id) },
+            ]);
+            // Still refresh to sync any partial removals; ignore secondary errors
+            try {
+              await refreshCart();
+            } catch {
+              // ignore
+            }
+          }
+
+          try {
+            const resolvedOrderId = await resolveIndexedOrderId(
+              createResult.txHash!,
+            );
+            if (resolvedOrderId) {
+              setSuccessOrders((prev) =>
+                prev.map((order) =>
+                  order.txHash === createResult.txHash
+                    ? { ...order, orderId: resolvedOrderId }
+                    : order,
+                ),
+              );
+            }
+          } catch {
+          }
+        } catch (err) {
+          const error =
+            err instanceof Error ? err.message : "Failed to create order.";
+          recordGroupFailure(farmerWallet, currency, gKey, error);
         }
       }
     } finally {
@@ -429,7 +474,16 @@ export default function CartDrawer() {
       if (operationIdRef.current === opId) {
         setRunning(false);
         setStep(3);
-        setProgressMessage("Checkout complete.");
+        if (failedGroups.length === 0) {
+          setProgressMessage("Checkout complete.");
+        } else {
+          const failedLabels = failedGroups
+            .map((f) => formatTruncatedAddress(f.farmerWallet))
+            .join(", ");
+          setProgressMessage(
+            `Checkout finished with ${failedGroups.length} failed group${failedGroups.length === 1 ? "" : "s"} (${succeededCount} succeeded): ${failedLabels}`,
+          );
+        }
       }
     }
   }
