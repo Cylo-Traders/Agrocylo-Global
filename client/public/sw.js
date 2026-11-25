@@ -8,11 +8,30 @@ const PRECACHE_URLS = [
   "/icon-512x512.svg",
 ];
 
+async function precacheResources(cacheName, urls) {
+  const cache = await caches.open(cacheName);
+  const results = await Promise.allSettled(urls.map((url) => cache.add(url)));
+  const failed = results.filter((result) => result.status === "rejected").length;
+  if (failed > 0) {
+    console.warn(`SW: ${failed} precache resource(s) unavailable`);
+  }
+}
+
+function normalizeNotificationTarget(value) {
+  if (typeof value !== "string" || value.trim() === "") return "/";
+  try {
+    const target = new URL(value, self.location.origin);
+    return target.origin === self.location.origin
+      ? `${target.pathname}${target.search}${target.hash}`
+      : "/";
+  } catch {
+    return "/";
+  }
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches
-      .open(CACHE_NAME)
-      .then((cache) => cache.addAll(PRECACHE_URLS))
+    precacheResources(CACHE_NAME, PRECACHE_URLS)
       .catch(() => {
         // Precache failure is non-fatal — app still works online.
         // Offline fallback may not be available on first install.
@@ -84,7 +103,7 @@ self.addEventListener("push", (event) => {
     body: data.body || "You have a new notification.",
     icon: "/icon-192x192.svg",
     badge: "/favicon.svg",
-    data: data.url || "/",
+    data: normalizeNotificationTarget(data.url),
   };
 
   event.waitUntil(self.registration.showNotification(title, options));
@@ -92,11 +111,5 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  event.waitUntil(self.clients.openWindow(event.notification.data));
-});
-
-self.addEventListener("sync", (event) => {
-  if (event.tag === "sync-updates") {
-    console.log("Syncing in background");
-  }
+  event.waitUntil(self.clients.openWindow(normalizeNotificationTarget(event.notification.data)));
 });

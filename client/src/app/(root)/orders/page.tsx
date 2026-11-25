@@ -32,6 +32,7 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [confirmErrors, setConfirmErrors] = useState<Record<string, string>>({});
   const [tab, setTab] = useState<TabValue>("all");
 
   useEffect(() => {
@@ -59,6 +60,11 @@ export default function OrdersPage() {
   }, [address]);
 
   async function handleConfirm(orderId: string) {
+    setConfirmErrors((prev) => {
+      const next = { ...prev };
+      delete next[orderId];
+      return next;
+    });
     try {
       await confirmReceipt(orderId);
       setOrders((prev) =>
@@ -67,7 +73,10 @@ export default function OrdersPage() {
         ),
       );
     } catch (err) {
-      console.error("Failed to confirm receipt:", err);
+      setConfirmErrors((prev) => ({
+        ...prev,
+        [orderId]: err instanceof Error ? err.message : "Receipt confirmation failed. Please retry.",
+      }));
     }
   }
 
@@ -158,6 +167,7 @@ export default function OrdersPage() {
                 isBuyer
                 onConfirm={handleConfirm}
                 isConfirming={confirmState.isLoading}
+                confirmError={confirmErrors[order.orderId]}
               />
             ))}
           </div>
