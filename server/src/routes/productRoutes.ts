@@ -3,6 +3,7 @@ import { requireWallet, type WalletRequest } from '../middleware/walletAuth.js';
 import { writeRateLimiter } from '../middleware/rateLimiter.js';
 import { ApiError, sendProblem } from '../http/errors.js';
 import {
+  assertProductSellerRole,
   createProduct,
   getProductById,
   getSuggestedPrice,
@@ -12,6 +13,28 @@ import {
 } from '../services/productService.js';
 
 const router = express.Router();
+
+/**
+ * Route-boundary role check for product write operations (Issue #1426).
+ * Resolves the caller's effective role from their persisted Profile (allowing
+ * FARMER, SELLER, and ADMIN) and rejects BUYER or missing profiles with
+ * 403 FORBIDDEN_ROLE in Problem+JSON format.
+ */
+async function requireProductSellerRole(
+  req: WalletRequest,
+  _res: express.Response,
+  next: express.NextFunction
+): Promise<void> {
+  try {
+    if (!req.walletAddress) {
+      throw new ApiError(401, 'Unauthorized', 'Missing wallet');
+    }
+    req.walletRole = await assertProductSellerRole(req.walletAddress, req.walletRole);
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
 
 router.get('/products', async (req, res, next) => {
   try {
@@ -70,27 +93,35 @@ router.get(
   }
 );
 
-router.post('/products', requireWallet, writeRateLimiter, async (req: WalletRequest, res, next) => {
-  try {
-    if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet');
-    const created = await createProduct(req.walletAddress, req.body ?? {});
-    res.status(201).json(created);
-  } catch (error) {
-    next(error);
+router.post(
+  '/products',
+  requireWallet,
+  writeRateLimiter,
+  requireProductSellerRole,
+  async (req: WalletRequest, res, next) => {
+    try {
+      if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet');
+      const created = await createProduct(req.walletAddress, req.body ?? {}, req.walletRole);
+      res.status(201).json(created);
+    } catch (error) {
+      next(error);
+    }
   }
-});
+);
 
 router.patch(
   '/products/:id',
   requireWallet,
   writeRateLimiter,
+  requireProductSellerRole,
   async (req: WalletRequest, res, next) => {
     try {
       if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet');
       const updated = await updateProduct(
         String(req.params['id']),
         req.walletAddress,
-        req.body ?? {}
+        req.body ?? {},
+        req.walletRole
       );
       res.status(200).json(updated);
     } catch (error) {
@@ -103,10 +134,15 @@ router.delete(
   '/products/:id',
   requireWallet,
   writeRateLimiter,
+  requireProductSellerRole,
   async (req: WalletRequest, res, next) => {
     try {
       if (!req.walletAddress) throw new ApiError(401, 'Unauthorized', 'Missing wallet');
-      const updated = await softDeleteProduct(String(req.params['id']), req.walletAddress);
+      const updated = await softDeleteProduct(
+        String(req.params['id']),
+        req.walletAddress,
+        req.walletRole
+      );
       res.status(200).json(updated);
     } catch (error) {
       next(error);

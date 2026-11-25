@@ -244,11 +244,53 @@ export async function getProductGraphData(productId: string): Promise<ProductGra
 }
 
 const ALLOWED_CURRENCIES = new Set(['USDC', 'XLM', 'EURC', 'STRK']);
+const ALLOWED_PRODUCT_WRITE_ROLES = new Set(['FARMER', 'SELLER', 'ADMIN']);
+
+/**
+ * Resolves and enforces the caller's effective product-write role from their
+ * persisted Profile (Issue #1426).
+ *
+ * Policy:
+ * - Allowed roles: `FARMER`, `SELLER`, and `ADMIN`.
+ * - Missing profile: rejected with `403 FORBIDDEN_ROLE` ("Complete your farmer
+ *   profile to list products"), except when the verified session token carries
+ *   the platform `ADMIN` role.
+ * - Existing profile with `BUYER` (or any non-seller role): rejected with
+ *   `403 FORBIDDEN_ROLE` even if an older JWT still carries `FARMER`, ensuring
+ *   role downgrades take effect immediately across POST, PATCH, and DELETE.
+ */
+export async function assertProductSellerRole(
+  walletAddress: string,
+  jwtRole?: string
+): Promise<string> {
+  const profile = await prisma.profile.findUnique({
+    where: { walletAddress: walletAddress.toLowerCase() },
+  });
+  const profileRole = profile?.role?.trim().toUpperCase();
+  const normalizedJwtRole = jwtRole?.trim().toUpperCase();
+
+  const effectiveRole = profileRole || (normalizedJwtRole === 'ADMIN' ? 'ADMIN' : undefined);
+
+  if (!effectiveRole || !ALLOWED_PRODUCT_WRITE_ROLES.has(effectiveRole)) {
+    throw new ApiError(
+      403,
+      'Forbidden',
+      'Complete your farmer profile to list products',
+      'https://cylos.io/errors/forbidden-role',
+      'FORBIDDEN_ROLE'
+    );
+  }
+
+  return effectiveRole;
+}
 
 export async function createProduct(
   farmerWallet: string,
-  input: ProductWriteInput
+  input: ProductWriteInput,
+  jwtRole?: string
 ): Promise<ProductDto> {
+  await assertProductSellerRole(farmerWallet, jwtRole);
+
   if (!input.name || !input.price_per_unit || !input.currency || !input.unit) {
     throw new ApiError(400, 'Bad Request', 'name, price_per_unit, currency, and unit are required');
   }
@@ -260,20 +302,6 @@ export async function createProduct(
       400,
       'Bad Request',
       `Invalid currency: ${input.currency}. Supported currencies are USDC, XLM, EURC, STRK.`
-    );
-  }
-
-  // Issue #1128: Enforce farmer/seller role. Profile roles are persisted
-  // upper-cased ("FARMER"), so compare case-insensitively.
-  const profile = await prisma.profile.findUnique({
-    where: { walletAddress: farmerWallet.toLowerCase() },
-  });
-  const profileRole = profile?.role.trim().toUpperCase();
-  if (profile && profileRole !== 'FARMER' && profileRole !== 'SELLER') {
-    throw new ApiError(
-      403,
-      'Forbidden',
-      'Only users with farmer or seller role can create products'
     );
   }
 
@@ -301,26 +329,15 @@ export async function createProduct(
 export async function updateProduct(
   productId: string,
   farmerWallet: string,
-  input: ProductWriteInput
+  input: ProductWriteInput,
+  jwtRole?: string
 ): Promise<ProductDto> {
+  await assertProductSellerRole(farmerWallet, jwtRole);
+
   const existing = await prisma.product.findUnique({ where: { id: productId } });
   if (!existing) throw new ApiError(404, 'Not Found', 'Product not found');
   if (existing.farmerWallet.toLowerCase() !== farmerWallet.toLowerCase()) {
     throw new ApiError(403, 'Forbidden', 'You do not own this product');
-  }
-
-  // Issue #1128: Enforce farmer/seller role. Profile roles are persisted
-  // upper-cased ("FARMER"), so compare case-insensitively.
-  const profile = await prisma.profile.findUnique({
-    where: { walletAddress: farmerWallet.toLowerCase() },
-  });
-  const profileRole = profile?.role.trim().toUpperCase();
-  if (profile && profileRole !== 'FARMER' && profileRole !== 'SELLER') {
-    throw new ApiError(
-      403,
-      'Forbidden',
-      'Only users with farmer or seller role can update products'
-    );
   }
 
   const data: Prisma.ProductUpdateInput = {};
@@ -358,8 +375,17 @@ export async function updateProduct(
   return result;
 }
 
-export async function softDeleteProduct(productId: string, farmerWallet: string) {
-  const result = await updateProduct(productId, farmerWallet, { is_available: false });
+export async function softDeleteProduct(
+  productId: string,
+  farmerWallet: string,
+  jwtRole?: string
+) {
+  const result = await updateProduct(
+    productId,
+    farmerWallet,
+    { is_available: false },
+    jwtRole
+  );
   emitProductEvent('product:deleted', result);
   return result;
 }
