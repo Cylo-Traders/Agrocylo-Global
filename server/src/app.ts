@@ -8,7 +8,7 @@ import logger from './config/logger.js';
 import { config } from './config/index.js';
 import { initializeSentry } from './config/observability.js';
 import { prisma } from './config/database.js';
-import { getSupabaseAdmin } from './config/supabase.js';
+import { getSupabaseAdmin, isSupabaseConfigured } from './config/supabase.js';
 import { incrementRequestCount, incrementErrorCount } from './services/metricsService.js';
 import { ApiError, sendProblem } from './http/errors.js';
 import { Sentry } from './config/sentry.js';
@@ -127,16 +127,44 @@ app.use(ussdRoutes);
 registerAllEndpoints(); // Populate the OpenAPI registry
 app.use(documentRoutes);
 
-app.get('/health', async (_req: Request, res: Response) => {
-  logger.info('Health check endpoint hit');
+function buildLivenessPayload() {
+  return {
+    status: 'UP' as const,
+    timestamp: new Date().toISOString(),
+    service: 'Agrocylo-Backend',
+    env: config.nodeEnv,
+  };
+}
 
-  const health = {
+// Liveness endpoint (#1423): process is up and serving HTTP.
+// Does not fail on placeholder Supabase credentials or unconfigured external dependencies.
+app.get('/health/live', (_req: Request, res: Response) => {
+  res.status(200).json(buildLivenessPayload());
+});
+
+// Backwards-compatible liveness alias (#1423).
+app.get('/health', (_req: Request, res: Response) => {
+  logger.info('Health check endpoint hit');
+  res.status(200).json(buildLivenessPayload());
+});
+
+// Readiness endpoint (#1423): verifies required dependencies (Postgres + optional Supabase when configured).
+app.get('/health/ready', async (_req: Request, res: Response) => {
+  const supabaseEnabled = isSupabaseConfigured();
+  const health: {
+    status: 'UP' | 'DOWN';
+    timestamp: string;
+    service: string;
+    env: string;
+    database: 'UP' | 'DOWN';
+    supabase: 'UP' | 'DOWN' | 'DISABLED';
+  } = {
     status: 'UP',
     timestamp: new Date().toISOString(),
     service: 'Agrocylo-Backend',
     env: config.nodeEnv,
     database: 'DOWN',
-    supabase: 'DOWN',
+    supabase: supabaseEnabled ? 'DOWN' : 'DISABLED',
   };
 
   // Check database connectivity
@@ -145,23 +173,25 @@ app.get('/health', async (_req: Request, res: Response) => {
     await prisma.$queryRaw`SELECT 1`;
     health.database = 'UP';
   } catch (error) {
-    logger.error('Database health check failed', error);
+    logger.error('Database readiness check failed', error);
     health.status = 'DOWN';
   }
 
-  // Check Supabase connectivity
-  try {
-    const supabase = getSupabaseAdmin();
-    const { error } = await supabase.from('profiles').select('count').limit(1).maybeSingle();
-    if (!error) {
-      health.supabase = 'UP';
-    } else {
-      logger.error('Supabase health check failed', error);
+  // Only require Supabase in readiness when real Supabase credentials are configured (#1423).
+  if (supabaseEnabled) {
+    try {
+      const supabase = getSupabaseAdmin();
+      const { error } = await supabase.from('profiles').select('count').limit(1).maybeSingle();
+      if (!error) {
+        health.supabase = 'UP';
+      } else {
+        logger.error('Supabase readiness check failed', error);
+        health.status = 'DOWN';
+      }
+    } catch (error) {
+      logger.error('Supabase readiness check failed', error);
       health.status = 'DOWN';
     }
-  } catch (error) {
-    logger.error('Supabase health check failed', error);
-    health.status = 'DOWN';
   }
 
   const statusCode = health.status === 'UP' ? 200 : 503;

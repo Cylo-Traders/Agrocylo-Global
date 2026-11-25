@@ -133,7 +133,7 @@ app.get('/health', (_req: Request, res: Response) => {
   });
 });
 
-app.get('/livez', (_req: Request, res: Response) => {
+app.get(['/livez', '/health/live'], (_req: Request, res: Response) => {
   jsonValidated(res, LivezResponseSchema, 200, {
     status: 'alive',
     uptime: process.uptime(),
@@ -141,7 +141,7 @@ app.get('/livez', (_req: Request, res: Response) => {
   });
 });
 
-app.get('/readyz', (_req: Request, res: Response) => {
+app.get(['/readyz', '/health/ready'], (_req: Request, res: Response) => {
   void (async () => {
     if (isGracefullyShuttingDown()) {
       jsonValidated(res, ReadyzResponseSchema, 503, {
