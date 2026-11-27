@@ -6,6 +6,7 @@ import { prisma } from '../db/client.js';
 import { ProductionEventParser } from './parser.js';
 import { EventPersister } from './persister.js';
 import { recordPersistError } from './metrics.js';
+import { recordReorgRollback } from '../services/promMetrics.js';
 import type { RawSorobanEvent } from './types.js';
 import { captureAlert } from '../config/sentry.js';
 
@@ -343,15 +344,6 @@ async function handleReorg(forkPointLedger: number): Promise<void> {
     });
     throw err;
   }
-}
-
-/**
- * Record a rollback metric when a reorg is detected.
- */
-function recordReorgRollback(transactionsReverted: number): void {
-  // Metrics would be recorded here — for now, this is a placeholder
-  // that allows the event persister to track reorgs
-  logger.info('Reorg rollback metric recorded', { transactionsReverted });
 }
 
 /**

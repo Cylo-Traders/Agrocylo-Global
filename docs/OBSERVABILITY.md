@@ -10,7 +10,7 @@
 | App | Error tracking | Metrics | Scheduled-job/alert coverage |
 |---|---|---|---|
 | `server/` (root API) | `@sentry/node`, init in `src/config/sentry.ts`, called from `src/index.ts` | Existing JSON `GET /metrics` (business metrics) **+ new** Prometheus-text `GET /metrics/prom` (`src/services/promMetrics.ts`): per-route `http_request_duration_seconds`/`http_requests_total`, `websocket_connections`, `queue_job_lag_seconds`, `queue_job_failures_total` | Contract watcher (`src/services/contractWatcher.ts`), BullMQ job failures (`src/queues/workers.ts` — this is what `aggregate-price-index` runs on), weather-polling cycle failures (`src/services/weatherService.ts`), elevated 5xx rate (`src/services/errorRateMonitor.ts`) |
-| `agro-production/server/` | `@sentry/node`, init in `src/config/sentry.ts`, called from `src/index.ts` | Existing hand-rolled `GET /metrics` **+ new** per-route histogram and `reconciliation_drift_count` gauge (`src/services/promMetrics.ts`), appended to the same response | Production contract watcher (`src/events/watcher.ts`), **new** reconciliation-drift sweep (`src/services/reconciliationSweep.ts` — the scheduled job Issue 8's drift metric never had), elevated 5xx rate |
+| `agro-production/server/` | `@sentry/node`, init in `src/config/sentry.ts`, called from `src/index.ts` | Existing hand-rolled `GET /metrics` **+ new** per-route histogram, `reconciliation_drift_count` gauge and the reorg rollback metrics below (`src/services/promMetrics.ts`), appended to the same response | Production contract watcher (`src/events/watcher.ts`), **new** reconciliation-drift sweep (`src/services/reconciliationSweep.ts` — the scheduled job Issue 8's drift metric never had), elevated 5xx rate |
 | `client/` (root Next.js) | `@sentry/nextjs`: `src/instrumentation.ts` (server/edge), `src/instrumentation-client.ts` (browser), `src/app/global-error.tsx` (root-layout crashes), plus a hook added to the existing `src/components/ErrorBoundary.tsx` (in-tree React errors) | — (frontend metrics out of scope for this pass; Sentry's own performance tracing covers basic frontend timing once a DSN is configured) | — |
 | `agro-production/client/` | `@sentry/nextjs`: same three files as above (no pre-existing error boundary component here, so only the instrumentation files + `global-error.tsx`) | — | — |
 
@@ -51,6 +51,21 @@ individual message string.
 Uncaught exceptions and 5xx `ApiError`/`HttpError`/`StorageError` instances
 are reported via `Sentry.captureException`, not `captureAlert` — those carry
 their own stack trace and don't need a synthetic message.
+
+### Reorg rollback metrics (`agro-production/server`, Issue #1480)
+
+The production event watcher (`src/events/watcher.ts`) records these after a
+chain reorg rollback completes. Neither metric has labels, so each is a single
+series; contract ids and transaction hashes are deliberately not labels.
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `reorg_rollbacks_total` | Counter | Successful rollbacks. A rollback that fails is not counted; it is logged and rethrown through the existing poll-error path (`contract_watcher_poll_error`). |
+| `reorg_rollback_transactions_reverted` | Histogram (buckets 0, 1, 5, 10, 50, 100, 500, 1000) | Transaction records deleted by each successful rollback. |
+
+Alert on the rate of `reorg_rollbacks_total` (for example
+`increase(reorg_rollbacks_total[1h]) > 0`), and use the histogram to see how
+much indexed data each reorg discarded.
 
 ## Incident-response expectation
 
