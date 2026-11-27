@@ -107,11 +107,25 @@ self.addEventListener("fetch", (event) => {
   }
 });
 
+// An empty, malformed or non-object push payload must still show a notification:
+// a throw here would drop the push without one.
+function readPushPayload(data) {
+  if (!data) return {};
+  try {
+    const parsed = data.json();
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+const nonEmptyString = (value) => (typeof value === "string" && value.trim() !== "" ? value : null);
+
 self.addEventListener("push", (event) => {
-  const data = event.data ? event.data.json() : {};
-  const title = data.title || "Cylo Global";
+  const data = readPushPayload(event.data);
+  const title = nonEmptyString(data.title) || "Cylo Global";
   const options = {
-    body: data.body || "You have a new notification.",
+    body: nonEmptyString(data.body) || "You have a new notification.",
     icon: "/icon-192x192.svg",
     badge: "/favicon.svg",
     data: normalizeNotificationTarget(data.url),
