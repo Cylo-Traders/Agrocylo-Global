@@ -656,6 +656,72 @@ describe('startProductionWatcher', () => {
       );
     });
 
+    // Issue #1480: a successful rollback is exposed as a metric; a failed one is not.
+    describe('reorg rollback metric', () => {
+      const reorgAt400 = () => {
+        mockEventCursorFindUnique.mockResolvedValueOnce({
+          contractId: 'CTEST',
+          ledger: 400,
+          eventIndex: 0,
+          ledgerHash: 'original_hash_400',
+        });
+        mockGetLatestLedger.mockResolvedValue({ sequence: 410 });
+        mockGetLedger.mockResolvedValueOnce({ hash: 'NEW_hash_400' });
+        mockGetEvents.mockResolvedValueOnce({ events: [] });
+      };
+      const read = async () => {
+        const { registry } = await import('../services/promMetrics.js');
+        const rollbacks = await registry
+          .getSingleMetric('reorg_rollbacks_total')
+          ?.get();
+        const reverted = await registry
+          .getSingleMetric('reorg_rollback_transactions_reverted')
+          ?.get();
+        const sample = (name: string) =>
+          reverted?.values.find(
+            (v) => (v as { metricName?: string }).metricName === name,
+          )?.value ?? 0;
+        return {
+          rollbacks: rollbacks?.values[0]?.value ?? 0,
+          labels: [
+            ...(rollbacks?.values ?? []),
+            ...(reverted?.values ?? []),
+          ].map((v) => Object.keys(v.labels).filter((k) => k !== 'le')),
+          revertedCount: sample('reorg_rollback_transactions_reverted_count'),
+          revertedSum: sample('reorg_rollback_transactions_reverted_sum'),
+        };
+      };
+
+      it('increments once per successful rollback and records the reverted count', async () => {
+        const before = await read();
+        reorgAt400();
+        mockTransactionDeleteMany.mockResolvedValueOnce({ count: 5 });
+
+        await startProductionWatcher();
+        await vi.advanceTimersByTimeAsync(5_000);
+
+        const after = await read();
+        expect(after.rollbacks - before.rollbacks).toBe(1);
+        expect(after.revertedCount - before.revertedCount).toBe(1);
+        expect(after.revertedSum - before.revertedSum).toBe(5);
+        // No per-contract or per-transaction labels: bounded cardinality.
+        expect(after.labels.flat()).toEqual([]);
+      });
+
+      it('does not increment when the rollback fails', async () => {
+        const before = await read();
+        reorgAt400();
+        mockTransactionDeleteMany.mockRejectedValueOnce(new Error('db down'));
+
+        await startProductionWatcher();
+        await vi.advanceTimersByTimeAsync(5_000);
+
+        const after = await read();
+        expect(after.rollbacks).toBe(before.rollbacks);
+        expect(after.revertedCount).toBe(before.revertedCount);
+      });
+    });
+
     it('handles rollback poison pill by removing conflicting transactions before re-projection', async () => {
       // This test verifies that the @@unique([ledger, eventIndex]) constraint
       // no longer causes a poison-pill by ensuring transactions are deleted

@@ -33,6 +33,26 @@ export const reconciliationDrift = new client.Gauge({
   registers: [registry],
 });
 
+// Issue #1480: reorg rollbacks, unlabeled so cardinality stays at one series
+// (no contract ids or transaction hashes).
+export const reorgRollbacksTotal = new client.Counter({
+  name: 'reorg_rollbacks_total',
+  help: 'Successful chain-reorg rollbacks performed by the production event watcher',
+  registers: [registry],
+});
+
+export const reorgRollbackTransactionsReverted = new client.Histogram({
+  name: 'reorg_rollback_transactions_reverted',
+  help: 'Transaction records deleted by each successful reorg rollback',
+  buckets: [0, 1, 5, 10, 50, 100, 500, 1000],
+  registers: [registry],
+});
+
+export function recordReorgRollback(transactionsReverted: number): void {
+  reorgRollbacksTotal.inc();
+  reorgRollbackTransactionsReverted.observe(Math.max(0, transactionsReverted));
+}
+
 export function recordHttpRequest(
   method: string,
   route: string,
